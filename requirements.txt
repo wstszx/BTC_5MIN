@@ -1,0 +1,6 @@
+requests
+pandas
+python-dateutil
+pytest
+websocket-client
+tenacity
