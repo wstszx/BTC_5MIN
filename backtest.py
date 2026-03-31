@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import warnings
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -23,6 +24,28 @@ def _select_entry_price(row: dict[str, str], side: str, entry_timing: str) -> fl
     if timing == "PRE_CLOSE":
         return _optional_float(row.get(f"entry_price_preclose_{side_key}"))
     return _optional_float(row.get(f"entry_price_open_{side_key}"))
+
+
+def _select_signal_current_up_price(row: dict[str, str], entry_timing: str) -> float | None:
+    if entry_timing.upper() == "PRE_CLOSE":
+        return _optional_float(row.get("entry_price_preclose_up"))
+    return _optional_float(row.get("entry_price_open_up"))
+
+
+def _signal_snapshot_overlap_ratio(rows: list[dict[str, str]], entry_timing: str) -> float:
+    comparable = 0
+    overlap = 0
+    for row in rows:
+        open_up = _optional_float(row.get("entry_price_open_up"))
+        current_up = _select_signal_current_up_price(row, entry_timing)
+        if open_up is None or current_up is None:
+            continue
+        comparable += 1
+        if abs(open_up - current_up) < 1e-9:
+            overlap += 1
+    if comparable == 0:
+        return 0.0
+    return overlap / comparable
 
 
 def _resolve_result(row: dict[str, str]) -> str:
@@ -87,9 +110,28 @@ def run_backtest(csv_path: Path, cfg: AppConfig | None = None) -> BacktestResult
 
     with csv_path.open("r", newline="", encoding="utf-8") as handle:
         rows = list(csv.DictReader(handle))
+    if cfg.strategy_id == 5:
+        overlap_ratio = _signal_snapshot_overlap_ratio(rows, cfg.entry_timing)
+        if overlap_ratio >= 0.9:
+            warnings.warn(
+                (
+                    "strategy_id=5 signal quality degraded in this CSV: "
+                    f"{overlap_ratio:.1%} rows have identical open/current UP prices. "
+                    "Momentum decision may effectively fall back to pattern logic."
+                ),
+                RuntimeWarning,
+                stacklevel=2,
+            )
 
     for row in rows:
-        side = get_side_for_round(cfg.strategy_id, state.round_index)
+        side = get_side_for_round(
+            cfg.strategy_id,
+            state.round_index,
+            signal_open_up_price=_optional_float(row.get("entry_price_open_up")),
+            signal_current_up_price=_select_signal_current_up_price(row, cfg.entry_timing),
+            signal_threshold=cfg.signal_momentum_threshold,
+            signal_fallback_strategy_id=cfg.signal_fallback_strategy_id,
+        )
         price = _select_entry_price(row, side, cfg.entry_timing)
 
         plan = build_trade_plan(
@@ -101,6 +143,8 @@ def run_backtest(csv_path: Path, cfg: AppConfig | None = None) -> BacktestResult
             max_stake=cfg.max_stake,
             daily_loss_cap=cfg.daily_loss_cap,
             max_consecutive_losses=cfg.max_consecutive_losses,
+            bet_sizing_mode=cfg.bet_sizing_mode,
+            base_order_cost=cfg.base_order_cost,
         )
 
         if not plan.should_trade:

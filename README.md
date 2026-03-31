@@ -8,9 +8,7 @@
 - 基于同一套策略和资金管理逻辑的回测
 - 纸面交易运行
 - 运行状态持久化
-- 默认禁用的实盘下单占位接口
-
-当前版本还不支持直接真实下单。`live-trade` 命令仍然会拒绝执行，直到后续接入 Polymarket 实盘签名和钱包凭据。
+- 基于 `py-clob-client` 的实盘下单（默认关闭，需显式开关与凭据）
 
 ## 1. 安装
 
@@ -29,33 +27,83 @@ python -m pip install -r requirements.txt
 - `series_id = 10684`
 - `series_slug = "btc-up-or-down-5m"`
 - `trade_mode = "paper"`
-- `strategy_id = 1`
-- `target_profit = 0.5`
-- `max_consecutive_losses = 8`
-- `max_stake = 25.0`
+- `strategy_id = 2`
+- `target_profit = 1.0`
+- `bet_sizing_mode = "FIXED_BASE_COST"`
+- `base_order_cost = 1.0`
+- `max_consecutive_losses = 6`
+- `max_stake = 15.0`
 - `max_price_threshold = 0.65`
+- `signal_momentum_threshold = 0.015`
+- `signal_fallback_strategy_id = 2`
+- `signal_weak_signal_mode = "SKIP"`
+- `signal_history_fidelity_seconds = 5`
+- `signal_anchor_max_offset_seconds = 20`
+- `signal_dynamic_threshold_k = 1.5`
+- `signal_dynamic_threshold_min_points = 8`
+- `signal_lock_before_entry_seconds = 20`
+- `max_stake_skip_alert_threshold = 5`
 - `daily_loss_cap = 50.0`
 - `poll_interval_seconds = 5`
 - `entry_timing = "OPEN"`
 - `open_delay_seconds = 5`
 - `preclose_seconds = 30`
+- `history_entry_fidelity_seconds = 5`
+- `history_entry_max_offset_seconds = 120`
+
+默认参数已切换为“稳健优先”配置：`strategy_id=2` + `FIXED_BASE_COST` + `base_order_cost=1.0` + `max_consecutive_losses=6` + `max_stake=15.0`。  
+目标是优先控制回撤和资金压力，而不是追求单阶段最高收益。
+
+实盘相关（默认都偏安全）：
+
+- `live_trading_enabled` 默认从环境变量 `LIVE_TRADING_ENABLED` 读取（默认 `False`）
+- `live_private_key` 从 `POLYMARKET_PRIVATE_KEY`（或 `PRIVATE_KEY`）读取
+- `live_chain_id` 默认 `137`
+- `live_signature_type` 默认 `0`（EOA）
+- `live_funder` 可选，用于代理/智能钱包
+- `live_order_type` 默认 `FOK`
 
 你最常会修改的是这些参数：
 
 - `strategy_id`
-  说明：`1/2/3/4` 分别对应：
+  说明：`1/2/3/4/5` 分别对应：
   - 1: `UP, DOWN, UP, DOWN`
   - 2: `UP, UP, DOWN, DOWN`
   - 3: `UP, UP, UP, DOWN, DOWN, DOWN`
   - 4: `UP, UP, UP, UP, DOWN, DOWN, DOWN, DOWN`
+  - 5: `5分钟价格动量信号`（用本轮 `UP` 价格相对开盘的变化决定方向，变化不够大时回退到 `signal_fallback_strategy_id`）
+  - 备注：策略 5 当前为 V2：会优先尝试历史 tick 对齐开盘锚点、接近入场时间锁定方向、并支持弱信号 `SKIP/FALLBACK` 两种模式；默认是 `SKIP`
+  - 重要限制：历史 CSV 的 `open/preclose` 快照在很多样本里仍可能高度重合，离线回测会自动给出退化告警，避免把“伪动量”结果当成真实优势
 - `target_profit`
   说明：每次赢后希望净赚多少
+- `bet_sizing_mode`
+  说明：下注金额模式，`FIXED_BASE_COST` 为固定起始金额（赢后回到固定金额），`TARGET_PROFIT` 为按目标盈利反推金额
+- `base_order_cost`
+  说明：`FIXED_BASE_COST` 模式下的固定起始下注金额（默认 `1.0`）
 - `max_consecutive_losses`
   说明：最大连续亏损次数，达到后触发止损重置
 - `max_stake`
   说明：单笔实际最大花费 USDC 上限
 - `max_price_threshold`
   说明：如果目标方向价格高于这个阈值则跳过
+- `signal_momentum_threshold`
+  说明：`strategy_id=5` 时的动量阈值（`current_up_price - open_up_price` 的绝对判定门槛）
+- `signal_fallback_strategy_id`
+  说明：`strategy_id=5` 在信号不足时回退到的基础策略（建议 `1~4`）
+- `signal_weak_signal_mode`
+  说明：`strategy_id=5` 的弱信号处理模式，`SKIP`（默认，不下单）或 `FALLBACK`（回退到基础策略）
+- `signal_history_fidelity_seconds`
+  说明：策略 5 拉取 token 历史序列时使用的采样粒度（秒）
+- `signal_anchor_max_offset_seconds`
+  说明：对齐开盘锚点时允许的最大时间偏移（秒）
+- `signal_dynamic_threshold_k`
+  说明：动态阈值系数，实际阈值为 `max(signal_momentum_threshold, k * sigma)`
+- `signal_dynamic_threshold_min_points`
+  说明：动态阈值至少需要的历史点数，小于这个数量时退回基础阈值
+- `signal_lock_before_entry_seconds`
+  说明：距离入场时间多少秒内锁定策略 5 的方向，避免临近入场来回跳边
+- `max_stake_skip_alert_threshold`
+  说明：连续多少次触发 `order_cost_above_max_stake` 时发出告警（只告警，不自动重置）
 - `daily_loss_cap`
   说明：每日累计亏损达到该值后停止交易
 - `entry_timing`
@@ -64,6 +112,18 @@ python -m pip install -r requirements.txt
   说明：`OPEN` 模式下开盘后延迟多少秒再尝试
 - `preclose_seconds`
   说明：`PRE_CLOSE` 模式下收盘前多少秒尝试入场
+- `history_entry_fidelity_seconds`
+  说明：导出历史 CSV 时，开盘/收盘前快照价格所用的采样粒度（秒）
+- `history_entry_max_offset_seconds`
+  说明：导出历史 CSV 时，快照匹配允许的最大时间偏移（秒）；超出后会回退为“最近点”以减少空值
+
+也支持通过环境变量临时覆盖关键参数（适合不改代码做多组纸测）：
+
+- `STRATEGY_ID`
+- `TARGET_PROFIT`
+- `MAX_CONSECUTIVE_LOSSES`
+- `MAX_STAKE`
+- `MAX_PRICE_THRESHOLD`
 
 ## 3. 命令总览
 
@@ -73,11 +133,14 @@ python -m pip install -r requirements.txt
 python main.py --help
 ```
 
-当前支持 4 个主命令：
+当前支持 7 个主命令：
 
 - `fetch-history`
 - `backtest`
+- `analyze-streak`
+- `research-strategy`
 - `paper-trade`
+- `paper-report`
 - `live-trade`
 
 ## 4. 拉取历史数据
@@ -131,6 +194,43 @@ python main.py backtest --csv data/你的历史文件.csv
 - 平均每局收益
 - 最大回撤
 
+## 5.1 连亏风险评估（倍投轮数建议）
+
+根据历史结果估算“连亏 >= K”的发生频率，并结合 `max_stake` 自动给出建议重置轮数：
+
+```bash
+python main.py analyze-streak --csv data/你的历史文件.csv
+```
+
+常用参数：
+
+- `--strategy-id`：覆盖配置里的策略编号
+- `--target-occurrence`：你能接受的“每轮发生概率”上限（例如 `0.01` 表示 1%）
+- `--min-round` / `--max-round`：评估 K 的区间
+
+## 5.2 自动策略研究（重复验证）
+
+按多个策略 / 重置轮数 / 目标盈利做批量回放，并按稳健性打分给出 Top 结果。该命令会考虑每轮实际价格不同的情况，并给出：
+
+- 总盈亏
+- 交易次数 / 胜率
+- 最大回撤
+- 历史最小所需本金
+- 建议本金（乘以安全系数）
+- 分段验证表现（避免只看单一区间）
+
+示例：
+
+```bash
+python main.py research-strategy --csv data/你的历史文件.csv --strategy-ids 1,2,3,4 --reset-rounds 2,3,4,5 --target-profits 1.0 --segments 5 --top-n 5
+```
+
+可选导出完整候选结果：
+
+```bash
+python main.py research-strategy --csv data/你的历史文件.csv --output data/research_report.csv
+```
+
 ## 6. 纸面交易
 
 只评估一轮并退出：
@@ -163,6 +263,64 @@ python main.py paper-trade
 5. 记录纸面成交
 6. 等待结算并更新状态
 
+## 6.1 `Total PnL` 与手动启停
+
+- `Total PnL` 含义：从当前会话起点开始累计的总盈亏（单位 USDC）。
+- 正数表示累计盈利，负数表示累计亏损。
+
+前台手动启动（窗口占用，适合临时观察）：
+
+```bash
+python main.py paper-trade
+```
+
+前台手动停止：
+
+```text
+Ctrl + C
+```
+
+后台手动启动（适合每天持续跑）：
+
+```powershell
+$ts = Get-Date -Format 'yyyyMMdd_HHmmss'
+Start-Process -FilePath python -ArgumentList @('main.py','paper-trade') `
+  -WorkingDirectory 'D:\python\BTC_5MIN' `
+  -RedirectStandardOutput "logs/paper_live_$ts.out" `
+  -RedirectStandardError "logs/paper_live_$ts.err"
+```
+
+后台查看进程：
+
+```powershell
+Get-Process | Where-Object { $_.ProcessName -like 'python*' }
+```
+
+后台手动停止（按 PID）：
+
+```powershell
+Stop-Process -Id <PID>
+```
+
+## 6.2 每日纸测报告（命中 / 盈亏 / 回撤 / 信号质量）
+
+按天汇总 `logs/paper_trades.csv`，输出：
+
+- 命中率、胜负次数
+- 当日总盈亏、单笔均值、最大回撤
+- 信号强度（`abs(delta)`）、强信号占比、信号锁定占比
+- 跳过原因统计
+
+```bash
+python main.py paper-report --csv logs/paper_trades.csv --tz-offset +08:00
+```
+
+可选时间过滤：
+
+```bash
+python main.py paper-report --start-date 2026-03-31 --end-date 2026-04-02
+```
+
 ## 7. 状态文件与日志
 
 程序运行过程中会使用这些目录：
@@ -192,27 +350,29 @@ logs/*.csv
 python main.py paper-trade
 ```
 
-## 8. 实盘命令当前状态
+## 8. 实盘命令使用方式
 
-目前命令行里虽然有：
+先做实盘 dry-run（不下单）：
 
 ```bash
+python main.py live-trade --dry-run-once
+```
+
+如果 dry-run 输出正常，再启用真实下单：
+
+```bash
+# PowerShell 示例
+$env:LIVE_TRADING_ENABLED='true'
+$env:POLYMARKET_PRIVATE_KEY='你的私钥'
 python main.py live-trade --enable-live-trading
 ```
 
-但当前版本不会真实下单，原因是：
+实盘命令内置了两层闸门：
 
-- `config.py` 里的 `live_trading_enabled = False`
-- `trader.py` 里的真实下单函数还是占位实现
-- 还没有接入 Polymarket 真实签名、API 凭据和钱包类型配置
+- 命令行必须显式传 `--enable-live-trading`
+- 配置/环境里必须 `LIVE_TRADING_ENABLED=true`
 
-所以当前这个项目适合：
-
-- 拉历史数据
-- 跑回测
-- 跑纸面交易
-
-不适合直接拿去实盘下真单。
+任何一层不满足都不会发真实订单。
 
 ## 9. 典型使用流程
 

@@ -117,3 +117,69 @@ def test_session_state_round_trip(tmp_path: Path):
     restored = load_session_state(path)
     assert restored.round_index == 3
     assert restored.recovery_loss == 1.25
+
+
+def test_fixed_base_cost_mode_uses_constant_starting_order_cost():
+    state = SessionState()
+    plan = build_trade_plan(
+        state=state,
+        side="UP",
+        price=0.5,
+        target_profit=0.5,
+        max_price_threshold=0.65,
+        max_stake=10,
+        daily_loss_cap=20,
+        max_consecutive_losses=8,
+        bet_sizing_mode="FIXED_BASE_COST",
+        base_order_cost=1.0,
+    )
+    assert plan.should_trade is True
+    assert round(plan.order_cost, 4) == 1.0
+    assert round(plan.order_size, 4) == 2.0
+
+
+def test_fixed_base_cost_mode_resets_to_base_after_win():
+    state = SessionState()
+    loss_plan = build_trade_plan(
+        state=state,
+        side="UP",
+        price=0.5,
+        target_profit=0.5,
+        max_price_threshold=0.65,
+        max_stake=100,
+        daily_loss_cap=20,
+        max_consecutive_losses=8,
+        bet_sizing_mode="FIXED_BASE_COST",
+        base_order_cost=1.0,
+    )
+    after_loss = apply_round_outcome(state, loss_plan, won=False)
+    assert round(after_loss.recovery_loss, 4) == 1.0
+
+    recovery_plan = build_trade_plan(
+        state=after_loss,
+        side="UP",
+        price=0.5,
+        target_profit=0.5,
+        max_price_threshold=0.65,
+        max_stake=100,
+        daily_loss_cap=20,
+        max_consecutive_losses=8,
+        bet_sizing_mode="FIXED_BASE_COST",
+        base_order_cost=1.0,
+    )
+    after_win = apply_round_outcome(after_loss, recovery_plan, won=True)
+    assert after_win.recovery_loss == 0.0
+
+    reset_plan = build_trade_plan(
+        state=after_win,
+        side="UP",
+        price=0.5,
+        target_profit=0.5,
+        max_price_threshold=0.65,
+        max_stake=100,
+        daily_loss_cap=20,
+        max_consecutive_losses=8,
+        bet_sizing_mode="FIXED_BASE_COST",
+        base_order_cost=1.0,
+    )
+    assert round(reset_plan.order_cost, 4) == 1.0

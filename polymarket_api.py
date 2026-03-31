@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import csv
 import json
+import random
+import time
 from dataclasses import asdict
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -56,6 +58,38 @@ def parse_outcome_prices(outcome_prices_raw: str | list[Any], outcomes_raw: str 
     return parsed
 
 
+def _optional_float(value: Any) -> float | None:
+    if value in (None, ""):
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def resolve_result(
+    *,
+    metadata: dict[str, Any],
+    market: dict[str, Any],
+) -> tuple[float | None, float | None, str]:
+    price_to_beat = _optional_float(metadata.get("priceToBeat"))
+    final_price = _optional_float(metadata.get("finalPrice"))
+
+    if price_to_beat is not None and final_price is not None:
+        return price_to_beat, final_price, "UP" if final_price >= price_to_beat else "DOWN"
+
+    prices = parse_outcome_prices(market.get("outcomePrices"), market.get("outcomes"))
+    up_price = prices.get("UP")
+    down_price = prices.get("DOWN")
+    if up_price is None or down_price is None:
+        return price_to_beat, final_price, ""
+    if up_price > down_price:
+        return price_to_beat, final_price, "UP"
+    if down_price > up_price:
+        return price_to_beat, final_price, "DOWN"
+    return price_to_beat, final_price, ""
+
+
 def extract_token_ids(clob_token_ids_raw: str | list[Any], outcomes_raw: str | list[Any]) -> dict[str, str]:
     token_ids = parse_json_list_field(clob_token_ids_raw)
     outcomes = parse_json_list_field(outcomes_raw)
@@ -68,23 +102,40 @@ def extract_token_ids(clob_token_ids_raw: str | list[Any], outcomes_raw: str | l
 
 
 def nearest_price_from_history(history_payload: dict[str, Any], target_ts: int) -> float | None:
+    closest = nearest_history_point(history_payload, target_ts)
+    if closest is None:
+        return None
+    return closest["price"]
+
+
+def nearest_history_point(
+    history_payload: dict[str, Any],
+    target_ts: int,
+    *,
+    max_offset_seconds: int | None = None,
+) -> dict[str, float | int] | None:
     history = history_payload.get("history", [])
     if not history:
         return None
 
     closest = min(history, key=lambda item: abs(int(item.get("t", 0)) - target_ts))
-    price = closest.get("p")
-    return None if price is None else float(price)
+    point_ts = int(closest.get("t", 0))
+    offset = abs(point_ts - target_ts)
+    if max_offset_seconds is not None and max_offset_seconds >= 0 and offset > max_offset_seconds:
+        return None
+    price = _optional_float(closest.get("p"))
+    if price is None:
+        return None
+    return {"timestamp": point_ts, "price": price, "offset_seconds": offset}
 
 
 def build_resolved_round(event_payload: dict[str, Any]) -> ResolvedRound:
     market = (event_payload.get("markets") or [{}])[0]
     metadata = event_payload.get("eventMetadata") or {}
     token_ids = extract_token_ids(market.get("clobTokenIds"), market.get("outcomes"))
-
-    price_to_beat = float(metadata["priceToBeat"])
-    final_price = float(metadata["finalPrice"])
-    result = "UP" if final_price >= price_to_beat else "DOWN"
+    price_to_beat, final_price, result = resolve_result(metadata=metadata, market=market)
+    if price_to_beat is None or final_price is None:
+        raise ValueError("Resolved round is missing priceToBeat/finalPrice metadata.")
 
     return ResolvedRound(
         event_id=str(event_payload.get("id", "")),
@@ -113,35 +164,55 @@ class PolymarketClient:
         *,
         base_url: str,
         params: dict[str, Any] | None = None,
-        retries: int = 3,
+        retries: int | None = None,
     ) -> Any:
+        retries = retries if retries is not None else self.config.api_retry_count
+        retries = max(1, retries)
+        base_delay = max(0.0, self.config.api_retry_base_delay_seconds)
+        max_delay = max(base_delay, self.config.api_retry_max_delay_seconds)
         last_error: Exception | None = None
-        for _ in range(retries):
+        for attempt in range(1, retries + 1):
             try:
                 response = self.session.get(f"{base_url}{path}", params=params, timeout=15)
                 response.raise_for_status()
                 return response.json()
             except (requests.RequestException, ValueError) as exc:
                 last_error = exc
+                if attempt >= retries:
+                    break
+                delay = min(max_delay, base_delay * (2 ** (attempt - 1)))
+                jitter = random.uniform(0.0, delay * 0.2) if delay > 0 else 0.0
+                time.sleep(delay + jitter)
         if last_error is None:
             raise RuntimeError("Request failed without an exception.")
-        raise RuntimeError(f"Unable to fetch {base_url}{path}: {last_error}") from last_error
+        raise RuntimeError(f"Unable to fetch {base_url}{path} after {retries} attempts: {last_error}") from last_error
 
     def list_series_events(
         self,
         *,
         limit: int = 200,
+        offset: int | None = None,
         active: bool | None = None,
         closed: bool | None = None,
         archived: bool | None = False,
+        start_time_min: datetime | str | None = None,
     ) -> list[dict[str, Any]]:
         params: dict[str, Any] = {"series_id": self.config.series_id, "limit": limit}
+        if offset is not None:
+            params["offset"] = offset
         if active is not None:
             params["active"] = str(active).lower()
         if closed is not None:
             params["closed"] = str(closed).lower()
         if archived is not None:
             params["archived"] = str(archived).lower()
+        if start_time_min is not None:
+            if isinstance(start_time_min, datetime):
+                if start_time_min.tzinfo is None:
+                    start_time_min = start_time_min.replace(tzinfo=timezone.utc)
+                params["start_time_min"] = start_time_min.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+            else:
+                params["start_time_min"] = start_time_min
 
         payload = self._get_json("/events", base_url=self.config.gamma_api_base, params=params)
         events = payload.get("value", payload) if isinstance(payload, dict) else payload
@@ -179,6 +250,25 @@ class PolymarketClient:
                 "endTs": end_ts,
                 "fidelity": fidelity,
             },
+        )
+
+    def get_nearest_history_point(
+        self,
+        token_id: str,
+        *,
+        target_ts: int,
+        start_ts: int,
+        end_ts: int,
+        fidelity: int = 60,
+        max_offset_seconds: int | None = None,
+    ) -> dict[str, float | int] | None:
+        if end_ts <= start_ts:
+            return None
+        payload = self.get_price_history(token_id, start_ts=start_ts, end_ts=end_ts, fidelity=fidelity)
+        return nearest_history_point(
+            payload,
+            target_ts,
+            max_offset_seconds=max_offset_seconds,
         )
 
     def event_to_market_window(self, event: dict[str, Any]) -> MarketWindow:
@@ -239,15 +329,47 @@ class PolymarketClient:
         active: bool | None = True,
         closed: bool | None = True,
     ) -> Path:
-        events = self.list_series_events(limit=limit, active=active, closed=closed, archived=False)
+        now_utc = datetime.now(timezone.utc)
+        recent_start = now_utc - timedelta(minutes=max(60, limit * 6))
+        page_size = min(200, max(50, limit))
+        paged_events: list[dict[str, Any]] = []
+        offset = 0
+
+        # Pull recent rounds first to avoid very old events that no longer have usable history snapshots.
+        while True:
+            batch = self.list_series_events(
+                limit=page_size,
+                offset=offset,
+                active=active,
+                closed=closed,
+                archived=False,
+                start_time_min=recent_start,
+            )
+            if not batch:
+                break
+            paged_events.extend(batch)
+            if len(batch) < page_size:
+                break
+            offset += page_size
+            if offset >= page_size * 20:
+                break
+
+        events = paged_events or self.list_series_events(limit=limit, active=active, closed=closed, archived=False)
+        ordered_events = sorted(
+            events,
+            key=lambda item: parse_iso_datetime(item.get("startTime") or item.get("startDate") or item.get("endDate") or "")
+            or datetime(1970, 1, 1, tzinfo=timezone.utc),
+        )
+        events = ordered_events[-limit:]
         rows: list[dict[str, Any]] = []
 
         for event in events:
-            event_details = self.get_event_by_slug(str(event.get("slug")))
+            event_details = event if event.get("markets") else self.get_event_by_slug(str(event.get("slug")))
             market = (event_details.get("markets") or [{}])[0]
             metadata = event_details.get("eventMetadata") or {}
             prices = parse_outcome_prices(market.get("outcomePrices"), market.get("outcomes"))
             token_ids = extract_token_ids(market.get("clobTokenIds"), market.get("outcomes"))
+            price_to_beat, final_price, result = resolve_result(metadata=metadata, market=market)
 
             row = {
                 "event_id": event_details.get("id", ""),
@@ -257,17 +379,9 @@ class PolymarketClient:
                 "series_id": self.config.series_id,
                 "start_time": event_details.get("startTime") or market.get("eventStartTime") or "",
                 "end_time": event_details.get("endDate") or market.get("endDate") or "",
-                "price_to_beat": metadata.get("priceToBeat"),
-                "final_price": metadata.get("finalPrice"),
-                "result": (
-                    "UP"
-                    if metadata.get("finalPrice") is not None
-                    and metadata.get("priceToBeat") is not None
-                    and float(metadata["finalPrice"]) >= float(metadata["priceToBeat"])
-                    else "DOWN"
-                    if metadata.get("finalPrice") is not None and metadata.get("priceToBeat") is not None
-                    else ""
-                ),
+                "price_to_beat": price_to_beat,
+                "final_price": final_price,
+                "result": result,
                 "up_token_id": token_ids.get("UP"),
                 "down_token_id": token_ids.get("DOWN"),
                 "up_last_price": prices.get("UP"),
@@ -287,16 +401,33 @@ class PolymarketClient:
             if start_time and end_time:
                 start_ts = int(start_time.timestamp())
                 end_ts = int(end_time.timestamp())
+                history_start_ts = max(0, start_ts - self.config.history_lookback_seconds)
 
                 for side, token_id in (("UP", token_ids.get("UP")), ("DOWN", token_ids.get("DOWN"))):
                     if not token_id:
                         continue
-                    history = self.get_price_history(token_id, start_ts=start_ts, end_ts=end_ts, fidelity=60)
-                    row[f"entry_price_open_{side.lower()}"] = nearest_price_from_history(history, start_ts + self.config.open_delay_seconds)
-                    row[f"entry_price_preclose_{side.lower()}"] = nearest_price_from_history(
+                    history = self.get_price_history(
+                        token_id,
+                        start_ts=history_start_ts,
+                        end_ts=end_ts,
+                        fidelity=max(1, self.config.history_entry_fidelity_seconds),
+                    )
+                    open_point = nearest_history_point(
+                        history,
+                        start_ts + self.config.open_delay_seconds,
+                        max_offset_seconds=max(0, self.config.history_entry_max_offset_seconds),
+                    )
+                    preclose_point = nearest_history_point(
                         history,
                         max(start_ts, end_ts - self.config.preclose_seconds),
+                        max_offset_seconds=max(0, self.config.history_entry_max_offset_seconds),
                     )
+                    if open_point is None:
+                        open_point = nearest_history_point(history, start_ts + self.config.open_delay_seconds)
+                    if preclose_point is None:
+                        preclose_point = nearest_history_point(history, max(start_ts, end_ts - self.config.preclose_seconds))
+                    row[f"entry_price_open_{side.lower()}"] = open_point["price"] if open_point is not None else None
+                    row[f"entry_price_preclose_{side.lower()}"] = preclose_point["price"] if preclose_point is not None else None
 
             rows.append(row)
 

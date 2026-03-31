@@ -1,0 +1,44 @@
+urllib3.exceptions.SSLError: EOF occurred in violation of protocol (_ssl.c:997)
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "C:\Users\Admin\AppData\Local\Programs\Python\Python310\lib\site-packages\requests\adapters.py", line 667, in send
+    resp = conn.urlopen(
+  File "C:\Users\Admin\AppData\Local\Programs\Python\Python310\lib\site-packages\urllib3\connectionpool.py", line 841, in urlopen
+    retries = retries.increment(
+  File "C:\Users\Admin\AppData\Local\Programs\Python\Python310\lib\site-packages\urllib3\util\retry.py", line 519, in increment
+    raise MaxRetryError(_pool, url, reason) from reason  # type: ignore[arg-type]
+urllib3.exceptions.MaxRetryError: HTTPSConnectionPool(host='gamma-api.polymarket.com', port=443): Max retries exceeded with url: /events?series_id=10684&limit=200&active=true&closed=false&archived=false (Caused by SSLError(SSLEOFError(8, 'EOF occurred in violation of protocol (_ssl.c:997)')))
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "D:\python\BTC_5MIN\polymarket_api.py", line 152, in _get_json
+    response = self.session.get(f"{base_url}{path}", params=params, timeout=15)
+  File "C:\Users\Admin\AppData\Local\Programs\Python\Python310\lib\site-packages\requests\sessions.py", line 602, in get
+    return self.request("GET", url, **kwargs)
+  File "C:\Users\Admin\AppData\Local\Programs\Python\Python310\lib\site-packages\requests\sessions.py", line 589, in request
+    resp = self.send(prep, **send_kwargs)
+  File "C:\Users\Admin\AppData\Local\Programs\Python\Python310\lib\site-packages\requests\sessions.py", line 703, in send
+    r = adapter.send(request, **kwargs)
+  File "C:\Users\Admin\AppData\Local\Programs\Python\Python310\lib\site-packages\requests\adapters.py", line 698, in send
+    raise SSLError(e, request=request)
+requests.exceptions.SSLError: HTTPSConnectionPool(host='gamma-api.polymarket.com', port=443): Max retries exceeded with url: /events?series_id=10684&limit=200&active=true&closed=false&archived=false (Caused by SSLError(SSLEOFError(8, 'EOF occurred in violation of protocol (_ssl.c:997)')))
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "D:\python\BTC_5MIN\main.py", line 206, in <module>
+    raise SystemExit(main())
+  File "D:\python\BTC_5MIN\main.py", line 188, in main
+    result = run_paper_trading(cfg, dry_run_once=args.dry_run_once)
+  File "D:\python\BTC_5MIN\trader.py", line 108, in run_paper_trading
+    current_round, next_round = client.find_current_and_next_rounds(now=now)
+  File "D:\python\BTC_5MIN\polymarket_api.py", line 262, in find_current_and_next_rounds
+    self.list_series_events(limit=limit, active=True, closed=False, archived=False),
+  File "D:\python\BTC_5MIN\polymarket_api.py", line 188, in list_series_events
+    payload = self._get_json("/events", base_url=self.config.gamma_api_base, params=params)
+  File "D:\python\BTC_5MIN\polymarket_api.py", line 159, in _get_json
+    raise RuntimeError(f"Unable to fetch {base_url}{path}: {last_error}") from last_error
+RuntimeError: Unable to fetch https://gamma-api.polymarket.com/events: HTTPSConnectionPool(host='gamma-api.polymarket.com', port=443): Max retries exceeded with url: /events?series_id=10684&limit=200&active=true&closed=false&archived=false (Caused by SSLError(SSLEOFError(8, 'EOF occurred in violation of protocol (_ssl.c:997)')))

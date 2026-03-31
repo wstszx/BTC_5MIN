@@ -1,0 +1,10 @@
+Traceback (most recent call last):
+  File "D:\python\BTC_5MIN\main.py", line 206, in <module>
+    raise SystemExit(main())
+  File "D:\python\BTC_5MIN\main.py", line 188, in main
+    result = run_paper_trading(cfg, dry_run_once=args.dry_run_once)
+  File "D:\python\BTC_5MIN\trader.py", line 159, in run_paper_trading
+    settled_state, result = _settle_paper_trade(client, state, target_round, plan.price or 0.0, side=side, cfg=cfg)
+  File "D:\python\BTC_5MIN\trader.py", line 75, in _settle_paper_trade
+    raise RuntimeError(f"Round {window.slug} is not resolved yet.")
+RuntimeError: Round btc-updown-5m-1774863600 is not resolved yet.

@@ -44,6 +44,8 @@ def build_trade_plan(
     max_stake: float,
     daily_loss_cap: float,
     max_consecutive_losses: int,
+    bet_sizing_mode: str = "TARGET_PROFIT",
+    base_order_cost: float = 1.0,
 ) -> TradePlan:
     if side not in {"UP", "DOWN"}:
         raise ValueError(f"Unsupported side: {side}")
@@ -65,9 +67,24 @@ def build_trade_plan(
 
     if price > max_price_threshold:
         return TradePlan(False, side=side, price=price, skip_reason="price_above_threshold")
-
-    order_size = compute_order_size(state.recovery_loss, target_profit, price)
-    order_cost = compute_order_cost(order_size, price)
+    mode = bet_sizing_mode.upper()
+    if mode == "FIXED_BASE_COST":
+        if base_order_cost <= 0:
+            return TradePlan(False, side=side, price=price, skip_reason="invalid_base_order_cost")
+        if state.recovery_loss <= 0:
+            order_cost = base_order_cost
+            order_size = order_cost / price
+            expected_profit = order_size * (1 - price)
+        else:
+            expected_profit = state.recovery_loss + base_order_cost
+            order_size = expected_profit / (1 - price)
+            order_cost = compute_order_cost(order_size, price)
+    elif mode == "TARGET_PROFIT":
+        order_size = compute_order_size(state.recovery_loss, target_profit, price)
+        order_cost = compute_order_cost(order_size, price)
+        expected_profit = order_size * (1 - price)
+    else:
+        return TradePlan(False, side=side, price=price, skip_reason="invalid_bet_sizing_mode")
 
     if order_cost > max_stake:
         return TradePlan(False, side=side, price=price, skip_reason="order_cost_above_max_stake")
@@ -78,7 +95,7 @@ def build_trade_plan(
         price=price,
         order_size=order_size,
         order_cost=order_cost,
-        expected_profit=order_size * (1 - price),
+        expected_profit=expected_profit,
     )
 
 

@@ -82,6 +82,12 @@ class TradeRecord:
     consecutive_losses: int = 0
     stop_loss_triggered: bool = False
     skip_reason: str | None = None
+    signal_open_up_price: float | None = None
+    signal_current_up_price: float | None = None
+    signal_threshold: float | None = None
+    signal_delta: float | None = None
+    signal_locked: bool = False
+    signal_reason: str | None = None
 
 
 @dataclass(slots=True)
@@ -90,6 +96,10 @@ class SessionState:
     cash_pnl: float = 0.0
     recovery_loss: float = 0.0
     consecutive_losses: int = 0
+    consecutive_max_stake_skips: int = 0
+    signal_round_slug: str | None = None
+    signal_round_open_up_price: float | None = None
+    signal_round_locked_side: str | None = None
     stop_loss_count: int = 0
     daily_realized_pnl: float = 0.0
     current_day: str | None = None

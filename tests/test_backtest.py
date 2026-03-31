@@ -12,7 +12,14 @@ def test_parse_outcome_prices_maps_up_and_down():
 
 
 def test_backtest_returns_summary_metrics():
-    cfg = AppConfig(max_consecutive_losses=2)
+    cfg = AppConfig(
+        strategy_id=1,
+        max_consecutive_losses=2,
+        target_profit=0.5,
+        bet_sizing_mode="TARGET_PROFIT",
+        max_stake=25.0,
+        max_price_threshold=0.65,
+    )
     result = run_backtest(Path("tests/fixtures/sample_history.csv"), cfg)
     assert result.trade_count == 4
     assert result.skipped_round_count == 2
