@@ -350,6 +350,7 @@ def place_live_order(
     market = market_client.get_market_by_slug(target_round.slug)
     quote = market_client.quote_from_market(market)
     print('[live] quote {' + _describe_quote_source(quote) + '}', flush=True)
+    print('[live] ws_runtime {' + _describe_ws_runtime(market_client) + '}', flush=True)
     side_decision = _resolve_side_from_strategy(
         cfg=cfg,
         state=state,
@@ -628,6 +629,23 @@ def _describe_quote_source(quote: MarketQuote) -> str:
     )
 
 
+def _describe_ws_runtime(client: PolymarketClient | Any) -> str:
+    get_stats = getattr(client, 'get_ws_runtime_stats', None)
+    if not callable(get_stats):
+        return 'ws_stats_unavailable'
+    stats = get_stats()
+    return (
+        'ws_enabled=' + str(stats.get('ws_enabled'))
+        + ', ws_connected=' + str(stats.get('ws_connected'))
+        + ', reconnects=' + str(stats.get('ws_reconnect_count'))
+        + ', connect_attempts=' + str(stats.get('ws_connect_attempts'))
+        + ', subscribed_assets=' + str(stats.get('ws_subscribed_asset_count'))
+        + ', cached_assets=' + str(stats.get('ws_cached_asset_count'))
+        + ', last_message_age_s=' + _fmt_price(stats.get('ws_last_message_age_seconds'))
+        + ', last_error=' + str(stats.get('ws_last_error'))
+    )
+
+
 def _settle_paper_trade(
     client: PolymarketClient,
     state: SessionState,
@@ -697,6 +715,7 @@ def run_paper_trading(
             market = client.get_market_by_slug(target_round.slug)
             quote = client.quote_from_market(market)
             _runtime_log('round=' + target_round.slug + ' quote {' + _describe_quote_source(quote) + '}')
+            _runtime_log('round=' + target_round.slug + ' ws_runtime {' + _describe_ws_runtime(client) + '}')
             side_decision = _resolve_side_from_strategy(
                 cfg=cfg,
                 state=state,

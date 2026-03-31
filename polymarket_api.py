@@ -165,6 +165,10 @@ class PolymarketClient:
         self._ws_quotes_by_asset: dict[str, dict[str, Any]] = {}
         self._ws_subscribed_assets: set[str] = set()
         self._ws_opened_at: datetime | None = None
+        self._ws_last_message_at: datetime | None = None
+        self._ws_connect_attempts: int = 0
+        self._ws_reconnect_count: int = 0
+        self._ws_last_error: str | None = None
 
 
     def close(self) -> None:
@@ -174,6 +178,8 @@ class PolymarketClient:
             self._ws_app = None
             self._ws_thread = None
             self._ws_opened_at = None
+            self._ws_last_message_at = None
+            self._ws_last_error = None
             self._ws_subscribed_assets.clear()
             self._ws_quotes_by_asset.clear()
         if app is not None:
@@ -204,6 +210,7 @@ class PolymarketClient:
 
         now = datetime.now(timezone.utc)
         with self._ws_lock:
+            self._ws_last_message_at = now
             for item in updates:
                 asset_id = item.get("asset_id")
                 if not asset_id:
@@ -242,6 +249,9 @@ class PolymarketClient:
             if alive:
                 return
 
+            if self._ws_connect_attempts > 0:
+                self._ws_reconnect_count += 1
+            self._ws_connect_attempts += 1
             self._ws_opened_at = None
 
             def on_open(_ws: websocket.WebSocketApp) -> None:
@@ -252,6 +262,8 @@ class PolymarketClient:
                 self._handle_ws_message(message)
 
             def on_error(_ws: websocket.WebSocketApp, _error: Any) -> None:
+                with self._ws_lock:
+                    self._ws_last_error = str(_error)
                 return
 
             def on_close(_ws: websocket.WebSocketApp, _status_code: Any, _msg: Any) -> None:
@@ -318,6 +330,26 @@ class PolymarketClient:
                         continue
                 out[asset] = dict(quote)
             return out
+
+    def get_ws_runtime_stats(self) -> dict[str, Any]:
+        with self._ws_lock:
+            opened = self._ws_opened_at
+            last_message = self._ws_last_message_at
+            now = datetime.now(timezone.utc)
+            return {
+                "ws_enabled": bool(self.config.ws_enabled),
+                "ws_connected": opened is not None,
+                "ws_connect_attempts": self._ws_connect_attempts,
+                "ws_reconnect_count": self._ws_reconnect_count,
+                "ws_subscribed_asset_count": len(self._ws_subscribed_assets),
+                "ws_cached_asset_count": len(self._ws_quotes_by_asset),
+                "ws_opened_at": opened,
+                "ws_last_message_at": last_message,
+                "ws_last_message_age_seconds": (
+                    (now - last_message).total_seconds() if isinstance(last_message, datetime) else None
+                ),
+                "ws_last_error": self._ws_last_error,
+            }
 
     def _get_json(
         self,

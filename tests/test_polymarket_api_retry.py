@@ -148,3 +148,16 @@ def test_quote_from_market_prefers_ws_snapshot_when_available():
     assert quote.up_price == 0.58
     assert quote.down_price == 0.42
     assert quote.up_best_ask == 0.59
+
+
+def test_get_ws_runtime_stats_reports_core_fields():
+    client = PolymarketClient(AppConfig(ws_enabled=True))
+
+    stats = client.get_ws_runtime_stats()
+    assert stats["ws_enabled"] is True
+    assert stats["ws_connected"] is False
+    assert stats["ws_connect_attempts"] == 0
+    assert stats["ws_reconnect_count"] == 0
+    assert stats["ws_subscribed_asset_count"] == 0
+    assert stats["ws_cached_asset_count"] == 0
+    assert stats["ws_last_message_age_seconds"] is None
