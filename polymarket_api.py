@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 import json
 import random
+import threading
 import time
 from dataclasses import asdict
 from datetime import datetime, timedelta, timezone
@@ -10,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 import requests
+import websocket
 
 from config import AppConfig
 from models import MarketQuote, MarketWindow, ResolvedRound
@@ -157,6 +159,165 @@ class PolymarketClient:
         self.config = config or AppConfig()
         self.session = session or requests.Session()
         self.session.headers.update({"User-Agent": "BTC_5MIN/0.1"})
+        self._ws_app: websocket.WebSocketApp | None = None
+        self._ws_thread: threading.Thread | None = None
+        self._ws_lock = threading.Lock()
+        self._ws_quotes_by_asset: dict[str, dict[str, Any]] = {}
+        self._ws_subscribed_assets: set[str] = set()
+        self._ws_opened_at: datetime | None = None
+
+
+    def close(self) -> None:
+        with self._ws_lock:
+            app = self._ws_app
+            thread = self._ws_thread
+            self._ws_app = None
+            self._ws_thread = None
+            self._ws_opened_at = None
+            self._ws_subscribed_assets.clear()
+            self._ws_quotes_by_asset.clear()
+        if app is not None:
+            try:
+                app.close()
+            except Exception:
+                pass
+        if thread is not None and thread.is_alive():
+            thread.join(timeout=2)
+
+    def _handle_ws_message(self, raw_message: str) -> None:
+        try:
+            payload = json.loads(raw_message)
+        except (TypeError, ValueError):
+            return
+
+        updates: list[dict[str, Any]] = []
+        if isinstance(payload, list):
+            updates = [item for item in payload if isinstance(item, dict)]
+        elif isinstance(payload, dict):
+            if payload.get("event_type") == "price_change" and isinstance(payload.get("price_changes"), list):
+                updates = [item for item in payload.get("price_changes", []) if isinstance(item, dict)]
+            else:
+                updates = [payload]
+
+        if not updates:
+            return
+
+        now = datetime.now(timezone.utc)
+        with self._ws_lock:
+            for item in updates:
+                asset_id = item.get("asset_id")
+                if not asset_id:
+                    continue
+                quote = self._ws_quotes_by_asset.setdefault(str(asset_id), {})
+                quote["updated_at"] = now
+                price = _optional_float(item.get("price"))
+                if price is not None:
+                    quote["last_price"] = price
+                best_bid = _optional_float(item.get("best_bid"))
+                if best_bid is not None:
+                    quote["best_bid"] = best_bid
+                best_ask = _optional_float(item.get("best_ask"))
+                if best_ask is not None:
+                    quote["best_ask"] = best_ask
+
+                bids = item.get("bids")
+                if isinstance(bids, list) and bids:
+                    bid0 = bids[0] if isinstance(bids[0], dict) else None
+                    bid_price = _optional_float(bid0.get("price") if bid0 else None)
+                    if bid_price is not None:
+                        quote["best_bid"] = bid_price
+
+                asks = item.get("asks")
+                if isinstance(asks, list) and asks:
+                    ask0 = asks[0] if isinstance(asks[0], dict) else None
+                    ask_price = _optional_float(ask0.get("price") if ask0 else None)
+                    if ask_price is not None:
+                        quote["best_ask"] = ask_price
+
+    def _ensure_ws_connection(self) -> None:
+        if not self.config.ws_enabled:
+            return
+        with self._ws_lock:
+            alive = self._ws_thread is not None and self._ws_thread.is_alive()
+            if alive:
+                return
+
+            self._ws_opened_at = None
+
+            def on_open(_ws: websocket.WebSocketApp) -> None:
+                with self._ws_lock:
+                    self._ws_opened_at = datetime.now(timezone.utc)
+
+            def on_message(_ws: websocket.WebSocketApp, message: str) -> None:
+                self._handle_ws_message(message)
+
+            def on_error(_ws: websocket.WebSocketApp, _error: Any) -> None:
+                return
+
+            def on_close(_ws: websocket.WebSocketApp, _status_code: Any, _msg: Any) -> None:
+                return
+
+            self._ws_app = websocket.WebSocketApp(
+                self.config.ws_market_url,
+                on_open=on_open,
+                on_message=on_message,
+                on_error=on_error,
+                on_close=on_close,
+            )
+
+            def run() -> None:
+                if self._ws_app is None:
+                    return
+                self._ws_app.run_forever(ping_interval=20, ping_timeout=10)
+
+            self._ws_thread = threading.Thread(target=run, daemon=True)
+            self._ws_thread.start()
+
+        deadline = time.time() + max(1, self.config.ws_connect_timeout_seconds)
+        while time.time() < deadline:
+            with self._ws_lock:
+                if self._ws_opened_at is not None:
+                    return
+            time.sleep(0.05)
+
+    def _ws_subscribe_assets(self, asset_ids: list[str]) -> None:
+        if not asset_ids:
+            return
+        self._ensure_ws_connection()
+        with self._ws_lock:
+            app = self._ws_app
+            opened = self._ws_opened_at is not None
+            pending = [asset for asset in asset_ids if asset not in self._ws_subscribed_assets]
+            if not opened or app is None or not pending:
+                return
+            message = {
+                "assets_ids": pending,
+                "type": "market",
+                "custom_feature_enabled": True,
+            }
+            app.send(json.dumps(message))
+            self._ws_subscribed_assets.update(pending)
+
+    def _ws_quote_for_assets(self, asset_ids: list[str]) -> dict[str, dict[str, Any]]:
+        if not self.config.ws_enabled:
+            return {}
+        if not asset_ids:
+            return {}
+        self._ws_subscribe_assets(asset_ids)
+        with self._ws_lock:
+            now = datetime.now(timezone.utc)
+            out: dict[str, dict[str, Any]] = {}
+            for asset in asset_ids:
+                quote = self._ws_quotes_by_asset.get(asset)
+                if not quote:
+                    continue
+                updated_at = quote.get("updated_at")
+                if isinstance(updated_at, datetime):
+                    age = (now - updated_at).total_seconds()
+                    if age > max(1, self.config.ws_quote_stale_seconds):
+                        continue
+                out[asset] = dict(quote)
+            return out
 
     def _get_json(
         self,
@@ -287,8 +448,9 @@ class PolymarketClient:
 
     def quote_from_market(self, market: dict[str, Any]) -> MarketQuote:
         prices = parse_outcome_prices(market.get("outcomePrices"), market.get("outcomes"))
-        return MarketQuote(
+        http_quote = MarketQuote(
             slug=str(market.get("slug", "")),
+            source="http",
             up_price=prices.get("UP"),
             down_price=prices.get("DOWN"),
             up_best_bid=float(market["bestBid"]) if market.get("bestBid") is not None else None,
@@ -296,6 +458,48 @@ class PolymarketClient:
             down_best_bid=None,
             down_best_ask=None,
             accepting_orders=bool(market.get("acceptingOrders", False)),
+            fetched_at=datetime.now(timezone.utc),
+        )
+
+        token_ids = extract_token_ids(market.get("clobTokenIds"), market.get("outcomes"))
+        up_token_id = token_ids.get("UP")
+        down_token_id = token_ids.get("DOWN")
+        asset_ids = [token for token in (up_token_id, down_token_id) if token]
+        ws_quotes = self._ws_quote_for_assets(asset_ids)
+        if not ws_quotes:
+            return http_quote
+
+        ws_up = ws_quotes.get(up_token_id) if up_token_id else None
+        ws_down = ws_quotes.get(down_token_id) if down_token_id else None
+
+        def _best_ask_from_snapshot(snapshot: dict[str, Any] | None, fallback: float | None) -> float | None:
+            if not snapshot:
+                return fallback
+            best_ask = _optional_float(snapshot.get("best_ask"))
+            if best_ask is not None:
+                return best_ask
+            last_price = _optional_float(snapshot.get("last_price"))
+            return last_price if last_price is not None else fallback
+
+        def _best_bid_from_snapshot(snapshot: dict[str, Any] | None, fallback: float | None) -> float | None:
+            if not snapshot:
+                return fallback
+            best_bid = _optional_float(snapshot.get("best_bid"))
+            if best_bid is not None:
+                return best_bid
+            last_price = _optional_float(snapshot.get("last_price"))
+            return last_price if last_price is not None else fallback
+
+        return MarketQuote(
+            slug=http_quote.slug,
+            source="websocket",
+            up_price=(ws_up or {}).get("last_price", http_quote.up_price),
+            down_price=(ws_down or {}).get("last_price", http_quote.down_price),
+            up_best_bid=_best_bid_from_snapshot(ws_up, http_quote.up_best_bid),
+            up_best_ask=_best_ask_from_snapshot(ws_up, http_quote.up_best_ask),
+            down_best_bid=_best_bid_from_snapshot(ws_down, http_quote.down_best_bid),
+            down_best_ask=_best_ask_from_snapshot(ws_down, http_quote.down_best_ask),
+            accepting_orders=http_quote.accepting_orders,
             fetched_at=datetime.now(timezone.utc),
         )
 

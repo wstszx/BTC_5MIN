@@ -349,6 +349,7 @@ def place_live_order(
     entry_time = _entry_time_for_round(cfg, target_round)
     market = market_client.get_market_by_slug(target_round.slug)
     quote = market_client.quote_from_market(market)
+    print('[live] quote {' + _describe_quote_source(quote) + '}', flush=True)
     side_decision = _resolve_side_from_strategy(
         cfg=cfg,
         state=state,
@@ -616,6 +617,17 @@ def _describe_side_decision(side_decision: SideDecision) -> str:
     return ', '.join(signal_bits)
 
 
+def _describe_quote_source(quote: MarketQuote) -> str:
+    source = quote.source or 'http'
+    return (
+        'source=' + source
+        + ', up_best_ask=' + _fmt_price(quote.up_best_ask)
+        + ', up_price=' + _fmt_price(quote.up_price)
+        + ', down_best_ask=' + _fmt_price(quote.down_best_ask)
+        + ', down_price=' + _fmt_price(quote.down_price)
+    )
+
+
 def _settle_paper_trade(
     client: PolymarketClient,
     state: SessionState,
@@ -684,6 +696,7 @@ def run_paper_trading(
             entry_time = _entry_time_for_round(cfg, target_round)
             market = client.get_market_by_slug(target_round.slug)
             quote = client.quote_from_market(market)
+            _runtime_log('round=' + target_round.slug + ' quote {' + _describe_quote_source(quote) + '}')
             side_decision = _resolve_side_from_strategy(
                 cfg=cfg,
                 state=state,
@@ -699,6 +712,7 @@ def run_paper_trading(
                 + ' side=' + str(side_decision.side)
                 + ' entry_at=' + entry_time.isoformat()
                 + ' signal={' + _describe_side_decision(side_decision) + '}'
+                + ' quote_source=' + str(quote.source)
             )
             if side_decision.side is None:
                 if dry_run_once:
@@ -786,6 +800,7 @@ def run_paper_trading(
                 + ' order_cost=' + f'{plan.order_cost:.4f}'
                 + ' order_size=' + f'{plan.order_size:.4f}'
                 + ' skip_reason=' + str(plan.skip_reason)
+                + ' quote_source=' + str(quote.source)
             )
 
             if dry_run_once:

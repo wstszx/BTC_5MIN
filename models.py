@@ -19,6 +19,7 @@ class MarketWindow:
 @dataclass(slots=True)
 class MarketQuote:
     slug: str
+    source: str = "http"
     up_price: float | None = None
     down_price: float | None = None
     up_best_bid: float | None = None

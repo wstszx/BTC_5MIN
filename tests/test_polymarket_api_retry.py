@@ -1,4 +1,5 @@
 import requests
+from datetime import datetime, timezone
 
 from config import AppConfig
 from polymarket_api import PolymarketClient
@@ -64,3 +65,86 @@ def test_get_json_raises_runtime_error_after_retries(monkeypatch):
     assert "Unable to fetch https://example.com/events" in message
     assert "after 2 attempts" in message
     assert client.session.calls == 2
+
+
+def test_ws_message_handler_ingests_book_and_price_change():
+    client = PolymarketClient(AppConfig(ws_enabled=False))
+
+    book_msg = '[{"asset_id":"up-token","bids":[{"price":"0.51"}],"asks":[{"price":"0.52"}]}]'
+    client._handle_ws_message(book_msg)
+    snapshot = client._ws_quotes_by_asset.get("up-token")
+    assert snapshot is not None
+    assert snapshot["best_bid"] == 0.51
+    assert snapshot["best_ask"] == 0.52
+
+    change_msg = '{"event_type":"price_change","price_changes":[{"asset_id":"up-token","price":"0.53","best_bid":"0.52","best_ask":"0.54"}]}'
+    client._handle_ws_message(change_msg)
+    updated = client._ws_quotes_by_asset.get("up-token")
+    assert updated is not None
+    assert updated["last_price"] == 0.53
+    assert updated["best_bid"] == 0.52
+    assert updated["best_ask"] == 0.54
+
+
+def test_quote_from_market_falls_back_to_http_when_ws_empty():
+    cfg = AppConfig(ws_enabled=True)
+    client = PolymarketClient(cfg)
+
+    # Avoid opening a real socket in unit test; force empty WS snapshot.
+    client._ws_quote_for_assets = lambda _asset_ids: {}  # type: ignore[method-assign]
+
+    market = {
+        "slug": "btc-updown-5m-test",
+        "outcomes": '["Up", "Down"]',
+        "outcomePrices": '["0.55", "0.45"]',
+        "clobTokenIds": '["up-token", "down-token"]',
+        "bestBid": "0.54",
+        "bestAsk": "0.56",
+        "acceptingOrders": True,
+    }
+
+    quote = client.quote_from_market(market)
+    assert quote.source == "http"
+    assert quote.up_price == 0.55
+    assert quote.up_best_ask == 0.56
+
+
+def test_quote_from_market_prefers_ws_snapshot_when_available():
+    cfg = AppConfig(ws_enabled=True)
+    client = PolymarketClient(cfg)
+
+    now = datetime.now(timezone.utc)
+
+    def fake_ws(_asset_ids):
+        return {
+            "up-token": {
+                "last_price": 0.58,
+                "best_bid": 0.57,
+                "best_ask": 0.59,
+                "updated_at": now,
+            },
+            "down-token": {
+                "last_price": 0.42,
+                "best_bid": 0.41,
+                "best_ask": 0.43,
+                "updated_at": now,
+            },
+        }
+
+    client._ws_quote_for_assets = fake_ws  # type: ignore[method-assign]
+
+    market = {
+        "slug": "btc-updown-5m-test",
+        "outcomes": '["Up", "Down"]',
+        "outcomePrices": '["0.55", "0.45"]',
+        "clobTokenIds": '["up-token", "down-token"]',
+        "bestBid": "0.54",
+        "bestAsk": "0.56",
+        "acceptingOrders": True,
+    }
+
+    quote = client.quote_from_market(market)
+    assert quote.source == "websocket"
+    assert quote.up_price == 0.58
+    assert quote.down_price == 0.42
+    assert quote.up_best_ask == 0.59
