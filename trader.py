@@ -581,6 +581,14 @@ def _sleep_until_round_end(cfg: AppConfig, window: MarketWindow) -> None:
         time.sleep(cfg.poll_interval_seconds)
 
 
+def _runtime_log(message: str) -> None:
+    print('[' + datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S') + ' UTC] ' + message, flush=True)
+
+
+def _fmt_price(value: float | None) -> str:
+    return 'N/A' if value is None else f'{value:.4f}'
+
+
 def _signal_record_kwargs(side_decision: SideDecision) -> dict[str, Any]:
     return {
         "signal_open_up_price": side_decision.signal_open_up_price,
@@ -590,6 +598,22 @@ def _signal_record_kwargs(side_decision: SideDecision) -> dict[str, Any]:
         "signal_locked": side_decision.signal_locked,
         "signal_reason": side_decision.reason,
     }
+
+
+def _describe_side_decision(side_decision: SideDecision) -> str:
+    signal_bits = []
+    if side_decision.signal_open_up_price is not None:
+        signal_bits.append('open_up=' + _fmt_price(side_decision.signal_open_up_price))
+    if side_decision.signal_current_up_price is not None:
+        signal_bits.append('current_up=' + _fmt_price(side_decision.signal_current_up_price))
+    if side_decision.signal_threshold is not None:
+        signal_bits.append('threshold=' + _fmt_price(side_decision.signal_threshold))
+    if side_decision.signal_delta is not None:
+        signal_bits.append('delta=' + _fmt_price(side_decision.signal_delta))
+    signal_bits.append('locked=' + str(side_decision.signal_locked))
+    if side_decision.reason:
+        signal_bits.append('reason=' + side_decision.reason)
+    return ', '.join(signal_bits)
 
 
 def _settle_paper_trade(
@@ -637,6 +661,12 @@ def run_paper_trading(
     log_path = log_path or cfg.logs_dir / "paper_trades.csv"
     state = load_session_state(state_path)
     consecutive_errors = 0
+    _runtime_log(
+        'paper-trade started | strategy=' + str(cfg.strategy_id)
+        + ' entry_timing=' + cfg.entry_timing
+        + ' poll=' + str(cfg.poll_interval_seconds)
+        + 's dry_run_once=' + str(dry_run_once)
+    )
 
     while True:
         try:
@@ -646,6 +676,7 @@ def run_paper_trading(
             if target_round is None:
                 if dry_run_once:
                     return {"status": "no_market"}
+                _runtime_log('no active round found; waiting ' + str(cfg.poll_interval_seconds) + 's')
                 consecutive_errors = 0
                 time.sleep(cfg.poll_interval_seconds)
                 continue
@@ -663,8 +694,18 @@ def run_paper_trading(
                 now=now,
                 entry_time=entry_time,
             )
+            _runtime_log(
+                'round=' + target_round.slug
+                + ' side=' + str(side_decision.side)
+                + ' entry_at=' + entry_time.isoformat()
+                + ' signal={' + _describe_side_decision(side_decision) + '}'
+            )
             if side_decision.side is None:
                 if dry_run_once:
+                    _runtime_log(
+                        'dry-run round=' + target_round.slug
+                        + ' skip due to signal; reason=' + str(side_decision.reason or 'signal_unavailable')
+                    )
                     return {
                         "status": "dry_run",
                         "slug": target_round.slug,
@@ -681,9 +722,17 @@ def run_paper_trading(
                     }
                 if now < entry_time:
                     sleep_seconds = min(cfg.poll_interval_seconds, max(1, int((entry_time - now).total_seconds())))
+                    _runtime_log(
+                        'round=' + target_round.slug
+                        + ' weak/no signal before entry; sleep ' + str(sleep_seconds) + 's then retry'
+                    )
                     consecutive_errors = 0
                     time.sleep(sleep_seconds)
                     continue
+                _runtime_log(
+                    'round=' + target_round.slug
+                    + ' skip trade due to signal; reason=' + str(side_decision.reason or 'signal_unavailable')
+                )
                 append_trade_log(
                     log_path,
                     TradeRecord(
@@ -729,12 +778,28 @@ def run_paper_trading(
                 bet_sizing_mode=cfg.bet_sizing_mode,
                 base_order_cost=cfg.base_order_cost,
             )
+            _runtime_log(
+                'round=' + target_round.slug
+                + ' plan should_trade=' + str(plan.should_trade)
+                + ' side=' + side
+                + ' price=' + _fmt_price(price)
+                + ' order_cost=' + f'{plan.order_cost:.4f}'
+                + ' order_size=' + f'{plan.order_size:.4f}'
+                + ' skip_reason=' + str(plan.skip_reason)
+            )
 
             if dry_run_once:
                 projected_streak = (
                     state.consecutive_max_stake_skips + 1
                     if plan.skip_reason == "order_cost_above_max_stake"
                     else 0
+                )
+                _runtime_log(
+                    'dry-run round=' + target_round.slug
+                    + ' side=' + side
+                    + ' should_trade=' + str(plan.should_trade)
+                    + ' price=' + _fmt_price(price)
+                    + ' skip_reason=' + str(plan.skip_reason)
                 )
                 return {
                     "status": "dry_run",
@@ -755,9 +820,17 @@ def run_paper_trading(
             if not plan.should_trade:
                 if now < entry_time:
                     sleep_seconds = min(cfg.poll_interval_seconds, max(1, int((entry_time - now).total_seconds())))
+                    _runtime_log(
+                        'round=' + target_round.slug
+                        + ' not tradable before entry; sleep ' + str(sleep_seconds) + 's then retry'
+                    )
                     consecutive_errors = 0
                     time.sleep(sleep_seconds)
                     continue
+                _runtime_log(
+                    'round=' + target_round.slug
+                    + ' skip trade due to risk gate; reason=' + str(plan.skip_reason)
+                )
                 should_alert = _update_max_stake_skip_streak(
                     state,
                     skip_reason=plan.skip_reason,
@@ -808,10 +881,15 @@ def run_paper_trading(
 
             if now < entry_time:
                 sleep_seconds = min(cfg.poll_interval_seconds, max(1, int((entry_time - now).total_seconds())))
+                _runtime_log(
+                    'round=' + target_round.slug
+                    + ' waiting for entry; sleep ' + str(sleep_seconds) + 's'
+                )
                 consecutive_errors = 0
                 time.sleep(sleep_seconds)
                 continue
 
+            _runtime_log('round=' + target_round.slug + ' entered trade; waiting for settlement')
             _sleep_until_round_end(cfg, target_round)
 
             while True:
@@ -821,12 +899,20 @@ def run_paper_trading(
                 except RuntimeError as exc:
                     # Polymarket resolution metadata can lag a few polling cycles after round end.
                     if "is not resolved yet" in str(exc):
+                        _runtime_log('round=' + target_round.slug + ' pending resolution')
                         time.sleep(cfg.poll_interval_seconds)
                         continue
                     raise
             settled_state.round_index = state.round_index + 1
             trade_pnl = settled_state.cash_pnl - state.cash_pnl
             state = settled_state
+            _runtime_log(
+                'round=' + target_round.slug
+                + ' settled result=' + result
+                + ' trade_pnl=' + f'{trade_pnl:.4f}'
+                + ' total_cash_pnl=' + f'{state.cash_pnl:.4f}'
+                + ' consecutive_losses=' + str(state.consecutive_losses)
+            )
 
             append_trade_log(
                 log_path,
@@ -858,4 +944,6 @@ def run_paper_trading(
             if dry_run_once:
                 return {"status": "error", "error": str(exc)}
             consecutive_errors += 1
-            time.sleep(_runtime_backoff_seconds(cfg, consecutive_errors))
+            backoff = _runtime_backoff_seconds(cfg, consecutive_errors)
+            _runtime_log('runtime error #' + str(consecutive_errors) + ': ' + str(exc) + ' | backoff=' + str(backoff) + 's')
+            time.sleep(backoff)
