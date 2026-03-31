@@ -4,6 +4,10 @@
 
 适用目录：`D:\python\BTC_5MIN`
 
+快捷入口：
+
+- 每日 1 页巡检清单：[docs/daily_ops_checklist.md](./daily_ops_checklist.md)
+
 ## 1. 基础准备
 
 ### 1.1 进入目录

@@ -13,6 +13,7 @@
 完整 PowerShell 操作手册：
 
 - [docs/operations_runbook.md](./docs/operations_runbook.md)
+- [docs/daily_ops_checklist.md](./docs/daily_ops_checklist.md)
 
 ## 1. 安装
 
