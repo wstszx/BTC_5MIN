@@ -10,6 +10,10 @@
 - 运行状态持久化
 - 基于 `py-clob-client` 的实盘下单（默认关闭，需显式开关与凭据）
 
+完整 PowerShell 操作手册：
+
+- [docs/operations_runbook.md](./docs/operations_runbook.md)
+
 ## 1. 安装
 
 进入项目目录后安装依赖：
