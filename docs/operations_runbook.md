@@ -192,6 +192,33 @@ python main.py paper-report --csv logs/paper_trades.csv --tz-offset +08:00 --sta
 
 ---
 
+## 5.3 本地 Dashboard（参数调节 + 实时行情对比）
+
+前台启动：
+
+```powershell
+cd D:\python\BTC_5MIN
+py -u main.py dashboard --host 127.0.0.1 --port 8787 --env-file .env.dashboard
+```
+
+浏览器打开：
+
+```text
+http://127.0.0.1:8787
+```
+
+页面中可以做的事：
+
+- 修改策略参数并保存到 `.env.dashboard`
+- 查看当前轮次实时报价（来源字段 `quote.source`）
+- 查看策略信号、下单计划、风控是否触发
+- 查看 `ws_runtime`（连接状态、重连次数、消息年龄）
+- 查看纸测日报和最近成交
+
+手动停止：`Ctrl + C`
+
+---
+
 ## 6. 实盘命令（仅 dry-run 推荐）
 
 ### 6.1 实盘 dry-run（不下单）

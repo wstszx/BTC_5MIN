@@ -12,6 +12,7 @@ from polymarket_api import PolymarketClient
 from streak_analysis import analyze_streak_risk
 from strategy_research import export_strategy_research_csv, run_strategy_research
 from test_table_builder import build_augmented_test_table
+from dashboard import run_dashboard
 from trader import place_live_order, run_paper_trading
 
 
@@ -91,6 +92,11 @@ def build_parser() -> argparse.ArgumentParser:
     live_parser = subparsers.add_parser("live-trade", help="Attempt live trading")
     live_parser.add_argument("--enable-live-trading", action="store_true", help="Explicitly enable live-trade path")
     live_parser.add_argument("--dry-run-once", action="store_true", help="Preview one live order plan without submitting")
+
+    dashboard_parser = subparsers.add_parser("dashboard", help="Run local web dashboard")
+    dashboard_parser.add_argument("--host", type=str, default="127.0.0.1", help="Dashboard host")
+    dashboard_parser.add_argument("--port", type=int, default=8787, help="Dashboard port")
+    dashboard_parser.add_argument("--env-file", type=Path, default=Path('.env.dashboard'), help="Dashboard env file path")
 
     return parser
 
@@ -306,6 +312,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         print("Live trading")
         for key, value in result.items():
             print(f"  {key}: {value}")
+        return 0
+
+    if args.command == "dashboard":
+        run_dashboard(host=args.host, port=args.port, env_file=args.env_file)
         return 0
 
     parser.error(f"Unknown command: {args.command}")

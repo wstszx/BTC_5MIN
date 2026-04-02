@@ -13,6 +13,7 @@
 完整 PowerShell 操作手册：
 
 - [docs/operations_runbook.md](./docs/operations_runbook.md)
+- [docs/dashboard_runbook.md](./docs/dashboard_runbook.md)
 - [docs/daily_ops_checklist.md](./docs/daily_ops_checklist.md)
 
 ## 1. 安装
@@ -138,7 +139,7 @@ python -m pip install -r requirements.txt
 python main.py --help
 ```
 
-当前支持 7 个主命令：
+当前支持 8 个主命令：
 
 - `fetch-history`
 - `backtest`
@@ -147,6 +148,7 @@ python main.py --help
 - `paper-trade`
 - `paper-report`
 - `live-trade`
+- `dashboard`
 
 ## 4. 拉取历史数据
 
@@ -326,6 +328,39 @@ python main.py paper-report --csv logs/paper_trades.csv --tz-offset +08:00
 python main.py paper-report --start-date 2026-03-31 --end-date 2026-04-02
 ```
 
+## 6.3 本地可视化 Dashboard（参数调节 + 实时行情 + 纸测结果）
+
+启动 Dashboard：
+
+```bash
+python main.py dashboard
+```
+
+默认访问地址：
+
+```text
+http://127.0.0.1:8787
+```
+
+可选参数：
+
+- `--host`：监听地址（默认 `127.0.0.1`）
+- `--port`：端口（默认 `8787`）
+- `--env-file`：Dashboard 参数文件（默认 `.env.dashboard`）
+
+示例：
+
+```bash
+python main.py dashboard --host 127.0.0.1 --port 8787 --env-file .env.dashboard
+```
+
+页面能力：
+
+- 在线编辑策略参数（会写入 `.env.dashboard`）
+- 查看当前轮次报价、信号方向与风控计划
+- 查看 `ws_runtime` 与 `ws_stale_guard_triggered`
+- 查看纸测日报汇总与最近成交记录
+
 ## 7. 状态文件与日志
 
 程序运行过程中会使用这些目录：
@@ -429,5 +464,5 @@ python main.py paper-trade
 
 
 - `WS_TRADE_GUARD_STALE_SECONDS`
-  - ???`1.5`
-  - ???? WebSocket ????????????????????? `skip_reason=ws_stale`?
+  - 默认值：`1.5`
+  - 含义：当 WebSocket 最新消息年龄超过该阈值时，交易会跳过并记录 `skip_reason=ws_stale`。

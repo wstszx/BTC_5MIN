@@ -91,7 +91,12 @@ def _resolve_signal_round_open_up_price(
 ) -> float | None:
     if _is_valid_signal_price(state.signal_round_open_up_price):
         return state.signal_round_open_up_price
-    if market_client is None or window is None or not window.up_token_id:
+    if (
+        market_client is None
+        or window is None
+        or not window.up_token_id
+        or not hasattr(market_client, "get_nearest_history_point")
+    ):
         return current_up_price
 
     target_ts = int((window.start_time + timedelta(seconds=max(0, cfg.open_delay_seconds))).timestamp())
@@ -121,7 +126,12 @@ def _compute_signal_threshold(
     now: datetime,
 ) -> float:
     base_threshold = max(0.0, cfg.signal_momentum_threshold)
-    if market_client is None or window is None or not window.up_token_id:
+    if (
+        market_client is None
+        or window is None
+        or not window.up_token_id
+        or not hasattr(market_client, "get_price_history")
+    ):
         return base_threshold
 
     start_ts = int((window.start_time + timedelta(seconds=max(0, cfg.open_delay_seconds))).timestamp())
