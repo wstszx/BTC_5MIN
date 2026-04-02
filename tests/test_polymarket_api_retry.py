@@ -179,3 +179,67 @@ def test_ws_message_handler_resets_on_invalid_operation():
     assert stats["ws_subscribed_asset_count"] == 0
     assert stats["ws_cached_asset_count"] == 0
     assert stats["ws_last_error"] == "INVALID OPERATION"
+
+
+
+def test_ws_subscribe_assets_reconnects_when_asset_set_changes():
+    class _StubApp:
+        def __init__(self):
+            self.sent = []
+
+        def send(self, payload):
+            self.sent.append(payload)
+
+    client = PolymarketClient(AppConfig(ws_enabled=True))
+
+    # Seed an existing open socket with old assets.
+    client._ws_app = _StubApp()
+    client._ws_opened_at = datetime.now(timezone.utc)
+    client._ws_subscribed_assets = {"old-a", "old-b"}
+
+    closed = {"count": 0}
+
+    def fake_close():
+        closed["count"] += 1
+        client._ws_app = None
+        client._ws_opened_at = None
+        client._ws_subscribed_assets.clear()
+
+    def fake_ensure():
+        if client._ws_app is None:
+            client._ws_app = _StubApp()
+            client._ws_opened_at = datetime.now(timezone.utc)
+
+    client.close = fake_close  # type: ignore[method-assign]
+    client._ensure_ws_connection = fake_ensure  # type: ignore[method-assign]
+
+    client._ws_subscribe_assets(["new-a", "new-b"])
+
+    assert closed["count"] == 1
+    assert client._ws_subscribed_assets == {"new-a", "new-b"}
+    assert client._ws_app is not None
+    assert len(client._ws_app.sent) == 1
+    assert "new-a" in client._ws_app.sent[0]
+
+
+def test_ws_subscribe_assets_skips_duplicate_subscription_for_same_set():
+    class _StubApp:
+        def __init__(self):
+            self.sent = []
+
+        def send(self, payload):
+            self.sent.append(payload)
+
+    client = PolymarketClient(AppConfig(ws_enabled=True))
+    client._ws_app = _StubApp()
+    client._ws_opened_at = datetime.now(timezone.utc)
+    client._ws_subscribed_assets = {"same-a", "same-b"}
+
+    # Bypass actual network connection path in unit test.
+    client._ensure_ws_connection = lambda: None  # type: ignore[method-assign]
+
+    client._ws_subscribe_assets(["same-b", "same-a"])
+
+    assert client._ws_app is not None
+    assert len(client._ws_app.sent) == 0
+    assert client._ws_subscribed_assets == {"same-a", "same-b"}

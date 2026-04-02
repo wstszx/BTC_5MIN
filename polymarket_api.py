@@ -319,20 +319,45 @@ class PolymarketClient:
     def _ws_subscribe_assets(self, asset_ids: list[str]) -> None:
         if not asset_ids:
             return
+
+        desired_assets = sorted(set(asset_ids))
         self._ensure_ws_connection()
+
         with self._ws_lock:
             app = self._ws_app
             opened = self._ws_opened_at is not None
-            pending = [asset for asset in asset_ids if asset not in self._ws_subscribed_assets]
-            if not opened or app is None or not pending:
+            current_assets = sorted(self._ws_subscribed_assets)
+
+        if not opened or app is None:
+            return
+
+        if current_assets and current_assets != desired_assets:
+            # Market channel may reject incremental changes; reconnect and subscribe exact set.
+            self.close()
+            self._ensure_ws_connection()
+            with self._ws_lock:
+                app = self._ws_app
+                opened = self._ws_opened_at is not None
+                current_assets = sorted(self._ws_subscribed_assets)
+            if not opened or app is None:
                 return
-            message = {
-                "assets_ids": sorted({*self._ws_subscribed_assets, *pending}),
-                "type": "market",
-                "custom_feature_enabled": True,
-            }
+
+        # Avoid duplicate subscribe messages for unchanged asset set; server may return INVALID OPERATION.
+        if current_assets == desired_assets:
+            return
+
+        message = {
+            "assets_ids": desired_assets,
+            "type": "market",
+            "custom_feature_enabled": True,
+        }
+        try:
             app.send(json.dumps(message))
-            self._ws_subscribed_assets.update(pending)
+        except Exception:
+            return
+
+        with self._ws_lock:
+            self._ws_subscribed_assets = set(desired_assets)
 
     def _ws_quote_for_assets(self, asset_ids: list[str]) -> dict[str, dict[str, Any]]:
         if not self.config.ws_enabled:
