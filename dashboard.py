@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import errno
 import json
 import os
 import threading
@@ -92,6 +93,12 @@ def _iso(dt: datetime | None) -> str | None:
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=timezone.utc)
     return dt.astimezone(timezone.utc).isoformat()
+
+
+def _json_default(value: Any) -> Any:
+    if isinstance(value, datetime):
+        return _iso(value)
+    raise TypeError(f"Object of type {value.__class__.__name__} is not JSON serializable")
 
 
 class DashboardState:
@@ -385,32 +392,43 @@ class _DashboardRequestHandler(BaseHTTPRequestHandler):
     def log_message(self, format: str, *args: Any) -> None:  # noqa: A003
         return
 
+    @staticmethod
+    def _is_client_disconnect(exc: Exception) -> bool:
+        if isinstance(exc, (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, TimeoutError)):
+            return True
+        winerr = getattr(exc, "winerror", None)
+        if winerr in {10053, 10054}:
+            return True
+        err_no = getattr(exc, "errno", None)
+        if err_no in {errno.EPIPE, errno.ECONNRESET, errno.ECONNABORTED}:
+            return True
+        return False
+
+    def _safe_send_bytes(self, raw: bytes, *, content_type: str, status: HTTPStatus) -> bool:
+        try:
+            self.send_response(status.value)
+            self.send_header("Content-Type", content_type)
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Content-Length", str(len(raw)))
+            self.end_headers()
+            self.wfile.write(raw)
+            return True
+        except OSError as exc:
+            if self._is_client_disconnect(exc):
+                return False
+            raise
+
     def _send_json(self, payload: dict[str, Any], status: HTTPStatus = HTTPStatus.OK) -> None:
-        raw = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-        self.send_response(status.value)
-        self.send_header("Content-Type", "application/json; charset=utf-8")
-        self.send_header("Cache-Control", "no-store")
-        self.send_header("Content-Length", str(len(raw)))
-        self.end_headers()
-        self.wfile.write(raw)
+        raw = json.dumps(payload, ensure_ascii=False, default=_json_default).encode("utf-8")
+        self._safe_send_bytes(raw, content_type="application/json; charset=utf-8", status=status)
 
     def _send_html(self, html: str) -> None:
         raw = html.encode("utf-8")
-        self.send_response(HTTPStatus.OK.value)
-        self.send_header("Content-Type", "text/html; charset=utf-8")
-        self.send_header("Cache-Control", "no-store")
-        self.send_header("Content-Length", str(len(raw)))
-        self.end_headers()
-        self.wfile.write(raw)
+        self._safe_send_bytes(raw, content_type="text/html; charset=utf-8", status=HTTPStatus.OK)
 
     def _send_text(self, text: str, *, content_type: str) -> None:
         raw = text.encode("utf-8")
-        self.send_response(HTTPStatus.OK.value)
-        self.send_header("Content-Type", content_type)
-        self.send_header("Cache-Control", "no-store")
-        self.send_header("Content-Length", str(len(raw)))
-        self.end_headers()
-        self.wfile.write(raw)
+        self._safe_send_bytes(raw, content_type=content_type, status=HTTPStatus.OK)
 
     def _read_json_body(self) -> dict[str, Any]:
         length = int(self.headers.get("Content-Length") or "0")
@@ -448,8 +466,17 @@ class _DashboardRequestHandler(BaseHTTPRequestHandler):
                 self._send_json(self.dashboard_state.get_recent_trades_payload(limit=limit))
                 return
             self._send_json({"error": "Not found"}, status=HTTPStatus.NOT_FOUND)
+        except OSError as exc:
+            if self._is_client_disconnect(exc):
+                return
+            raise
         except Exception as exc:  # pragma: no cover
-            self._send_json({"error": str(exc)}, status=HTTPStatus.INTERNAL_SERVER_ERROR)
+            try:
+                self._send_json({"error": str(exc)}, status=HTTPStatus.INTERNAL_SERVER_ERROR)
+            except OSError as send_exc:
+                if self._is_client_disconnect(send_exc):
+                    return
+                raise
 
     def do_POST(self) -> None:  # noqa: N802
         parsed = urlparse(self.path)
@@ -463,10 +490,24 @@ class _DashboardRequestHandler(BaseHTTPRequestHandler):
                 raise ValueError("env_values must be object")
             updated = self.dashboard_state.update_config({str(k): str(v) for k, v in env_values.items()})
             self._send_json(updated)
+        except OSError as exc:
+            if self._is_client_disconnect(exc):
+                return
+            raise
         except ValueError as exc:
-            self._send_json({"error": str(exc)}, status=HTTPStatus.BAD_REQUEST)
+            try:
+                self._send_json({"error": str(exc)}, status=HTTPStatus.BAD_REQUEST)
+            except OSError as send_exc:
+                if self._is_client_disconnect(send_exc):
+                    return
+                raise
         except Exception as exc:  # pragma: no cover
-            self._send_json({"error": str(exc)}, status=HTTPStatus.INTERNAL_SERVER_ERROR)
+            try:
+                self._send_json({"error": str(exc)}, status=HTTPStatus.INTERNAL_SERVER_ERROR)
+            except OSError as send_exc:
+                if self._is_client_disconnect(send_exc):
+                    return
+                raise
 
 
 def run_dashboard(*, host: str = "127.0.0.1", port: int = 8787, env_file: Path = Path(".env.dashboard")) -> None:
