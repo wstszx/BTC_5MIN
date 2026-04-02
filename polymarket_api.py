@@ -11,7 +11,10 @@ from pathlib import Path
 from typing import Any
 
 import requests
-import websocket
+try:
+    import websocket
+except ModuleNotFoundError:  # pragma: no cover - depends on runtime environment
+    websocket = None
 
 from config import AppConfig
 from models import MarketQuote, MarketWindow, ResolvedRound
@@ -244,6 +247,8 @@ class PolymarketClient:
     def _ensure_ws_connection(self) -> None:
         if not self.config.ws_enabled:
             return
+        if websocket is None:
+            return
         with self._ws_lock:
             alive = self._ws_thread is not None and self._ws_thread.is_alive()
             if alive:
@@ -338,6 +343,7 @@ class PolymarketClient:
             now = datetime.now(timezone.utc)
             return {
                 "ws_enabled": bool(self.config.ws_enabled),
+                "ws_available": websocket is not None,
                 "ws_connected": opened is not None,
                 "ws_connect_attempts": self._ws_connect_attempts,
                 "ws_reconnect_count": self._ws_reconnect_count,

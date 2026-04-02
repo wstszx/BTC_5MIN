@@ -155,6 +155,7 @@ def test_get_ws_runtime_stats_reports_core_fields():
 
     stats = client.get_ws_runtime_stats()
     assert stats["ws_enabled"] is True
+    assert stats["ws_available"] in (True, False)
     assert stats["ws_connected"] is False
     assert stats["ws_connect_attempts"] == 0
     assert stats["ws_reconnect_count"] == 0

@@ -636,6 +636,7 @@ def _describe_ws_runtime(client: PolymarketClient | Any) -> str:
     stats = get_stats()
     return (
         'ws_enabled=' + str(stats.get('ws_enabled'))
+        + ', ws_available=' + str(stats.get('ws_available'))
         + ', ws_connected=' + str(stats.get('ws_connected'))
         + ', reconnects=' + str(stats.get('ws_reconnect_count'))
         + ', connect_attempts=' + str(stats.get('ws_connect_attempts'))
