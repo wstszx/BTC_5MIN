@@ -66,6 +66,7 @@ class AppConfig:
     ws_enabled: bool = field(default_factory=lambda: _env_bool("WS_ENABLED", True))
     ws_market_url: str = field(default_factory=lambda: os.getenv("WS_MARKET_URL") or "wss://ws-subscriptions-clob.polymarket.com/ws/market")
     ws_quote_stale_seconds: int = field(default_factory=lambda: _env_int("WS_QUOTE_STALE_SECONDS", 3))
+    ws_trade_guard_stale_seconds: float = field(default_factory=lambda: _env_float("WS_TRADE_GUARD_STALE_SECONDS", 1.5))
     ws_connect_timeout_seconds: int = field(default_factory=lambda: _env_int("WS_CONNECT_TIMEOUT_SECONDS", 5))
     ws_log_every_updates: int = field(default_factory=lambda: _env_int("WS_LOG_EVERY_UPDATES", 200))
     runtime_error_backoff_base_seconds: int = 5

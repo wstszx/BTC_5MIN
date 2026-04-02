@@ -275,3 +275,54 @@ def test_append_trade_log_rotates_legacy_schema_file(tmp_path):
     assert len(rotated) == 1
     header = log_path.read_text(encoding="utf-8").splitlines()[0]
     assert "signal_reason" in header
+
+
+def test_place_live_order_skips_when_ws_stale_guard_triggered(tmp_path):
+    cfg = AppConfig(ws_trade_guard_stale_seconds=0.0)
+
+    class _StaleLiveClient(_LiveMarketClient):
+        def get_ws_runtime_stats(self):
+            return {
+                "ws_enabled": True,
+                "ws_available": True,
+                "ws_last_message_age_seconds": 10.0,
+            }
+
+    result = place_live_order(
+        cfg=cfg,
+        market_client=_StaleLiveClient(),
+        state_path=tmp_path / "state.json",
+        log_path=tmp_path / "live.csv",
+        dry_run=True,
+    )
+
+    assert result["status"] == "dry_run"
+    assert result["should_trade"] is False
+    assert result["skip_reason"] == "ws_stale"
+
+
+def test_run_paper_trading_dry_run_skips_when_ws_stale_guard_triggered(tmp_path):
+    cfg = AppConfig(
+        strategy_id=2,
+        ws_trade_guard_stale_seconds=0.0,
+    )
+
+    class _StalePaperClient(_LiveMarketClient):
+        def get_ws_runtime_stats(self):
+            return {
+                "ws_enabled": True,
+                "ws_available": True,
+                "ws_last_message_age_seconds": 10.0,
+            }
+
+    result = run_paper_trading(
+        cfg,
+        client=_StalePaperClient(),
+        state_path=tmp_path / "state.json",
+        log_path=tmp_path / "paper.csv",
+        dry_run_once=True,
+    )
+
+    assert result["status"] == "dry_run"
+    assert result["should_trade"] is False
+    assert result["skip_reason"] == "ws_stale"

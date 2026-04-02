@@ -407,6 +407,51 @@ def place_live_order(
         }
     side = side_decision.side
     price = resolve_quote_price(side, quote)
+
+    if _ws_is_stale_for_trade(market_client, cfg):
+        skip_reason = "ws_stale"
+        if not dry_run:
+            append_trade_log(
+                log_path,
+                TradeRecord(
+                    timestamp=datetime.now(timezone.utc),
+                    mode="live",
+                    round_index=state.round_index,
+                    strategy=cfg.strategy_id,
+                    entry_timing=cfg.entry_timing,
+                    event_slug=target_round.slug,
+                    start_time=target_round.start_time,
+                    end_time=target_round.end_time,
+                    side=side,
+                    price=price,
+                    order_size=0.0,
+                    order_cost=0.0,
+                    expected_profit=0.0,
+                    result=None,
+                    trade_pnl=0.0,
+                    cash_pnl=state.cash_pnl,
+                    recovery_loss=state.recovery_loss,
+                    consecutive_losses=state.consecutive_losses,
+                    skip_reason=skip_reason,
+                    **_signal_record_kwargs(side_decision),
+                ),
+            )
+        save_session_state(state_path, state)
+        return {
+            "status": "dry_run" if dry_run else "skipped",
+            "slug": target_round.slug,
+            "side": side,
+            "token_id": None,
+            "price": price,
+            "should_trade": False,
+            "skip_reason": skip_reason,
+            "entry_time": entry_time.isoformat(),
+            "signal_open_up_price": side_decision.signal_open_up_price,
+            "signal_current_up_price": side_decision.signal_current_up_price,
+            "signal_threshold": side_decision.signal_threshold,
+            "signal_delta": side_decision.signal_delta,
+            "signal_locked": side_decision.signal_locked,
+        }
     plan = build_trade_plan(
         state=state,
         side=side,
@@ -649,6 +694,21 @@ def _describe_ws_runtime(client: PolymarketClient | Any) -> str:
     )
 
 
+def _ws_is_stale_for_trade(client: PolymarketClient | Any, cfg: AppConfig) -> bool:
+    get_stats = getattr(client, 'get_ws_runtime_stats', None)
+    if not callable(get_stats):
+        return False
+    stats = get_stats()
+    if not stats.get('ws_enabled'):
+        return False
+    if not stats.get('ws_available'):
+        return False
+    age = stats.get('ws_last_message_age_seconds')
+    if not isinstance(age, (int, float)):
+        return False
+    return age > max(0.0, cfg.ws_trade_guard_stale_seconds)
+
+
 def _settle_paper_trade(
     client: PolymarketClient,
     state: SessionState,
@@ -802,6 +862,76 @@ def run_paper_trading(
 
             side = side_decision.side
             price = resolve_quote_price(side, quote)
+
+            if _ws_is_stale_for_trade(client, cfg):
+                ws_skip_reason = 'ws_stale'
+                if dry_run_once:
+                    _runtime_log(
+                        'dry-run round=' + target_round.slug
+                        + ' side=' + side
+                        + ' should_trade=False'
+                        + ' price=' + _fmt_price(price)
+                        + ' skip_reason=' + ws_skip_reason
+                    )
+                    return {
+                        "status": "dry_run",
+                        "slug": target_round.slug,
+                        "side": side,
+                        "price": price,
+                        "should_trade": False,
+                        "skip_reason": ws_skip_reason,
+                        "entry_time": entry_time.isoformat(),
+                        "projected_max_stake_skip_streak": 0,
+                        "signal_open_up_price": side_decision.signal_open_up_price,
+                        "signal_current_up_price": side_decision.signal_current_up_price,
+                        "signal_threshold": side_decision.signal_threshold,
+                        "signal_delta": side_decision.signal_delta,
+                        "signal_locked": side_decision.signal_locked,
+                    }
+                if now < entry_time:
+                    sleep_seconds = min(cfg.poll_interval_seconds, max(1, int((entry_time - now).total_seconds())))
+                    _runtime_log(
+                        'round=' + target_round.slug
+                        + ' ws stale before entry; sleep ' + str(sleep_seconds) + 's then retry'
+                    )
+                    consecutive_errors = 0
+                    time.sleep(sleep_seconds)
+                    continue
+                _runtime_log(
+                    'round=' + target_round.slug
+                    + ' skip trade due to ws stale; reason=' + ws_skip_reason
+                )
+                append_trade_log(
+                    log_path,
+                    TradeRecord(
+                        timestamp=datetime.now(timezone.utc),
+                        mode="paper",
+                        round_index=state.round_index,
+                        strategy=cfg.strategy_id,
+                        entry_timing=cfg.entry_timing,
+                        event_slug=target_round.slug,
+                        start_time=target_round.start_time,
+                        end_time=target_round.end_time,
+                        side=side,
+                        price=price,
+                        order_size=0.0,
+                        order_cost=0.0,
+                        expected_profit=0.0,
+                        result=None,
+                        trade_pnl=0.0,
+                        cash_pnl=state.cash_pnl,
+                        recovery_loss=state.recovery_loss,
+                        consecutive_losses=state.consecutive_losses,
+                        skip_reason=ws_skip_reason,
+                        **_signal_record_kwargs(side_decision),
+                    ),
+                )
+                state.round_index += 1
+                save_session_state(state_path, state)
+                consecutive_errors = 0
+                _sleep_until_round_end(cfg, target_round)
+                continue
+
             plan = build_trade_plan(
                 state=state,
                 side=side,
