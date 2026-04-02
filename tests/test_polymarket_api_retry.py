@@ -159,6 +159,23 @@ def test_get_ws_runtime_stats_reports_core_fields():
     assert stats["ws_connected"] is False
     assert stats["ws_connect_attempts"] == 0
     assert stats["ws_reconnect_count"] == 0
+    assert stats["ws_invalid_operation_count"] == 0
     assert stats["ws_subscribed_asset_count"] == 0
     assert stats["ws_cached_asset_count"] == 0
     assert stats["ws_last_message_age_seconds"] is None
+
+
+def test_ws_message_handler_resets_on_invalid_operation():
+    client = PolymarketClient(AppConfig(ws_enabled=True))
+    client._ws_opened_at = datetime.now(timezone.utc)
+    client._ws_subscribed_assets.update({"a", "b"})
+    client._ws_quotes_by_asset["a"] = {"last_price": 0.5, "updated_at": datetime.now(timezone.utc)}
+
+    client._handle_ws_message("INVALID OPERATION")
+
+    stats = client.get_ws_runtime_stats()
+    assert stats["ws_connected"] is False
+    assert stats["ws_invalid_operation_count"] == 1
+    assert stats["ws_subscribed_asset_count"] == 0
+    assert stats["ws_cached_asset_count"] == 0
+    assert stats["ws_last_error"] == "INVALID OPERATION"

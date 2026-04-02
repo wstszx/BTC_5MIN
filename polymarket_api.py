@@ -172,6 +172,7 @@ class PolymarketClient:
         self._ws_connect_attempts: int = 0
         self._ws_reconnect_count: int = 0
         self._ws_last_error: str | None = None
+        self._ws_invalid_operation_count: int = 0
 
 
     def close(self) -> None:
@@ -183,6 +184,7 @@ class PolymarketClient:
             self._ws_opened_at = None
             self._ws_last_message_at = None
             self._ws_last_error = None
+            self._ws_invalid_operation_count = 0
             self._ws_subscribed_assets.clear()
             self._ws_quotes_by_asset.clear()
         if app is not None:
@@ -194,6 +196,23 @@ class PolymarketClient:
             thread.join(timeout=2)
 
     def _handle_ws_message(self, raw_message: str) -> None:
+        if isinstance(raw_message, str) and raw_message.strip().upper() == "INVALID OPERATION":
+            with self._ws_lock:
+                self._ws_invalid_operation_count += 1
+                self._ws_last_error = "INVALID OPERATION"
+                app = self._ws_app
+                self._ws_app = None
+                self._ws_thread = None
+                self._ws_opened_at = None
+                self._ws_subscribed_assets.clear()
+                self._ws_quotes_by_asset.clear()
+            if app is not None:
+                try:
+                    app.close()
+                except Exception:
+                    pass
+            return
+
         try:
             payload = json.loads(raw_message)
         except (TypeError, ValueError):
@@ -308,7 +327,7 @@ class PolymarketClient:
             if not opened or app is None or not pending:
                 return
             message = {
-                "assets_ids": pending,
+                "assets_ids": sorted({*self._ws_subscribed_assets, *pending}),
                 "type": "market",
                 "custom_feature_enabled": True,
             }
@@ -347,6 +366,7 @@ class PolymarketClient:
                 "ws_connected": opened is not None,
                 "ws_connect_attempts": self._ws_connect_attempts,
                 "ws_reconnect_count": self._ws_reconnect_count,
+                "ws_invalid_operation_count": self._ws_invalid_operation_count,
                 "ws_subscribed_asset_count": len(self._ws_subscribed_assets),
                 "ws_cached_asset_count": len(self._ws_quotes_by_asset),
                 "ws_opened_at": opened,
