@@ -72,7 +72,8 @@ def resolve_quote_price(side: str, quote: MarketQuote) -> float | None:
 
 
 def _resolve_signal_up_price(quote: MarketQuote) -> float | None:
-    return quote.up_best_ask if quote.up_best_ask is not None else quote.up_price
+    # For signal direction, prefer traded/last price to reduce orderbook ask spikes noise.
+    return quote.up_price if quote.up_price is not None else quote.up_best_ask
 
 
 def _is_valid_signal_price(price: float | None) -> bool:

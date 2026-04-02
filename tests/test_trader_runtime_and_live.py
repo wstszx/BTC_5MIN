@@ -164,11 +164,33 @@ def test_resolve_side_from_strategy_uses_quote_momentum_for_strategy_5():
     first_quote = MarketQuote(slug="s1", up_best_ask=0.56, up_price=0.55)
     side_first = _resolve_side_from_strategy(cfg=cfg, state=state, slug="s1", quote=first_quote)
     assert side_first.side == "UP"
-    assert state.signal_round_open_up_price == 0.56
+    assert state.signal_round_open_up_price == 0.55
 
     lower_quote = MarketQuote(slug="s1", up_best_ask=0.52, up_price=0.52)
     side_second = _resolve_side_from_strategy(cfg=cfg, state=state, slug="s1", quote=lower_quote)
     assert side_second.side == "DOWN"
+
+
+def test_resolve_side_from_strategy_prefers_up_last_price_over_best_ask_for_signal():
+    cfg = AppConfig(
+        strategy_id=5,
+        signal_momentum_threshold=0.02,
+        signal_weak_signal_mode="SKIP",
+    )
+    state = SessionState(round_index=0)
+
+    # Open anchor should come from up_price, not best_ask.
+    first_quote = MarketQuote(slug="s1", up_best_ask=0.90, up_price=0.50)
+    first = _resolve_side_from_strategy(cfg=cfg, state=state, slug="s1", quote=first_quote)
+    assert first.side is None
+    assert state.signal_round_open_up_price == 0.50
+
+    # Even with extreme best_ask spike, side should be based on up_price momentum.
+    second_quote = MarketQuote(slug="s1", up_best_ask=0.99, up_price=0.54)
+    second = _resolve_side_from_strategy(cfg=cfg, state=state, slug="s1", quote=second_quote)
+    assert second.side == "UP"
+    assert second.signal_delta is not None
+    assert second.signal_delta == pytest.approx(0.04)
 
 
 def test_resolve_side_from_strategy_skips_weak_signal_when_mode_is_skip():
