@@ -104,6 +104,13 @@ class SessionState:
     stop_loss_count: int = 0
     daily_realized_pnl: float = 0.0
     current_day: str | None = None
+    pending_live_slug: str | None = None
+    pending_live_side: str | None = None
+    pending_live_price: float | None = None
+    pending_live_order_size: float | None = None
+    pending_live_order_cost: float | None = None
+    pending_live_expected_profit: float | None = None
+    pending_live_end_time: str | None = None
 
 
 @dataclass(slots=True)

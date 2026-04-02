@@ -142,10 +142,10 @@ class DashboardState:
         "SIGNAL_DYNAMIC_THRESHOLD_MIN_POINTS": "动态阈值最少样本点",
         "SIGNAL_LOCK_BEFORE_ENTRY_SECONDS": "入场前锁边秒数",
         "MAX_STAKE_SKIP_ALERT_THRESHOLD": "超额跳过告警阈值",
-        "WS_ENABLED": "WebSocket 开关",
+        "WS_ENABLED": "实时连接开关",
         "WS_QUOTE_STALE_SECONDS": "行情过期秒",
         "WS_TRADE_GUARD_STALE_SECONDS": "交易防陈旧阈值秒",
-        "WS_CONNECT_TIMEOUT_SECONDS": "WS 连接超时秒",
+        "WS_CONNECT_TIMEOUT_SECONDS": "实时连接超时秒",
     }
 
     SELECT_OPTIONS: dict[str, list[str]] = {
@@ -179,6 +179,70 @@ class DashboardState:
         "WS_CONNECT_TIMEOUT_SECONDS": "ws_connect_timeout_seconds",
     }
 
+    INT_CONFIG_KEYS: tuple[str, ...] = (
+        "STRATEGY_ID",
+        "MAX_CONSECUTIVE_LOSSES",
+        "SIGNAL_FALLBACK_STRATEGY_ID",
+        "SIGNAL_HISTORY_FIDELITY_SECONDS",
+        "SIGNAL_ANCHOR_MAX_OFFSET_SECONDS",
+        "SIGNAL_DYNAMIC_THRESHOLD_MIN_POINTS",
+        "SIGNAL_LOCK_BEFORE_ENTRY_SECONDS",
+        "MAX_STAKE_SKIP_ALERT_THRESHOLD",
+        "WS_QUOTE_STALE_SECONDS",
+        "WS_CONNECT_TIMEOUT_SECONDS",
+    )
+
+    FLOAT_CONFIG_KEYS: tuple[str, ...] = (
+        "TARGET_PROFIT",
+        "BASE_ORDER_COST",
+        "MAX_STAKE",
+        "MAX_PRICE_THRESHOLD",
+        "SIGNAL_MOMENTUM_THRESHOLD",
+        "SIGNAL_DYNAMIC_THRESHOLD_K",
+        "WS_TRADE_GUARD_STALE_SECONDS",
+    )
+
+    BOOL_CONFIG_KEYS: tuple[str, ...] = ("WS_ENABLED",)
+
+    @classmethod
+    def _normalize_bool_config_value(cls, key: str, value: str) -> str:
+        normalized = value.strip().lower()
+        if normalized in {"1", "true", "yes", "on"}:
+            return "true"
+        if normalized in {"0", "false", "no", "off"}:
+            return "false"
+        raise ValueError(f"Invalid value for {key}: expected true/false, got {value!r}")
+
+    @classmethod
+    def _normalize_config_value(cls, key: str, value: str) -> str:
+        normalized = value.strip()
+        if normalized == "":
+            return ""
+
+        if key in cls.BOOL_CONFIG_KEYS:
+            return cls._normalize_bool_config_value(key, normalized)
+
+        if key in cls.SELECT_OPTIONS:
+            allowed = cls.SELECT_OPTIONS[key]
+            upper_value = normalized.upper()
+            if upper_value in allowed:
+                return upper_value
+            raise ValueError(f"Invalid value for {key}: expected one of {allowed}, got {value!r}")
+
+        if key in cls.INT_CONFIG_KEYS:
+            try:
+                return str(int(normalized))
+            except ValueError as exc:
+                raise ValueError(f"Invalid value for {key}: expected integer, got {value!r}") from exc
+
+        if key in cls.FLOAT_CONFIG_KEYS:
+            try:
+                return str(float(normalized))
+            except ValueError as exc:
+                raise ValueError(f"Invalid value for {key}: expected number, got {value!r}") from exc
+
+        raise ValueError(f"Unsupported config key: {key}")
+
     def __init__(self, *, env_file: Path) -> None:
         self.env_file = Path(env_file)
         self._lock = threading.RLock()
@@ -205,23 +269,32 @@ class DashboardState:
             self._client = PolymarketClient(self._cfg)
         old_client.close()
 
-    def _merged_env_values(self) -> dict[str, str]:
+    def _merged_env_values(self) -> tuple[dict[str, str], dict[str, str]]:
         merged: dict[str, str] = {}
+        validation_errors: dict[str, str] = {}
         for key in self.EDITABLE_CONFIG_KEYS:
+            effective_value = _fmt_env(getattr(self._cfg, self.CONFIG_ATTR_MAP[key]))
             if key in self._env_values:
-                merged[key] = self._env_values[key]
+                raw_value = self._env_values[key]
+                try:
+                    merged[key] = self._normalize_config_value(key, raw_value)
+                except ValueError as exc:
+                    merged[key] = effective_value
+                    validation_errors[key] = str(exc)
             else:
-                merged[key] = _fmt_env(getattr(self._cfg, self.CONFIG_ATTR_MAP[key]))
-        return merged
+                merged[key] = effective_value
+        return merged, validation_errors
 
     def get_config_payload(self) -> dict[str, Any]:
         with self._lock:
+            env_values, validation_errors = self._merged_env_values()
             return {
                 "env_file": str(self.env_file),
-                "env_values": self._merged_env_values(),
+                "env_values": env_values,
                 "editable_keys": list(self.EDITABLE_CONFIG_KEYS),
                 "labels": self.CONFIG_LABELS,
                 "select_options": self.SELECT_OPTIONS,
+                "validation_errors": validation_errors,
                 "saved_at": _iso(self._last_saved_at),
             }
 
@@ -232,9 +305,22 @@ class DashboardState:
         if unsupported:
             raise ValueError(f"Unsupported keys: {', '.join(unsupported)}")
 
+        normalized_updates: dict[str, str] = {}
+        validation_errors: list[str] = []
+        for key, value in values.items():
+            normalized = "" if value is None else str(value).strip()
+            if normalized == "":
+                normalized_updates[key] = ""
+                continue
+            try:
+                normalized_updates[key] = self._normalize_config_value(key, normalized)
+            except ValueError as exc:
+                validation_errors.append(str(exc))
+        if validation_errors:
+            raise ValueError("; ".join(validation_errors))
+
         with self._lock:
-            for key, value in values.items():
-                normalized = "" if value is None else str(value).strip()
+            for key, normalized in normalized_updates.items():
                 if normalized == "":
                     self._env_values.pop(key, None)
                 else:
@@ -554,7 +640,7 @@ def _dashboard_html() -> str:
     <section class=\"panel left-stack\">
       <div class=\"panel-head\">
         <div>
-          <div class=\"head-title\">CONFIG ENGINE</div>
+          <div class=\"head-title\">参数引擎</div>
           <div class=\"head-desc\">参数可编辑并写回 .env</div>
         </div>
         <div id=\"cfgStatus\" class=\"chip\">未保存</div>
@@ -574,6 +660,7 @@ def _dashboard_html() -> str:
         <form id=\"configForm\" class=\"form-grid\"></form>
 
         <div class=\"actions\">
+          <button id=\"btnToggleKeys\" class=\"btn btn-ghost\" type=\"button\">显示内部键名：关</button>
           <button id=\"btnReloadConfig\" class=\"btn btn-ghost\" type=\"button\">重新读取参数</button>
           <button id=\"btnSaveConfig\" class=\"btn btn-primary\" type=\"button\">保存参数</button>
         </div>
@@ -583,7 +670,7 @@ def _dashboard_html() -> str:
     <section class=\"panel center-stack\">
       <div class=\"panel-head\">
         <div>
-          <div class=\"head-title\">MARKET + SIGNAL</div>
+          <div class=\"head-title\">行情与信号</div>
           <div class=\"head-desc\">5分钟轮次行情 / 方向信号 / 下注计划</div>
         </div>
         <div id=\"marketHealth\" class=\"chip\">待刷新</div>
@@ -595,8 +682,9 @@ def _dashboard_html() -> str:
             <div id=\"marketTitle\" class=\"title\">--</div>
           </div>
           <div class=\"timer-wrap\">
-            <div class=\"timer-label\">距离入场</div>
+            <div id=\"entryCountdownLabel\" class=\"timer-label\">距离入场</div>
             <div id=\"entryCountdown\" class=\"timer-val\">--:--</div>
+            <div id=\"entrySyncAt\" class=\"timer-label\">同步于 --</div>
           </div>
         </div>
 
@@ -604,10 +692,10 @@ def _dashboard_html() -> str:
           <div class=\"box\">
             <div class=\"box-title\">盘口价格</div>
             <div class=\"kv-grid\">
-              <div class=\"kv\"><div class=\"k\">UP 买价</div><div id=\"upPrice\" class=\"v cyan\">--</div></div>
-              <div class=\"kv\"><div class=\"k\">DOWN 买价</div><div id=\"downPrice\" class=\"v cyan\">--</div></div>
-              <div class=\"kv\"><div class=\"k\">UP 最优挂单</div><div id=\"upAsk\" class=\"v\">--</div></div>
-              <div class=\"kv\"><div class=\"k\">DOWN 最优挂单</div><div id=\"downAsk\" class=\"v\">--</div></div>
+              <div class=\"kv\"><div class=\"k\">看涨买价</div><div id=\"upPrice\" class=\"v cyan\">--</div></div>
+              <div class=\"kv\"><div class=\"k\">看跌买价</div><div id=\"downPrice\" class=\"v cyan\">--</div></div>
+              <div class=\"kv\"><div class=\"k\">看涨最优卖价</div><div id=\"upAsk\" class=\"v\">--</div></div>
+              <div class=\"kv\"><div class=\"k\">看跌最优卖价</div><div id=\"downAsk\" class=\"v\">--</div></div>
             </div>
             <div class=\"row\">
               <span class=\"label\">行情来源</span>
@@ -634,10 +722,10 @@ def _dashboard_html() -> str:
               <span id=\"signalReason\" class=\"value\">--</span>
             </div>
             <div class=\"kv-grid\">
-              <div class=\"kv\"><div class=\"k\">open_up</div><div id=\"signalOpenUp\" class=\"v\">--</div></div>
-              <div class=\"kv\"><div class=\"k\">current_up</div><div id=\"signalCurrentUp\" class=\"v\">--</div></div>
-              <div class=\"kv\"><div class=\"k\">threshold</div><div id=\"signalThreshold\" class=\"v\">--</div></div>
-              <div class=\"kv\"><div class=\"k\">delta</div><div id=\"signalDelta\" class=\"v\">--</div></div>
+              <div class=\"kv\"><div class=\"k\">开盘看涨价</div><div id=\"signalOpenUp\" class=\"v\">--</div></div>
+              <div class=\"kv\"><div class=\"k\">当前看涨价</div><div id=\"signalCurrentUp\" class=\"v\">--</div></div>
+              <div class=\"kv\"><div class=\"k\">信号阈值</div><div id=\"signalThreshold\" class=\"v\">--</div></div>
+              <div class=\"kv\"><div class=\"k\">信号偏移</div><div id=\"signalDelta\" class=\"v\">--</div></div>
             </div>
             <div class=\"row\">
               <span class=\"label\">已锁边</span>
@@ -648,28 +736,28 @@ def _dashboard_html() -> str:
 
         <div class=\"split\">
           <div class=\"box\">
-            <div class=\"box-title\">下注计划 / 风控闸门</div>
+            <div class=\"box-title\">下注计划与风控</div>
             <div class=\"rows\">
-              <div class=\"row\"><span class=\"label\">should_trade</span><span id=\"planShouldTrade\" class=\"value\">--</span></div>
-              <div class=\"row\"><span class=\"label\">side</span><span id=\"planSide\" class=\"value\">--</span></div>
-              <div class=\"row\"><span class=\"label\">price</span><span id=\"planPrice\" class=\"value\">--</span></div>
-              <div class=\"row\"><span class=\"label\">order_cost</span><span id=\"planOrderCost\" class=\"value\">--</span></div>
-              <div class=\"row\"><span class=\"label\">order_size</span><span id=\"planOrderSize\" class=\"value\">--</span></div>
-              <div class=\"row\"><span class=\"label\">expected_profit</span><span id=\"planExpectedProfit\" class=\"value\">--</span></div>
-              <div class=\"row\"><span class=\"label\">skip_reason</span><span id=\"planSkipReason\" class=\"value\">--</span></div>
-              <div class=\"row\"><span class=\"label\">stop_loss_triggered</span><span id=\"planStopLoss\" class=\"value\">--</span></div>
+              <div class=\"row\"><span class=\"label\">是否下单</span><span id=\"planShouldTrade\" class=\"value\">--</span></div>
+              <div class=\"row\"><span class=\"label\">方向</span><span id=\"planSide\" class=\"value\">--</span></div>
+              <div class=\"row\"><span class=\"label\">买入价格</span><span id=\"planPrice\" class=\"value\">--</span></div>
+              <div class=\"row\"><span class=\"label\">下单金额</span><span id=\"planOrderCost\" class=\"value\">--</span></div>
+              <div class=\"row\"><span class=\"label\">下单份额</span><span id=\"planOrderSize\" class=\"value\">--</span></div>
+              <div class=\"row\"><span class=\"label\">预期收益</span><span id=\"planExpectedProfit\" class=\"value\">--</span></div>
+              <div class=\"row\"><span class=\"label\">跳过原因</span><span id=\"planSkipReason\" class=\"value\">--</span></div>
+              <div class=\"row\"><span class=\"label\">触发止损重置</span><span id=\"planStopLoss\" class=\"value\">--</span></div>
             </div>
           </div>
 
           <div class=\"box\">
             <div class=\"box-title\">会话状态</div>
             <div class=\"kv-grid\">
-              <div class=\"kv\"><div class=\"k\">round_index</div><div id=\"ssRoundIndex\" class=\"v\">--</div></div>
-              <div class=\"kv\"><div class=\"k\">cash_pnl</div><div id=\"ssCashPnl\" class=\"v\">--</div></div>
-              <div class=\"kv\"><div class=\"k\">recovery_loss</div><div id=\"ssRecoveryLoss\" class=\"v\">--</div></div>
-              <div class=\"kv\"><div class=\"k\">consecutive_losses</div><div id=\"ssConsecutiveLosses\" class=\"v\">--</div></div>
-              <div class=\"kv\"><div class=\"k\">stop_loss_count</div><div id=\"ssStopLossCount\" class=\"v\">--</div></div>
-              <div class=\"kv\"><div class=\"k\">daily_realized_pnl</div><div id=\"ssDailyPnl\" class=\"v\">--</div></div>
+              <div class=\"kv\"><div class=\"k\">轮次计数</div><div id=\"ssRoundIndex\" class=\"v\">--</div></div>
+              <div class=\"kv\"><div class=\"k\">累计盈亏</div><div id=\"ssCashPnl\" class=\"v\">--</div></div>
+              <div class=\"kv\"><div class=\"k\">待回补亏损</div><div id=\"ssRecoveryLoss\" class=\"v\">--</div></div>
+              <div class=\"kv\"><div class=\"k\">连续亏损轮数</div><div id=\"ssConsecutiveLosses\" class=\"v\">--</div></div>
+              <div class=\"kv\"><div class=\"k\">止损重置次数</div><div id=\"ssStopLossCount\" class=\"v\">--</div></div>
+              <div class=\"kv\"><div class=\"k\">当日已实现盈亏</div><div id=\"ssDailyPnl\" class=\"v\">--</div></div>
             </div>
             <div class=\"row\">
               <span class=\"label\">WS 交易陈旧保护</span>
@@ -688,21 +776,21 @@ def _dashboard_html() -> str:
       <div class=\"panel\">
         <div class=\"panel-head\">
           <div>
-            <div class=\"head-title\">WS RUNTIME</div>
+            <div class=\"head-title\">实时连接状态</div>
             <div class=\"head-desc\">连接质量与订阅状态</div>
           </div>
           <div id=\"wsHealth\" class=\"chip\">待刷新</div>
         </div>
         <div class=\"panel-body\">
           <div id=\"wsRuntimeList\" class=\"runtime-list\"></div>
-          <div class=\"footnote\">说明: `source=websocket` 表示直接使用 WS 缓存盘口, `source=http` 表示回退 HTTP。</div>
+          <div class=\"footnote\">说明: 行情来源为 websocket 表示使用 WS 缓存盘口, 为 http 表示回退 HTTP 拉取。</div>
         </div>
       </div>
 
       <div class=\"panel\">
         <div class=\"panel-head\">
           <div>
-            <div class=\"head-title\">PAPER SUMMARY</div>
+            <div class=\"head-title\">纸面交易汇总</div>
             <div class=\"head-desc\">按北京时间聚合的纸面成绩</div>
           </div>
           <div id=\"paperStatus\" class=\"chip\">待刷新</div>
@@ -710,11 +798,11 @@ def _dashboard_html() -> str:
         <div class=\"panel-body\">
           <div class=\"kv-grid\" style=\"margin-bottom: 10px;\">
             <div class=\"kv\"><div class=\"k\">日期</div><div id=\"sumDate\" class=\"v\">--</div></div>
-            <div class=\"kv\"><div class=\"k\">trade_rows</div><div id=\"sumTrades\" class=\"v\">--</div></div>
-            <div class=\"kv\"><div class=\"k\">hit_rate</div><div id=\"sumHitRate\" class=\"v\">--</div></div>
-            <div class=\"kv\"><div class=\"k\">total_pnl</div><div id=\"sumTotalPnl\" class=\"v\">--</div></div>
-            <div class=\"kv\"><div class=\"k\">max_drawdown</div><div id=\"sumDrawdown\" class=\"v\">--</div></div>
-            <div class=\"kv\"><div class=\"k\">strong_signal_rate</div><div id=\"sumStrongRate\" class=\"v\">--</div></div>
+            <div class=\"kv\"><div class=\"k\">交易笔数</div><div id=\"sumTrades\" class=\"v\">--</div></div>
+            <div class=\"kv\"><div class=\"k\">命中率</div><div id=\"sumHitRate\" class=\"v\">--</div></div>
+            <div class=\"kv\"><div class=\"k\">总盈亏</div><div id=\"sumTotalPnl\" class=\"v\">--</div></div>
+            <div class=\"kv\"><div class=\"k\">最大回撤</div><div id=\"sumDrawdown\" class=\"v\">--</div></div>
+            <div class=\"kv\"><div class=\"k\">强信号占比</div><div id=\"sumStrongRate\" class=\"v\">--</div></div>
           </div>
 
           <div class=\"days-table-wrap\">
@@ -738,7 +826,7 @@ def _dashboard_html() -> str:
     <section class=\"panel trades-panel\">
       <div class=\"panel-head\">
         <div>
-          <div class=\"head-title\">RECENT PAPER TRADES</div>
+          <div class=\"head-title\">最近纸面交易明细</div>
           <div class=\"head-desc\">最近纸面交易流水 (默认 80 行)</div>
         </div>
         <div id=\"recentStatus\" class=\"chip\">待刷新</div>
@@ -755,8 +843,8 @@ def _dashboard_html() -> str:
               <th>结果</th>
               <th>单笔盈亏</th>
               <th>累计盈亏</th>
-              <th>skip_reason</th>
-              <th>signal_delta</th>
+              <th>跳过原因</th>
+              <th>信号偏移</th>
             </tr>
           </thead>
           <tbody id=\"recentTbody\"></tbody>
@@ -1286,6 +1374,9 @@ const state = {
   market: null,
   summary: null,
   recent: null,
+  countdownSnapshotAtMs: null,
+  countdownBaseSeconds: null,
+  showInternalKeys: false,
 };
 
 const POLL_MS = {
@@ -1294,6 +1385,105 @@ const POLL_MS = {
   recent: 12000,
   clock: 1000,
 };
+
+const STORAGE_KEYS = {
+  showInternalKeys: 'dashboard_show_internal_keys',
+};
+
+const OPTION_LABELS = {
+  BET_SIZING_MODE: {
+    FIXED_BASE_COST: '固定金额模式',
+    TARGET_PROFIT: '目标收益模式',
+  },
+  SIGNAL_WEAK_SIGNAL_MODE: {
+    SKIP: '弱信号跳过',
+    FALLBACK: '弱信号回退',
+  },
+  WS_ENABLED: {
+    true: '开启',
+    false: '关闭',
+  },
+};
+
+const REASON_LABELS = {
+  ws_stale: '连接数据陈旧',
+  signal_unavailable: '信号不可用',
+  signal_too_weak_skip: '信号太弱，按规则跳过',
+  signal_too_weak: '信号太弱',
+  price_above_threshold: '价格超过上限阈值',
+  order_cost_above_max_stake: '下单金额超过单笔上限',
+  order_size_not_positive: '下单份额无效',
+  daily_loss_cap_reached: '触发当日亏损上限',
+  max_consecutive_losses_reached: '达到连续亏损重置阈值',
+  stop_loss_triggered: '触发止损重置',
+  manual_skip: '人工跳过',
+};
+
+const CONFIG_KEY_NAMES = {
+  STRATEGY_ID: '策略编号',
+  TARGET_PROFIT: '每次目标净利',
+  BET_SIZING_MODE: '下注模式',
+  BASE_ORDER_COST: '固定起始下注金额',
+  MAX_CONSECUTIVE_LOSSES: '连亏重置轮数',
+  MAX_STAKE: '单笔最大下注金额',
+  MAX_PRICE_THRESHOLD: '最高买入价格阈值',
+  SIGNAL_MOMENTUM_THRESHOLD: '动量阈值',
+  SIGNAL_WEAK_SIGNAL_MODE: '弱信号处理',
+  SIGNAL_FALLBACK_STRATEGY_ID: '弱信号回退策略',
+  SIGNAL_HISTORY_FIDELITY_SECONDS: '信号采样秒数',
+  SIGNAL_ANCHOR_MAX_OFFSET_SECONDS: '开盘锚点最大偏移秒',
+  SIGNAL_DYNAMIC_THRESHOLD_K: '动态阈值系数K',
+  SIGNAL_DYNAMIC_THRESHOLD_MIN_POINTS: '动态阈值最少样本点',
+  SIGNAL_LOCK_BEFORE_ENTRY_SECONDS: '入场前锁边秒数',
+  MAX_STAKE_SKIP_ALERT_THRESHOLD: '超额跳过告警阈值',
+  WS_ENABLED: '实时连接开关',
+  WS_QUOTE_STALE_SECONDS: '行情过期秒',
+  WS_TRADE_GUARD_STALE_SECONDS: '交易防陈旧阈值秒',
+  WS_CONNECT_TIMEOUT_SECONDS: '实时连接超时秒',
+};
+
+function reasonText(reason) {
+  if (!reason) {
+    return '--';
+  }
+  if (REASON_LABELS[reason]) {
+    return REASON_LABELS[reason];
+  }
+  return '未知原因（' + String(reason) + '）';
+}
+
+function formatConfigLabel(key, labels) {
+  const base = (labels && labels[key]) || CONFIG_KEY_NAMES[key] || key;
+  if (state.showInternalKeys) {
+    return base + '（' + key + '）';
+  }
+  return base;
+}
+
+function loadUiPrefs() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEYS.showInternalKeys);
+    if (raw === null) {
+      state.showInternalKeys = false;
+      return;
+    }
+    state.showInternalKeys = raw === '1';
+  } catch (_err) {
+    state.showInternalKeys = false;
+  }
+}
+
+function saveUiPrefs() {
+  try {
+    localStorage.setItem(STORAGE_KEYS.showInternalKeys, state.showInternalKeys ? '1' : '0');
+  } catch (_err) {
+    // Ignore storage failures (private mode / storage disabled)
+  }
+}
+
+function syncToggleButtonText() {
+  el('btnToggleKeys').textContent = '显示内部键名：' + (state.showInternalKeys ? '开' : '关');
+}
 
 function el(id) {
   return document.getElementById(id);
@@ -1364,6 +1554,54 @@ function fmtSeconds(value) {
   return sign + mm + ':' + ss;
 }
 
+function fmtDuration(value) {
+  const n = toNum(value);
+  if (n === null) {
+    return '--:--';
+  }
+  const abs = Math.abs(Math.floor(n));
+  const mm = String(Math.floor(abs / 60)).padStart(2, '0');
+  const ss = String(abs % 60).padStart(2, '0');
+  return mm + ':' + ss;
+}
+
+function renderEntryCountdown(secondsToEntry) {
+  const sec = toNum(secondsToEntry);
+  if (sec === null) {
+    el('entryCountdownLabel').textContent = '距离入场';
+    el('entryCountdown').textContent = '--:--';
+    el('entrySyncAt').textContent = '同步于 --';
+    state.countdownSnapshotAtMs = null;
+    state.countdownBaseSeconds = null;
+    return;
+  }
+  if (sec >= 0) {
+    el('entryCountdownLabel').textContent = '距离入场';
+    el('entryCountdown').textContent = fmtDuration(sec);
+  } else {
+    el('entryCountdownLabel').textContent = '已过入场';
+    el('entryCountdown').textContent = fmtDuration(sec);
+  }
+  state.countdownSnapshotAtMs = Date.now();
+  state.countdownBaseSeconds = sec;
+  el('entrySyncAt').textContent = '同步于 ' + new Date().toLocaleTimeString('zh-CN', { hour12: false });
+}
+
+function tickEntryCountdown() {
+  if (state.countdownSnapshotAtMs === null || state.countdownBaseSeconds === null) {
+    return;
+  }
+  const elapsed = (Date.now() - state.countdownSnapshotAtMs) / 1000;
+  const liveSeconds = state.countdownBaseSeconds - elapsed;
+  if (liveSeconds >= 0) {
+    el('entryCountdownLabel').textContent = '距离入场';
+    el('entryCountdown').textContent = fmtDuration(liveSeconds);
+  } else {
+    el('entryCountdownLabel').textContent = '已过入场';
+    el('entryCountdown').textContent = fmtDuration(liveSeconds);
+  }
+}
+
 function sideText(side) {
   if (side === 'UP') return '看涨';
   if (side === 'DOWN') return '看跌';
@@ -1371,11 +1609,102 @@ function sideText(side) {
   return '待定';
 }
 
+function sourceText(source) {
+  if (!source) {
+    return '--';
+  }
+  const normalized = String(source).toLowerCase();
+  if (normalized === 'websocket') {
+    return '实时连接';
+  }
+  if (normalized === 'http') {
+    return 'HTTP回退';
+  }
+  return String(source);
+}
+
+function marketTitleText(title) {
+  if (!title) {
+    return '--';
+  }
+  const raw = String(title).trim();
+  const m = raw.match(/^Bitcoin Up or Down\\s*-\\s*(.+)\\s+ET$/i);
+  if (m) {
+    const timeRaw = m[1].trim();
+    const t = timeRaw.match(/^([A-Za-z]+)\\s+(\\d{1,2}),\\s*(\\d{1,2}:\\d{2})(AM|PM)\\s*-\\s*(\\d{1,2}:\\d{2})(AM|PM)$/i);
+    if (t) {
+      const monthMap = {
+        january: '1月',
+        february: '2月',
+        march: '3月',
+        april: '4月',
+        may: '5月',
+        june: '6月',
+        july: '7月',
+        august: '8月',
+        september: '9月',
+        october: '10月',
+        november: '11月',
+        december: '12月',
+      };
+      const monthCn = monthMap[String(t[1]).toLowerCase()] || t[1];
+      const day = String(Number(t[2]));
+
+      const to24h = (hhmm, ampm) => {
+        const [hRaw, mRaw] = hhmm.split(':');
+        let h = Number(hRaw);
+        const m = Number(mRaw);
+        const isPM = String(ampm).toUpperCase() === 'PM';
+        if (isPM && h !== 12) {
+          h += 12;
+        }
+        if (!isPM && h === 12) {
+          h = 0;
+        }
+        return String(h).padStart(2, '0') + ':' + String(m).padStart(2, '0');
+      };
+
+      const start = to24h(t[3], t[4]);
+      const end = to24h(t[5], t[6]);
+      return '比特币涨跌（美东时间 ' + monthCn + day + '日 ' + start + '-' + end + '）';
+    }
+    return '比特币涨跌（美东时间 ' + timeRaw + '）';
+  }
+  return raw;
+}
+
 function sideClass(side) {
   if (side === 'UP') return 'trade-up';
   if (side === 'DOWN') return 'trade-down';
   return 'trade-skip';
 }
+
+const RUNTIME_LABELS = {
+  ws_enabled: '实时连接开关',
+  ws_available: '实时连接可用',
+  ws_connected: '实时连接状态',
+  ws_connect_attempts: '连接尝试次数',
+  ws_reconnect_count: '重连次数',
+  ws_invalid_operation_count: '异常操作次数',
+  ws_subscribed_asset_count: '已订阅资产数',
+  ws_cached_asset_count: '缓存资产数',
+  ws_opened_at: '建连时间',
+  ws_last_message_at: '最近消息时间',
+  ws_last_message_age_seconds: '消息延迟(秒)',
+  ws_last_error: '最近错误',
+  reconnects: '重连次数',
+  invalid_ops: '异常操作次数',
+  connect_attempts: '连接尝试次数',
+  subscribed_assets: '已订阅资产数',
+  cached_assets: '缓存资产数',
+  last_message_age_s: '消息延迟(秒)',
+  last_error: '最近错误',
+};
+
+const STATUS_LABELS = {
+  true: '是',
+  false: '否',
+};
 
 function classifyPnl(value) {
   const n = toNum(value);
@@ -1438,8 +1767,7 @@ function renderConfig(payload) {
 
     const label = document.createElement('label');
     label.setAttribute('for', 'cfg_' + key);
-    const title = labels[key] || key;
-    label.textContent = title + ' (' + key + ')';
+    label.textContent = formatConfigLabel(key, labels);
     wrap.appendChild(label);
 
     if (Array.isArray(options[key]) && options[key].length > 0) {
@@ -1448,7 +1776,8 @@ function renderConfig(payload) {
       for (const opt of options[key]) {
         const option = document.createElement('option');
         option.value = opt;
-        option.textContent = opt;
+        const optMap = OPTION_LABELS[key] || {};
+        option.textContent = optMap[opt] || opt;
         if (String(values[key] ?? '') === String(opt)) {
           option.selected = true;
         }
@@ -1524,8 +1853,19 @@ function renderWsRuntime(ws, staleGuard) {
   const pairs = basePairs.concat(extraPairs);
 
   const rows = pairs.map(([key, value]) => {
-    const shown = (value === null || value === undefined || value === '') ? '--' : String(value);
-    return '<div class=\"runtime-item\"><span class=\"rk\">' + esc(key) + '</span><span class=\"rv\">' + esc(shown) + '</span></div>';
+    let shown = (value === null || value === undefined || value === '') ? '--' : String(value);
+    if (key in STATUS_LABELS && (value === true || value === false)) {
+      shown = STATUS_LABELS[value];
+    }
+    if (key === 'last_error') {
+      shown = reasonText(shown);
+    }
+    if (key === 'last_message_age_s' && shown !== '--') {
+      const n = toNum(shown);
+      shown = n === null ? shown : n.toFixed(3);
+    }
+    const displayKey = RUNTIME_LABELS[key] || key;
+    return '<div class=\"runtime-item\"><span class=\"rk\">' + esc(displayKey) + '</span><span class=\"rv\">' + esc(shown) + '</span></div>';
   }).join('');
 
   list.innerHTML = rows || '<div class=\"empty\">暂无 WS 运行数据</div>';
@@ -1550,12 +1890,12 @@ function renderMarket(payload) {
   if (!round) {
     el('marketSlug').textContent = '暂无可用轮次';
     el('marketTitle').textContent = payload.message || '当前时段没有可交易轮次';
-    el('entryCountdown').textContent = '--:--';
+    renderEntryCountdown(null);
     setChip('marketHealth', '无轮次', 'warn');
   } else {
     el('marketSlug').textContent = round.slug || '--';
-    el('marketTitle').textContent = round.title || '--';
-    el('entryCountdown').textContent = fmtSeconds(round.seconds_to_entry);
+    el('marketTitle').textContent = marketTitleText(round.title);
+    renderEntryCountdown(round.seconds_to_entry);
     setChip('marketHealth', round.is_current ? '当前轮次' : '下一轮次', 'ok');
   }
 
@@ -1563,7 +1903,7 @@ function renderMarket(payload) {
   el('downPrice').textContent = fmtNum(quote.down_price, 4);
   el('upAsk').textContent = fmtNum(quote.up_best_ask, 4);
   el('downAsk').textContent = fmtNum(quote.down_best_ask, 4);
-  el('quoteSource').textContent = quote.source ? String(quote.source).toUpperCase() : '--';
+  el('quoteSource').textContent = sourceText(quote.source);
   el('quoteAccepting').textContent = quote.accepting_orders ? '是' : '否';
   el('quoteFetchedAt').textContent = fmtIso(quote.fetched_at);
 
@@ -1572,7 +1912,7 @@ function renderMarket(payload) {
   signalNode.textContent = sideText(signalSide);
   signalNode.className = 'value ' + sideClass(signalSide);
 
-  el('signalReason').textContent = signal.reason || '--';
+  el('signalReason').textContent = reasonText(signal.reason);
   el('signalOpenUp').textContent = fmtNum(signal.open_up, 4);
   el('signalCurrentUp').textContent = fmtNum(signal.current_up, 4);
   el('signalThreshold').textContent = fmtNum(signal.threshold, 4);
@@ -1588,7 +1928,7 @@ function renderMarket(payload) {
   el('planOrderCost').textContent = fmtNum(plan.order_cost, 4);
   el('planOrderSize').textContent = fmtNum(plan.order_size, 6);
   el('planExpectedProfit').textContent = fmtPnl(plan.expected_profit, 4);
-  el('planSkipReason').textContent = plan.skip_reason || '--';
+  el('planSkipReason').textContent = reasonText(plan.skip_reason);
   el('planStopLoss').textContent = plan.stop_loss_triggered ? '是' : '否';
 
   el('ssRoundIndex').textContent = String(ss.round_index ?? '--');
@@ -1689,7 +2029,7 @@ function renderRecent(payload) {
       '<td>' + esc(row.result || '--') + '</td>' +
       '<td class=\"' + esc(pnlCls) + '\">' + esc(fmtPnl(row.trade_pnl, 4)) + '</td>' +
       '<td class=\"' + esc(cashCls) + '\">' + esc(fmtPnl(row.cash_pnl, 4)) + '</td>' +
-      '<td>' + esc(row.skip_reason || '--') + '</td>' +
+      '<td>' + esc(reasonText(row.skip_reason)) + '</td>' +
       '<td>' + esc(fmtPnl(row.signal_delta, 4)) + '</td>' +
       '</tr>';
   }).join('');
@@ -1741,9 +2081,19 @@ function tickClock() {
   const now = new Date();
   el('clockLocal').textContent = '本地 ' + now.toLocaleString('zh-CN', { hour12: false });
   el('clockUtc').textContent = 'UTC ' + now.toISOString().replace('T', ' ').slice(0, 19);
+  tickEntryCountdown();
 }
 
 function bindActions() {
+  syncToggleButtonText();
+  el('btnToggleKeys').addEventListener('click', () => {
+    state.showInternalKeys = !state.showInternalKeys;
+    saveUiPrefs();
+    syncToggleButtonText();
+    if (state.config) {
+      renderConfig(state.config);
+    }
+  });
   el('btnRefreshNow').addEventListener('click', () => {
     refreshAll();
   });
@@ -1763,6 +2113,7 @@ function startPolling() {
 }
 
 async function bootstrap() {
+  loadUiPrefs();
   bindActions();
   tickClock();
   await refreshAll();

@@ -40,6 +40,40 @@ def test_dashboard_rejects_unknown_config_keys(tmp_path: Path):
         state.close()
 
 
+def test_dashboard_rejects_invalid_config_values(tmp_path: Path):
+    env_file = tmp_path / ".env.dashboard"
+    state = DashboardState(env_file=env_file)
+    try:
+        try:
+            state.update_config({"MAX_STAKE": "abc", "WS_ENABLED": "maybe"})
+        except ValueError as exc:
+            message = str(exc)
+        else:
+            raise AssertionError("Expected ValueError")
+
+        assert "MAX_STAKE" in message
+        assert "WS_ENABLED" in message
+        assert not env_file.exists()
+    finally:
+        state.close()
+
+
+def test_dashboard_payload_uses_effective_values_for_invalid_env_file(tmp_path: Path):
+    env_file = tmp_path / ".env.dashboard"
+    env_file.write_text("MAX_STAKE=abc\nWS_ENABLED=maybe\nTARGET_PROFIT=1.2\n", encoding="utf-8")
+    state = DashboardState(env_file=env_file)
+    try:
+        payload = state.get_config_payload()
+
+        assert payload["env_values"]["MAX_STAKE"] == "15.0"
+        assert payload["env_values"]["WS_ENABLED"] == "true"
+        assert payload["env_values"]["TARGET_PROFIT"] == "1.2"
+        assert payload["validation_errors"]["MAX_STAKE"]
+        assert payload["validation_errors"]["WS_ENABLED"]
+    finally:
+        state.close()
+
+
 def test_recent_trades_payload_handles_missing_csv(tmp_path: Path):
     old_cwd = Path.cwd()
     os.chdir(tmp_path)

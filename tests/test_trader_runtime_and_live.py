@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -11,6 +12,7 @@ from trader import (
     _resolve_side_from_strategy,
     _update_max_stake_skip_streak,
     append_trade_log,
+    load_session_state,
     place_live_order,
     run_paper_trading,
 )
@@ -76,6 +78,20 @@ class _StubClobClient:
         return {"success": True, "orderID": "oid-123"}
 
 
+class _SettlingLiveClient(_LiveMarketClient):
+    def get_event_by_slug(self, slug: str):
+        if slug != "btc-updown-5m-prev":
+            raise AssertionError(f"Unexpected slug {slug}")
+        return {"eventMetadata": {"priceToBeat": 100.0, "finalPrice": 90.0}}
+
+
+class _UnresolvedSettlingLiveClient(_LiveMarketClient):
+    def get_event_by_slug(self, slug: str):
+        if slug != "btc-updown-5m-prev":
+            raise AssertionError(f"Unexpected slug {slug}")
+        return {"eventMetadata": {"priceToBeat": None, "finalPrice": None}}
+
+
 def test_run_paper_trading_continues_after_transient_exception(tmp_path, monkeypatch):
     monkeypatch.setattr("trader.time.sleep", lambda _seconds: None)
     cfg = AppConfig(poll_interval_seconds=1)
@@ -125,6 +141,95 @@ def test_place_live_order_submits_market_order_with_injected_clob(tmp_path):
     assert len(stub_clob.created_orders) == 1
     assert stub_clob.created_orders[0].side == "BUY"
     assert len(stub_clob.posted_orders) == 1
+
+
+def test_place_live_order_settles_previous_pending_trade_before_new_submission(tmp_path):
+    cfg = AppConfig(live_trading_enabled=True, max_stake=25.0)
+    stub_clob = _StubClobClient()
+    state_path = tmp_path / "state.json"
+    state_path.write_text(
+        json.dumps(
+            {
+                "round_index": 1,
+                "cash_pnl": 0.0,
+                "recovery_loss": 0.0,
+                "consecutive_losses": 0,
+                "consecutive_max_stake_skips": 0,
+                "signal_round_slug": None,
+                "signal_round_open_up_price": None,
+                "signal_round_locked_side": None,
+                "stop_loss_count": 0,
+                "daily_realized_pnl": 0.0,
+                "current_day": "2026-04-02",
+                "pending_live_slug": "btc-updown-5m-prev",
+                "pending_live_side": "UP",
+                "pending_live_price": 0.5,
+                "pending_live_order_size": 2.0,
+                "pending_live_order_cost": 1.0,
+                "pending_live_expected_profit": 1.0,
+                "pending_live_end_time": "2026-04-02T00:00:00+00:00",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = place_live_order(
+        cfg=cfg,
+        market_client=_SettlingLiveClient(),
+        clob_client=stub_clob,
+        state_path=state_path,
+        log_path=tmp_path / "live.csv",
+    )
+
+    assert result["status"] == "submitted"
+    assert stub_clob.created_orders[0].amount > 1.0
+
+    state = load_session_state(state_path)
+    assert state.recovery_loss == pytest.approx(1.0)
+    assert state.consecutive_losses == 1
+    assert state.round_index == 2
+
+
+def test_place_live_order_waits_for_previous_pending_trade_settlement(tmp_path):
+    cfg = AppConfig(live_trading_enabled=True, max_stake=25.0)
+    stub_clob = _StubClobClient()
+    state_path = tmp_path / "state.json"
+    state_path.write_text(
+        json.dumps(
+            {
+                "round_index": 1,
+                "cash_pnl": 0.0,
+                "recovery_loss": 0.0,
+                "consecutive_losses": 0,
+                "consecutive_max_stake_skips": 0,
+                "signal_round_slug": None,
+                "signal_round_open_up_price": None,
+                "signal_round_locked_side": None,
+                "stop_loss_count": 0,
+                "daily_realized_pnl": 0.0,
+                "current_day": "2026-04-02",
+                "pending_live_slug": "btc-updown-5m-prev",
+                "pending_live_side": "UP",
+                "pending_live_price": 0.5,
+                "pending_live_order_size": 2.0,
+                "pending_live_order_cost": 1.0,
+                "pending_live_expected_profit": 1.0,
+                "pending_live_end_time": "2026-04-02T00:00:00+00:00",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = place_live_order(
+        cfg=cfg,
+        market_client=_UnresolvedSettlingLiveClient(),
+        clob_client=stub_clob,
+        state_path=state_path,
+        log_path=tmp_path / "live.csv",
+    )
+
+    assert result["status"] == "pending_settlement"
+    assert stub_clob.created_orders == []
 
 
 def test_place_live_order_requires_private_key_without_injected_client(tmp_path):
@@ -326,3 +431,37 @@ def test_run_paper_trading_dry_run_skips_when_ws_stale_guard_triggered(tmp_path)
     assert result["status"] == "dry_run"
     assert result["should_trade"] is False
     assert result["skip_reason"] == "ws_stale"
+
+
+def test_run_paper_trading_dry_run_resets_daily_loss_cap_after_day_rollover(tmp_path):
+    cfg = AppConfig(strategy_id=2, daily_loss_cap=50.0)
+    state_path = tmp_path / "state.json"
+    state_path.write_text(
+        json.dumps(
+            {
+                "round_index": 0,
+                "cash_pnl": -60.0,
+                "recovery_loss": 0.0,
+                "consecutive_losses": 0,
+                "consecutive_max_stake_skips": 0,
+                "signal_round_slug": None,
+                "signal_round_open_up_price": None,
+                "signal_round_locked_side": None,
+                "stop_loss_count": 0,
+                "daily_realized_pnl": -60.0,
+                "current_day": "1900-01-01",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = run_paper_trading(
+        cfg,
+        client=_LiveMarketClient(),
+        state_path=state_path,
+        log_path=tmp_path / "paper.csv",
+        dry_run_once=True,
+    )
+
+    assert result["status"] == "dry_run"
+    assert result["should_trade"] is True

@@ -182,7 +182,7 @@ def _simulate_segment(
             continue
 
         if sizing_mode == "FIXED_BASE_COST":
-            base_order_cost = target_profit
+            base_order_cost = cfg.base_order_cost
             if base_order_cost <= 0:
                 skipped += 1
                 continue

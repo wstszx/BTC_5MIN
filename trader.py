@@ -10,8 +10,8 @@ from statistics import pstdev
 from typing import Any
 
 from config import AppConfig
-from models import MarketQuote, MarketWindow, SessionState, TradeRecord
-from polymarket_api import PolymarketClient, extract_token_ids
+from models import MarketQuote, MarketWindow, SessionState, TradePlan, TradeRecord
+from polymarket_api import PolymarketClient, extract_token_ids, parse_iso_datetime
 from risk_and_sizing import apply_round_outcome, build_trade_plan, reset_after_stop_loss
 from strategy import get_side_for_round
 
@@ -25,6 +25,9 @@ class SideDecision:
     signal_threshold: float | None = None
     signal_delta: float | None = None
     signal_locked: bool = False
+
+
+SESSION_DAY_TZ = timezone(timedelta(hours=8))
 
 
 def save_session_state(path: Path, state: SessionState) -> None:
@@ -319,6 +322,110 @@ def _resolve_live_order_type(raw_order_type: str):
     return getattr(OrderType, normalized, OrderType.FOK)
 
 
+def _session_day_key(now: datetime) -> str:
+    return now.astimezone(SESSION_DAY_TZ).date().isoformat()
+
+
+def _refresh_daily_session_state(state: SessionState, now: datetime) -> bool:
+    session_day = _session_day_key(now)
+    if state.current_day == session_day:
+        return False
+    state.current_day = session_day
+    state.daily_realized_pnl = 0.0
+    return True
+
+
+def _clear_pending_live_trade(state: SessionState) -> None:
+    state.pending_live_slug = None
+    state.pending_live_side = None
+    state.pending_live_price = None
+    state.pending_live_order_size = None
+    state.pending_live_order_cost = None
+    state.pending_live_expected_profit = None
+    state.pending_live_end_time = None
+
+
+def _build_pending_live_trade_plan(state: SessionState) -> TradePlan:
+    if state.pending_live_side not in {"UP", "DOWN"}:
+        raise RuntimeError("Pending live trade is missing a valid side.")
+    if state.pending_live_price is None:
+        raise RuntimeError("Pending live trade is missing entry price.")
+    if state.pending_live_order_size is None or state.pending_live_order_size <= 0:
+        raise RuntimeError("Pending live trade is missing order size.")
+    if state.pending_live_order_cost is None or state.pending_live_order_cost <= 0:
+        raise RuntimeError("Pending live trade is missing order cost.")
+    if state.pending_live_expected_profit is None:
+        raise RuntimeError("Pending live trade is missing expected profit.")
+
+    return TradePlan(
+        True,
+        side=state.pending_live_side,
+        price=state.pending_live_price,
+        order_size=state.pending_live_order_size,
+        order_cost=state.pending_live_order_cost,
+        expected_profit=state.pending_live_expected_profit,
+    )
+
+
+def _settle_pending_live_trade_if_needed(
+    *,
+    market_client: PolymarketClient | Any,
+    state: SessionState,
+    now: datetime,
+) -> tuple[SessionState, dict[str, Any] | None, bool]:
+    if not state.pending_live_slug:
+        return state, None, False
+
+    end_time = parse_iso_datetime(state.pending_live_end_time)
+    if end_time is None:
+        raise RuntimeError("Pending live trade is missing round end time.")
+
+    if now < end_time:
+        return (
+            state,
+            {
+                "status": "pending_settlement",
+                "slug": state.pending_live_slug,
+                "side": state.pending_live_side,
+                "skip_reason": "round_in_progress",
+                "pending_end_time": state.pending_live_end_time,
+            },
+            False,
+        )
+
+    event = market_client.get_event_by_slug(state.pending_live_slug)
+    metadata = event.get("eventMetadata") or {}
+    if metadata.get("priceToBeat") is None or metadata.get("finalPrice") is None:
+        return (
+            state,
+            {
+                "status": "pending_settlement",
+                "slug": state.pending_live_slug,
+                "side": state.pending_live_side,
+                "skip_reason": "round_unresolved",
+                "pending_end_time": state.pending_live_end_time,
+            },
+            False,
+        )
+
+    result = "UP" if float(metadata["finalPrice"]) >= float(metadata["priceToBeat"]) else "DOWN"
+    plan = _build_pending_live_trade_plan(state)
+    updated_state = apply_round_outcome(state, plan, won=(result == plan.side))
+    trade_pnl = updated_state.cash_pnl - state.cash_pnl
+    _clear_pending_live_trade(updated_state)
+    return (
+        updated_state,
+        {
+            "status": "settled",
+            "slug": state.pending_live_slug,
+            "side": plan.side,
+            "result": result,
+            "trade_pnl": trade_pnl,
+        },
+        True,
+    )
+
+
 def _create_live_clob_client(cfg: AppConfig):
     if not cfg.live_private_key:
         raise RuntimeError("Missing PRIVATE_KEY/POLYMARKET_PRIVATE_KEY for live trading.")
@@ -352,9 +459,24 @@ def place_live_order(
     state = load_session_state(state_path)
 
     now = datetime.now(timezone.utc)
+    daily_state_changed = _refresh_daily_session_state(state, now)
+    state, pending_status, settled_previous_trade = _settle_pending_live_trade_if_needed(
+        market_client=market_client,
+        state=state,
+        now=now,
+    )
+    if pending_status is not None and pending_status["status"] == "pending_settlement":
+        if daily_state_changed and not dry_run:
+            save_session_state(state_path, state)
+        return pending_status
+    if settled_previous_trade and not dry_run:
+        save_session_state(state_path, state)
+
     current_round, next_round = market_client.find_current_and_next_rounds(now=now)
     target_round = current_round or next_round
     if target_round is None:
+        if daily_state_changed and not dry_run:
+            save_session_state(state_path, state)
         return {"status": "no_market"}
 
     entry_time = _entry_time_for_round(cfg, target_round)
@@ -605,6 +727,13 @@ def place_live_order(
             **_signal_record_kwargs(side_decision),
         ),
     )
+    state.pending_live_slug = target_round.slug
+    state.pending_live_side = side
+    state.pending_live_price = plan.price
+    state.pending_live_order_size = plan.order_size
+    state.pending_live_order_cost = plan.order_cost
+    state.pending_live_expected_profit = plan.expected_profit
+    state.pending_live_end_time = target_round.end_time.isoformat()
     state.round_index += 1
     save_session_state(state_path, state)
 
@@ -774,6 +903,7 @@ def run_paper_trading(
     while True:
         try:
             now = datetime.now(timezone.utc)
+            _refresh_daily_session_state(state, now)
             current_round, next_round = client.find_current_and_next_rounds(now=now)
             target_round = current_round or next_round
             if target_round is None:
@@ -1068,6 +1198,7 @@ def run_paper_trading(
 
             _runtime_log('round=' + target_round.slug + ' entered trade; waiting for settlement')
             _sleep_until_round_end(cfg, target_round)
+            _refresh_daily_session_state(state, datetime.now(timezone.utc))
 
             while True:
                 try:
