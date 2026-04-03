@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from dashboard import DashboardState, _dashboard_html, _dashboard_js
+from dashboard import ConfigValidationError, DashboardState, _dashboard_html, _dashboard_js
 
 
 def test_dashboard_config_roundtrip_updates_env_file(tmp_path: Path):
@@ -46,13 +46,16 @@ def test_dashboard_rejects_invalid_config_values(tmp_path: Path):
     try:
         try:
             state.update_config({"MAX_STAKE": "abc", "WS_ENABLED": "maybe"})
-        except ValueError as exc:
+        except ConfigValidationError as exc:
             message = str(exc)
+            field_errors = exc.field_errors
         else:
-            raise AssertionError("Expected ValueError")
+            raise AssertionError("Expected ConfigValidationError")
 
         assert "MAX_STAKE" in message
         assert "WS_ENABLED" in message
+        assert field_errors["MAX_STAKE"].startswith("Invalid value for MAX_STAKE")
+        assert field_errors["WS_ENABLED"].startswith("Invalid value for WS_ENABLED")
         assert not env_file.exists()
     finally:
         state.close()
@@ -164,3 +167,12 @@ def test_dashboard_help_center_includes_faq_and_doc_links():
     assert "docs/dashboard_runbook.md" in js or "dashboard_runbook.md" in html
     assert "docs/operations_runbook.md" in js or "operations_runbook.md" in html
     assert "docs/daily_ops_checklist.md" in js or "daily_ops_checklist.md" in html
+
+
+def test_dashboard_assets_surface_field_errors_after_failed_save():
+    js = _dashboard_js()
+
+    assert "field_errors" in js
+    assert "fieldErrors" in js
+    assert "validation_errors: fieldErrors" in js
+    assert "env_values: values" in js

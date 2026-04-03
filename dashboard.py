@@ -190,6 +190,12 @@ def _field_groups() -> list[dict[str, Any]]:
     ]
 
 
+class ConfigValidationError(ValueError):
+    def __init__(self, field_errors: dict[str, str]):
+        self.field_errors = dict(field_errors)
+        super().__init__("; ".join(self.field_errors.values()))
+
+
 class DashboardState:
     EDITABLE_CONFIG_KEYS: tuple[str, ...] = (
         "STRATEGY_ID",
@@ -434,7 +440,7 @@ class DashboardState:
             raise ValueError(f"Unsupported keys: {', '.join(unsupported)}")
 
         normalized_updates: dict[str, str] = {}
-        validation_errors: list[str] = []
+        field_errors: dict[str, str] = {}
         for key, value in values.items():
             normalized = "" if value is None else str(value).strip()
             if normalized == "":
@@ -443,9 +449,9 @@ class DashboardState:
             try:
                 normalized_updates[key] = self._normalize_config_value(key, normalized)
             except ValueError as exc:
-                validation_errors.append(str(exc))
-        if validation_errors:
-            raise ValueError("; ".join(validation_errors))
+                field_errors[key] = str(exc)
+        if field_errors:
+            raise ConfigValidationError(field_errors)
 
         with self._lock:
             for key, normalized in normalized_updates.items():
@@ -708,6 +714,16 @@ class _DashboardRequestHandler(BaseHTTPRequestHandler):
             if self._is_client_disconnect(exc):
                 return
             raise
+        except ConfigValidationError as exc:
+            try:
+                self._send_json(
+                    {"error": str(exc), "field_errors": exc.field_errors},
+                    status=HTTPStatus.BAD_REQUEST,
+                )
+            except OSError as send_exc:
+                if self._is_client_disconnect(send_exc):
+                    return
+                raise
         except ValueError as exc:
             try:
                 self._send_json({"error": str(exc)}, status=HTTPStatus.BAD_REQUEST)
@@ -2468,9 +2484,16 @@ async function apiGet(path) {
   const resp = await fetch(path, { cache: 'no-store' });
   const data = await resp.json();
   if (!resp.ok) {
-    throw new Error(data.error || ('HTTP ' + resp.status));
+    throw buildApiError(data, resp.status);
   }
   return data;
+}
+
+function buildApiError(data, status) {
+  const err = new Error((data && data.error) || ('HTTP ' + status));
+  err.status = status;
+  err.fieldErrors = (data && data.field_errors) || {};
+  return err;
 }
 
 async function apiPost(path, payload) {
@@ -2481,7 +2504,7 @@ async function apiPost(path, payload) {
   });
   const data = await resp.json();
   if (!resp.ok) {
-    throw new Error(data.error || ('HTTP ' + resp.status));
+    throw buildApiError(data, resp.status);
   }
   return data;
 }
@@ -2739,14 +2762,25 @@ async function refreshConfig() {
 }
 
 async function saveConfig() {
+  let values = {};
   try {
     setChip('cfgStatus', '保存中', 'warn');
-    const values = collectConfigValues();
+    values = collectConfigValues();
     const data = await apiPost('/api/config', { env_values: values });
     renderConfig(data);
     setChip('cfgStatus', '已保存', 'ok');
   } catch (err) {
-    setChip('cfgStatus', '保存失败', 'err');
+    const fieldErrors = err && err.fieldErrors ? err.fieldErrors : {};
+    if (Object.keys(fieldErrors).length > 0 && state.config) {
+      renderConfig({
+        ...state.config,
+        env_values: values,
+        validation_errors: fieldErrors,
+      });
+      setChip('cfgStatus', '校验失败', 'err');
+    } else {
+      setChip('cfgStatus', '保存失败', 'err');
+    }
     console.error(err);
   }
 }
