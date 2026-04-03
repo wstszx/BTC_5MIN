@@ -19,6 +19,7 @@ from config import AppConfig
 from paper_report import summarize_paper_trades
 from polymarket_api import PolymarketClient
 from risk_and_sizing import build_trade_plan
+from strategy import get_side_for_round
 from trader import (
     _entry_time_for_round,
     _resolve_side_from_strategy,
@@ -101,6 +102,94 @@ def _json_default(value: Any) -> Any:
     raise TypeError(f"Object of type {value.__class__.__name__} is not JSON serializable")
 
 
+def _pattern_strategy_preview(strategy_id: int, *, length: int | None = None) -> list[str]:
+    rounds = length or max(4, strategy_id * 2)
+    return [get_side_for_round(strategy_id, index) for index in range(rounds)]
+
+
+def _strategy_catalog() -> dict[str, dict[str, Any]]:
+    return {
+        "1": {
+            "label": "单轮交替",
+            "summary": "每 1 轮切换一次方向，节奏最直接。",
+            "preview": _pattern_strategy_preview(1),
+            "detail": "适合快速观察最基础的涨跌交替节奏。",
+        },
+        "2": {
+            "label": "双轮分组交替",
+            "summary": "每 2 轮切换一次方向，默认稳健配置。",
+            "preview": _pattern_strategy_preview(2),
+            "detail": "当前仓位恢复和研究流程默认围绕这组节奏展开。",
+        },
+        "3": {
+            "label": "三轮分组交替",
+            "summary": "每 3 轮切换一次方向，单边持续更久。",
+            "preview": _pattern_strategy_preview(3),
+            "detail": "适合想观察更长分组惯性的场景。",
+        },
+        "4": {
+            "label": "四轮分组交替",
+            "summary": "每 4 轮切换一次方向，分组最长。",
+            "preview": _pattern_strategy_preview(4),
+            "detail": "更强调单边延续，切换频率最低。",
+        },
+        "5": {
+            "label": "动量信号 V2",
+            "summary": "比较本轮 UP 价格相对开盘的变化，强信号才给方向。",
+            "preview": ["MOMENTUM", "THRESHOLD", "FALLBACK"],
+            "detail": "弱信号时按 SIGNAL_WEAK_SIGNAL_MODE 决定跳过还是回退到基础策略。",
+        },
+    }
+
+
+def _field_groups() -> list[dict[str, Any]]:
+    return [
+        {
+            "title": "基础策略",
+            "description": "决定方向节奏、下注模式和主要风险边界。",
+            "keys": [
+                "STRATEGY_ID",
+                "TARGET_PROFIT",
+                "BET_SIZING_MODE",
+                "BASE_ORDER_COST",
+                "MAX_CONSECUTIVE_LOSSES",
+                "MAX_STAKE",
+                "MAX_PRICE_THRESHOLD",
+            ],
+        },
+        {
+            "title": "动量信号",
+            "description": "仅策略 5 使用，用于判定强弱信号、回退逻辑和锁边。",
+            "scope": "strategy_5_only",
+            "keys": [
+                "SIGNAL_MOMENTUM_THRESHOLD",
+                "SIGNAL_WEAK_SIGNAL_MODE",
+                "SIGNAL_FALLBACK_STRATEGY_ID",
+                "SIGNAL_HISTORY_FIDELITY_SECONDS",
+                "SIGNAL_ANCHOR_MAX_OFFSET_SECONDS",
+                "SIGNAL_DYNAMIC_THRESHOLD_K",
+                "SIGNAL_DYNAMIC_THRESHOLD_MIN_POINTS",
+                "SIGNAL_LOCK_BEFORE_ENTRY_SECONDS",
+            ],
+        },
+        {
+            "title": "风险与告警",
+            "description": "控制连续超限提醒，避免异常状态被忽略。",
+            "keys": ["MAX_STAKE_SKIP_ALERT_THRESHOLD"],
+        },
+        {
+            "title": "实时连接保护",
+            "description": "控制 WS 行情刷新与交易陈旧保护阈值。",
+            "keys": [
+                "WS_ENABLED",
+                "WS_QUOTE_STALE_SECONDS",
+                "WS_TRADE_GUARD_STALE_SECONDS",
+                "WS_CONNECT_TIMEOUT_SECONDS",
+            ],
+        },
+    ]
+
+
 class DashboardState:
     EDITABLE_CONFIG_KEYS: tuple[str, ...] = (
         "STRATEGY_ID",
@@ -126,7 +215,7 @@ class DashboardState:
     )
 
     CONFIG_LABELS: dict[str, str] = {
-        "STRATEGY_ID": "策略编号",
+        "STRATEGY_ID": "基础策略",
         "TARGET_PROFIT": "每次目标净利",
         "BET_SIZING_MODE": "下注模式",
         "BASE_ORDER_COST": "固定起始下注金额",
@@ -135,7 +224,7 @@ class DashboardState:
         "MAX_PRICE_THRESHOLD": "最高买入价格阈值",
         "SIGNAL_MOMENTUM_THRESHOLD": "动量阈值",
         "SIGNAL_WEAK_SIGNAL_MODE": "弱信号处理",
-        "SIGNAL_FALLBACK_STRATEGY_ID": "弱信号回退策略",
+        "SIGNAL_FALLBACK_STRATEGY_ID": "弱信号回退基础策略",
         "SIGNAL_HISTORY_FIDELITY_SECONDS": "信号采样秒数",
         "SIGNAL_ANCHOR_MAX_OFFSET_SECONDS": "开盘锚点最大偏移秒",
         "SIGNAL_DYNAMIC_THRESHOLD_K": "动态阈值系数K",
@@ -203,6 +292,41 @@ class DashboardState:
     )
 
     BOOL_CONFIG_KEYS: tuple[str, ...] = ("WS_ENABLED",)
+
+    STRATEGY_CATALOG: dict[str, dict[str, Any]] = _strategy_catalog()
+    FIELD_GROUPS: list[dict[str, Any]] = _field_groups()
+    FIELD_SCOPE: dict[str, str] = {
+        "SIGNAL_MOMENTUM_THRESHOLD": "strategy_5_only",
+        "SIGNAL_WEAK_SIGNAL_MODE": "strategy_5_only",
+        "SIGNAL_FALLBACK_STRATEGY_ID": "strategy_5_only",
+        "SIGNAL_HISTORY_FIDELITY_SECONDS": "strategy_5_only",
+        "SIGNAL_ANCHOR_MAX_OFFSET_SECONDS": "strategy_5_only",
+        "SIGNAL_DYNAMIC_THRESHOLD_K": "strategy_5_only",
+        "SIGNAL_DYNAMIC_THRESHOLD_MIN_POINTS": "strategy_5_only",
+        "SIGNAL_LOCK_BEFORE_ENTRY_SECONDS": "strategy_5_only",
+    }
+    FIELD_HELP: dict[str, str] = {
+        "STRATEGY_ID": "1~4 是固定节奏策略；5 是动量信号策略，会额外用到下方 signal_* 参数。",
+        "TARGET_PROFIT": "TARGET_PROFIT 模式下，每轮希望净赚多少；FIXED_BASE_COST 模式下主要用于研究，不直接决定起始下注额。",
+        "BET_SIZING_MODE": "FIXED_BASE_COST 为固定起始金额，TARGET_PROFIT 为按目标盈利反推下单金额。",
+        "BASE_ORDER_COST": "仅 FIXED_BASE_COST 模式下生效，赢后回到这个起始金额。",
+        "MAX_CONSECUTIVE_LOSSES": "连续亏损达到该轮数后，策略会触发止损重置。",
+        "MAX_STAKE": "单笔实际花费的 USDC 上限，超过会直接跳过。",
+        "MAX_PRICE_THRESHOLD": "目标方向价格高于此阈值就不入场，避免买得太贵。",
+        "SIGNAL_MOMENTUM_THRESHOLD": "策略 5 的基础阈值，比较 current_up - open_up 的绝对变化。",
+        "SIGNAL_WEAK_SIGNAL_MODE": "弱信号时可直接跳过，或回退到一个固定节奏策略。",
+        "SIGNAL_FALLBACK_STRATEGY_ID": "仅在策略 5 且弱信号回退时使用，建议选 1~4 中最熟悉的一种。",
+        "SIGNAL_HISTORY_FIDELITY_SECONDS": "拉取历史价格序列时的采样粒度，越小越细但请求更重。",
+        "SIGNAL_ANCHOR_MAX_OFFSET_SECONDS": "对齐开盘锚点允许的最大时间偏移，过大可能把信号锚点拉偏。",
+        "SIGNAL_DYNAMIC_THRESHOLD_K": "动态阈值系数，实际阈值取 max(基础阈值, k * sigma)。",
+        "SIGNAL_DYNAMIC_THRESHOLD_MIN_POINTS": "动态阈值至少需要的样本点数，不足时退回基础阈值。",
+        "SIGNAL_LOCK_BEFORE_ENTRY_SECONDS": "离入场很近时锁定方向，避免最后几秒来回跳边。",
+        "MAX_STAKE_SKIP_ALERT_THRESHOLD": "连续多少次因超过 MAX_STAKE 跳过后打印告警。",
+        "WS_ENABLED": "开启后优先使用 WebSocket 缓存盘口，失败时自动回退 HTTP。",
+        "WS_QUOTE_STALE_SECONDS": "超过这个秒数未更新，就认为 WS 行情过期。",
+        "WS_TRADE_GUARD_STALE_SECONDS": "交易前若 WS 行情陈旧超过该阈值，会直接阻止下单。",
+        "WS_CONNECT_TIMEOUT_SECONDS": "建立 WebSocket 连接时允许等待的超时时间。",
+    }
 
     @classmethod
     def _normalize_bool_config_value(cls, key: str, value: str) -> str:
@@ -294,6 +418,10 @@ class DashboardState:
                 "editable_keys": list(self.EDITABLE_CONFIG_KEYS),
                 "labels": self.CONFIG_LABELS,
                 "select_options": self.SELECT_OPTIONS,
+                "strategy_catalog": self.STRATEGY_CATALOG,
+                "field_groups": self.FIELD_GROUPS,
+                "field_scope": self.FIELD_SCOPE,
+                "field_help": self.FIELD_HELP,
                 "validation_errors": validation_errors,
                 "saved_at": _iso(self._last_saved_at),
             }
@@ -632,6 +760,7 @@ def _dashboard_html() -> str:
     <div class=\"top-actions\">
       <div id=\"clockLocal\" class=\"clock\">本地时间 --</div>
       <div id=\"clockUtc\" class=\"clock\">UTC --</div>
+      <button id=\"btnHelp\" class=\"btn btn-ghost\" type=\"button\">帮助</button>
       <button id=\"btnRefreshNow\" class=\"btn btn-ghost\" type=\"button\">立即刷新</button>
     </div>
   </header>
@@ -656,6 +785,8 @@ def _dashboard_html() -> str:
             <span id=\"cfgSavedAt\" class=\"meta-value\">--</span>
           </div>
         </div>
+
+        <div id=\"strategyGuideCard\" class=\"strategy-guide-card\"></div>
 
         <form id=\"configForm\" class=\"form-grid\"></form>
 
@@ -852,6 +983,19 @@ def _dashboard_html() -> str:
       </div>
     </section>
   </main>
+  <div id=\"helpBackdrop\" class=\"help-backdrop\"></div>
+  <aside id=\"helpDrawer\" class=\"help-drawer\" aria-hidden=\"true\" tabindex=\"-1\">
+    <div class=\"help-head\">
+      <div>
+        <div class=\"help-title\">帮助中心</div>
+        <div class=\"help-subtitle\">快速上手与元素说明</div>
+      </div>
+      <button id=\"btnHelpClose\" class=\"btn btn-ghost\" type=\"button\">关闭</button>
+    </div>
+    <div id=\"helpTabs\" class=\"help-tabs\"></div>
+    <div id=\"helpBody\" class=\"help-body\"></div>
+    <div id=\"helpFooter\" class=\"help-footer\"></div>
+  </aside>
   <script src=\"/dashboard.js\"></script>
 </body>
 </html>
@@ -982,6 +1126,212 @@ body::before {
   border: 1px solid #395679;
 }
 
+.help-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(2, 8, 18, 0.58);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 140ms ease;
+  z-index: 40;
+}
+
+.help-drawer {
+  position: fixed;
+  top: 0;
+  right: 0;
+  width: min(460px, calc(100vw - 24px));
+  height: 100vh;
+  background: linear-gradient(180deg, rgba(15, 24, 40, 0.98), rgba(8, 14, 25, 0.98));
+  border-left: 1px solid rgba(61, 93, 141, 0.55);
+  box-shadow: -18px 0 32px rgba(0, 0, 0, 0.35);
+  transform: translateX(100%);
+  transition: transform 160ms ease;
+  z-index: 50;
+  display: grid;
+  grid-template-rows: auto auto 1fr auto;
+}
+
+.help-backdrop.open {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.help-drawer.open {
+  transform: translateX(0);
+}
+
+.help-head {
+  padding: 14px;
+  border-bottom: 1px solid rgba(61, 93, 141, 0.35);
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.help-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.help-subtitle {
+  font-size: 12px;
+  color: var(--muted);
+  margin-top: 4px;
+}
+
+.help-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 12px 14px;
+  border-bottom: 1px solid rgba(61, 93, 141, 0.3);
+}
+
+.help-tab {
+  border: 1px solid rgba(57, 86, 121, 0.8);
+  background: rgba(10, 21, 40, 0.9);
+  color: var(--muted);
+  border-radius: 999px;
+  padding: 6px 10px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.help-tab.help-tab-active {
+  color: var(--text);
+  border-color: rgba(60, 215, 255, 0.55);
+  background: rgba(60, 215, 255, 0.14);
+}
+
+.help-body {
+  overflow: auto;
+  padding: 14px;
+}
+
+.help-intro {
+  border: 1px solid rgba(84, 129, 194, 0.32);
+  border-radius: 10px;
+  background: rgba(12, 22, 38, 0.78);
+  padding: 10px 12px;
+  color: #d8e6ff;
+  line-height: 1.6;
+  font-size: 12px;
+  margin-bottom: 12px;
+}
+
+.help-section {
+  display: grid;
+  gap: 8px;
+  padding-bottom: 12px;
+  margin-bottom: 12px;
+  border-bottom: 1px dashed rgba(62, 98, 145, 0.35);
+}
+
+.help-section:last-child {
+  border-bottom: none;
+  margin-bottom: 0;
+  padding-bottom: 0;
+}
+
+.help-section h3 {
+  margin: 0;
+  font-size: 13px;
+  color: #dce8ff;
+}
+
+.help-section ul {
+  margin: 0;
+  padding-left: 18px;
+  display: grid;
+  gap: 6px;
+}
+
+.help-section li {
+  color: #d4deef;
+  line-height: 1.6;
+  font-size: 12px;
+}
+
+.help-section p {
+  margin: 0;
+  color: #d4deef;
+  line-height: 1.6;
+  font-size: 12px;
+}
+
+.help-detail-list {
+  margin: 0;
+  padding-left: 18px;
+  display: grid;
+  gap: 10px;
+}
+
+.help-item-subkey {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: #8db0dc;
+}
+
+.help-item-scope {
+  font-size: 11px;
+  color: #d0a464;
+}
+
+.help-strategy-card {
+  display: grid;
+  gap: 8px;
+  border: 1px solid rgba(61, 93, 141, 0.35);
+  border-radius: 12px;
+  background: rgba(9, 18, 31, 0.72);
+  padding: 12px;
+  margin-bottom: 12px;
+}
+
+.help-strategy-card:last-child {
+  margin-bottom: 0;
+}
+
+.help-strategy-card-active {
+  border-color: rgba(60, 215, 255, 0.55);
+  box-shadow: 0 0 0 1px rgba(60, 215, 255, 0.2) inset;
+}
+
+.help-strategy-summary,
+.help-strategy-detail,
+.help-strategy-extra {
+  color: #d4deef;
+  line-height: 1.6;
+  font-size: 12px;
+}
+
+.help-strategy-preview {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.help-footer {
+  min-height: 20px;
+  padding: 12px 14px;
+  border-top: 1px solid rgba(61, 93, 141, 0.35);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.help-footer a {
+  color: var(--cyan);
+  font-size: 12px;
+  text-decoration: none;
+}
+
+.help-footer a:hover {
+  text-decoration: underline;
+}
+
 .layout {
   padding: 14px;
   display: grid;
@@ -1084,11 +1434,110 @@ body::before {
 
 .form-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 10px;
+  gap: 12px;
   max-height: 560px;
   overflow: auto;
   padding-right: 4px;
+}
+
+.strategy-guide-card {
+  border: 1px solid rgba(90, 144, 255, 0.28);
+  border-radius: 12px;
+  background: linear-gradient(135deg, rgba(12, 25, 45, 0.95), rgba(8, 18, 33, 0.92));
+  padding: 12px;
+  margin-bottom: 12px;
+  display: grid;
+  gap: 10px;
+}
+
+.strategy-guide-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.strategy-guide-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.strategy-guide-subtitle {
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.strategy-guide-note {
+  font-size: 12px;
+  color: #d9e6ff;
+  line-height: 1.6;
+}
+
+.strategy-guide-preview,
+.strategy-guide-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.strategy-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 9px;
+  border-radius: 999px;
+  background: rgba(43, 83, 145, 0.35);
+  border: 1px solid rgba(112, 166, 255, 0.22);
+  color: var(--text);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.strategy-pill.trade-up {
+  background: rgba(24, 129, 91, 0.22);
+  border-color: rgba(53, 202, 143, 0.28);
+}
+
+.strategy-pill.trade-down {
+  background: rgba(165, 54, 54, 0.2);
+  border-color: rgba(255, 120, 120, 0.24);
+}
+
+.strategy-pill.strategy-info {
+  background: rgba(157, 116, 35, 0.22);
+  border-color: rgba(229, 183, 92, 0.22);
+}
+
+.config-group {
+  display: grid;
+  gap: 8px;
+}
+
+.config-group-head {
+  display: grid;
+  gap: 3px;
+  padding: 0 2px;
+}
+
+.config-group-title {
+  font-size: 12px;
+  font-weight: 700;
+  color: #dce8ff;
+  letter-spacing: 0.04em;
+}
+
+.config-group-desc {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--muted);
+}
+
+.group-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
 }
 
 .field {
@@ -1104,9 +1553,7 @@ body::before {
 .field label {
   font-size: 11px;
   color: var(--muted);
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
+  line-height: 1.45;
 }
 
 .field input,
@@ -1119,6 +1566,35 @@ body::before {
   padding: 6px 8px;
   font-size: 12px;
   font-family: var(--mono);
+}
+
+.field-help,
+.field-scope-note,
+.field-error {
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.field-help {
+  color: var(--muted);
+}
+
+.field-scope-note {
+  color: #d3a35f;
+  min-height: 16px;
+}
+
+.field-error {
+  color: #ff8d8d;
+}
+
+.field.field-muted {
+  opacity: 0.58;
+  border-style: dashed;
+}
+
+.config-group.config-group-muted .config-group-desc {
+  color: #c69c58;
 }
 
 .actions {
@@ -1359,10 +1835,11 @@ tr:hover td { background: rgba(50, 88, 131, 0.1); }
   .right-stack { grid-column: auto; grid-template-columns: 1fr; }
   .split,
   .kv-grid,
-  .form-grid { grid-template-columns: 1fr; }
+  .group-grid { grid-template-columns: 1fr; }
   .market-header { grid-template-columns: 1fr; }
   .timer-wrap { text-align: left; }
   .subtitle { max-width: 56vw; }
+  .help-drawer { width: 100vw; }
 }
 """
 
@@ -1377,6 +1854,9 @@ const state = {
   countdownSnapshotAtMs: null,
   countdownBaseSeconds: null,
   showInternalKeys: false,
+  helpOpen: false,
+  helpTab: 'quickstart',
+  helpReturnFocusId: 'btnHelp',
 };
 
 const POLL_MS = {
@@ -1386,8 +1866,134 @@ const POLL_MS = {
   clock: 1000,
 };
 
+const HELP_TABS = [
+  { id: 'quickstart', label: '快速上手' },
+  { id: 'pageguide', label: '页面说明' },
+  { id: 'configdict', label: '配置字典' },
+  { id: 'strategyguide', label: '策略说明' },
+  { id: 'faq', label: '常见问题' },
+];
+
+const HELP_SECTIONS = {
+  quickstart: {
+    title: '快速上手',
+    intro: '先确认基础策略、下注模式、最大下注金额，再观察 3~5 个轮次，不要频繁同时改动多项参数。',
+    sections: [
+      {
+        title: '先看哪里',
+        bullets: [
+          '先看 行情与信号，确认当前轮次、方向判断和倒计时。',
+          '再看 下注计划与风控，重点关注是否下单、跳过原因和预期收益。',
+          '然后看 会话状态，确认累计盈亏、待回补亏损和连续亏损轮数。',
+          '最后看 实时连接状态，判断 websocket 行情是否可靠。',
+        ],
+      },
+      {
+        title: '怎么安全改参数',
+        bullets: [
+          '先确认当前基础策略，固定节奏策略和策略 5 的可调参数不同。',
+          '每次只改一类参数，不要同时改策略、阈值和下注金额。',
+          '保存后以页面显示的有效值和字段提示为准，不要只看自己输入了什么。',
+          '如果字段出现校验错误，说明该输入没有真正生效，需要先修正。',
+        ],
+      },
+      {
+        title: '怎么判断当前能不能跑',
+        bullets: [
+          '是否下单=执行，说明当前轮次、价格、风控和 WS 状态都允许。',
+          '是否下单=跳过，先看跳过原因，不要先怀疑策略失效。',
+          '价格超过阈值、信号太弱、金额超限，属于常见可接受跳过。',
+          'WS 数据陈旧、当日亏损上限、连续亏损重置，属于要优先排查的跳过。',
+        ],
+      },
+      {
+        title: '出问题先看哪里',
+        bullets: [
+          '保存了但效果不对：先看参数区字段提示和有效值。',
+          '一直不下单：先看 跳过原因 和 实时连接状态。',
+          '方向看不懂：去 策略说明，对照固定节奏或动量逻辑。',
+          '当天收益异常：看 纸面交易汇总 和 最近纸面交易明细。',
+        ],
+      },
+    ],
+  },
+  pageguide: {
+    title: '页面元素说明',
+    sections: [
+      {
+        title: '参数引擎',
+        bullets: [
+          '用于查看并编辑运行参数。',
+          '重点关注基础策略、下注模式、风控边界，以及哪些字段只对策略 5 生效。',
+        ],
+      },
+      {
+        title: '行情与信号',
+        bullets: [
+          '用于观察当前轮次市场状态和方向判断。',
+          '重点关注方向、原因、阈值、偏移和是否已锁边。',
+        ],
+      },
+      {
+        title: '下注计划与风控',
+        bullets: [
+          '用于判断当前轮次是否允许执行。',
+          '重点关注是否下单、买入价格、下单金额和跳过原因。',
+        ],
+      },
+      {
+        title: '会话状态',
+        bullets: [
+          '用于看累计收益和当前恢复状态。',
+          '重点关注累计盈亏、待回补亏损、连续亏损轮数和当日已实现盈亏。',
+        ],
+      },
+      {
+        title: '实时连接状态',
+        bullets: [
+          '用于判断 websocket 行情是否可信。',
+          '重点关注最近消息延迟、重连次数、最近错误和是否触发陈旧保护。',
+        ],
+      },
+      {
+        title: '纸面交易汇总',
+        bullets: [
+          '用于从日维度查看策略近期表现。',
+          '适合看趋势，不适合解释某一笔具体异常。',
+        ],
+      },
+      {
+        title: '最近纸面交易明细',
+        bullets: [
+          '用于排查最近交易到底发生了什么。',
+          '重点关注时间、方向、结果、跳过原因和信号偏移。',
+        ],
+      },
+    ],
+  },
+};
+
+const HELP_FAQ = [
+  ['为什么我保存了参数，但感觉没生效？', '先看参数区字段提示和有效值；如果输入非法，系统会回退到有效配置，而不是按错误值运行。'],
+  ['为什么当前显示不下单？', '先看下注计划与风控里的跳过原因，再区分是价格、风控、信号还是 WS 保护导致。'],
+  ['为什么策略 5 经常没信号？', '策略 5 不是固定节奏，需要价格变化达到阈值；弱信号时会按 SKIP 或 FALLBACK 处理。'],
+  ['为什么方向和我想的不一样？', '固定节奏策略先看轮次编号；动量策略则要看开盘价、当前价、阈值和偏移。'],
+  ['为什么 WS 保护会触发？', '说明 websocket 行情太旧，系统为了避免使用过期数据下单而阻止执行。'],
+  ['为什么当日已实现盈亏归零了？', '这是日切后的日内统计重置；累计盈亏仍然保留在会话状态里。'],
+  ['为什么超过最大下注金额后一直跳过？', '当前恢复亏损和价格条件共同推高了所需下单金额，先看待回补亏损和 MAX_STAKE。'],
+  ['新手最容易改错什么？', '一次改太多参数、没分清固定节奏和动量策略、把 WS 保护误以为是策略问题。'],
+];
+
 const STORAGE_KEYS = {
   showInternalKeys: 'dashboard_show_internal_keys',
+};
+
+const STRATEGY_LABELS = {
+  1: '单轮交替',
+  2: '双轮分组交替',
+  3: '三轮分组交替',
+  4: '四轮分组交替',
+  5: '动量信号 V2',
 };
 
 const OPTION_LABELS = {
@@ -1420,7 +2026,7 @@ const REASON_LABELS = {
 };
 
 const CONFIG_KEY_NAMES = {
-  STRATEGY_ID: '策略编号',
+  STRATEGY_ID: '基础策略',
   TARGET_PROFIT: '每次目标净利',
   BET_SIZING_MODE: '下注模式',
   BASE_ORDER_COST: '固定起始下注金额',
@@ -1429,7 +2035,7 @@ const CONFIG_KEY_NAMES = {
   MAX_PRICE_THRESHOLD: '最高买入价格阈值',
   SIGNAL_MOMENTUM_THRESHOLD: '动量阈值',
   SIGNAL_WEAK_SIGNAL_MODE: '弱信号处理',
-  SIGNAL_FALLBACK_STRATEGY_ID: '弱信号回退策略',
+  SIGNAL_FALLBACK_STRATEGY_ID: '弱信号回退基础策略',
   SIGNAL_HISTORY_FIDELITY_SECONDS: '信号采样秒数',
   SIGNAL_ANCHOR_MAX_OFFSET_SECONDS: '开盘锚点最大偏移秒',
   SIGNAL_DYNAMIC_THRESHOLD_K: '动态阈值系数K',
@@ -1483,6 +2089,25 @@ function saveUiPrefs() {
 
 function syncToggleButtonText() {
   el('btnToggleKeys').textContent = '显示内部键名：' + (state.showInternalKeys ? '开' : '关');
+}
+
+function openHelpDrawer(tab = 'quickstart') {
+  state.helpOpen = true;
+  state.helpTab = tab;
+  renderHelpDrawer();
+  const drawer = el('helpDrawer');
+  if (drawer) {
+    drawer.focus();
+  }
+}
+
+function closeHelpDrawer() {
+  state.helpOpen = false;
+  renderHelpDrawer();
+  const trigger = el(state.helpReturnFocusId || 'btnHelp');
+  if (trigger) {
+    trigger.focus();
+  }
 }
 
 function el(id) {
@@ -1607,6 +2232,119 @@ function sideText(side) {
   if (side === 'DOWN') return '看跌';
   if (side === 'SKIP') return '跳过';
   return '待定';
+}
+
+function strategyCatalog(payload) {
+  return (payload && payload.strategy_catalog) || {};
+}
+
+function strategyMeta(payload, strategyId) {
+  return strategyCatalog(payload)[String(strategyId || '')] || null;
+}
+
+function strategyShortLabel(payload, strategyId) {
+  const meta = strategyMeta(payload, strategyId);
+  if (meta && meta.label) {
+    return meta.label;
+  }
+  if (STRATEGY_LABELS[String(strategyId || '')]) {
+    return STRATEGY_LABELS[String(strategyId || '')];
+  }
+  return '策略 ' + String(strategyId || '--');
+}
+
+function strategyOptionLabel(key, opt, payload) {
+  if (key === 'STRATEGY_ID' || key === 'SIGNAL_FALLBACK_STRATEGY_ID') {
+    return String(opt) + ' | ' + strategyShortLabel(payload, opt);
+  }
+  const optMap = OPTION_LABELS[key] || {};
+  return optMap[opt] || opt;
+}
+
+function strategyPreviewText(token) {
+  if (token === 'UP') return '看涨';
+  if (token === 'DOWN') return '看跌';
+  if (token === 'MOMENTUM') return '动量判断';
+  if (token === 'THRESHOLD') return '阈值过滤';
+  if (token === 'FALLBACK') return '弱信号回退';
+  return String(token || '--');
+}
+
+function strategyPreviewClass(token) {
+  if (token === 'UP') return 'trade-up';
+  if (token === 'DOWN') return 'trade-down';
+  return 'strategy-info';
+}
+
+function renderStrategyPills(tokens) {
+  if (!Array.isArray(tokens) || tokens.length === 0) {
+    return '<span class="strategy-pill strategy-info">暂无节奏预览</span>';
+  }
+  return tokens.map((token) => {
+    return '<span class="strategy-pill ' + esc(strategyPreviewClass(token)) + '">' + esc(strategyPreviewText(token)) + '</span>';
+  }).join('');
+}
+
+function renderStrategyGuide(payload, values) {
+  const node = el('strategyGuideCard');
+  if (!node) {
+    return;
+  }
+
+  const currentValues = values || {};
+  const envValues = (payload && payload.env_values) || {};
+  const strategyId = String(currentValues.STRATEGY_ID ?? envValues.STRATEGY_ID ?? '');
+  const meta = strategyMeta(payload, strategyId);
+  if (!meta) {
+    node.innerHTML = '<div class="empty">暂无策略说明</div>';
+    return;
+  }
+
+  let extra = '';
+  if (strategyId === '5') {
+    const weakModeRaw = String(currentValues.SIGNAL_WEAK_SIGNAL_MODE ?? envValues.SIGNAL_WEAK_SIGNAL_MODE ?? '--');
+    const weakModeText = (OPTION_LABELS.SIGNAL_WEAK_SIGNAL_MODE || {})[weakModeRaw] || weakModeRaw;
+    const fallbackId = String(currentValues.SIGNAL_FALLBACK_STRATEGY_ID ?? envValues.SIGNAL_FALLBACK_STRATEGY_ID ?? '');
+    const fallbackMeta = strategyMeta(payload, fallbackId);
+    const fallbackPreview = fallbackMeta && Array.isArray(fallbackMeta.preview) ? renderStrategyPills(fallbackMeta.preview) : '';
+    extra =
+      '<div class="strategy-guide-note">弱信号处理：' + esc(weakModeText) +
+      '；回退策略：' + esc(strategyShortLabel(payload, fallbackId)) + '</div>' +
+      '<div class="strategy-guide-meta">' + fallbackPreview + '</div>';
+  }
+
+  node.innerHTML =
+    '<div class="strategy-guide-head">' +
+      '<div>' +
+        '<div class="strategy-guide-title">' + esc(strategyId + ' | ' + meta.label) + '</div>' +
+        '<div class="strategy-guide-subtitle">' + esc(meta.summary || '') + '</div>' +
+      '</div>' +
+      '<span class="chip ok">配置解读</span>' +
+    '</div>' +
+    '<div class="strategy-guide-preview">' + renderStrategyPills(meta.preview || []) + '</div>' +
+    '<div class="strategy-guide-note">' + esc(meta.detail || '') + '</div>' +
+    extra;
+}
+
+function applyConfigFieldVisibility(values) {
+  const strategyId = String((values && values.STRATEGY_ID) || '');
+  const isStrategyFive = strategyId === '5';
+
+  document.querySelectorAll('.field[data-field-scope]').forEach((node) => {
+    const scope = node.getAttribute('data-field-scope') || 'all';
+    const shouldMute = scope === 'strategy_5_only' && !isStrategyFive;
+    node.classList.toggle('field-muted', shouldMute);
+    const note = node.querySelector('.field-scope-note');
+    if (note) {
+      note.textContent = shouldMute ? '当前基础策略未使用此参数，仅策略 5 使用' : '';
+    }
+  });
+
+  document.querySelectorAll('.config-group[data-group-scope]').forEach((node) => {
+    const scope = node.getAttribute('data-group-scope') || 'all';
+    const shouldMute = scope === 'strategy_5_only' && !isStrategyFive;
+    node.classList.toggle('config-group-muted', shouldMute);
+  });
 }
 
 function sourceText(source) {
@@ -1748,6 +2486,126 @@ async function apiPost(path, payload) {
   return data;
 }
 
+function renderHelpSectionList(section) {
+  return (section.sections || []).map((group) => {
+    const items = (group.bullets || []).map((item) => '<li>' + esc(item) + '</li>').join('');
+    return '<section class="help-section"><h3>' + esc(group.title || '') + '</h3><ul>' + items + '</ul></section>';
+  }).join('');
+}
+
+function renderHelpQuickStart() {
+  const section = HELP_SECTIONS.quickstart;
+  return '<div class="help-intro">' + esc(section.intro || '') + '</div>' + renderHelpSectionList(section);
+}
+
+function renderHelpPageGuide() {
+  return renderHelpSectionList(HELP_SECTIONS.pageguide);
+}
+
+function renderHelpConfigDictionary() {
+  const payload = state.config || {};
+  const groups = payload.field_groups || [];
+  const help = payload.field_help || {};
+  const scope = payload.field_scope || {};
+  const labels = payload.labels || {};
+
+  return groups.map((group) => {
+    const items = (group.keys || []).map((key) => {
+      const scopeNote = scope[key] === 'strategy_5_only' ? '仅策略 5 重点使用' : '所有策略都可参考';
+      return '<li>' +
+        '<strong>' + esc(formatConfigLabel(key, labels)) + '</strong>' +
+        '<div class="help-item-subkey">' + esc(key) + '</div>' +
+        '<div>' + esc(help[key] || '暂无说明') + '</div>' +
+        '<div class="help-item-scope">' + esc(scopeNote) + '</div>' +
+        '</li>';
+    }).join('');
+    return '<section class="help-section">' +
+      '<h3>' + esc(group.title || '参数分组') + '</h3>' +
+      '<ul class="help-detail-list">' + items + '</ul>' +
+      '</section>';
+  }).join('');
+}
+
+function renderHelpStrategyGuide() {
+  const payload = state.config || {};
+  const envValues = payload.env_values || {};
+  const activeId = String(envValues.STRATEGY_ID || '');
+  const catalog = payload.strategy_catalog || {};
+
+  return Object.entries(catalog).map(([strategyId, meta]) => {
+    const activeCls = strategyId === activeId ? ' help-strategy-card-active' : '';
+    const preview = renderStrategyPills(meta.preview || []);
+    let extra = '';
+    if (strategyId === '5') {
+      const weakModeRaw = String(envValues.SIGNAL_WEAK_SIGNAL_MODE || '--');
+      const weakModeText = (OPTION_LABELS.SIGNAL_WEAK_SIGNAL_MODE || {})[weakModeRaw] || weakModeRaw;
+      extra = '<div class="help-strategy-extra">' +
+        '弱信号模式：' + esc(weakModeText) +
+        '；回退策略：' + esc(strategyShortLabel(payload, envValues.SIGNAL_FALLBACK_STRATEGY_ID)) +
+        '</div>';
+    }
+    return '<section class="help-strategy-card' + activeCls + '">' +
+      '<h3>' + esc(strategyId + ' | ' + (meta.label || '')) + '</h3>' +
+      '<div class="help-strategy-summary">' + esc(meta.summary || '') + '</div>' +
+      '<div class="help-strategy-preview">' + preview + '</div>' +
+      '<div class="help-strategy-detail">' + esc(meta.detail || '') + '</div>' +
+      extra +
+      '</section>';
+  }).join('');
+}
+
+function renderHelpFaq() {
+  return HELP_FAQ.map(([question, answer]) => {
+    return '<section class="help-section">' +
+      '<h3>' + esc(question) + '</h3>' +
+      '<p>' + esc(answer) + '</p>' +
+      '</section>';
+  }).join('');
+}
+
+function renderHelpDrawer() {
+  const backdrop = el('helpBackdrop');
+  const drawer = el('helpDrawer');
+  const tabs = el('helpTabs');
+  const body = el('helpBody');
+  const footer = el('helpFooter');
+  if (!backdrop || !drawer || !tabs || !body || !footer) {
+    return;
+  }
+
+  backdrop.classList.toggle('open', state.helpOpen);
+  drawer.classList.toggle('open', state.helpOpen);
+  drawer.setAttribute('aria-hidden', state.helpOpen ? 'false' : 'true');
+
+  tabs.innerHTML = HELP_TABS.map((tab) => {
+    const active = tab.id === state.helpTab ? ' help-tab-active' : '';
+    return '<button class="help-tab' + active + '" data-help-tab="' + esc(tab.id) + '" type="button">' + esc(tab.label) + '</button>';
+  }).join('');
+
+  if (state.helpTab === 'quickstart') {
+    body.innerHTML = renderHelpQuickStart();
+  } else if (state.helpTab === 'pageguide') {
+    body.innerHTML = renderHelpPageGuide();
+  } else if (state.helpTab === 'configdict') {
+    body.innerHTML = renderHelpConfigDictionary();
+  } else if (state.helpTab === 'strategyguide') {
+    body.innerHTML = renderHelpStrategyGuide();
+  } else {
+    body.innerHTML = renderHelpFaq();
+  }
+  footer.innerHTML =
+    '<a href="docs/dashboard_runbook.md" target="_blank" rel="noreferrer">Dashboard Runbook</a>' +
+    '<a href="docs/operations_runbook.md" target="_blank" rel="noreferrer">Operations Runbook</a>' +
+    '<a href="docs/daily_ops_checklist.md" target="_blank" rel="noreferrer">Daily Checklist</a>';
+
+  tabs.querySelectorAll('[data-help-tab]').forEach((node) => {
+    node.addEventListener('click', () => {
+      state.helpTab = node.getAttribute('data-help-tab') || 'quickstart';
+      renderHelpDrawer();
+    });
+  });
+}
+
 function renderConfig(payload) {
   state.config = payload;
   el('cfgEnvFile').textContent = payload.env_file || '--';
@@ -1760,41 +2618,101 @@ function renderConfig(payload) {
   const labels = payload.labels || {};
   const values = payload.env_values || {};
   const options = payload.select_options || {};
+  const fieldHelp = payload.field_help || {};
+  const fieldScope = payload.field_scope || {};
+  const validationErrors = payload.validation_errors || {};
+  const fieldGroups = Array.isArray(payload.field_groups) && payload.field_groups.length > 0
+    ? payload.field_groups
+    : [{ title: '全部参数', description: '', keys }];
+  const editableKeySet = new Set(keys);
 
-  for (const key of keys) {
-    const wrap = document.createElement('div');
-    wrap.className = 'field';
-
-    const label = document.createElement('label');
-    label.setAttribute('for', 'cfg_' + key);
-    label.textContent = formatConfigLabel(key, labels);
-    wrap.appendChild(label);
-
-    if (Array.isArray(options[key]) && options[key].length > 0) {
-      const select = document.createElement('select');
-      select.id = 'cfg_' + key;
-      for (const opt of options[key]) {
-        const option = document.createElement('option');
-        option.value = opt;
-        const optMap = OPTION_LABELS[key] || {};
-        option.textContent = optMap[opt] || opt;
-        if (String(values[key] ?? '') === String(opt)) {
-          option.selected = true;
-        }
-        select.appendChild(option);
-      }
-      wrap.appendChild(select);
-    } else {
-      const input = document.createElement('input');
-      input.id = 'cfg_' + key;
-      input.type = 'text';
-      input.value = String(values[key] ?? '');
-      wrap.appendChild(input);
+  for (const group of fieldGroups) {
+    const groupKeys = (group.keys || []).filter((key) => editableKeySet.has(key));
+    if (groupKeys.length === 0) {
+      continue;
     }
 
-    form.appendChild(wrap);
+    const section = document.createElement('section');
+    section.className = 'config-group';
+    if (group.scope) {
+      section.dataset.groupScope = group.scope;
+    }
+
+    const head = document.createElement('div');
+    head.className = 'config-group-head';
+    head.innerHTML =
+      '<div class="config-group-title">' + esc(group.title || '参数分组') + '</div>' +
+      '<div class="config-group-desc">' + esc(group.description || '') + '</div>';
+    section.appendChild(head);
+
+    const grid = document.createElement('div');
+    grid.className = 'group-grid';
+
+    for (const key of groupKeys) {
+      const wrap = document.createElement('div');
+      wrap.className = 'field';
+      wrap.dataset.fieldScope = fieldScope[key] || 'all';
+
+      const label = document.createElement('label');
+      label.setAttribute('for', 'cfg_' + key);
+      label.textContent = formatConfigLabel(key, labels);
+      wrap.appendChild(label);
+
+      if (Array.isArray(options[key]) && options[key].length > 0) {
+        const select = document.createElement('select');
+        select.id = 'cfg_' + key;
+        for (const opt of options[key]) {
+          const option = document.createElement('option');
+          option.value = opt;
+          option.textContent = strategyOptionLabel(key, opt, payload);
+          if (String(values[key] ?? '') === String(opt)) {
+            option.selected = true;
+          }
+          select.appendChild(option);
+        }
+        wrap.appendChild(select);
+      } else {
+        const input = document.createElement('input');
+        input.id = 'cfg_' + key;
+        input.type = 'text';
+        input.value = String(values[key] ?? '');
+        wrap.appendChild(input);
+      }
+
+      if (fieldHelp[key]) {
+        const help = document.createElement('div');
+        help.className = 'field-help';
+        help.textContent = fieldHelp[key];
+        wrap.appendChild(help);
+      }
+
+      const scopeNote = document.createElement('div');
+      scopeNote.className = 'field-scope-note';
+      wrap.appendChild(scopeNote);
+
+      if (validationErrors[key]) {
+        const err = document.createElement('div');
+        err.className = 'field-error';
+        err.textContent = validationErrors[key];
+        wrap.appendChild(err);
+      }
+
+      grid.appendChild(wrap);
+    }
+
+    section.appendChild(grid);
+    form.appendChild(section);
   }
 
+  form.oninput = () => {
+    const liveValues = collectConfigValues();
+    renderStrategyGuide(state.config, liveValues);
+    applyConfigFieldVisibility(liveValues);
+  };
+  form.onchange = form.oninput;
+
+  renderStrategyGuide(payload, values);
+  applyConfigFieldVisibility(values);
   setChip('cfgStatus', '已加载', 'ok');
 }
 
@@ -2086,6 +3004,12 @@ function tickClock() {
 
 function bindActions() {
   syncToggleButtonText();
+  el('btnHelp').addEventListener('click', () => {
+    state.helpReturnFocusId = 'btnHelp';
+    openHelpDrawer('quickstart');
+  });
+  el('btnHelpClose').addEventListener('click', closeHelpDrawer);
+  el('helpBackdrop').addEventListener('click', closeHelpDrawer);
   el('btnToggleKeys').addEventListener('click', () => {
     state.showInternalKeys = !state.showInternalKeys;
     saveUiPrefs();
@@ -2115,10 +3039,17 @@ function startPolling() {
 async function bootstrap() {
   loadUiPrefs();
   bindActions();
+  renderHelpDrawer();
   tickClock();
   await refreshAll();
   startPolling();
 }
+
+document.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape' && state.helpOpen) {
+    closeHelpDrawer();
+  }
+});
 
 document.addEventListener('DOMContentLoaded', bootstrap);
 """
