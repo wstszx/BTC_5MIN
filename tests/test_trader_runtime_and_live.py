@@ -65,9 +65,11 @@ class _LiveMarketClient:
 
 
 class _StubClobClient:
-    def __init__(self):
+    def __init__(self, *, post_response=None, order_payloads=None):
         self.created_orders = []
         self.posted_orders = []
+        self.post_response = post_response if post_response is not None else {"success": True, "orderID": "oid-123"}
+        self.order_payloads = order_payloads or {}
 
     def create_market_order(self, order_args):
         self.created_orders.append(order_args)
@@ -75,7 +77,10 @@ class _StubClobClient:
 
     def post_order(self, order, order_type):
         self.posted_orders.append((order, order_type))
-        return {"success": True, "orderID": "oid-123"}
+        return self.post_response
+
+    def get_order(self, order_id):
+        return self.order_payloads.get(order_id, {})
 
 
 class _SettlingLiveClient(_LiveMarketClient):
@@ -123,6 +128,72 @@ def test_place_live_order_dry_run_returns_order_plan(tmp_path):
     assert result["order_cost"] > 0
 
 
+def test_place_live_order_waits_until_entry_window_before_submitting(tmp_path):
+    cfg = AppConfig(live_trading_enabled=True)
+    stub_clob = _StubClobClient()
+
+    class _FutureRoundClient(_LiveMarketClient):
+        def find_current_and_next_rounds(self, *, now):
+            window = MarketWindow(
+                event_id="evt-1",
+                market_id="mkt-1",
+                slug="btc-updown-5m-next",
+                title="BTC 5m Next",
+                start_time=now + timedelta(minutes=1),
+                end_time=now + timedelta(minutes=6),
+                up_token_id="up-token",
+                down_token_id="down-token",
+            )
+            return None, window
+
+    result = place_live_order(
+        cfg=cfg,
+        market_client=_FutureRoundClient(),
+        clob_client=stub_clob,
+        state_path=tmp_path / "state.json",
+        log_path=tmp_path / "live.csv",
+    )
+
+    assert result["status"] == "waiting_for_entry"
+    assert stub_clob.created_orders == []
+    assert stub_clob.posted_orders == []
+
+
+def test_place_live_order_dry_run_does_not_persist_state_on_signal_skip(tmp_path):
+    cfg = AppConfig(
+        strategy_id=5,
+        signal_momentum_threshold=0.05,
+        signal_weak_signal_mode="SKIP",
+    )
+    state_path = tmp_path / "state.json"
+    original = {
+        "round_index": 4,
+        "cash_pnl": 0.0,
+        "recovery_loss": 0.0,
+        "consecutive_losses": 0,
+        "consecutive_max_stake_skips": 0,
+        "signal_round_slug": None,
+        "signal_round_open_up_price": None,
+        "signal_round_locked_side": None,
+        "stop_loss_count": 0,
+        "daily_realized_pnl": -1.0,
+        "current_day": "1900-01-01",
+    }
+    state_path.write_text(json.dumps(original), encoding="utf-8")
+
+    result = place_live_order(
+        cfg=cfg,
+        market_client=_LiveMarketClient(),
+        state_path=state_path,
+        dry_run=True,
+    )
+
+    assert result["status"] == "dry_run"
+    assert result["should_trade"] is False
+    assert result["skip_reason"] == "signal_too_weak_skip"
+    assert json.loads(state_path.read_text(encoding="utf-8")) == original
+
+
 def test_place_live_order_submits_market_order_with_injected_clob(tmp_path):
     cfg = AppConfig(live_trading_enabled=True)
     stub_clob = _StubClobClient()
@@ -143,9 +214,37 @@ def test_place_live_order_submits_market_order_with_injected_clob(tmp_path):
     assert len(stub_clob.posted_orders) == 1
 
 
+def test_place_live_order_rejects_submission_response_without_acceptance(tmp_path):
+    cfg = AppConfig(live_trading_enabled=True)
+    stub_clob = _StubClobClient(post_response={"success": False, "errorMsg": "rejected"})
+    state_path = tmp_path / "state.json"
+
+    with pytest.raises(RuntimeError, match="not accepted"):
+        place_live_order(
+            cfg=cfg,
+            market_client=_LiveMarketClient(),
+            clob_client=stub_clob,
+            state_path=state_path,
+            log_path=tmp_path / "live.csv",
+        )
+
+    state = load_session_state(state_path)
+    assert state.pending_live_slug is None
+    assert state.round_index == 0
+
+
 def test_place_live_order_settles_previous_pending_trade_before_new_submission(tmp_path):
     cfg = AppConfig(live_trading_enabled=True, max_stake=25.0)
-    stub_clob = _StubClobClient()
+    stub_clob = _StubClobClient(
+        order_payloads={
+            "oid-prev": {
+                "status": "filled",
+                "filled_order_size": 2.0,
+                "filled_order_cost": 1.0,
+                "avg_price": 0.5,
+            }
+        }
+    )
     state_path = tmp_path / "state.json"
     state_path.write_text(
         json.dumps(
@@ -168,6 +267,7 @@ def test_place_live_order_settles_previous_pending_trade_before_new_submission(t
                 "pending_live_order_cost": 1.0,
                 "pending_live_expected_profit": 1.0,
                 "pending_live_end_time": "2026-04-02T00:00:00+00:00",
+                "pending_live_order_id": "oid-prev",
             }
         ),
         encoding="utf-8",
@@ -192,7 +292,7 @@ def test_place_live_order_settles_previous_pending_trade_before_new_submission(t
 
 def test_place_live_order_waits_for_previous_pending_trade_settlement(tmp_path):
     cfg = AppConfig(live_trading_enabled=True, max_stake=25.0)
-    stub_clob = _StubClobClient()
+    stub_clob = _StubClobClient(order_payloads={"oid-prev": {"status": "filled"}})
     state_path = tmp_path / "state.json"
     state_path.write_text(
         json.dumps(
@@ -215,6 +315,7 @@ def test_place_live_order_waits_for_previous_pending_trade_settlement(tmp_path):
                 "pending_live_order_cost": 1.0,
                 "pending_live_expected_profit": 1.0,
                 "pending_live_end_time": "2026-04-02T00:00:00+00:00",
+                "pending_live_order_id": "oid-prev",
             }
         ),
         encoding="utf-8",
@@ -229,6 +330,7 @@ def test_place_live_order_waits_for_previous_pending_trade_settlement(tmp_path):
     )
 
     assert result["status"] == "pending_settlement"
+    assert result["skip_reason"] == "awaiting_fill_confirmation"
     assert stub_clob.created_orders == []
 
 

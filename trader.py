@@ -342,6 +342,7 @@ def _clear_pending_live_trade(state: SessionState) -> None:
     state.pending_live_order_size = None
     state.pending_live_order_cost = None
     state.pending_live_expected_profit = None
+    state.pending_live_order_id = None
     state.pending_live_end_time = None
 
 
@@ -367,9 +368,121 @@ def _build_pending_live_trade_plan(state: SessionState) -> TradePlan:
     )
 
 
+def _coerce_positive_float(raw: Any) -> float | None:
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        return None
+    if value <= 0:
+        return None
+    return value
+
+
+def _extract_live_order_id(response: Any) -> str | None:
+    if not isinstance(response, dict):
+        return None
+    for key in ("orderID", "orderId", "id"):
+        raw = response.get(key)
+        if raw is None:
+            continue
+        order_id = str(raw).strip()
+        if order_id:
+            return order_id
+    return None
+
+
+def _validate_live_submission_response(response: Any) -> str:
+    if not isinstance(response, dict):
+        raise RuntimeError("Live order not accepted: invalid submission response.")
+
+    if response.get("success") is False:
+        reason = response.get("errorMsg") or response.get("error") or response.get("message") or "submission rejected"
+        raise RuntimeError(f"Live order not accepted: {reason}")
+
+    order_id = _extract_live_order_id(response)
+    if order_id is None:
+        raise RuntimeError("Live order not accepted: missing order id in submission response.")
+    return order_id
+
+
+def _build_verified_pending_live_trade_plan(
+    state: SessionState,
+    *,
+    clob_client: Any | None,
+) -> TradePlan | None:
+    if state.pending_live_side not in {"UP", "DOWN"}:
+        raise RuntimeError("Pending live trade is missing a valid side.")
+    if not state.pending_live_order_id:
+        return None
+    if clob_client is None:
+        return None
+
+    get_order = getattr(clob_client, "get_order", None)
+    if not callable(get_order):
+        return None
+
+    order_payload = get_order(state.pending_live_order_id)
+    if not isinstance(order_payload, dict):
+        return None
+
+    status = str(order_payload.get("status") or "").strip().lower()
+    has_fill_markers = any(
+        order_payload.get(key) is not None
+        for key in (
+            "filled_order_size",
+            "filledOrderSize",
+            "filled_order_cost",
+            "filledOrderCost",
+            "avg_price",
+            "avgPrice",
+        )
+    )
+    if status not in {"filled", "matched"} and not has_fill_markers:
+        return None
+
+    order_size = _coerce_positive_float(
+        order_payload.get("filled_order_size")
+        or order_payload.get("filledOrderSize")
+        or order_payload.get("size_matched")
+        or order_payload.get("matched_size")
+    )
+    order_cost = _coerce_positive_float(
+        order_payload.get("filled_order_cost")
+        or order_payload.get("filledOrderCost")
+        or order_payload.get("filled_value")
+        or order_payload.get("filledValue")
+        or order_payload.get("cost")
+    )
+    fill_price = _coerce_positive_float(
+        order_payload.get("avg_price")
+        or order_payload.get("avgPrice")
+        or order_payload.get("price")
+    )
+
+    if order_size is None and order_cost is not None and fill_price is not None:
+        order_size = order_cost / fill_price
+    if order_cost is None and order_size is not None and fill_price is not None:
+        order_cost = order_size * fill_price
+    if fill_price is None and order_size is not None and order_cost is not None:
+        fill_price = order_cost / order_size
+
+    if order_size is None or order_cost is None or fill_price is None or not 0 < fill_price < 1:
+        return None
+
+    return TradePlan(
+        True,
+        side=state.pending_live_side,
+        price=fill_price,
+        order_size=order_size,
+        order_cost=order_cost,
+        expected_profit=order_size * (1 - fill_price),
+    )
+
+
 def _settle_pending_live_trade_if_needed(
     *,
     market_client: PolymarketClient | Any,
+    clob_client: Any | None,
     state: SessionState,
     now: datetime,
 ) -> tuple[SessionState, dict[str, Any] | None, bool]:
@@ -393,6 +506,21 @@ def _settle_pending_live_trade_if_needed(
             False,
         )
 
+    plan = _build_verified_pending_live_trade_plan(state, clob_client=clob_client)
+    if plan is None:
+        return (
+            state,
+            {
+                "status": "pending_settlement",
+                "slug": state.pending_live_slug,
+                "side": state.pending_live_side,
+                "skip_reason": "awaiting_fill_confirmation",
+                "pending_end_time": state.pending_live_end_time,
+                "order_id": state.pending_live_order_id,
+            },
+            False,
+        )
+
     event = market_client.get_event_by_slug(state.pending_live_slug)
     metadata = event.get("eventMetadata") or {}
     if metadata.get("priceToBeat") is None or metadata.get("finalPrice") is None:
@@ -409,7 +537,6 @@ def _settle_pending_live_trade_if_needed(
         )
 
     result = "UP" if float(metadata["finalPrice"]) >= float(metadata["priceToBeat"]) else "DOWN"
-    plan = _build_pending_live_trade_plan(state)
     updated_state = apply_round_outcome(state, plan, won=(result == plan.side))
     trade_pnl = updated_state.cash_pnl - state.cash_pnl
     _clear_pending_live_trade(updated_state)
@@ -457,25 +584,30 @@ def place_live_order(
     state_path = state_path or cfg.logs_dir / "live_session_state.json"
     log_path = log_path or cfg.logs_dir / "live_orders.csv"
     state = load_session_state(state_path)
+    persist_state = not dry_run
+    live_client = clob_client
 
     now = datetime.now(timezone.utc)
     daily_state_changed = _refresh_daily_session_state(state, now)
+    if state.pending_live_slug and live_client is None and state.pending_live_order_id and cfg.live_private_key:
+        live_client = _create_live_clob_client(cfg)
     state, pending_status, settled_previous_trade = _settle_pending_live_trade_if_needed(
         market_client=market_client,
+        clob_client=live_client,
         state=state,
         now=now,
     )
     if pending_status is not None and pending_status["status"] == "pending_settlement":
-        if daily_state_changed and not dry_run:
+        if daily_state_changed and persist_state:
             save_session_state(state_path, state)
         return pending_status
-    if settled_previous_trade and not dry_run:
+    if settled_previous_trade and persist_state:
         save_session_state(state_path, state)
 
     current_round, next_round = market_client.find_current_and_next_rounds(now=now)
     target_round = current_round or next_round
     if target_round is None:
-        if daily_state_changed and not dry_run:
+        if daily_state_changed and persist_state:
             save_session_state(state_path, state)
         return {"status": "no_market"}
 
@@ -495,7 +627,41 @@ def place_live_order(
         entry_time=entry_time,
     )
     if side_decision.side is None:
-        if not dry_run:
+        if dry_run:
+            return {
+                "status": "dry_run",
+                "slug": target_round.slug,
+                "side": None,
+                "token_id": None,
+                "price": None,
+                "should_trade": False,
+                "skip_reason": side_decision.reason or "signal_unavailable",
+                "entry_time": entry_time.isoformat(),
+                "signal_open_up_price": side_decision.signal_open_up_price,
+                "signal_current_up_price": side_decision.signal_current_up_price,
+                "signal_threshold": side_decision.signal_threshold,
+                "signal_delta": side_decision.signal_delta,
+                "signal_locked": side_decision.signal_locked,
+            }
+        if now < entry_time:
+            if persist_state:
+                save_session_state(state_path, state)
+            return {
+                "status": "waiting_for_entry",
+                "slug": target_round.slug,
+                "side": None,
+                "token_id": None,
+                "price": None,
+                "should_trade": False,
+                "skip_reason": side_decision.reason or "signal_unavailable",
+                "entry_time": entry_time.isoformat(),
+                "signal_open_up_price": side_decision.signal_open_up_price,
+                "signal_current_up_price": side_decision.signal_current_up_price,
+                "signal_threshold": side_decision.signal_threshold,
+                "signal_delta": side_decision.signal_delta,
+                "signal_locked": side_decision.signal_locked,
+            }
+        if persist_state:
             append_trade_log(
                 log_path,
                 TradeRecord(
@@ -521,9 +687,10 @@ def place_live_order(
                     **_signal_record_kwargs(side_decision),
                 ),
             )
-        save_session_state(state_path, state)
+        if persist_state:
+            save_session_state(state_path, state)
         return {
-            "status": "dry_run" if dry_run else "skipped",
+            "status": "skipped",
             "slug": target_round.slug,
             "side": None,
             "token_id": None,
@@ -542,7 +709,41 @@ def place_live_order(
 
     if _ws_is_stale_for_trade(market_client, cfg):
         skip_reason = "ws_stale"
-        if not dry_run:
+        if dry_run:
+            return {
+                "status": "dry_run",
+                "slug": target_round.slug,
+                "side": side,
+                "token_id": None,
+                "price": price,
+                "should_trade": False,
+                "skip_reason": skip_reason,
+                "entry_time": entry_time.isoformat(),
+                "signal_open_up_price": side_decision.signal_open_up_price,
+                "signal_current_up_price": side_decision.signal_current_up_price,
+                "signal_threshold": side_decision.signal_threshold,
+                "signal_delta": side_decision.signal_delta,
+                "signal_locked": side_decision.signal_locked,
+            }
+        if now < entry_time:
+            if persist_state:
+                save_session_state(state_path, state)
+            return {
+                "status": "waiting_for_entry",
+                "slug": target_round.slug,
+                "side": side,
+                "token_id": None,
+                "price": price,
+                "should_trade": False,
+                "skip_reason": skip_reason,
+                "entry_time": entry_time.isoformat(),
+                "signal_open_up_price": side_decision.signal_open_up_price,
+                "signal_current_up_price": side_decision.signal_current_up_price,
+                "signal_threshold": side_decision.signal_threshold,
+                "signal_delta": side_decision.signal_delta,
+                "signal_locked": side_decision.signal_locked,
+            }
+        if persist_state:
             append_trade_log(
                 log_path,
                 TradeRecord(
@@ -568,9 +769,10 @@ def place_live_order(
                     **_signal_record_kwargs(side_decision),
                 ),
             )
-        save_session_state(state_path, state)
+        if persist_state:
+            save_session_state(state_path, state)
         return {
-            "status": "dry_run" if dry_run else "skipped",
+            "status": "skipped",
             "slug": target_round.slug,
             "side": side,
             "token_id": None,
@@ -628,6 +830,27 @@ def place_live_order(
     if not cfg.live_trading_enabled:
         raise RuntimeError("Live trading is disabled. Set LIVE_TRADING_ENABLED=true (or config flag) to submit orders.")
     if not plan.should_trade:
+        if now < entry_time:
+            if persist_state:
+                save_session_state(state_path, state)
+            return {
+                "status": "waiting_for_entry",
+                "slug": target_round.slug,
+                "side": side,
+                "token_id": token_id,
+                "price": price,
+                "should_trade": False,
+                "skip_reason": plan.skip_reason,
+                "order_size": plan.order_size,
+                "order_cost": plan.order_cost,
+                "expected_profit": plan.expected_profit,
+                "entry_time": entry_time.isoformat(),
+                "signal_open_up_price": side_decision.signal_open_up_price,
+                "signal_current_up_price": side_decision.signal_current_up_price,
+                "signal_threshold": side_decision.signal_threshold,
+                "signal_delta": side_decision.signal_delta,
+                "signal_locked": side_decision.signal_locked,
+            }
         append_trade_log(
             log_path,
             TradeRecord(
@@ -667,7 +890,8 @@ def place_live_order(
                 state=state,
                 cfg=cfg,
             )
-        save_session_state(state_path, state)
+        if persist_state:
+            save_session_state(state_path, state)
         return {
             "status": "skipped",
             "slug": target_round.slug,
@@ -684,11 +908,33 @@ def place_live_order(
     state.consecutive_max_stake_skips = 0
     if token_id is None:
         raise RuntimeError(f"Missing token id for side={side} on market={target_round.slug}")
+    if now < entry_time:
+        if persist_state:
+            save_session_state(state_path, state)
+        return {
+            "status": "waiting_for_entry",
+            "slug": target_round.slug,
+            "side": side,
+            "token_id": token_id,
+            "price": price,
+            "should_trade": True,
+            "skip_reason": None,
+            "entry_time": entry_time.isoformat(),
+            "order_size": plan.order_size,
+            "order_cost": plan.order_cost,
+            "expected_profit": plan.expected_profit,
+            "order_type": cfg.live_order_type.upper(),
+            "signal_open_up_price": side_decision.signal_open_up_price,
+            "signal_current_up_price": side_decision.signal_current_up_price,
+            "signal_threshold": side_decision.signal_threshold,
+            "signal_delta": side_decision.signal_delta,
+            "signal_locked": side_decision.signal_locked,
+        }
 
     from py_clob_client.clob_types import MarketOrderArgs
     from py_clob_client.order_builder.constants import BUY
 
-    live_client = clob_client or _create_live_clob_client(cfg)
+    live_client = live_client or _create_live_clob_client(cfg)
     order_type = _resolve_live_order_type(cfg.live_order_type)
     order_args = MarketOrderArgs(
         token_id=token_id,
@@ -698,10 +944,7 @@ def place_live_order(
     )
     signed_order = live_client.create_market_order(order_args)
     response = live_client.post_order(signed_order, order_type)
-
-    order_id = None
-    if isinstance(response, dict):
-        order_id = response.get("orderID") or response.get("orderId") or response.get("id")
+    order_id = _validate_live_submission_response(response)
 
     append_trade_log(
         log_path,
@@ -733,9 +976,11 @@ def place_live_order(
     state.pending_live_order_size = plan.order_size
     state.pending_live_order_cost = plan.order_cost
     state.pending_live_expected_profit = plan.expected_profit
+    state.pending_live_order_id = order_id
     state.pending_live_end_time = target_round.end_time.isoformat()
     state.round_index += 1
-    save_session_state(state_path, state)
+    if persist_state:
+        save_session_state(state_path, state)
 
     return {
         "status": "submitted",

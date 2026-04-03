@@ -110,6 +110,7 @@ class SessionState:
     pending_live_order_size: float | None = None
     pending_live_order_cost: float | None = None
     pending_live_expected_profit: float | None = None
+    pending_live_order_id: str | None = None
     pending_live_end_time: str | None = None
 
 
