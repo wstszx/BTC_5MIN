@@ -8,8 +8,9 @@ import pytest
 import requests
 
 from config import AppConfig
-from models import MarketQuote, MarketWindow, SessionState, TradeRecord
+from models import MarketQuote, MarketWindow, SessionState, TradePlan, TradeRecord
 from trader import (
+    SideDecision,
     _resolve_side_from_strategy,
     _update_max_stake_skip_streak,
     append_trade_log,
@@ -68,6 +69,21 @@ class _LiveMarketClient:
             up_best_ask=0.56,
             fetched_at=datetime.now(timezone.utc),
         )
+
+
+class _RoundEndMarketClient(_LiveMarketClient):
+    def find_current_and_next_rounds(self, *, now):
+        window = MarketWindow(
+            event_id="evt-2",
+            market_id="mkt-2",
+            slug="btc-updown-5m-round-end",
+            title="BTC 5m Round End",
+            start_time=now - timedelta(minutes=1),
+            end_time=now + timedelta(minutes=1),
+            up_token_id="up-token",
+            down_token_id="down-token",
+        )
+        return window, None
 
 
 class _StubClobClient:
@@ -597,7 +613,7 @@ def test_run_paper_trading_stops_when_stop_event_is_set(tmp_path, monkeypatch):
     assert sleep_calls["count"] == 1
 
 
-def test_run_paper_trading_refreshes_config_between_iterations(tmp_path, monkeypatch):
+def test_run_paper_trading_refreshes_config_provider_between_iterations(tmp_path, monkeypatch):
     stop_event = threading.Event()
     sleep_calls: list[float] = []
     config_sequence = [1.0, 5.0]
@@ -627,3 +643,43 @@ def test_run_paper_trading_refreshes_config_between_iterations(tmp_path, monkeyp
     assert result["status"] == "stopped"
     assert sleep_calls == [1.0, 5.0]
     assert config_calls == [1.0, 5.0]
+
+
+def test_run_paper_trading_stop_event_stops_during_round_end_wait(tmp_path, monkeypatch):
+    stop_event = threading.Event()
+    sleep_calls: list[float] = []
+
+    def fake_sleep(seconds):
+        sleep_calls.append(seconds)
+        stop_event.set()
+
+    monkeypatch.setattr("trader.time.sleep", fake_sleep)
+    monkeypatch.setattr(
+        "trader._resolve_side_from_strategy",
+        lambda **kwargs: SideDecision(side="UP"),
+    )
+    monkeypatch.setattr(
+        "trader.build_trade_plan",
+        lambda *args, **kwargs: TradePlan(
+            True,
+            "UP",
+            price=0.5,
+            order_size=1.0,
+            order_cost=0.5,
+            expected_profit=0.5,
+        ),
+    )
+    def fail_settle(*args, **kwargs):
+        raise AssertionError("Settlement should not run when stop_event triggers earlier")
+    monkeypatch.setattr("trader._settle_paper_trade", fail_settle)
+
+    result = run_paper_trading(
+        AppConfig(poll_interval_seconds=1),
+        client=_RoundEndMarketClient(),
+        state_path=tmp_path / "state.json",
+        log_path=tmp_path / "paper.csv",
+        stop_event=stop_event,
+    )
+
+    assert result["status"] == "stopped"
+    assert sleep_calls == [1.0]

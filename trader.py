@@ -1010,9 +1010,17 @@ def _entry_time_for_round(cfg: AppConfig, window: MarketWindow) -> datetime:
     return window.start_time + timedelta(seconds=cfg.open_delay_seconds)
 
 
-def _sleep_until_round_end(cfg: AppConfig, window: MarketWindow) -> None:
+def _sleep_until_round_end(
+    cfg: AppConfig,
+    window: MarketWindow,
+    stop_event: threading.Event | None = None,
+) -> bool:
+    if _is_stop_requested(stop_event):
+        return False
     while datetime.now(timezone.utc) < window.end_time:
-        time.sleep(cfg.poll_interval_seconds)
+        if not _sleep_if_not_stopped(stop_event, cfg.poll_interval_seconds):
+            return False
+    return True
 
 
 def _is_stop_requested(stop_event: threading.Event | None) -> bool:
@@ -1265,7 +1273,8 @@ def run_paper_trading(
                 state.round_index += 1
                 save_session_state(state_path, state)
                 consecutive_errors = 0
-                _sleep_until_round_end(cfg, target_round)
+                if not _sleep_until_round_end(cfg, target_round, stop_event):
+                    return {"status": "stopped"}
                 continue
 
             side = side_decision.side
@@ -1338,7 +1347,8 @@ def run_paper_trading(
                 state.round_index += 1
                 save_session_state(state_path, state)
                 consecutive_errors = 0
-                _sleep_until_round_end(cfg, target_round)
+                if not _sleep_until_round_end(cfg, target_round, stop_event):
+                    return {"status": "stopped"}
                 continue
 
             plan = build_trade_plan(
@@ -1452,7 +1462,8 @@ def run_paper_trading(
                 state.round_index += 1
                 save_session_state(state_path, state)
                 consecutive_errors = 0
-                _sleep_until_round_end(cfg, target_round)
+                if not _sleep_until_round_end(cfg, target_round, stop_event):
+                    return {"status": "stopped"}
                 continue
             state.consecutive_max_stake_skips = 0
 
@@ -1468,7 +1479,8 @@ def run_paper_trading(
                 continue
 
             _runtime_log('round=' + target_round.slug + ' entered trade; waiting for settlement')
-            _sleep_until_round_end(cfg, target_round)
+            if not _sleep_until_round_end(cfg, target_round, stop_event):
+                return {"status": "stopped"}
             _refresh_daily_session_state(state, datetime.now(timezone.utc))
 
             while True:
