@@ -41,7 +41,7 @@ Open http://127.0.0.1:8787 in your browser to inspect the current quote, signal 
 
 Supporting files and directories:
 
-- `logs/paper_trades.csv`: paper trade records. Use `python main.py paper-report --csv logs/paper_trades.csv` for ad-hoc reports, but this is not part of the standard flow.
+- `logs/paper_trades.csv`: paper trade records kept for later inspection or offline analysis.
 - `logs/session_state.json`: keeps track of rounds, cumulative PnL, and streak counters. Delete it to reset the paper trading state.
 - `data/`: where history exports and research outputs live.
 
@@ -51,4 +51,4 @@ Press `Ctrl+C` to terminate `python main.py`. It shuts down the dashboard first 
 
 ## 6. Troubleshooting
 
-`python main.py --help` still lists the legacy subcommands, but they are diagnostics/research tools rather than the day-to-day workflow. If the dashboard cannot be reached, first verify the process is still running and port 8787 is available, then repeat the launch step above.
+Legacy research and analysis modules still live in the repository, but the supported operator workflow is only the single `python main.py` runtime described above. If the dashboard cannot be reached, first verify the process is still running and port 8787 is available, then repeat the launch step above.

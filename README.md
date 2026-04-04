@@ -41,5 +41,3 @@ Press `Ctrl+C` in the terminal where `python main.py` is running to shut down bo
 ## Additional resources
 
 [docs/operations_runbook.md](./docs/operations_runbook.md) · [docs/dashboard_runbook.md](./docs/dashboard_runbook.md)
-
-`python main.py --help` is still available if you need to explore the legacy commands, but the documentation and support path focus exclusively on running `python main.py` as outlined above.
