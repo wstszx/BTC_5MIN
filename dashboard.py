@@ -6,7 +6,7 @@ import json
 import os
 import threading
 from collections import deque
-from dataclasses import asdict
+from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -707,22 +707,54 @@ class _DashboardRequestHandler(BaseHTTPRequestHandler):
                 raise
 
 
-def run_dashboard(*, host: str = "127.0.0.1", port: int = 8787, env_file: Path = Path(".env.dashboard")) -> None:
-    state = DashboardState(env_file=Path(env_file))
+@dataclass
+class DashboardRuntime:
+    server: ThreadingHTTPServer
+    state: DashboardState
+
+    def serve_forever(self) -> None:
+        self.server.serve_forever()
+
+    def shutdown(self) -> None:
+        self.server.shutdown()
+
+    def close(self) -> None:
+        self.server.server_close()
+        self.state.close()
+
+
+def create_dashboard_runtime(
+    *,
+    host: str = "127.0.0.1",
+    port: int = 8787,
+    env_file: Path = Path(".env.dashboard"),
+) -> DashboardRuntime:
+    env_path = Path(env_file)
+    state = DashboardState(env_file=env_path)
 
     class Handler(_DashboardRequestHandler):
         dashboard_state = state
 
     server = ThreadingHTTPServer((host, port), Handler)
+    return DashboardRuntime(server=server, state=state)
+
+
+def run_dashboard(
+    *,
+    host: str = "127.0.0.1",
+    port: int = 8787,
+    env_file: Path = Path(".env.dashboard"),
+) -> None:
+    env_path = Path(env_file)
+    runtime = create_dashboard_runtime(host=host, port=port, env_file=env_path)
     print(f"Dashboard running at http://{host}:{port}")
-    print(f"Config file: {env_file}")
+    print(f"Config file: {env_path}")
     try:
-        server.serve_forever()
+        runtime.serve_forever()
     except KeyboardInterrupt:
         print("\nDashboard stopped.")
     finally:
-        server.server_close()
-        state.close()
+        runtime.close()
 
 
 def _dashboard_html() -> str:

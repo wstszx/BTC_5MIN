@@ -1,10 +1,35 @@
 from __future__ import annotations
 
 import os
+import threading
 from pathlib import Path
 
-from dashboard import ConfigValidationError, DashboardState, _dashboard_html, _dashboard_js
+from dashboard import (
+    ConfigValidationError,
+    DashboardState,
+    _dashboard_html,
+    _dashboard_js,
+    create_dashboard_runtime,
+)
 
+
+def test_create_dashboard_runtime_uses_requested_env_file(tmp_path: Path):
+    runtime = create_dashboard_runtime(host="127.0.0.1", port=0, env_file=tmp_path / ".env.dashboard")
+    try:
+        assert runtime.state.env_file == tmp_path / ".env.dashboard"
+        assert runtime.server.server_address[0] == "127.0.0.1"
+    finally:
+        runtime.close()
+
+
+def test_dashboard_runtime_can_shutdown_cleanly(tmp_path: Path):
+    runtime = create_dashboard_runtime(host="127.0.0.1", port=0, env_file=tmp_path / ".env.dashboard")
+    thread = threading.Thread(target=runtime.serve_forever)
+    thread.start()
+    runtime.shutdown()
+    thread.join(timeout=2)
+    assert not thread.is_alive()
+    runtime.close()
 
 def test_dashboard_config_roundtrip_updates_env_file(tmp_path: Path):
     env_file = tmp_path / ".env.dashboard"
