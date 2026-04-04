@@ -20,6 +20,7 @@ from polymarket_api import PolymarketClient
 from risk_and_sizing import build_trade_plan
 from strategy import get_side_for_round
 from trader import (
+    _entry_window_missed,
     _entry_time_for_round,
     _resolve_side_from_strategy,
     _ws_is_stale_for_trade,
@@ -476,7 +477,7 @@ class DashboardState:
         price = resolve_quote_price(side, quote) if side in {"UP", "DOWN"} else None
         ws_stale = _ws_is_stale_for_trade(client, cfg)
 
-        if side in {"UP", "DOWN"} and not ws_stale:
+        if side in {"UP", "DOWN"} and not ws_stale and not _entry_window_missed(now, entry_time):
             plan_obj = build_trade_plan(
                 state=session_state,
                 side=side,
@@ -500,7 +501,12 @@ class DashboardState:
                 "stop_loss_triggered": plan_obj.stop_loss_triggered,
             }
         else:
-            reason = "ws_stale" if ws_stale else (side_decision.reason or "signal_unavailable")
+            if ws_stale:
+                reason = "ws_stale"
+            elif side in {"UP", "DOWN"} and _entry_window_missed(now, entry_time):
+                reason = "entry_window_missed"
+            else:
+                reason = side_decision.reason or "signal_unavailable"
             plan = {
                 "should_trade": False,
                 "side": side,
@@ -2054,6 +2060,7 @@ const OPTION_LABELS = {
 };
 
 const REASON_LABELS = {
+  entry_window_missed: '已错过入场时间',
   ws_stale: '连接数据陈旧',
   signal_unavailable: '信号不可用',
   signal_too_weak_skip: '信号太弱，按规则跳过',

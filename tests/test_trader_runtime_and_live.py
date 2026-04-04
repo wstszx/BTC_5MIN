@@ -558,6 +558,22 @@ def test_run_paper_trading_dry_run_skips_when_ws_stale_guard_triggered(tmp_path)
     assert result["skip_reason"] == "ws_stale"
 
 
+def test_run_paper_trading_dry_run_skips_when_entry_window_missed(tmp_path):
+    cfg = AppConfig(strategy_id=2)
+
+    result = run_paper_trading(
+        cfg,
+        client=_LiveMarketClient(),
+        state_path=tmp_path / "state.json",
+        log_path=tmp_path / "paper.csv",
+        dry_run_once=True,
+    )
+
+    assert result["status"] == "dry_run"
+    assert result["should_trade"] is False
+    assert result["skip_reason"] == "entry_window_missed"
+
+
 def test_run_paper_trading_dry_run_resets_daily_loss_cap_after_day_rollover(tmp_path):
     cfg = AppConfig(strategy_id=2, daily_loss_cap=50.0)
     state_path = tmp_path / "state.json"

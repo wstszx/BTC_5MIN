@@ -1010,6 +1010,10 @@ def _entry_time_for_round(cfg: AppConfig, window: MarketWindow) -> datetime:
     return window.start_time + timedelta(seconds=cfg.open_delay_seconds)
 
 
+def _entry_window_missed(now: datetime, entry_time: datetime) -> bool:
+    return now > entry_time
+
+
 def _sleep_until_round_end(
     cfg: AppConfig,
     window: MarketWindow,
@@ -1350,6 +1354,67 @@ def run_paper_trading(
                         recovery_loss=state.recovery_loss,
                         consecutive_losses=state.consecutive_losses,
                         skip_reason=ws_skip_reason,
+                        **_signal_record_kwargs(side_decision),
+                    ),
+                )
+                state.round_index += 1
+                save_session_state(state_path, state)
+                consecutive_errors = 0
+                if not _sleep_until_round_end(cfg, target_round, stop_event):
+                    return {"status": "stopped"}
+                continue
+
+            if _entry_window_missed(now, entry_time):
+                missed_reason = "entry_window_missed"
+                if dry_run_once:
+                    _runtime_log(
+                        'dry-run round=' + target_round.slug
+                        + ' side=' + side
+                        + ' should_trade=False'
+                        + ' price=' + _fmt_price(price)
+                        + ' skip_reason=' + missed_reason
+                    )
+                    return {
+                        "status": "dry_run",
+                        "slug": target_round.slug,
+                        "side": side,
+                        "price": price,
+                        "should_trade": False,
+                        "skip_reason": missed_reason,
+                        "entry_time": entry_time.isoformat(),
+                        "projected_max_stake_skip_streak": 0,
+                        "signal_open_up_price": side_decision.signal_open_up_price,
+                        "signal_current_up_price": side_decision.signal_current_up_price,
+                        "signal_threshold": side_decision.signal_threshold,
+                        "signal_delta": side_decision.signal_delta,
+                        "signal_locked": side_decision.signal_locked,
+                    }
+                _runtime_log(
+                    'round=' + target_round.slug
+                    + ' skip trade due to missed entry window; reason=' + missed_reason
+                )
+                append_trade_log(
+                    log_path,
+                    TradeRecord(
+                        timestamp=datetime.now(timezone.utc),
+                        mode="paper",
+                        round_index=state.round_index,
+                        strategy=cfg.strategy_id,
+                        entry_timing=cfg.entry_timing,
+                        event_slug=target_round.slug,
+                        start_time=target_round.start_time,
+                        end_time=target_round.end_time,
+                        side=side,
+                        price=price,
+                        order_size=0.0,
+                        order_cost=0.0,
+                        expected_profit=0.0,
+                        result=None,
+                        trade_pnl=0.0,
+                        cash_pnl=state.cash_pnl,
+                        recovery_loss=state.recovery_loss,
+                        consecutive_losses=state.consecutive_losses,
+                        skip_reason=missed_reason,
                         **_signal_record_kwargs(side_decision),
                     ),
                 )
