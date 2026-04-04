@@ -1,6 +1,6 @@
 # Polymarket BTC 5m Trading Bot
 
-This repository runs the end-to-end BTC 5-minute paper-trading workflow that ships both the trading engine and the local dashboard from a single command. Operators should center on the one supported flow described below; other commands exist for debugging but are not part of the normal path.
+This repository runs the end-to-end BTC 5-minute paper-trading workflow that ships both the trading engine and the local dashboard from a single command. Operators should center on the one supported flow described below; any legacy research modules still in the repository are outside the supported runtime path.
 
 All commands assume you are working inside `D:\pythonProject\BTC_5MIN`.
 

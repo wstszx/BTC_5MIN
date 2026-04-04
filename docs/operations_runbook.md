@@ -1,6 +1,6 @@
 # BTC_5MIN Operations Runbook (PowerShell)
 
-This runbook is built around the single supported workflow: install dependencies, adjust dashboard parameters, run `python main.py`, open http://127.0.0.1:8787/, and stop with `Ctrl+C`. Other `main.py` commands remain for investigation purposes only; daily operations should follow the steps below.
+This runbook is built around the single supported workflow: install dependencies, adjust dashboard parameters, run `python main.py`, open http://127.0.0.1:8787/, and stop with `Ctrl+C`. Daily operations should follow the steps below; legacy research modules in the repository are outside the supported runtime path.
 
 Applicable path: `D:\pythonProject\BTC_5MIN`
 
