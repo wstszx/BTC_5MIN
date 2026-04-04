@@ -15,24 +15,40 @@ def load_env_file_values(path: Path) -> dict[str, str]:
         if not raw or raw.startswith("#") or "=" not in raw:
             continue
         key, value = raw.split("=", 1)
-        values[key.strip()] = value.strip()
+        key = key.strip()
+        if not key:
+            continue
+        values[key] = value.strip()
     return values
 
 
 @contextmanager
 def patched_env(overrides: dict[str, str]):
     previous: dict[str, str | None] = {}
-    for key, value in overrides.items():
-        previous[key] = os.environ.get(key)
-        os.environ[key] = value
-    try:
-        yield
-    finally:
-        for key, old_value in previous.items():
+    assigned_keys: list[str] = []
+
+    def _restore() -> None:
+        for key in reversed(assigned_keys):
+            old_value = previous.get(key)
             if old_value is None:
                 os.environ.pop(key, None)
             else:
                 os.environ[key] = old_value
+        assigned_keys.clear()
+
+    try:
+        for key, value in overrides.items():
+            previous[key] = os.environ.get(key)
+            os.environ[key] = value
+            assigned_keys.append(key)
+    except Exception:
+        _restore()
+        raise
+
+    try:
+        yield
+    finally:
+        _restore()
 
 
 def build_config_from_env_values(values: dict[str, str]) -> AppConfig:
