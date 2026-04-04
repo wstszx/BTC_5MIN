@@ -665,6 +665,89 @@ def test_run_paper_trading_refreshes_config_provider_between_iterations(tmp_path
     assert asdict(state) == initial_state_snapshot
 
 
+def test_run_paper_trading_config_provider_refreshes_default_client(tmp_path, monkeypatch):
+    created_cfgs: list[AppConfig] = []
+
+    class RecordingClient:
+        def __init__(self, cfg: AppConfig):
+            created_cfgs.append(cfg)
+
+        def find_current_and_next_rounds(self, *, now):
+            return None, None
+
+    stop_event = threading.Event()
+    sleep_calls: list[float] = []
+
+    def fake_sleep(seconds):
+        sleep_calls.append(seconds)
+        stop_event.set()
+
+    def config_provider():
+        return AppConfig(poll_interval_seconds=99)
+
+    monkeypatch.setattr("trader.PolymarketClient", RecordingClient)
+    monkeypatch.setattr("trader.time.sleep", fake_sleep)
+
+    result = run_paper_trading(
+        AppConfig(poll_interval_seconds=1),
+        state_path=tmp_path / "state.json",
+        log_path=tmp_path / "paper.csv",
+        stop_event=stop_event,
+        config_provider=config_provider,
+    )
+
+    assert result["status"] == "stopped"
+    assert sleep_calls == [99]
+    assert len(created_cfgs) == 2
+    assert created_cfgs[0].poll_interval_seconds == 1
+    assert created_cfgs[1].poll_interval_seconds == 99
+
+
+def test_run_paper_trading_stop_event_during_settlement_wait_prevents_settlement(tmp_path, monkeypatch):
+    stop_event = threading.Event()
+    sleep_calls: list[float] = []
+    settle_calls: list[str] = []
+
+    def fake_sleep(seconds):
+        sleep_calls.append(seconds)
+        stop_event.set()
+
+    def fail_settle(*args, **kwargs):
+        settle_calls.append("called")
+        raise RuntimeError("Round is not resolved yet")
+
+    monkeypatch.setattr("trader.time.sleep", fake_sleep)
+    monkeypatch.setattr("trader._settle_paper_trade", fail_settle)
+    monkeypatch.setattr("trader._sleep_until_round_end", lambda cfg, window, stop_event=None: True)
+    monkeypatch.setattr(
+        "trader._resolve_side_from_strategy",
+        lambda **kwargs: SideDecision(side="UP"),
+    )
+    monkeypatch.setattr(
+        "trader.build_trade_plan",
+        lambda *args, **kwargs: TradePlan(
+            True,
+            "UP",
+            price=0.5,
+            order_size=1.0,
+            order_cost=0.5,
+            expected_profit=0.5,
+        ),
+    )
+    monkeypatch.setattr("trader._entry_time_for_round", lambda cfg, window: datetime.now(timezone.utc))
+
+    result = run_paper_trading(
+        AppConfig(poll_interval_seconds=1),
+        client=_RoundEndMarketClient(),
+        state_path=tmp_path / "state.json",
+        log_path=tmp_path / "paper.csv",
+        stop_event=stop_event,
+    )
+
+    assert result["status"] == "stopped"
+    assert settle_calls == ["called"]
+
+
 def test_run_paper_trading_stop_event_stops_during_round_end_wait(tmp_path, monkeypatch):
     stop_event = threading.Event()
     sleep_calls: list[float] = []

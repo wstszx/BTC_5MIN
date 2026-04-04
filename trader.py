@@ -1031,7 +1031,7 @@ def _sleep_if_not_stopped(stop_event: threading.Event | None, seconds: float) ->
     if _is_stop_requested(stop_event):
         return False
     time.sleep(seconds)
-    return True
+    return not _is_stop_requested(stop_event)
 
 
 def _runtime_log(message: str) -> None:
@@ -1156,6 +1156,9 @@ def run_paper_trading(
     config_provider: Callable[[], AppConfig] | None = None,
 ) -> dict[str, Any]:
     cfg = cfg or AppConfig()
+    client_provided = client is not None
+    state_path_provided = state_path is not None
+    log_path_provided = log_path is not None
     client = client or PolymarketClient(cfg)
     state_path = state_path or cfg.logs_dir / "session_state.json"
     log_path = log_path or cfg.logs_dir / "paper_trades.csv"
@@ -1171,11 +1174,17 @@ def run_paper_trading(
     while True:
         if _is_stop_requested(stop_event):
             return {"status": "stopped"}
-        if config_provider is not None:
-            candidate_cfg = config_provider()
-            if candidate_cfg is not None:
-                cfg = candidate_cfg
         try:
+            if config_provider is not None:
+                candidate_cfg = config_provider()
+                if candidate_cfg is not None:
+                    cfg = candidate_cfg
+                    if not client_provided:
+                        client = PolymarketClient(cfg)
+                    if not state_path_provided:
+                        state_path = cfg.logs_dir / "session_state.json"
+                    if not log_path_provided:
+                        log_path = cfg.logs_dir / "paper_trades.csv"
             now = datetime.now(timezone.utc)
             _refresh_daily_session_state(state, now)
             current_round, next_round = client.find_current_and_next_rounds(now=now)
