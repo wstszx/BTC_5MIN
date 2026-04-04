@@ -127,6 +127,7 @@ class AppConfig:
     api_retry_max_delay_seconds: float = 8.0
     entry_timing: str = "OPEN"
     open_delay_seconds: int = 5
+    entry_grace_seconds: int = field(default_factory=lambda: _env_int("ENTRY_GRACE_SECONDS", 5))
     preclose_seconds: int = 30
     history_lookback_seconds: int = 900
     history_entry_fidelity_seconds: int = field(default_factory=lambda: _env_int("HISTORY_ENTRY_FIDELITY_SECONDS", 5))

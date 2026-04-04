@@ -1,0 +1,7 @@
+Runtime started: paper trading + dashboard
+Dashboard URL: http://127.0.0.1:8787/
+[2026-04-04 15:24:23 UTC] paper-trade started | strategy=2 entry_timing=OPEN poll=5s dry_run_once=False
+[2026-04-04 15:24:32 UTC] round=btc-updown-5m-1775316000 quote {source=http, up_best_ask=0.4200, up_price=0.4150, down_best_ask=N/A, down_price=0.5850}
+[2026-04-04 15:24:32 UTC] round=btc-updown-5m-1775316000 ws_runtime {ws_enabled=True, ws_available=True, ws_connected=True, reconnects=0, invalid_ops=0, connect_attempts=1, subscribed_assets=2, cached_assets=0, last_message_age_s=N/A, last_error=None}
+[2026-04-04 15:24:32 UTC] round=btc-updown-5m-1775316000 side=DOWN entry_at=2026-04-04T15:20:05+00:00 signal={locked=False} quote_source=http
+[2026-04-04 15:24:32 UTC] round=btc-updown-5m-1775316000 skip trade due to missed entry window; reason=entry_window_missed

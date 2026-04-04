@@ -1010,8 +1010,8 @@ def _entry_time_for_round(cfg: AppConfig, window: MarketWindow) -> datetime:
     return window.start_time + timedelta(seconds=cfg.open_delay_seconds)
 
 
-def _entry_window_missed(now: datetime, entry_time: datetime) -> bool:
-    return now > entry_time
+def _entry_window_missed(now: datetime, entry_time: datetime, *, grace_seconds: float = 0.0) -> bool:
+    return now > (entry_time + timedelta(seconds=max(0.0, grace_seconds)))
 
 
 def _sleep_until_round_end(
@@ -1364,7 +1364,7 @@ def run_paper_trading(
                     return {"status": "stopped"}
                 continue
 
-            if _entry_window_missed(now, entry_time):
+            if _entry_window_missed(now, entry_time, grace_seconds=cfg.entry_grace_seconds):
                 missed_reason = "entry_window_missed"
                 if dry_run_once:
                     _runtime_log(

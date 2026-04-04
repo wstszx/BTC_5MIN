@@ -574,6 +574,36 @@ def test_run_paper_trading_dry_run_skips_when_entry_window_missed(tmp_path):
     assert result["skip_reason"] == "entry_window_missed"
 
 
+def test_run_paper_trading_dry_run_allows_trade_within_entry_grace_window(tmp_path):
+    cfg = AppConfig(strategy_id=2)
+
+    class _GraceWindowPaperClient(_LiveMarketClient):
+        def find_current_and_next_rounds(self, *, now):
+            window = MarketWindow(
+                event_id="evt-grace",
+                market_id="mkt-grace",
+                slug="btc-updown-5m-grace",
+                title="BTC 5m Grace",
+                start_time=now - timedelta(seconds=7),
+                end_time=now + timedelta(minutes=4, seconds=53),
+                up_token_id="up-token",
+                down_token_id="down-token",
+            )
+            return window, None
+
+    result = run_paper_trading(
+        cfg,
+        client=_GraceWindowPaperClient(),
+        state_path=tmp_path / "state.json",
+        log_path=tmp_path / "paper.csv",
+        dry_run_once=True,
+    )
+
+    assert result["status"] == "dry_run"
+    assert result["should_trade"] is True
+    assert result["skip_reason"] is None
+
+
 def test_run_paper_trading_dry_run_resets_daily_loss_cap_after_day_rollover(tmp_path):
     cfg = AppConfig(strategy_id=2, daily_loss_cap=50.0)
     state_path = tmp_path / "state.json"
@@ -596,9 +626,23 @@ def test_run_paper_trading_dry_run_resets_daily_loss_cap_after_day_rollover(tmp_
         encoding="utf-8",
     )
 
+    class _GraceWindowPaperClient(_LiveMarketClient):
+        def find_current_and_next_rounds(self, *, now):
+            window = MarketWindow(
+                event_id="evt-reset",
+                market_id="mkt-reset",
+                slug="btc-updown-5m-reset",
+                title="BTC 5m Reset",
+                start_time=now - timedelta(seconds=7),
+                end_time=now + timedelta(minutes=4, seconds=53),
+                up_token_id="up-token",
+                down_token_id="down-token",
+            )
+            return window, None
+
     result = run_paper_trading(
         cfg,
-        client=_LiveMarketClient(),
+        client=_GraceWindowPaperClient(),
         state_path=state_path,
         log_path=tmp_path / "paper.csv",
         dry_run_once=True,

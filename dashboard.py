@@ -477,7 +477,11 @@ class DashboardState:
         price = resolve_quote_price(side, quote) if side in {"UP", "DOWN"} else None
         ws_stale = _ws_is_stale_for_trade(client, cfg)
 
-        if side in {"UP", "DOWN"} and not ws_stale and not _entry_window_missed(now, entry_time):
+        if side in {"UP", "DOWN"} and not ws_stale and not _entry_window_missed(
+            now,
+            entry_time,
+            grace_seconds=cfg.entry_grace_seconds,
+        ):
             plan_obj = build_trade_plan(
                 state=session_state,
                 side=side,
@@ -503,7 +507,11 @@ class DashboardState:
         else:
             if ws_stale:
                 reason = "ws_stale"
-            elif side in {"UP", "DOWN"} and _entry_window_missed(now, entry_time):
+            elif side in {"UP", "DOWN"} and _entry_window_missed(
+                now,
+                entry_time,
+                grace_seconds=cfg.entry_grace_seconds,
+            ):
                 reason = "entry_window_missed"
             else:
                 reason = side_decision.reason or "signal_unavailable"
