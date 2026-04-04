@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sys
 import threading
 import time
 from pathlib import Path
@@ -131,7 +132,7 @@ def run_single_command_runtime(
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    args = list(argv or [])
+    args = list(sys.argv[1:] if argv is None else argv)
     if args:
         raise SystemExit(2)
     return run_single_command_runtime(

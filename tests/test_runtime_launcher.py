@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sys
 import threading
 import time
 from pathlib import Path
@@ -7,6 +8,7 @@ from pathlib import Path
 import pytest
 
 import main
+from config import AppConfig, build_config_from_env_values, load_env_file_values
 
 
 def test_main_without_args_starts_single_command_runtime(monkeypatch, tmp_path: Path):
@@ -28,11 +30,52 @@ def test_main_without_args_starts_single_command_runtime(monkeypatch, tmp_path: 
     assert calls["port"] == 8787
 
 
+def test_main_without_explicit_argv_uses_sys_argv(monkeypatch):
+    calls = {"count": 0}
+
+    def fake_run(*, env_file, host, port):
+        calls["count"] += 1
+        return 0
+
+    monkeypatch.setattr(main, "run_single_command_runtime", fake_run)
+    monkeypatch.setattr(sys, "argv", ["main.py", "paper-trade"])
+
+    with pytest.raises(SystemExit) as exc:
+        main.main()
+
+    assert exc.value.code == 2
+    assert calls["count"] == 0
+
+
 def test_main_rejects_legacy_subcommands():
     with pytest.raises(SystemExit) as exc:
         main.main(["paper-trade"])
 
     assert exc.value.code == 2
+
+
+def test_load_env_file_values_reads_simple_key_value_pairs(tmp_path: Path):
+    env_file = tmp_path / ".env.dashboard"
+    env_file.write_text("STRATEGY_ID=5\nMAX_STAKE=9.5\n", encoding="utf-8")
+
+    values = load_env_file_values(env_file)
+
+    assert values == {"STRATEGY_ID": "5", "MAX_STAKE": "9.5"}
+
+
+def test_build_config_from_env_values_applies_dashboard_values():
+    cfg = build_config_from_env_values(
+        {
+            "STRATEGY_ID": "5",
+            "MAX_STAKE": "9.5",
+            "TARGET_PROFIT": "0.8",
+        }
+    )
+
+    assert isinstance(cfg, AppConfig)
+    assert cfg.strategy_id == 5
+    assert cfg.max_stake == 9.5
+    assert cfg.target_profit == 0.8
 
 
 def test_run_single_command_runtime_loads_shared_config_for_startup_and_refresh(monkeypatch, tmp_path: Path):

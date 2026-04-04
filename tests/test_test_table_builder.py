@@ -3,7 +3,10 @@ from __future__ import annotations
 import csv
 from pathlib import Path
 
+import pytest
+
 from config import AppConfig
+import main
 from test_table_builder import build_augmented_test_table
 
 
@@ -50,15 +53,8 @@ def test_build_augmented_test_table_fills_missing_prices_and_adds_summary(tmp_pa
     assert raw.startswith(b"\xef\xbb\xbf")
 
 
-def test_cli_command_is_registered():
-    from main import build_parser
+def test_main_rejects_legacy_build_test_table_subcommand():
+    with pytest.raises(SystemExit) as exc:
+        main.main(["build-test-table"])
 
-    parser = build_parser()
-    choices = parser._subparsers._group_actions[0].choices
-    assert "build-test-table" in choices
-    build_table_parser = choices["build-test-table"]
-    option_dests = {action.dest for action in build_table_parser._actions}
-    assert "daily_loss_cap" in option_dests
-    assert "max_consecutive_losses" in option_dests
-    assert "bet_sizing_mode" in option_dests
-    assert "base_order_cost" in option_dests
+    assert exc.value.code == 2

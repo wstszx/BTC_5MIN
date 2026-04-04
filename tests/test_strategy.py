@@ -1,7 +1,7 @@
 import pytest
 
 from config import AppConfig
-from main import build_parser
+import main
 from strategy import get_side_for_round
 
 
@@ -26,10 +26,11 @@ def test_strategy_sequences(strategy_id, expected):
     assert actual == expected
 
 
-def test_cli_exposes_expected_commands():
-    parser = build_parser()
-    choices = parser._subparsers._group_actions[0].choices
-    assert {"fetch-history", "backtest", "analyze-streak", "research-strategy", "paper-trade", "live-trade"} <= set(choices)
+def test_main_rejects_legacy_cli_subcommands():
+    with pytest.raises(SystemExit) as exc:
+        main.main(["backtest"])
+
+    assert exc.value.code == 2
 
 
 def test_signal_strategy_chooses_up_when_momentum_exceeds_threshold():
