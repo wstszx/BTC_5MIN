@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import csv
 import json
+import threading
 import time
+from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -1013,6 +1015,17 @@ def _sleep_until_round_end(cfg: AppConfig, window: MarketWindow) -> None:
         time.sleep(cfg.poll_interval_seconds)
 
 
+def _is_stop_requested(stop_event: threading.Event | None) -> bool:
+    return bool(stop_event and stop_event.is_set())
+
+
+def _sleep_if_not_stopped(stop_event: threading.Event | None, seconds: float) -> bool:
+    if _is_stop_requested(stop_event):
+        return False
+    time.sleep(seconds)
+    return True
+
+
 def _runtime_log(message: str) -> None:
     print('[' + datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S') + ' UTC] ' + message, flush=True)
 
@@ -1131,6 +1144,8 @@ def run_paper_trading(
     state_path: Path | None = None,
     log_path: Path | None = None,
     dry_run_once: bool = False,
+    stop_event: threading.Event | None = None,
+    config_provider: Callable[[], AppConfig] | None = None,
 ) -> dict[str, Any]:
     cfg = cfg or AppConfig()
     client = client or PolymarketClient(cfg)
@@ -1146,6 +1161,12 @@ def run_paper_trading(
     )
 
     while True:
+        if _is_stop_requested(stop_event):
+            return {"status": "stopped"}
+        if config_provider is not None:
+            candidate_cfg = config_provider()
+            if candidate_cfg is not None:
+                cfg = candidate_cfg
         try:
             now = datetime.now(timezone.utc)
             _refresh_daily_session_state(state, now)
@@ -1156,7 +1177,8 @@ def run_paper_trading(
                     return {"status": "no_market"}
                 _runtime_log('no active round found; waiting ' + str(cfg.poll_interval_seconds) + 's')
                 consecutive_errors = 0
-                time.sleep(cfg.poll_interval_seconds)
+                if not _sleep_if_not_stopped(stop_event, cfg.poll_interval_seconds):
+                    return {"status": "stopped"}
                 continue
 
             entry_time = _entry_time_for_round(cfg, target_round)
@@ -1208,7 +1230,8 @@ def run_paper_trading(
                         + ' weak/no signal before entry; sleep ' + str(sleep_seconds) + 's then retry'
                     )
                     consecutive_errors = 0
-                    time.sleep(sleep_seconds)
+                    if not _sleep_if_not_stopped(stop_event, sleep_seconds):
+                        return {"status": "stopped"}
                     continue
                 _runtime_log(
                     'round=' + target_round.slug
@@ -1280,7 +1303,8 @@ def run_paper_trading(
                         + ' ws stale before entry; sleep ' + str(sleep_seconds) + 's then retry'
                     )
                     consecutive_errors = 0
-                    time.sleep(sleep_seconds)
+                    if not _sleep_if_not_stopped(stop_event, sleep_seconds):
+                        return {"status": "stopped"}
                     continue
                 _runtime_log(
                     'round=' + target_round.slug
@@ -1377,7 +1401,8 @@ def run_paper_trading(
                         + ' not tradable before entry; sleep ' + str(sleep_seconds) + 's then retry'
                     )
                     consecutive_errors = 0
-                    time.sleep(sleep_seconds)
+                    if not _sleep_if_not_stopped(stop_event, sleep_seconds):
+                        return {"status": "stopped"}
                     continue
                 _runtime_log(
                     'round=' + target_round.slug
@@ -1438,7 +1463,8 @@ def run_paper_trading(
                     + ' waiting for entry; sleep ' + str(sleep_seconds) + 's'
                 )
                 consecutive_errors = 0
-                time.sleep(sleep_seconds)
+                if not _sleep_if_not_stopped(stop_event, sleep_seconds):
+                    return {"status": "stopped"}
                 continue
 
             _runtime_log('round=' + target_round.slug + ' entered trade; waiting for settlement')
@@ -1453,7 +1479,8 @@ def run_paper_trading(
                     # Polymarket resolution metadata can lag a few polling cycles after round end.
                     if "is not resolved yet" in str(exc):
                         _runtime_log('round=' + target_round.slug + ' pending resolution')
-                        time.sleep(cfg.poll_interval_seconds)
+                        if not _sleep_if_not_stopped(stop_event, cfg.poll_interval_seconds):
+                            return {"status": "stopped"}
                         continue
                     raise
             settled_state.round_index = state.round_index + 1
@@ -1499,4 +1526,5 @@ def run_paper_trading(
             consecutive_errors += 1
             backoff = _runtime_backoff_seconds(cfg, consecutive_errors)
             _runtime_log('runtime error #' + str(consecutive_errors) + ': ' + str(exc) + ' | backoff=' + str(backoff) + 's')
-            time.sleep(backoff)
+            if not _sleep_if_not_stopped(stop_event, backoff):
+                return {"status": "stopped"}

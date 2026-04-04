@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import threading
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -27,6 +28,11 @@ class _TransientPaperClient:
         if self.calls == 1:
             raise requests.exceptions.SSLError("temporary ssl failure")
         raise KeyboardInterrupt
+
+
+class _NoMarketClient:
+    def find_current_and_next_rounds(self, *, now):
+        return None, None
 
 
 class _LiveMarketClient:
@@ -567,3 +573,57 @@ def test_run_paper_trading_dry_run_resets_daily_loss_cap_after_day_rollover(tmp_
 
     assert result["status"] == "dry_run"
     assert result["should_trade"] is True
+
+
+def test_run_paper_trading_stops_when_stop_event_is_set(tmp_path, monkeypatch):
+    stop_event = threading.Event()
+    sleep_calls = {"count": 0}
+
+    def fake_sleep(_seconds):
+        sleep_calls["count"] += 1
+        stop_event.set()
+
+    monkeypatch.setattr("trader.time.sleep", fake_sleep)
+
+    result = run_paper_trading(
+        AppConfig(poll_interval_seconds=1),
+        client=_NoMarketClient(),
+        state_path=tmp_path / "state.json",
+        log_path=tmp_path / "paper.csv",
+        stop_event=stop_event,
+    )
+
+    assert result["status"] == "stopped"
+    assert sleep_calls["count"] == 1
+
+
+def test_run_paper_trading_refreshes_config_between_iterations(tmp_path, monkeypatch):
+    stop_event = threading.Event()
+    sleep_calls: list[float] = []
+    config_sequence = [1.0, 5.0]
+    config_calls: list[float] = []
+
+    def fake_sleep(seconds):
+        sleep_calls.append(seconds)
+        if len(sleep_calls) == 2:
+            stop_event.set()
+
+    def config_provider():
+        value = config_sequence.pop(0) if config_sequence else 5.0
+        config_calls.append(value)
+        return AppConfig(poll_interval_seconds=value)
+
+    monkeypatch.setattr("trader.time.sleep", fake_sleep)
+
+    result = run_paper_trading(
+        AppConfig(poll_interval_seconds=1),
+        client=_NoMarketClient(),
+        state_path=tmp_path / "state.json",
+        log_path=tmp_path / "paper.csv",
+        stop_event=stop_event,
+        config_provider=config_provider,
+    )
+
+    assert result["status"] == "stopped"
+    assert sleep_calls == [1.0, 5.0]
+    assert config_calls == [1.0, 5.0]
