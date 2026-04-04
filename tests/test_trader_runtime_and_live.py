@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import threading
+from dataclasses import asdict
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -618,7 +619,7 @@ def test_run_paper_trading_refreshes_config_provider_between_iterations(tmp_path
     sleep_calls: list[float] = []
     config_sequence = [1.0, 5.0]
     config_calls: list[float] = []
-    state_snapshot = {
+    initial_state_data = {
         "round_index": 1,
         "cash_pnl": 10.0,
         "recovery_loss": 2.0,
@@ -631,8 +632,11 @@ def test_run_paper_trading_refreshes_config_provider_between_iterations(tmp_path
         "daily_realized_pnl": 5.0,
         "current_day": "2026-04-01",
     }
-    initial_state_text = json.dumps(state_snapshot, indent=2)
-    (tmp_path / "state.json").write_text(initial_state_text, encoding="utf-8")
+    state = SessionState(**initial_state_data)
+    initial_state_snapshot = asdict(state)
+    monkeypatch.setattr("trader.load_session_state", lambda path: state)
+    monkeypatch.setattr("trader.save_session_state", lambda path, payload: None)
+    monkeypatch.setattr("trader._refresh_daily_session_state", lambda state_arg, now: False)
 
     def fake_sleep(seconds):
         sleep_calls.append(seconds)
@@ -658,7 +662,7 @@ def test_run_paper_trading_refreshes_config_provider_between_iterations(tmp_path
     assert result["status"] == "stopped"
     assert sleep_calls == [1.0, 5.0]
     assert config_calls == [1.0, 5.0]
-    assert (tmp_path / "state.json").read_text(encoding="utf-8") == initial_state_text
+    assert asdict(state) == initial_state_snapshot
 
 
 def test_run_paper_trading_stop_event_stops_during_round_end_wait(tmp_path, monkeypatch):
