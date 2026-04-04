@@ -284,3 +284,19 @@ def test_dashboard_assets_include_entry_window_missed_reason_label():
     js = _dashboard_js()
 
     assert "entry_window_missed" in js
+
+
+def test_dashboard_assets_use_planned_entry_copy():
+    html = _dashboard_html()
+    js = _dashboard_js()
+
+    assert "计划入场" in html
+    assert "距离计划入场" in js
+    assert "已过计划入场" in js
+
+
+def test_dashboard_reason_fallback_is_human_friendly():
+    js = _dashboard_js()
+
+    assert "未识别原因：" in js
+    assert "可尝试刷新页面" in js

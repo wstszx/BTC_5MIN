@@ -861,7 +861,7 @@ def _dashboard_html() -> str:
             <div id=\"marketTitle\" class=\"title\">--</div>
           </div>
           <div class=\"timer-wrap\">
-            <div id=\"entryCountdownLabel\" class=\"timer-label\">距离入场</div>
+            <div id=\"entryCountdownLabel\" class=\"timer-label\">距离计划入场</div>
             <div id=\"entryCountdown\" class=\"timer-val\">--:--</div>
             <div id=\"entrySyncAt\" class=\"timer-label\">同步于 --</div>
           </div>
@@ -2104,7 +2104,7 @@ function reasonText(reason) {
   if (REASON_LABELS[reason]) {
     return REASON_LABELS[reason];
   }
-  return '未知原因（' + String(reason) + '）';
+  return '未识别原因：' + String(reason) + '（可尝试刷新页面）';
 }
 
 function formatConfigLabel(key, labels) {
@@ -2242,7 +2242,7 @@ function fmtDuration(value) {
 function renderEntryCountdown(secondsToEntry) {
   const sec = toNum(secondsToEntry);
   if (sec === null) {
-    el('entryCountdownLabel').textContent = '距离入场';
+    el('entryCountdownLabel').textContent = '距离计划入场';
     el('entryCountdown').textContent = '--:--';
     el('entrySyncAt').textContent = '同步于 --';
     state.countdownSnapshotAtMs = null;
@@ -2250,10 +2250,10 @@ function renderEntryCountdown(secondsToEntry) {
     return;
   }
   if (sec >= 0) {
-    el('entryCountdownLabel').textContent = '距离入场';
+    el('entryCountdownLabel').textContent = '距离计划入场';
     el('entryCountdown').textContent = fmtDuration(sec);
   } else {
-    el('entryCountdownLabel').textContent = '已过入场';
+    el('entryCountdownLabel').textContent = '已过计划入场';
     el('entryCountdown').textContent = fmtDuration(sec);
   }
   state.countdownSnapshotAtMs = Date.now();
@@ -2268,10 +2268,10 @@ function tickEntryCountdown() {
   const elapsed = (Date.now() - state.countdownSnapshotAtMs) / 1000;
   const liveSeconds = state.countdownBaseSeconds - elapsed;
   if (liveSeconds >= 0) {
-    el('entryCountdownLabel').textContent = '距离入场';
+    el('entryCountdownLabel').textContent = '距离计划入场';
     el('entryCountdown').textContent = fmtDuration(liveSeconds);
   } else {
-    el('entryCountdownLabel').textContent = '已过入场';
+    el('entryCountdownLabel').textContent = '已过计划入场';
     el('entryCountdown').textContent = fmtDuration(liveSeconds);
   }
 }
