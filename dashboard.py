@@ -6,7 +6,6 @@ import json
 import os
 import threading
 from collections import deque
-from contextlib import contextmanager
 from dataclasses import asdict
 from datetime import datetime, timezone
 from http import HTTPStatus
@@ -15,7 +14,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
-from config import AppConfig
+from config import AppConfig, build_config_from_env_values, load_env_file_values
 from paper_report import summarize_paper_trades
 from polymarket_api import PolymarketClient
 from risk_and_sizing import build_trade_plan
@@ -33,37 +32,6 @@ def _fmt_env(value: Any) -> str:
     if isinstance(value, bool):
         return "true" if value else "false"
     return str(value)
-
-
-@contextmanager
-def _patched_environ(overrides: dict[str, str]):
-    previous: dict[str, str | None] = {}
-    for key, value in overrides.items():
-        previous[key] = os.environ.get(key)
-        os.environ[key] = value
-    try:
-        yield
-    finally:
-        for key, old_value in previous.items():
-            if old_value is None:
-                os.environ.pop(key, None)
-            else:
-                os.environ[key] = old_value
-
-
-def _read_env_file(path: Path) -> dict[str, str]:
-    if not path.exists():
-        return {}
-    values: dict[str, str] = {}
-    for raw_line in path.read_text(encoding="utf-8").splitlines():
-        line = raw_line.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        key, value = line.split("=", 1)
-        key = key.strip()
-        if key:
-            values[key] = value.strip()
-    return values
 
 
 def _write_env_file(path: Path, values: dict[str, str]) -> None:
@@ -376,7 +344,7 @@ class DashboardState:
     def __init__(self, *, env_file: Path) -> None:
         self.env_file = Path(env_file)
         self._lock = threading.RLock()
-        self._env_values = _read_env_file(self.env_file)
+        self._env_values = load_env_file_values(self.env_file)
         self._cfg = self._build_config(self._env_values)
         self._client = PolymarketClient(self._cfg)
         self._last_saved_at: datetime | None = None
@@ -389,8 +357,7 @@ class DashboardState:
             client.close()
 
     def _build_config(self, env_values: dict[str, str]) -> AppConfig:
-        with _patched_environ(env_values):
-            return AppConfig()
+        return build_config_from_env_values(env_values)
 
     def _refresh_runtime(self) -> None:
         with self._lock:

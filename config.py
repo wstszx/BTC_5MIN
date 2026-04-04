@@ -1,8 +1,43 @@
 from __future__ import annotations
 
 import os
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
+
+
+def load_env_file_values(path: Path) -> dict[str, str]:
+    if not path.exists():
+        return {}
+    values: dict[str, str] = {}
+    for line in path.read_text(encoding="utf-8").splitlines():
+        raw = line.strip()
+        if not raw or raw.startswith("#") or "=" not in raw:
+            continue
+        key, value = raw.split("=", 1)
+        values[key.strip()] = value.strip()
+    return values
+
+
+@contextmanager
+def patched_env(overrides: dict[str, str]):
+    previous: dict[str, str | None] = {}
+    for key, value in overrides.items():
+        previous[key] = os.environ.get(key)
+        os.environ[key] = value
+    try:
+        yield
+    finally:
+        for key, old_value in previous.items():
+            if old_value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = old_value
+
+
+def build_config_from_env_values(values: dict[str, str]) -> AppConfig:
+    with patched_env(values):
+        return AppConfig()
 
 
 def _env_bool(name: str, default: bool) -> bool:
