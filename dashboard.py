@@ -6,7 +6,7 @@ import json
 import os
 import threading
 from collections import deque
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -711,16 +711,43 @@ class _DashboardRequestHandler(BaseHTTPRequestHandler):
 class DashboardRuntime:
     server: ThreadingHTTPServer
     state: DashboardState
+    _serve_started: threading.Event = field(default_factory=threading.Event, init=False, repr=False)
+    _shutdown_requested: threading.Event = field(default_factory=threading.Event, init=False, repr=False)
+    _shutdown_lock: threading.Lock = field(default_factory=threading.Lock, init=False, repr=False)
 
     def serve_forever(self) -> None:
-        self.server.serve_forever()
+        self._serve_started.set()
+        try:
+            if self._shutdown_requested.is_set():
+                return
+            self.server.serve_forever()
+        finally:
+            self._serve_started.clear()
 
     def shutdown(self) -> None:
-        self.server.shutdown()
+        if self._shutdown_requested.is_set():
+            return
+        with self._shutdown_lock:
+            if self._shutdown_requested.is_set():
+                return
+            self._shutdown_requested.set()
+        if self._serve_started.is_set():
+            self._shutdown_server()
+
+    def _shutdown_server(self) -> None:
+        try:
+            self.server.shutdown()
+        except OSError:
+            pass
 
     def close(self) -> None:
-        self.server.server_close()
-        self.state.close()
+        try:
+            self.shutdown()
+        finally:
+            try:
+                self.server.server_close()
+            finally:
+                self.state.close()
 
 
 def create_dashboard_runtime(

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import threading
+import time
 from pathlib import Path
 
 from dashboard import (
@@ -18,6 +19,8 @@ def test_create_dashboard_runtime_uses_requested_env_file(tmp_path: Path):
     try:
         assert runtime.state.env_file == tmp_path / ".env.dashboard"
         assert runtime.server.server_address[0] == "127.0.0.1"
+        payload = runtime.state.get_config_payload()
+        assert payload["env_file"] == str(tmp_path / ".env.dashboard")
     finally:
         runtime.close()
 
@@ -30,6 +33,28 @@ def test_dashboard_runtime_can_shutdown_cleanly(tmp_path: Path):
     thread.join(timeout=2)
     assert not thread.is_alive()
     runtime.close()
+
+
+def test_dashboard_runtime_close_stops_active_server(tmp_path: Path):
+    runtime = create_dashboard_runtime(host="127.0.0.1", port=0, env_file=tmp_path / ".env.dashboard")
+    thread = threading.Thread(target=runtime.serve_forever)
+    thread.start()
+    time.sleep(0.1)
+    runtime.close()
+    thread.join(timeout=2)
+    assert not thread.is_alive()
+
+
+def test_dashboard_runtime_shutdown_close_idempotent(tmp_path: Path):
+    runtime = create_dashboard_runtime(host="127.0.0.1", port=0, env_file=tmp_path / ".env.dashboard")
+    runtime.shutdown()
+    runtime.shutdown()
+    thread = threading.Thread(target=runtime.serve_forever)
+    thread.start()
+    runtime.close()
+    runtime.close()
+    thread.join(timeout=2)
+    assert not thread.is_alive()
 
 def test_dashboard_config_roundtrip_updates_env_file(tmp_path: Path):
     env_file = tmp_path / ".env.dashboard"
