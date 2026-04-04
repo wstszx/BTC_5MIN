@@ -618,6 +618,21 @@ def test_run_paper_trading_refreshes_config_provider_between_iterations(tmp_path
     sleep_calls: list[float] = []
     config_sequence = [1.0, 5.0]
     config_calls: list[float] = []
+    state_snapshot = {
+        "round_index": 1,
+        "cash_pnl": 10.0,
+        "recovery_loss": 2.0,
+        "consecutive_losses": 0,
+        "consecutive_max_stake_skips": 0,
+        "signal_round_slug": None,
+        "signal_round_open_up_price": None,
+        "signal_round_locked_side": None,
+        "stop_loss_count": 0,
+        "daily_realized_pnl": 5.0,
+        "current_day": "2026-04-01",
+    }
+    initial_state_text = json.dumps(state_snapshot, indent=2)
+    (tmp_path / "state.json").write_text(initial_state_text, encoding="utf-8")
 
     def fake_sleep(seconds):
         sleep_calls.append(seconds)
@@ -643,6 +658,7 @@ def test_run_paper_trading_refreshes_config_provider_between_iterations(tmp_path
     assert result["status"] == "stopped"
     assert sleep_calls == [1.0, 5.0]
     assert config_calls == [1.0, 5.0]
+    assert (tmp_path / "state.json").read_text(encoding="utf-8") == initial_state_text
 
 
 def test_run_paper_trading_stop_event_stops_during_round_end_wait(tmp_path, monkeypatch):
