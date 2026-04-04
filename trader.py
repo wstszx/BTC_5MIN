@@ -1180,7 +1180,7 @@ def run_paper_trading(
                 if candidate_cfg is not None:
                     cfg = candidate_cfg
                     if not client_provided:
-                        client = PolymarketClient(cfg)
+                        client.config = cfg
                     if not state_path_provided:
                         state_path = cfg.logs_dir / "session_state.json"
                     if not log_path_provided:

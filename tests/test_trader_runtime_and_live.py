@@ -666,11 +666,12 @@ def test_run_paper_trading_refreshes_config_provider_between_iterations(tmp_path
 
 
 def test_run_paper_trading_config_provider_refreshes_default_client(tmp_path, monkeypatch):
-    created_cfgs: list[AppConfig] = []
+    client_instances: list["RecordingClient"] = []
 
     class RecordingClient:
         def __init__(self, cfg: AppConfig):
-            created_cfgs.append(cfg)
+            self.config = cfg
+            client_instances.append(self)
 
         def find_current_and_next_rounds(self, *, now):
             return None, None
@@ -698,9 +699,8 @@ def test_run_paper_trading_config_provider_refreshes_default_client(tmp_path, mo
 
     assert result["status"] == "stopped"
     assert sleep_calls == [99]
-    assert len(created_cfgs) == 2
-    assert created_cfgs[0].poll_interval_seconds == 1
-    assert created_cfgs[1].poll_interval_seconds == 99
+    assert len(client_instances) == 1
+    assert client_instances[0].config.poll_interval_seconds == 99
 
 
 def test_run_paper_trading_stop_event_during_settlement_wait_prevents_settlement(tmp_path, monkeypatch):
