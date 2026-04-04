@@ -129,6 +129,28 @@ Recommended structure:
 
 This avoids requiring the operator to open multiple shells while still keeping each runtime concern isolated.
 
+### Configuration Source of Truth
+
+The combined runtime must not allow the dashboard and the paper-trading loop to drift onto different effective configs.
+
+The current dashboard already reads and writes `.env.dashboard`, while `AppConfig` normally reads process environment variables. If that behavior is left unchanged, the operator could edit parameters in the dashboard while the paper trader keeps using stale values.
+
+The single-command runtime should therefore adopt one effective config source:
+
+- `.env.dashboard` becomes the operator-facing runtime config file
+- the launcher loads initial config from that file before starting workers
+- the dashboard continues to edit that same file
+- the paper-trading runtime reads from the same effective values rather than a separate environment snapshot
+
+Recommended behavior:
+
+1. Startup loads `.env.dashboard` if present, then builds `AppConfig` from those values.
+2. Dashboard saves continue writing to `.env.dashboard`.
+3. Paper trading refreshes config from the same source at a safe boundary, preferably between polling cycles or before entering the next round.
+4. If a dashboard save is invalid, the existing validated config remains active and the error stays visible in the UI.
+
+This keeps the dashboard's editable settings and the trader's actual behavior aligned in one-process operation.
+
 ## Shutdown Design
 
 Shutdown behavior is a core requirement.
@@ -152,6 +174,10 @@ If `127.0.0.1:8787` is already occupied, startup should fail loudly and exit. Th
 ### Trading API Failures
 
 The paper-trading loop should keep its current retry and backoff behavior for transient Polymarket failures. A brief upstream issue should not kill the combined runtime.
+
+### Invalid Runtime Config Update
+
+If the operator saves invalid values through the dashboard, the runtime should reject the update without switching the paper trader onto a broken configuration. The last valid config should remain active until a valid save replaces it.
 
 ### Partial Startup Failure
 
@@ -226,6 +252,7 @@ Validation should cover:
 - Keep orchestration code small and focused.
 - Reuse the existing `AppConfig`, dashboard state, session-state file, and paper-trade CSV flow.
 - Prefer adding explicit stop hooks over relying on daemon-thread termination.
+- Treat `.env.dashboard` as the shared runtime config source for the combined launcher path.
 - Avoid deleting older tools until the single-command runtime is verified stable.
 
 ## Recommended Implementation Order
