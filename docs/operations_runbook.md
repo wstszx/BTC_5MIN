@@ -1,8 +1,8 @@
 # BTC_5MIN Operations Runbook (PowerShell)
 
-This runbook is built around the single supported workflow: install dependencies, adjust dashboard parameters, run `python main.py`, open http://127.0.0.1:8787/, and stop with `Ctrl+C`. Daily operations should follow the steps below; legacy research modules in the repository are outside the supported runtime path.
+This runbook is built around the single supported workflow: install dependencies, tune `.env.dashboard`, run `python main.py`, open [http://127.0.0.1:8787/](http://127.0.0.1:8787/), and stop with `Ctrl+C`. Daily operations should follow the steps below; legacy research modules in the repository are outside the supported runtime path.
 
-Applicable path: `D:\pythonProject\BTC_5MIN`
+Run the commands below from the repository root, for example `D:\pythonProject\BTC_5MIN`.
 
 ## 1. Preparation
 
@@ -13,7 +13,7 @@ python -m pip install -r requirements.txt
 
 ## 2. Configure parameters
 
-All runtime knobs are surfaced through `.env.dashboard`. Edit that file before launching, or use the dashboard editor after launching—either way the changes are persisted for the next run.
+All supported runtime knobs are surfaced through `.env.dashboard`. Edit that file before launch, or use the dashboard editor after launch to save changes for the next run.
 
 Key fields to review:
 
@@ -23,9 +23,8 @@ Key fields to review:
 - `MAX_CONSECUTIVE_LOSSES`
 - `SIGNAL_MOMENTUM_THRESHOLD`
 - `SIGNAL_WEAK_SIGNAL_MODE`
-- `LIVE_TRADING_ENABLED` (keep `false` to stay in paper trading)
 
-These values can also be overridden via environment variables; `python main.py` prefers environment variables, then `.env.dashboard`, then the defaults in `config.py`.
+For overlapping keys, `.env.dashboard` is the source of truth. If a key is missing there, `python main.py` can still read it from temporary environment variables for that launch, and anything still missing falls back to the defaults in `config.py`. Environment-variable values do not get written back to `.env.dashboard`.
 
 ## 3. Launch the single entrypoint
 
@@ -33,21 +32,24 @@ These values can also be overridden via environment variables; `python main.py` 
 python main.py
 ```
 
-This command starts the continuous paper-trading loop and the local dashboard simultaneously. A successful launch prints `Dashboard running at http://127.0.0.1:8787` and `Config file: .env.dashboard` in the terminal.
+This command starts the continuous paper-trading loop and the local dashboard together. A successful launch prints these lines in the terminal:
+
+- `Runtime started: paper trading + dashboard`
+- `Dashboard URL: http://127.0.0.1:8787/`
 
 ## 4. Monitor and interact
 
-Open http://127.0.0.1:8787 in your browser to inspect the current quote, signal reasoning, risk controls, and the live config editor. Every change written through the editor updates `.env.dashboard`.
+Open [http://127.0.0.1:8787/](http://127.0.0.1:8787/) in your browser to inspect the current quote, signal reasoning, risk controls, and the live config editor. Every save from the editor updates `.env.dashboard`.
 
 Supporting files and directories:
 
-- `logs/paper_trades.csv`: paper trade records kept for later inspection or offline analysis.
-- `logs/session_state.json`: keeps track of rounds, cumulative PnL, and streak counters. Delete it to reset the paper trading state.
-- `data/`: where history exports and research outputs live.
+- `logs/paper_trades.csv`: paper trade records for later inspection or offline analysis.
+- `logs/session_state.json`: tracks rounds, cumulative PnL, and streak counters. Delete it to reset paper-trading state.
+- `data/`: stores history exports and research outputs.
 
 ## 5. Stop
 
-Press `Ctrl+C` to terminate `python main.py`. It shuts down the dashboard first and then the trading loop, while leaving logs in `logs/` for later review.
+Press `Ctrl+C` to stop `python main.py`. The runtime asks both the dashboard and the paper-trading loop to stop cleanly, while leaving logs in `logs/` for later review.
 
 ## 6. Troubleshooting
 

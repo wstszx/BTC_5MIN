@@ -1,8 +1,8 @@
 # Polymarket BTC 5m Trading Bot
 
-This repository runs the end-to-end BTC 5-minute paper-trading workflow that ships both the trading engine and the local dashboard from a single command. Operators should center on the one supported flow described below; any legacy research modules still in the repository are outside the supported runtime path.
+This repository runs the BTC 5-minute paper-trading workflow from a single command. Operators should use the one supported flow below; legacy research modules that still exist in the repository are outside the supported runtime path.
 
-All commands assume you are working inside `D:\pythonProject\BTC_5MIN`.
+Run the commands below from the repository root, for example `D:\pythonProject\BTC_5MIN`.
 
 ## 1. Install dependencies
 
@@ -13,7 +13,9 @@ python -m pip install -r requirements.txt
 
 ## 2. Configure parameters
 
-`python main.py` references `.env.dashboard` first and then `config.py`, so edit that file (or use the dashboard UI once it is running) to tune the values operators care about. Common overrides include:
+`python main.py` uses `.env.dashboard` as the primary operator config file. For overlapping keys, values in `.env.dashboard` win. If a key is missing there, the runtime can still read it from temporary environment variables for that launch; anything still missing falls back to the defaults in `config.py`. Environment-variable values do not get written back to `.env.dashboard`.
+
+Dashboard saves do write back to `.env.dashboard` for the next run. Common fields include:
 
 - `STRATEGY_ID`
 - `TARGET_PROFIT`
@@ -22,22 +24,28 @@ python -m pip install -r requirements.txt
 - `SIGNAL_MOMENTUM_THRESHOLD`
 - `SIGNAL_WEAK_SIGNAL_MODE`
 
-You can set these before launch via environment variables or update them live from the dashboard; both approaches write back to `.env.dashboard` so the next run inherits the changes.
-
 ## 3. Run the supported runtime
 
-`python main.py`
+```powershell
+python main.py
+```
 
-This is the only supported public entrypoint. It launches the continuous paper-trading loop along with the local dashboard binding to `http://127.0.0.1:8787/`. Leave it running until you are ready to stop.
+This is the only supported public entrypoint. It starts the continuous paper-trading loop and the local dashboard together.
+
+When startup succeeds, the terminal prints:
+
+- `Runtime started: paper trading + dashboard`
+- `Dashboard URL: http://127.0.0.1:8787/`
 
 ## 4. View the dashboard
 
-Open [http://127.0.0.1:8787/](http://127.0.0.1:8787/) in your browser to inspect current quotes, signals, risk checks, and the same config editor that writes to `.env.dashboard`.
+Open [http://127.0.0.1:8787/](http://127.0.0.1:8787/) in your browser to inspect quotes, signals, risk checks, and the config editor that writes back to `.env.dashboard`.
 
 ## 5. Stop
 
-Press `Ctrl+C` in the terminal where `python main.py` is running to shut down both the paper trader and the dashboard.
+Press `Ctrl+C` in the terminal where `python main.py` is running. The runtime asks both services to stop cleanly and leaves run data in `logs/` for later review.
 
 ## Additional resources
 
-[docs/operations_runbook.md](./docs/operations_runbook.md) · [docs/dashboard_runbook.md](./docs/dashboard_runbook.md)
+- [docs/operations_runbook.md](./docs/operations_runbook.md)
+- [docs/dashboard_runbook.md](./docs/dashboard_runbook.md)
