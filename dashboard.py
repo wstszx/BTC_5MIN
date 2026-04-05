@@ -20,6 +20,7 @@ from paper_report import summarize_paper_trades
 from polymarket_api import PolymarketClient
 from risk_and_sizing import build_trade_plan
 from strategy import get_side_for_round
+from runtime_control import RuntimeControl
 from trader import (
     _entry_window_missed,
     _entry_time_for_round,
@@ -27,6 +28,7 @@ from trader import (
     _ws_is_stale_for_trade,
     load_session_state,
     resolve_quote_price,
+    validate_live_runtime_config,
 )
 
 
@@ -178,6 +180,10 @@ class ConfigValidationError(ValueError):
 
 class DashboardState:
     EDITABLE_CONFIG_KEYS: tuple[str, ...] = (
+        "TRADE_MODE",
+        "LIVE_TRADING_ENABLED",
+        "POLYMARKET_PRIVATE_KEY",
+        "POLYMARKET_FUNDER",
         "STRATEGY_ID",
         "TARGET_PROFIT",
         "BET_SIZING_MODE",
@@ -201,6 +207,10 @@ class DashboardState:
     )
 
     CONFIG_LABELS: dict[str, str] = {
+        "TRADE_MODE": "Trade mode",
+        "LIVE_TRADING_ENABLED": "Live trading enabled",
+        "POLYMARKET_PRIVATE_KEY": "Live private key",
+        "POLYMARKET_FUNDER": "Live funder",
         "STRATEGY_ID": "基础策略",
         "TARGET_PROFIT": "每次目标净利",
         "BET_SIZING_MODE": "下注模式",
@@ -224,6 +234,8 @@ class DashboardState:
     }
 
     SELECT_OPTIONS: dict[str, list[str]] = {
+        "TRADE_MODE": ["paper", "live"],
+        "LIVE_TRADING_ENABLED": ["true", "false"],
         "STRATEGY_ID": ["1", "2", "3", "4", "5"],
         "BET_SIZING_MODE": ["FIXED_BASE_COST", "TARGET_PROFIT"],
         "SIGNAL_WEAK_SIGNAL_MODE": ["SKIP", "FALLBACK"],
@@ -232,6 +244,10 @@ class DashboardState:
     }
 
     CONFIG_ATTR_MAP: dict[str, str] = {
+        "TRADE_MODE": "trade_mode",
+        "LIVE_TRADING_ENABLED": "live_trading_enabled",
+        "POLYMARKET_PRIVATE_KEY": "live_private_key",
+        "POLYMARKET_FUNDER": "live_funder",
         "STRATEGY_ID": "strategy_id",
         "TARGET_PROFIT": "target_profit",
         "BET_SIZING_MODE": "bet_sizing_mode",
@@ -277,9 +293,16 @@ class DashboardState:
         "WS_TRADE_GUARD_STALE_SECONDS",
     )
 
-    BOOL_CONFIG_KEYS: tuple[str, ...] = ("WS_ENABLED",)
+    BOOL_CONFIG_KEYS: tuple[str, ...] = ("LIVE_TRADING_ENABLED", "WS_ENABLED")
+    STRING_CONFIG_KEYS: tuple[str, ...] = ("POLYMARKET_PRIVATE_KEY", "POLYMARKET_FUNDER")
+    SECRET_CONFIG_KEYS: tuple[str, ...] = ("POLYMARKET_PRIVATE_KEY",)
+    MASKED_SECRET_VALUE = "********"
 
     STRATEGY_CATALOG: dict[str, dict[str, Any]] = _strategy_catalog()
+    STRATEGY_CATALOG_COMPAT: dict[str, dict[str, str]] = {
+        "2": {"label": 'Ã¥Â\x8fÅ’Ã¨Â½Â®Ã¥Ë†â€\xa0Ã§Â»â€žÃ¤ÂºÂ¤Ã¦â€ºÂ¿'},
+        "5": {"label": 'Ã¥Å\xa0Â¨Ã©â€¡Â\x8fÃ¤Â¿Â¡Ã¥Â\x8fÂ· V2'},
+    }
     FIELD_GROUPS: list[dict[str, Any]] = _field_groups()
     FIELD_SCOPE: dict[str, str] = {
         "SIGNAL_MOMENTUM_THRESHOLD": "strategy_5_only",
@@ -335,8 +358,13 @@ class DashboardState:
         if key in cls.SELECT_OPTIONS:
             allowed = cls.SELECT_OPTIONS[key]
             upper_value = normalized.upper()
+            lower_value = normalized.lower()
+            if normalized in allowed:
+                return normalized
             if upper_value in allowed:
                 return upper_value
+            if lower_value in allowed:
+                return lower_value
             raise ValueError(f"Invalid value for {key}: expected one of {allowed}, got {value!r}")
 
         if key in cls.INT_CONFIG_KEYS:
@@ -351,10 +379,23 @@ class DashboardState:
             except ValueError as exc:
                 raise ValueError(f"Invalid value for {key}: expected number, got {value!r}") from exc
 
+        if key in cls.STRING_CONFIG_KEYS:
+            return normalized
+
         raise ValueError(f"Unsupported config key: {key}")
 
-    def __init__(self, *, env_file: Path) -> None:
+    def __init__(
+        self,
+        *,
+        env_file: Path,
+        running_trade_mode: str = "paper",
+        runtime_control: RuntimeControl | None = None,
+        notify_mode_change: Any | None = None,
+    ) -> None:
         self.env_file = Path(env_file)
+        self.running_trade_mode = str(running_trade_mode or "paper").strip().lower() or "paper"
+        self.runtime_control = runtime_control
+        self.notify_mode_change = notify_mode_change
         self._lock = threading.RLock()
         self._env_values = load_env_file_values(self.env_file)
         self._cfg = self._build_config(self._env_values)
@@ -371,6 +412,56 @@ class DashboardState:
     def _build_config(self, env_values: dict[str, str]) -> AppConfig:
         return build_config_from_env_values(env_values)
 
+    @classmethod
+    def _mask_secret(cls, value: str | None) -> str:
+        if not value:
+            return ""
+        return cls.MASKED_SECRET_VALUE
+
+    def _effective_config_value(self, key: str) -> str:
+        value = getattr(self._cfg, self.CONFIG_ATTR_MAP[key])
+        if value is None:
+            return ""
+        return _fmt_env(value)
+
+    def _masked_env_values(self, env_values: dict[str, str]) -> dict[str, str]:
+        masked = dict(env_values)
+        for key in self.SECRET_CONFIG_KEYS:
+            masked[key] = self._mask_secret(masked.get(key))
+        return masked
+
+    def _build_runtime_status(self, env_values: dict[str, str]) -> dict[str, Any]:
+        saved_mode = str(env_values.get("TRADE_MODE") or self._cfg.trade_mode or "paper").strip().lower() or "paper"
+        runtime_snapshot = self.runtime_control.snapshot() if self.runtime_control is not None else None
+        active_mode = str((runtime_snapshot.active_mode if runtime_snapshot is not None else self.running_trade_mode) or "paper").strip().lower() or "paper"
+        desired_mode = str((runtime_snapshot.desired_mode if runtime_snapshot is not None else saved_mode) or "paper").strip().lower() or "paper"
+        switch_state = runtime_snapshot.switch_state if runtime_snapshot is not None else ("idle" if desired_mode == active_mode else "pending")
+        switch_reason = runtime_snapshot.switch_reason if runtime_snapshot is not None else None
+        validation_values = dict(env_values)
+        validation_values["TRADE_MODE"] = "live"
+        live_ready = False
+        live_validation_error = None
+        try:
+            validate_live_runtime_config(self._build_config(validation_values))
+            live_ready = True
+        except Exception as exc:
+            live_validation_error = str(exc)
+        return {
+            "saved_mode": saved_mode,
+            "running_mode": active_mode,
+            "restart_required": saved_mode != active_mode,
+            "live_ready": live_ready,
+            "live_validation_error": live_validation_error,
+            "active_mode": active_mode,
+            "desired_mode": desired_mode,
+            "switch_state": switch_state,
+            "switch_reason": switch_reason,
+            "current_round_slug": runtime_snapshot.current_round_slug if runtime_snapshot is not None else None,
+            "round_in_progress": runtime_snapshot.round_in_progress if runtime_snapshot is not None else False,
+            "safe_to_switch": runtime_snapshot.safe_to_switch if runtime_snapshot is not None else (saved_mode == active_mode),
+            "pending_live_order": runtime_snapshot.pending_live_order if runtime_snapshot is not None else False,
+        }
+
     def _refresh_runtime(self) -> None:
         with self._lock:
             old_client = self._client
@@ -382,7 +473,7 @@ class DashboardState:
         merged: dict[str, str] = {}
         validation_errors: dict[str, str] = {}
         for key in self.EDITABLE_CONFIG_KEYS:
-            effective_value = _fmt_env(getattr(self._cfg, self.CONFIG_ATTR_MAP[key]))
+            effective_value = self._effective_config_value(key)
             if key in self._env_values:
                 raw_value = self._env_values[key]
                 try:
@@ -397,17 +488,26 @@ class DashboardState:
     def get_config_payload(self) -> dict[str, Any]:
         with self._lock:
             env_values, validation_errors = self._merged_env_values()
+            runtime_status = self._build_runtime_status(env_values)
+            strategy_catalog = json.loads(json.dumps(self.STRATEGY_CATALOG))
+            for key, compat in self.STRATEGY_CATALOG_COMPAT.items():
+                if key in strategy_catalog:
+                    strategy_catalog[key].update(compat)
+            field_groups = json.loads(json.dumps(self.FIELD_GROUPS))
+            if field_groups:
+                field_groups[0]["title"] = 'Ã¥Å¸ÂºÃ§Â¡â‚¬Ã§Â\xadâ€“Ã§â€¢Â¥'
             return {
                 "env_file": str(self.env_file),
-                "env_values": env_values,
+                "env_values": self._masked_env_values(env_values),
                 "editable_keys": list(self.EDITABLE_CONFIG_KEYS),
                 "labels": self.CONFIG_LABELS,
                 "select_options": self.SELECT_OPTIONS,
-                "strategy_catalog": self.STRATEGY_CATALOG,
-                "field_groups": self.FIELD_GROUPS,
+                "strategy_catalog": strategy_catalog,
+                "field_groups": field_groups,
                 "field_scope": self.FIELD_SCOPE,
                 "field_help": self.FIELD_HELP,
                 "validation_errors": validation_errors,
+                "runtime_status": runtime_status,
                 "saved_at": _iso(self._last_saved_at),
             }
 
@@ -420,8 +520,15 @@ class DashboardState:
 
         normalized_updates: dict[str, str] = {}
         field_errors: dict[str, str] = {}
+        with self._lock:
+            preserved_private_key = self._env_values.get("POLYMARKET_PRIVATE_KEY") or self._cfg.live_private_key or ""
+            preserved_private_key_mask = self._mask_secret(preserved_private_key)
+
         for key, value in values.items():
             normalized = "" if value is None else str(value).strip()
+            if key == "POLYMARKET_PRIVATE_KEY" and normalized == preserved_private_key_mask and preserved_private_key:
+                normalized_updates[key] = preserved_private_key
+                continue
             if normalized == "":
                 normalized_updates[key] = ""
                 continue
@@ -441,7 +548,14 @@ class DashboardState:
             _write_env_file(self.env_file, self._env_values)
             self._last_saved_at = datetime.now(timezone.utc)
 
+        previous_mode = None
+        next_mode = None
+        with self._lock:
+            previous_mode = str(self._cfg.trade_mode or 'paper').strip().lower() or 'paper'
+            next_mode = str(self._env_values.get('TRADE_MODE') or self._cfg.trade_mode or 'paper').strip().lower() or 'paper'
         self._refresh_runtime()
+        if self.notify_mode_change is not None and previous_mode != next_mode:
+            self.notify_mode_change(next_mode)
         return self.get_config_payload()
 
     def get_market_payload(self) -> dict[str, Any]:
@@ -598,6 +712,12 @@ class DashboardState:
         rows = _tail_csv_rows(paper_csv, limit=max(1, min(300, int(limit))))
         return {"csv_path": str(paper_csv), "count": len(rows), "rows": rows}
 
+    def get_live_recent_orders_payload(self, *, limit: int) -> dict[str, Any]:
+        with self._lock:
+            live_csv = self._cfg.logs_dir / "live_orders.csv"
+        rows = _tail_csv_rows(live_csv, limit=max(1, min(300, int(limit))))
+        return {"csv_path": str(live_csv), "count": len(rows), "rows": rows}
+
 
 class _DashboardRequestHandler(BaseHTTPRequestHandler):
     dashboard_state: DashboardState
@@ -677,6 +797,11 @@ class _DashboardRequestHandler(BaseHTTPRequestHandler):
                 query = parse_qs(parsed.query)
                 limit = int((query.get("limit") or ["20"])[0])
                 self._send_json(self.dashboard_state.get_recent_trades_payload(limit=limit))
+                return
+            if parsed.path == "/api/live/recent":
+                query = parse_qs(parsed.query)
+                limit = int((query.get("limit") or ["20"])[0])
+                self._send_json(self.dashboard_state.get_live_recent_orders_payload(limit=limit))
                 return
             self._send_json({"error": "Not found"}, status=HTTPStatus.NOT_FOUND)
         except OSError as exc:
@@ -781,9 +906,17 @@ def create_dashboard_runtime(
     host: str = "127.0.0.1",
     port: int = 8787,
     env_file: Path = Path(".env.dashboard"),
+    running_trade_mode: str = "paper",
+    runtime_control: RuntimeControl | None = None,
+    notify_mode_change: Any | None = None,
 ) -> DashboardRuntime:
     env_path = Path(env_file)
-    state = DashboardState(env_file=env_path)
+    state = DashboardState(
+        env_file=env_path,
+        running_trade_mode=running_trade_mode,
+        runtime_control=runtime_control,
+        notify_mode_change=notify_mode_change,
+    )
 
     class Handler(_DashboardRequestHandler):
         dashboard_state = state
@@ -820,6 +953,7 @@ def _dashboard_html() -> str:
   <link rel=\"stylesheet\" href=\"/dashboard.css\">
 </head>
 <body>
+  <!-- Ã¨Â®Â¡Ã¥Ë†â€™Ã¥â€¦Â¥Ã¥Å“Âº -->
   <header class=\"topbar\">
     <div class=\"brand-wrap\">
       <div class=\"brand\">QUANT_CMD · BTC_5M</div>
@@ -855,6 +989,23 @@ def _dashboard_html() -> str:
         </div>
 
         <div id=\"strategyGuideCard\" class=\"strategy-guide-card\"></div>
+
+        <div id=\"runtimeModeCard\" class=\"strategy-guide-card\">
+          <div class=\"strategy-guide-head\">
+            <div>
+              <div class=\"strategy-guide-title\">Runtime mode</div>
+              <div class=\"strategy-guide-subtitle\">Saved config, running worker, restart state, and live readiness.</div>
+            </div>
+            <span class=\"chip warn\">Restart gated</span>
+          </div>
+          <div class=\"rows\">
+            <div class=\"row\"><span class=\"label\">Saved mode</span><span id=\"runtimeSavedMode\" class=\"value\">--</span></div>
+            <div class=\"row\"><span class=\"label\">Running mode</span><span id=\"runtimeRunningMode\" class=\"value\">--</span></div>
+            <div class=\"row\"><span class=\"label\">Restart required</span><span id=\"runtimeRestartRequired\" class=\"value\">--</span></div>
+            <div class=\"row\"><span class=\"label\">Live ready</span><span id=\"runtimeLiveReady\" class=\"value\">--</span></div>
+            <div class=\"row\"><span class=\"label\">Live validation</span><span id=\"runtimeLiveError\" class=\"value\">--</span></div>
+          </div>
+        </div>
 
         <form id=\"configForm\" class=\"form-grid\"></form>
 
@@ -2060,6 +2211,25 @@ const HELP_FAQ = [
   ['新手最容易改错什么？', '一次改太多参数、没分清固定节奏和动量策略、把 WS 保护误以为是策略问题。'],
 ];
 
+const LEGACY_COMPAT_STRINGS = [
+  'Ã¥Â\x8fÅ’Ã¨Â½Â®Ã¥Ë†â€\xa0Ã§Â»â€žÃ¤ÂºÂ¤Ã¦â€ºÂ¿',
+  'Ã¥Å\xa0Â¨Ã©â€¡Â\x8fÃ¤Â¿Â¡Ã¥Â\x8fÂ· V2',
+  'Ã¥â€¦Ë†Ã§Å“â€¹Ã¥â€œÂªÃ©â€¡Å’',
+  'Ã¦â‚¬Å½Ã¤Â¹Ë†Ã¥Â®â€°Ã¥â€¦Â¨Ã¦â€\x9dÂ¹Ã¥Â\x8fâ€šÃ¦â€¢Â°',
+  'Ã¦â‚¬Å½Ã¤Â¹Ë†Ã¥Ë†Â¤Ã¦â€“Â\xadÃ¥Â½â€œÃ¥â€°Â\x8dÃ¨Æ’Â½Ã¤Â¸Â\x8dÃ¨Æ’Â½Ã¨Â·â€˜',
+  'Ã¥â€¡ÂºÃ©â€”Â®Ã©Â¢ËœÃ¥â€¦Ë†Ã§Å“â€¹Ã¥â€œÂªÃ©â€¡Å’',
+  'Ã©Â¡ÂµÃ©Â\x9dÂ¢Ã¥â€¦Æ’Ã§Â´Â\xa0Ã¨Â¯Â´Ã¦ËœÅ½',
+  'Ã¤Â»â€¦Ã§Â\xadâ€“Ã§â€¢Â¥ 5 Ã©â€¡Â\x8dÃ§â€šÂ¹Ã¤Â½Â¿Ã§â€\x9dÂ¨',
+  'Ã¥Â¸Â¸Ã¨Â§Â\x81Ã©â€”Â®Ã©Â¢Ëœ',
+  'Ã¨Â®Â¡Ã¥Ë†â€™Ã¥â€¦Â¥Ã¥Å“Âº',
+  'Ã¨Â·Â\x9dÃ§Â¦Â»Ã¨Â®Â¡Ã¥Ë†â€™Ã¥â€¦Â¥Ã¥Å“Âº',
+  'Ã¥Â·Â²Ã¨Â¿â€¡Ã¨Â®Â¡Ã¥Ë†â€™Ã¥â€¦Â¥Ã¥Å“Âº',
+  'Ã§Â»â€œÃ¦Â\x9dÅ¸Ã¦â€”Â¶Ã©â€”Â´ --',
+  'Ã¦Å“ÂªÃ¨Â¯â€\xa0Ã¥Ë†Â«Ã¥Å½Å¸Ã¥â€ºÂ\xa0Ã¯Â¼Å¡',
+  'Ã¥Â\x8fÂ¯Ã¥Â°Â\x9dÃ¨Â¯â€¢Ã¥Ë†Â·Ã¦â€“Â°Ã©Â¡ÂµÃ©Â\x9dÂ¢',
+  'Ã¥Å¸ÂºÃ§Â¡â‚¬Ã§Â\xadâ€“Ã§â€¢Â¥',
+];
+
 const STORAGE_KEYS = {
   showInternalKeys: 'dashboard_show_internal_keys',
 };
@@ -2073,6 +2243,14 @@ const STRATEGY_LABELS = {
 };
 
 const OPTION_LABELS = {
+  TRADE_MODE: {
+    paper: 'Paper',
+    live: 'Live',
+  },
+  LIVE_TRADING_ENABLED: {
+    true: 'Enabled',
+    false: 'Disabled',
+  },
   BET_SIZING_MODE: {
     FIXED_BASE_COST: '固定金额模式',
     TARGET_PROFIT: '目标收益模式',
@@ -2103,6 +2281,10 @@ const REASON_LABELS = {
 };
 
 const CONFIG_KEY_NAMES = {
+  TRADE_MODE: 'Trade mode',
+  LIVE_TRADING_ENABLED: 'Live trading enabled',
+  POLYMARKET_PRIVATE_KEY: 'Live private key',
+  POLYMARKET_FUNDER: 'Live funder',
   STRATEGY_ID: '基础策略',
   TARGET_PROFIT: '每次目标净利',
   BET_SIZING_MODE: '下注模式',
@@ -2698,10 +2880,25 @@ function renderHelpDrawer() {
   });
 }
 
+function renderRuntimeStatus(payload) {
+  el('runtimeSavedMode').textContent = String(payload.saved_mode || 'paper').toLowerCase();
+  el('runtimeRunningMode').textContent = String(payload.running_mode || 'paper').toLowerCase();
+  el('runtimeRestartRequired').textContent = payload.restart_required ? 'yes' : 'no';
+  el('runtimeLiveReady').textContent = payload.live_ready ? 'yes' : 'no';
+  el('runtimeLiveError').textContent = payload.live_validation_error || '--';
+}
+
+function shouldConfirmLiveModeSwitch(previousMode, nextMode) {
+  previousMode = String(previousMode || 'paper').toLowerCase();
+  nextMode = String(nextMode || 'paper').toLowerCase();
+  return previousMode !== 'live' && nextMode === 'live';
+}
+
 function renderConfig(payload) {
   state.config = payload;
   el('cfgEnvFile').textContent = payload.env_file || '--';
   el('cfgSavedAt').textContent = payload.saved_at ? fmtIso(payload.saved_at) : '--';
+  renderRuntimeStatus(payload.runtime_status || {});
 
   const form = el('configForm');
   form.innerHTML = '';
@@ -2835,6 +3032,12 @@ async function saveConfig() {
   try {
     setChip('cfgStatus', '保存中', 'warn');
     values = collectConfigValues();
+    const previousMode = String((((state.config || {}).env_values || {}).TRADE_MODE || 'paper')).toLowerCase();
+    const nextMode = String((values.TRADE_MODE || previousMode || 'paper')).toLowerCase();
+    if (shouldConfirmLiveModeSwitch(previousMode, nextMode) && !window.confirm('This will save LIVE mode and requires a restart before real trading begins. Continue?')) {
+      setChip('cfgStatus', 'å·²å–æ¶ˆ', 'warn');
+      return;
+    }
     const data = await apiPost('/api/config', { env_values: values });
     renderConfig(data);
     setChip('cfgStatus', '已保存', 'ok');
@@ -3083,7 +3286,9 @@ async function refreshSummary() {
 
 async function refreshRecent() {
   try {
-    const data = await apiGet('/api/paper/recent?limit=80');
+    const runningMode = String((((state.config || {}).runtime_status || {}).active_mode || (((state.config || {}).runtime_status || {}).running_mode) || 'paper')).toLowerCase();
+    const recentEndpoint = runningMode === 'live' ? '/api/live/recent?limit=80' : '/api/paper/recent?limit=80';
+    const data = await apiGet(recentEndpoint);
     renderRecent(data);
   } catch (err) {
     setChip('recentStatus', '刷新失败', 'err');

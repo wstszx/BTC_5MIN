@@ -15,6 +15,7 @@ from dashboard import (
     create_dashboard_runtime,
 )
 from models import MarketQuote, MarketWindow
+from runtime_control import RuntimeControl
 
 
 def test_create_dashboard_runtime_uses_requested_env_file(tmp_path: Path):
@@ -306,12 +307,12 @@ def test_dashboard_payload_includes_strategy_catalog_and_field_groups(tmp_path: 
     try:
         payload = state.get_config_payload()
 
-        assert payload["strategy_catalog"]["2"]["label"] == "双轮分组交替"
+        assert payload["strategy_catalog"]["2"]["label"] == "Ã¥ÂÅ’Ã¨Â½Â®Ã¥Ë†â€ Ã§Â»â€žÃ¤ÂºÂ¤Ã¦â€ºÂ¿"
         assert payload["strategy_catalog"]["2"]["preview"] == ["UP", "UP", "DOWN", "DOWN"]
-        assert payload["strategy_catalog"]["5"]["label"] == "动量信号 V2"
+        assert payload["strategy_catalog"]["5"]["label"] == "Ã¥Å Â¨Ã©â€¡ÂÃ¤Â¿Â¡Ã¥ÂÂ· V2"
         assert payload["field_help"]["STRATEGY_ID"]
         assert payload["field_scope"]["SIGNAL_MOMENTUM_THRESHOLD"] == "strategy_5_only"
-        assert payload["field_groups"][0]["title"] == "基础策略"
+        assert payload["field_groups"][0]["title"] == "Ã¥Å¸ÂºÃ§Â¡â‚¬Ã§Â­â€“Ã§â€¢Â¥"
     finally:
         state.close()
 
@@ -322,8 +323,8 @@ def test_dashboard_assets_include_strategy_guide_and_human_labels():
 
     assert 'id="strategyGuideCard"' in html
     assert "function renderStrategyGuide(" in js
-    assert "双轮分组交替" in js
-    assert "动量信号 V2" in js
+    assert "Ã¥ÂÅ’Ã¨Â½Â®Ã¥Ë†â€ Ã§Â»â€žÃ¤ÂºÂ¤Ã¦â€ºÂ¿" in js
+    assert "Ã¥Å Â¨Ã©â€¡ÂÃ¤Â¿Â¡Ã¥ÂÂ· V2" in js
 
 
 def test_dashboard_assets_include_help_center_shell():
@@ -352,11 +353,11 @@ def test_dashboard_assets_include_help_center_renderers():
 def test_dashboard_help_center_includes_quickstart_copy():
     js = _dashboard_js()
 
-    assert "先看哪里" in js
-    assert "怎么安全改参数" in js
-    assert "怎么判断当前能不能跑" in js
-    assert "出问题先看哪里" in js
-    assert "页面元素说明" in js
+    assert "Ã¥â€¦Ë†Ã§Å“â€¹Ã¥â€œÂªÃ©â€¡Å’" in js
+    assert "Ã¦â‚¬Å½Ã¤Â¹Ë†Ã¥Â®â€°Ã¥â€¦Â¨Ã¦â€Â¹Ã¥Ââ€šÃ¦â€¢Â°" in js
+    assert "Ã¦â‚¬Å½Ã¤Â¹Ë†Ã¥Ë†Â¤Ã¦â€“Â­Ã¥Â½â€œÃ¥â€°ÂÃ¨Æ’Â½Ã¤Â¸ÂÃ¨Æ’Â½Ã¨Â·â€˜" in js
+    assert "Ã¥â€¡ÂºÃ©â€”Â®Ã©Â¢ËœÃ¥â€¦Ë†Ã§Å“â€¹Ã¥â€œÂªÃ©â€¡Å’" in js
+    assert "Ã©Â¡ÂµÃ©ÂÂ¢Ã¥â€¦Æ’Ã§Â´Â Ã¨Â¯Â´Ã¦ËœÅ½" in js
 
 
 def test_dashboard_help_center_reuses_strategy_and_field_metadata():
@@ -366,7 +367,7 @@ def test_dashboard_help_center_reuses_strategy_and_field_metadata():
     assert "function renderHelpStrategyGuide()" in js
     assert "payload.field_groups" in js
     assert "payload.strategy_catalog" in js
-    assert "仅策略 5 重点使用" in js
+    assert "Ã¤Â»â€¦Ã§Â­â€“Ã§â€¢Â¥ 5 Ã©â€¡ÂÃ§â€šÂ¹Ã¤Â½Â¿Ã§â€Â¨" in js
     assert "help-strategy-card-active" in js
 
 
@@ -374,7 +375,7 @@ def test_dashboard_help_center_includes_faq_and_doc_links():
     html = _dashboard_html()
     js = _dashboard_js()
 
-    assert "常见问题" in js
+    assert "Ã¥Â¸Â¸Ã¨Â§ÂÃ©â€”Â®Ã©Â¢Ëœ" in js
     assert "docs/dashboard_runbook.md" in js or "dashboard_runbook.md" in html
     assert "docs/operations_runbook.md" in js or "operations_runbook.md" in html
     assert "docs/daily_ops_checklist.md" in js or "daily_ops_checklist.md" in html
@@ -399,9 +400,9 @@ def test_dashboard_assets_use_planned_entry_copy():
     html = _dashboard_html()
     js = _dashboard_js()
 
-    assert "计划入场" in html
-    assert "距离计划入场" in js
-    assert "已过计划入场" in js
+    assert "Ã¨Â®Â¡Ã¥Ë†â€™Ã¥â€¦Â¥Ã¥Å“Âº" in html
+    assert "Ã¨Â·ÂÃ§Â¦Â»Ã¨Â®Â¡Ã¥Ë†â€™Ã¥â€¦Â¥Ã¥Å“Âº" in js
+    assert "Ã¥Â·Â²Ã¨Â¿â€¡Ã¨Â®Â¡Ã¥Ë†â€™Ã¥â€¦Â¥Ã¥Å“Âº" in js
 
 
 def test_dashboard_market_header_prioritizes_human_time_over_slug():
@@ -410,12 +411,196 @@ def test_dashboard_market_header_prioritizes_human_time_over_slug():
 
     assert 'id="marketDeadline"' in html
     assert "function marketDeadlineText(" in js
-    assert "结束时间 --" in js
+    assert "Ã§Â»â€œÃ¦ÂÅ¸Ã¦â€”Â¶Ã©â€”Â´ --" in js
     assert "el('marketDeadline').textContent = marketDeadlineText(round.end_time);" in js
 
 
 def test_dashboard_reason_fallback_is_human_friendly():
     js = _dashboard_js()
 
-    assert "未识别原因：" in js
-    assert "可尝试刷新页面" in js
+    assert "Ã¦Å“ÂªÃ¨Â¯â€ Ã¥Ë†Â«Ã¥Å½Å¸Ã¥â€ºÂ Ã¯Â¼Å¡" in js
+    assert "Ã¥ÂÂ¯Ã¥Â°ÂÃ¨Â¯â€¢Ã¥Ë†Â·Ã¦â€“Â°Ã©Â¡ÂµÃ©ÂÂ¢" in js
+
+
+def test_dashboard_config_payload_masks_live_private_key_and_exposes_mode_fields(tmp_path: Path):
+    env_file = tmp_path / '.env.dashboard'
+    env_file.write_text(
+        'TRADE_MODE=live\n'
+        'LIVE_TRADING_ENABLED=true\n'
+        'POLYMARKET_PRIVATE_KEY=super-secret-private-key\n'
+        'POLYMARKET_FUNDER=0xfunder\n',
+        encoding='utf-8',
+    )
+    state = DashboardState(env_file=env_file)
+    try:
+        payload = state.get_config_payload()
+
+        assert 'TRADE_MODE' in payload['editable_keys']
+        assert 'LIVE_TRADING_ENABLED' in payload['editable_keys']
+        assert 'POLYMARKET_PRIVATE_KEY' in payload['editable_keys']
+        assert payload['env_values']['TRADE_MODE'] == 'live'
+        assert payload['env_values']['LIVE_TRADING_ENABLED'] == 'true'
+        assert payload['env_values']['POLYMARKET_PRIVATE_KEY'] != 'super-secret-private-key'
+        assert payload['env_values']['POLYMARKET_PRIVATE_KEY']
+        assert payload['runtime_status']['saved_mode'] == 'live'
+        assert payload['runtime_status']['running_mode'] == 'paper'
+        assert payload['runtime_status']['restart_required'] is True
+    finally:
+        state.close()
+
+
+
+def test_dashboard_update_config_preserves_masked_private_key_on_unrelated_save(tmp_path: Path):
+    env_file = tmp_path / '.env.dashboard'
+    env_file.write_text(
+        'TRADE_MODE=live\n'
+        'LIVE_TRADING_ENABLED=true\n'
+        'POLYMARKET_PRIVATE_KEY=super-secret-private-key\n'
+        'POLYMARKET_FUNDER=0xfunder\n',
+        encoding='utf-8',
+    )
+    state = DashboardState(env_file=env_file)
+    try:
+        initial = state.get_config_payload()
+        masked = initial['env_values']['POLYMARKET_PRIVATE_KEY']
+
+        payload = state.update_config(
+            {
+                'TRADE_MODE': 'live',
+                'TARGET_PROFIT': '2.5',
+                'POLYMARKET_PRIVATE_KEY': masked,
+            }
+        )
+
+        text = env_file.read_text(encoding='utf-8')
+        assert 'POLYMARKET_PRIVATE_KEY=super-secret-private-key' in text
+        assert payload['env_values']['POLYMARKET_PRIVATE_KEY'] == masked
+        assert payload['env_values']['TARGET_PROFIT'] == '2.5'
+    finally:
+        state.close()
+
+
+
+def test_dashboard_runtime_status_reports_live_ready_and_restart_requirement(tmp_path: Path):
+    env_file = tmp_path / '.env.dashboard'
+    env_file.write_text(
+        'TRADE_MODE=live\n'
+        'LIVE_TRADING_ENABLED=true\n'
+        'POLYMARKET_PRIVATE_KEY=super-secret-private-key\n'
+        'POLYMARKET_FUNDER=0xfunder\n',
+        encoding='utf-8',
+    )
+    state = DashboardState(env_file=env_file)
+    try:
+        payload = state.get_config_payload()
+        status = payload['runtime_status']
+
+        assert status['saved_mode'] == 'live'
+        assert status['running_mode'] == 'paper'
+        assert status['restart_required'] is True
+        assert status['live_ready'] is True
+        assert status['live_validation_error'] is None
+    finally:
+        state.close()
+
+
+
+def test_dashboard_live_recent_orders_reads_live_specific_csv(tmp_path: Path):
+    old_cwd = Path.cwd()
+    os.chdir(tmp_path)
+    state = DashboardState(env_file=tmp_path / '.env.dashboard')
+    try:
+        live_csv = tmp_path / 'logs' / 'live_orders.csv'
+        live_csv.parent.mkdir(parents=True, exist_ok=True)
+        live_csv.write_text(
+            'timestamp,mode,event_slug,side,price,order_cost,trade_pnl,skip_reason\n'
+            '2026-04-05T00:00:00+00:00,live,slug-one,UP,0.51,10.0,0.0,\n'
+            '2026-04-05T00:05:00+00:00,live,slug-two,DOWN,0.49,12.0,1.5,\n',
+            encoding='utf-8',
+        )
+
+        payload = state.get_live_recent_orders_payload(limit=10)
+
+        assert payload['count'] == 2
+        assert payload['csv_path'].endswith('live_orders.csv')
+        assert payload['rows'][0]['event_slug'] == 'slug-two'
+        assert payload['rows'][1]['event_slug'] == 'slug-one'
+    finally:
+        state.close()
+        os.chdir(old_cwd)
+
+
+
+def test_dashboard_runtime_factory_accepts_running_trade_mode(tmp_path: Path):
+    runtime = create_dashboard_runtime(
+        host="127.0.0.1",
+        port=0,
+        env_file=tmp_path / ".env.dashboard",
+        running_trade_mode="live",
+    )
+    try:
+        payload = runtime.state.get_config_payload()
+        assert payload["runtime_status"]["running_mode"] == "live"
+    finally:
+        runtime.close()
+
+
+def test_dashboard_assets_include_runtime_mode_status_shell():
+    html = _dashboard_html()
+    js = _dashboard_js()
+
+    assert 'id="runtimeModeCard"' in html
+    assert 'id="runtimeSavedMode"' in html
+    assert 'id="runtimeRunningMode"' in html
+    assert 'id="runtimeRestartRequired"' in html
+    assert 'id="runtimeLiveReady"' in html
+    assert 'id="runtimeLiveError"' in html
+    assert 'function renderRuntimeStatus(' in js
+    assert 'payload.runtime_status || {}' in js
+
+
+
+def test_dashboard_assets_switch_recent_endpoint_by_running_mode():
+    js = _dashboard_js()
+
+    assert "const runningMode = String((((state.config || {}).runtime_status || {}).active_mode || (((state.config || {}).runtime_status || {}).running_mode) || 'paper')).toLowerCase();" in js
+    assert "const recentEndpoint = runningMode === 'live' ? '/api/live/recent?limit=80' : '/api/paper/recent?limit=80';" in js
+
+
+
+def test_dashboard_assets_confirm_before_switching_to_live_mode():
+    js = _dashboard_js()
+
+    assert 'function shouldConfirmLiveModeSwitch(' in js
+    assert "previousMode !== 'live' && nextMode === 'live'" in js
+    assert 'window.confirm(' in js
+
+
+def test_dashboard_runtime_payload_uses_manager_snapshot(tmp_path: Path):
+    control = RuntimeControl(initial_mode='paper')
+    control.set_desired_mode('live')
+    state = DashboardState(env_file=tmp_path / '.env.dashboard', runtime_control=control)
+    try:
+        payload = state.get_config_payload()
+        runtime = payload['runtime_status']
+        assert runtime['active_mode'] == 'paper'
+        assert runtime['desired_mode'] == 'live'
+        assert runtime['switch_state'] == 'pending'
+        assert runtime['running_mode'] == 'paper'
+        assert runtime['saved_mode'] == 'paper'
+    finally:
+        state.close()
+
+
+
+def test_dashboard_update_config_notifies_runtime_manager(tmp_path: Path):
+    calls: list[str] = []
+    state = DashboardState(
+        env_file=tmp_path / '.env.dashboard',
+        notify_mode_change=lambda mode: calls.append(mode),
+    )
+    try:
+        state.update_config({'TRADE_MODE': 'live', 'LIVE_TRADING_ENABLED': 'true'})
+        assert calls == ['live']
+    finally:
+        state.close()
