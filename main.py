@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import inspect
+from dataclasses import replace
 import sys
 import threading
 import time
@@ -8,8 +10,40 @@ from typing import Sequence
 
 from config import AppConfig, build_config_from_env_values, load_env_file_values
 from dashboard import create_dashboard_runtime
-from trader import run_paper_trading
+from runtime_control import RuntimeControl
+from trader import run_live_trading, run_paper_trading, validate_live_runtime_config
 
+
+
+
+def _build_worker_call_kwargs(
+    worker,
+    *,
+    stop_event: threading.Event,
+    config_provider,
+    runtime_control: RuntimeControl,
+    stop_when_safe,
+) -> dict[str, object]:
+    kwargs: dict[str, object] = {
+        'stop_event': stop_event,
+        'config_provider': config_provider,
+    }
+    signature = inspect.signature(worker)
+    if 'runtime_control' in signature.parameters:
+        kwargs['runtime_control'] = runtime_control
+    if 'stop_when_safe' in signature.parameters:
+        kwargs['stop_when_safe'] = stop_when_safe
+    return kwargs
+
+
+def _cfg_for_active_mode(cfg: AppConfig, mode: str) -> AppConfig:
+    if not hasattr(cfg, '__dataclass_fields__'):
+        return cfg
+    if getattr(cfg, 'trade_mode', None) == mode:
+        return cfg
+    worker_cfg = replace(cfg)
+    worker_cfg.trade_mode = mode
+    return worker_cfg
 
 def _load_shared_config(env_file: Path) -> AppConfig:
     env_values = load_env_file_values(env_file)
@@ -49,10 +83,57 @@ def _wait_for_runtime_exit(
         time.sleep(0.1)
 
 
+
+
+class RuntimeManager:
+    def __init__(
+        self,
+        *,
+        env_file: Path,
+        host: str,
+        port: int,
+        startup_cfg: AppConfig | None = None,
+        dashboard_runtime_factory=create_dashboard_runtime,
+        validate_live_config=validate_live_runtime_config,
+    ) -> None:
+        self.env_file = Path(env_file)
+        self.host = host
+        self.port = port
+        self.dashboard_runtime_factory = dashboard_runtime_factory
+        self.validate_live_config = validate_live_config
+        self.startup_cfg = startup_cfg or _load_shared_config(self.env_file)
+        self.runtime_control = RuntimeControl(initial_mode=getattr(self.startup_cfg, 'trade_mode', 'paper'))
+
+    def snapshot(self):
+        return self.runtime_control.snapshot()
+
+    def request_mode_change(self, mode: str) -> None:
+        self.runtime_control.set_desired_mode(mode)
+
+    def poll_once(self) -> None:
+        snapshot = self.runtime_control.snapshot()
+        if snapshot.active_mode == snapshot.desired_mode:
+            if snapshot.switch_state != 'idle' or snapshot.switch_reason is not None:
+                self.runtime_control.mark_active_mode(snapshot.active_mode)
+            return
+        if snapshot.round_in_progress or not snapshot.safe_to_switch or snapshot.pending_live_order:
+            return
+        if snapshot.desired_mode == 'live':
+            try:
+                cfg = _load_shared_config(self.env_file)
+                self.validate_live_config(cfg)
+            except BaseException as exc:
+                self.runtime_control.mark_blocked(str(exc))
+                return
+        self.runtime_control.mark_switching()
+
+    def shutdown(self) -> None:
+        return
+
 def run_single_command_runtime(
     *,
-    env_file: Path = Path(".env.dashboard"),
-    host: str = "127.0.0.1",
+    env_file: Path = Path('.env.dashboard'),
+    host: str = '127.0.0.1',
     port: int = 8787,
 ) -> int:
     env_path = Path(env_file)
@@ -64,8 +145,17 @@ def run_single_command_runtime(
     try:
         startup_cfg = _load_shared_config(env_path)
     except BaseException as exc:
-        print(f"Runtime startup failed: could not load config from {env_path}: {exc}")
+        print(f'Runtime startup failed: could not load config from {env_path}: {exc}')
         return 1
+
+    manager = RuntimeManager(
+        env_file=env_path,
+        host=host,
+        port=port,
+        startup_cfg=startup_cfg,
+        dashboard_runtime_factory=create_dashboard_runtime,
+        validate_live_config=validate_live_runtime_config,
+    )
 
     def _config_provider() -> AppConfig:
         return _load_shared_config(env_path)
@@ -73,33 +163,91 @@ def run_single_command_runtime(
     dashboard_runtime = None
     dashboard_thread = None
     trader_thread = None
+    printed_startup = False
+    first_worker = True
     try:
-        dashboard_runtime = create_dashboard_runtime(host=host, port=port, env_file=env_path)
-        trader_thread = _spawn_runtime_worker(
-            name="paper-trading-worker",
-            target=lambda: run_paper_trading(
-                startup_cfg,
-                stop_event=stop_event,
-                config_provider=_config_provider,
-            ),
-            stop_event=stop_event,
-            worker_errors=worker_errors,
+        initial_mode = manager.snapshot().active_mode
+        if initial_mode == 'live':
+            validate_live_runtime_config(_cfg_for_active_mode(startup_cfg, 'live'))
+        dashboard_runtime = create_dashboard_runtime(
+            host=host,
+            port=port,
+            env_file=env_path,
+            running_trade_mode=initial_mode,
+            runtime_control=manager.runtime_control,
+            notify_mode_change=manager.request_mode_change,
         )
         dashboard_thread = _spawn_runtime_worker(
-            name="dashboard-worker",
+            name='dashboard-worker',
             target=dashboard_runtime.serve_forever,
             stop_event=stop_event,
             worker_errors=worker_errors,
         )
 
-        print("Runtime started: paper trading + dashboard")
-        print(f"Dashboard URL: http://{host}:{port}/")
+        while not stop_event.is_set():
+            snapshot = manager.snapshot()
+            active_mode = snapshot.active_mode
+            base_cfg = startup_cfg if first_worker else _config_provider()
+            current_cfg = _cfg_for_active_mode(base_cfg, active_mode)
+            first_worker = False
+            if active_mode == 'live':
+                validate_live_runtime_config(current_cfg)
+                worker_name = 'live-trading-worker'
+                startup_label = 'live trading'
+                worker = run_live_trading
+            else:
+                worker_name = 'paper-trading-worker'
+                startup_label = 'paper trading'
+                worker = run_paper_trading
 
-        _wait_for_runtime_exit(
-            stop_event=stop_event,
-            dashboard_thread=dashboard_thread,
-            trader_thread=trader_thread,
-        )
+            worker_signature = inspect.signature(worker)
+            worker_supports_runtime_control = 'runtime_control' in worker_signature.parameters
+            worker_kwargs = _build_worker_call_kwargs(
+                worker,
+                stop_event=stop_event,
+                config_provider=_config_provider,
+                runtime_control=manager.runtime_control,
+                stop_when_safe=lambda: manager.snapshot().desired_mode != manager.snapshot().active_mode,
+            )
+            trader_target = lambda worker=worker, cfg=current_cfg, worker_kwargs=worker_kwargs: worker(cfg, **worker_kwargs)
+            trader_thread = _spawn_runtime_worker(
+                name=worker_name,
+                target=trader_target,
+                stop_event=stop_event,
+                worker_errors=worker_errors,
+            )
+
+            if not printed_startup:
+                print(f'Runtime started: {startup_label} + dashboard')
+                print(f'Trade mode: {active_mode}')
+                print(f'Dashboard URL: http://{host}:{port}/')
+                printed_startup = True
+
+            _wait_for_runtime_exit(
+                stop_event=stop_event,
+                dashboard_thread=dashboard_thread,
+                trader_thread=trader_thread,
+            )
+            trader_thread.join(timeout=10)
+
+            if worker_errors or stop_event.is_set():
+                break
+
+            if worker_supports_runtime_control:
+                try:
+                    manager.request_mode_change(_config_provider().trade_mode)
+                    manager.poll_once()
+                except BaseException as exc:
+                    startup_error = exc
+                    break
+
+                snapshot = manager.snapshot()
+                if snapshot.switch_state == 'switching':
+                    manager.runtime_control.mark_active_mode(snapshot.desired_mode)
+                    continue
+            if not dashboard_thread.is_alive():
+                break
+            break
     except KeyboardInterrupt:
         interrupted = True
     except BaseException as exc:
@@ -116,16 +264,16 @@ def run_single_command_runtime(
             dashboard_runtime.close()
 
     if startup_error is not None:
-        print(f"Runtime startup failed: {startup_error}")
+        print(f'Runtime startup failed: {startup_error}')
         return 1
 
     if worker_errors:
         worker_name, exc = worker_errors[0]
-        print(f"Runtime stopped due to {worker_name} failure: {exc}")
+        print(f'Runtime stopped due to {worker_name} failure: {exc}')
         return 1
 
     if interrupted:
-        print("Runtime stopped.")
+        print('Runtime stopped.')
         return 0
 
     return 0
@@ -136,11 +284,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args:
         raise SystemExit(2)
     return run_single_command_runtime(
-        env_file=Path(".env.dashboard"),
-        host="127.0.0.1",
+        env_file=Path('.env.dashboard'),
+        host='127.0.0.1',
         port=8787,
     )
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     raise SystemExit(main())
