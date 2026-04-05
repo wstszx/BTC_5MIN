@@ -15,6 +15,7 @@ from typing import Any
 from urllib.parse import parse_qs, urlparse
 
 from config import AppConfig, build_config_from_env_values, load_env_file_values
+from models import MarketWindow
 from paper_report import summarize_paper_trades
 from polymarket_api import PolymarketClient
 from risk_and_sizing import build_trade_plan
@@ -22,12 +23,21 @@ from strategy import get_side_for_round
 from trader import (
     _entry_window_missed,
     _entry_time_for_round,
-    _select_target_round,
     _resolve_side_from_strategy,
     _ws_is_stale_for_trade,
     load_session_state,
     resolve_quote_price,
 )
+
+
+def _select_display_round(
+    *,
+    current_round: MarketWindow | None,
+    next_round: MarketWindow | None,
+) -> MarketWindow | None:
+    if current_round is not None:
+        return current_round
+    return next_round
 
 
 def _fmt_env(value: Any) -> str:
@@ -442,7 +452,8 @@ class DashboardState:
         now = datetime.now(timezone.utc)
         session_state = load_session_state(cfg.logs_dir / "session_state.json")
         current_round, next_round = client.find_current_and_next_rounds(now=now)
-        target_round = _select_target_round(cfg, now=now, current_round=current_round, next_round=next_round)
+        display_round = _select_display_round(current_round=current_round, next_round=next_round)
+        target_round = display_round
         ws_runtime = client.get_ws_runtime_stats()
 
         if target_round is None:

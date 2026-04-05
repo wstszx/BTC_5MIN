@@ -241,7 +241,7 @@ def test_market_payload_allows_trade_within_entry_grace_window(tmp_path: Path, m
         state.close()
 
 
-def test_market_payload_prefers_next_round_when_current_entry_window_has_closed(tmp_path: Path, monkeypatch):
+def test_market_payload_keeps_showing_current_round_when_current_entry_window_has_closed(tmp_path: Path, monkeypatch):
     class StubClient:
         def __init__(self, cfg):
             self.config = cfg
@@ -292,11 +292,11 @@ def test_market_payload_prefers_next_round_when_current_entry_window_has_closed(
     state = DashboardState(env_file=tmp_path / ".env.dashboard")
     try:
         payload = state.get_market_payload()
-        assert payload["round"]["slug"] == "btc-updown-5m-next"
-        assert payload["round"]["is_current"] is False
-        assert payload["round"]["seconds_to_entry"] > 0
-        assert payload["plan"]["should_trade"] is True
-        assert payload["plan"]["skip_reason"] is None
+        assert payload["round"]["slug"] == "btc-updown-5m-current"
+        assert payload["round"]["is_current"] is True
+        assert payload["round"]["seconds_to_entry"] < 0
+        assert payload["plan"]["should_trade"] is False
+        assert payload["plan"]["skip_reason"] == "entry_window_missed"
     finally:
         state.close()
 
