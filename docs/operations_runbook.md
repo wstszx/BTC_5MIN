@@ -23,6 +23,17 @@ Key fields to review:
 - `MAX_CONSECUTIVE_LOSSES`
 - `SIGNAL_MOMENTUM_THRESHOLD`
 - `SIGNAL_WEAK_SIGNAL_MODE`
+- `TRADE_MODE`
+- `LIVE_TRADING_ENABLED`
+
+Trading mode rules:
+
+- Use `TRADE_MODE=paper` for paper trading.
+- Use `TRADE_MODE=live` only when live credentials are present and `LIVE_TRADING_ENABLED=true` is also set.
+- A dashboard save updates `.env.dashboard` and the runtime manager target mode.
+- The current worker finishes its current round before the runtime switches modes.
+- `paper -> live` still requires confirmation and valid live credentials.
+- If a live order is unresolved or live validation fails, the runtime remains pending or blocked until it is safe to continue.
 
 For overlapping keys, `.env.dashboard` is the source of truth. If a key is missing there, `python main.py` can still read it from temporary environment variables for that launch, and anything still missing falls back to the defaults in `config.py`. Environment-variable values do not get written back to `.env.dashboard`.
 
@@ -32,7 +43,7 @@ For overlapping keys, `.env.dashboard` is the source of truth. If a key is missi
 python main.py
 ```
 
-This command starts the continuous paper-trading loop and the local dashboard together. A successful launch prints these lines in the terminal:
+This command starts the configured trading loop and the local dashboard together. A successful launch prints these lines in the terminal:
 
 - `Runtime started: paper trading + dashboard`
 - `Dashboard URL: http://127.0.0.1:8787/`
@@ -41,10 +52,20 @@ This command starts the continuous paper-trading loop and the local dashboard to
 
 Open [http://127.0.0.1:8787/](http://127.0.0.1:8787/) in your browser to inspect the current quote, signal reasoning, risk controls, and the live config editor. Every save from the editor updates `.env.dashboard`.
 
+Check the runtime mode card after every mode change:
+
+- `Saved Mode` is what `.env.dashboard` currently stores.
+- `Running Mode` is what the active worker is actually using right now.
+- `Desired Mode` is the manager target mode that the runtime is trying to reach.
+- `Switch State` shows `idle`, `pending`, `switching`, or `blocked`.
+- `Live Ready` reports whether the saved live configuration passes validation.
+
 Supporting files and directories:
 
 - `logs/paper_trades.csv`: paper trade records for later inspection or offline analysis.
 - `logs/session_state.json`: tracks rounds, cumulative PnL, and streak counters. Delete it to reset paper-trading state.
+- `logs/live_orders.csv`: live order log used when the active worker is in live mode.
+- `logs/live_session_state.json`: live-mode runtime state used when the active worker is in live mode.
 - `data/`: stores history exports and research outputs.
 
 ## 5. Stop
