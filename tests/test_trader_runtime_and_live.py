@@ -10,6 +10,7 @@ import requests
 
 from config import AppConfig
 from models import MarketQuote, MarketWindow, SessionState, TradePlan, TradeRecord
+from runtime_control import RuntimeControl
 from trader import (
     SideDecision,
     _resolve_side_from_strategy,
@@ -17,7 +18,9 @@ from trader import (
     append_trade_log,
     load_session_state,
     place_live_order,
+    run_live_trading,
     run_paper_trading,
+    validate_live_runtime_config,
 )
 
 
@@ -70,6 +73,96 @@ class _LiveMarketClient:
             up_best_ask=0.56,
             fetched_at=datetime.now(timezone.utc),
         )
+
+
+class _NoTradeLiveMarketClient(_LiveMarketClient):
+    def find_current_and_next_rounds(self, *, now):
+        return None, None
+
+
+def test_validate_live_runtime_config_requires_private_key_and_funder():
+    cfg = AppConfig(trade_mode='live', live_trading_enabled=True)
+
+    with pytest.raises(RuntimeError, match='private key'):
+        validate_live_runtime_config(cfg)
+
+
+def test_run_live_trading_stops_when_stop_event_is_set(tmp_path, monkeypatch):
+    stop_event = threading.Event()
+
+    def fake_sleep(_seconds):
+        stop_event.set()
+
+    monkeypatch.setattr('trader.time.sleep', fake_sleep)
+
+    result = run_live_trading(
+        AppConfig(
+            trade_mode='live',
+            live_trading_enabled=True,
+            live_private_key='pk',
+            live_funder='0xfunder',
+            poll_interval_seconds=1,
+        ),
+        market_client=_NoTradeLiveMarketClient(),
+        clob_client=_StubClobClient(),
+        state_path=tmp_path / 'live_state.json',
+        log_path=tmp_path / 'live_orders.csv',
+        stop_event=stop_event,
+    )
+
+    assert result['status'] == 'stopped'
+
+
+def test_run_live_trading_reports_pending_live_order_blocks_switch(tmp_path):
+    control = RuntimeControl(initial_mode='live')
+    state_path = tmp_path / 'live_state.json'
+    state_path.write_text(
+        json.dumps(
+            {
+                'round_index': 0,
+                'cash_pnl': 0.0,
+                'recovery_loss': 0.0,
+                'consecutive_losses': 0,
+                'consecutive_max_stake_skips': 0,
+                'signal_round_slug': None,
+                'signal_round_open_up_price': None,
+                'signal_round_locked_side': None,
+                'stop_loss_count': 0,
+                'daily_realized_pnl': 0.0,
+                'current_day': '2026-04-01',
+                'pending_live_slug': 'btc-updown-5m-prev',
+                'pending_live_side': 'UP',
+                'pending_live_price': 0.5,
+                'pending_live_order_size': 2.0,
+                'pending_live_order_cost': 1.0,
+                'pending_live_expected_profit': 1.0,
+                'pending_live_end_time': '2099-01-01T00:00:00+00:00',
+                'pending_live_order_id': 'oid-prev',
+            }
+        ),
+        encoding='utf-8',
+    )
+
+    result = run_live_trading(
+        AppConfig(
+            trade_mode='live',
+            live_trading_enabled=True,
+            live_private_key='pk',
+            live_funder='0xfunder',
+        ),
+        market_client=_NoTradeLiveMarketClient(),
+        clob_client=_StubClobClient(),
+        state_path=state_path,
+        log_path=tmp_path / 'live_orders.csv',
+        runtime_control=control,
+        stop_when_safe=lambda: True,
+    )
+
+    snapshot = control.snapshot()
+    assert snapshot.pending_live_order is True
+    assert snapshot.safe_to_switch is False
+    assert snapshot.switch_reason is None
+    assert result['status'] == 'pending_settlement'
 
 
 class _RoundEndMarketClient(_LiveMarketClient):
@@ -713,6 +806,27 @@ def test_run_paper_trading_stops_when_stop_event_is_set(tmp_path, monkeypatch):
 
     assert result["status"] == "stopped"
     assert sleep_calls["count"] == 1
+
+
+def test_run_paper_trading_reports_safe_to_switch_when_idle(tmp_path):
+    control = RuntimeControl(initial_mode='paper')
+
+    result = run_paper_trading(
+        AppConfig(poll_interval_seconds=1),
+        client=_NoMarketClient(),
+        state_path=tmp_path / 'state.json',
+        log_path=tmp_path / 'paper.csv',
+        runtime_control=control,
+        stop_when_safe=lambda: True,
+    )
+
+    snapshot = control.snapshot()
+    assert result['status'] == 'stopped'
+    assert snapshot.active_mode == 'paper'
+    assert snapshot.current_round_slug is None
+    assert snapshot.round_in_progress is False
+    assert snapshot.safe_to_switch is True
+    assert snapshot.pending_live_order is False
 
 
 def test_run_paper_trading_refreshes_config_provider_between_iterations(tmp_path, monkeypatch):

@@ -16,6 +16,7 @@ from models import MarketQuote, MarketWindow, SessionState, TradePlan, TradeReco
 from polymarket_api import PolymarketClient, extract_token_ids, parse_iso_datetime
 from risk_and_sizing import apply_round_outcome, build_trade_plan, reset_after_stop_loss
 from strategy import get_side_for_round
+from runtime_control import RuntimeControl
 
 
 @dataclass(slots=True)
@@ -305,12 +306,11 @@ def _emit_max_stake_skip_alert(
 ) -> None:
     printable_price = "N/A" if price is None else f"{price:.4f}"
     print(
-        "[WARN] order_cost_above_max_stake 连续触发 "
-        f"{state.consecutive_max_stake_skips} 次 | slug={slug} side={side} price={printable_price} "
+        "[WARN] order_cost_above_max_stake triggered "
+        f"{state.consecutive_max_stake_skips} times | slug={slug} side={side} price={printable_price} "
         f"recovery_loss={state.recovery_loss:.4f} max_stake={cfg.max_stake:.4f} "
-        "（仅告警，不会自动重置策略状态）"
+        "(alert only; strategy state is not reset automatically)"
     )
-
 
 def _runtime_backoff_seconds(cfg: AppConfig, consecutive_errors: int) -> int:
     scaled = cfg.runtime_error_backoff_base_seconds * (2 ** max(0, consecutive_errors - 1))
@@ -323,6 +323,18 @@ def _resolve_live_order_type(raw_order_type: str):
     normalized = (raw_order_type or "FOK").upper()
     return getattr(OrderType, normalized, OrderType.FOK)
 
+
+def validate_live_runtime_config(cfg: AppConfig) -> None:
+    if cfg.trade_mode != 'live':
+        return
+    if not cfg.live_trading_enabled:
+        raise RuntimeError('Live trading is disabled.')
+    if not cfg.live_private_key:
+        raise RuntimeError('Missing private key for live trading.')
+    if not cfg.live_funder:
+        raise RuntimeError('Missing POLYMARKET_FUNDER for live trading.')
+    if (cfg.live_order_type or 'FOK').upper() != 'FOK':
+        _resolve_live_order_type(cfg.live_order_type)
 
 def _session_day_key(now: datetime) -> str:
     return now.astimezone(SESSION_DAY_TZ).date().isoformat()
@@ -933,17 +945,29 @@ def place_live_order(
             "signal_locked": side_decision.signal_locked,
         }
 
-    from py_clob_client.clob_types import MarketOrderArgs
-    from py_clob_client.order_builder.constants import BUY
-
     live_client = live_client or _create_live_clob_client(cfg)
-    order_type = _resolve_live_order_type(cfg.live_order_type)
-    order_args = MarketOrderArgs(
-        token_id=token_id,
-        amount=plan.order_cost,
-        side=BUY,
-        order_type=order_type,
-    )
+    order_type = (cfg.live_order_type or 'FOK').upper() if clob_client is not None else _resolve_live_order_type(cfg.live_order_type)
+    if clob_client is None:
+        from py_clob_client.clob_types import MarketOrderArgs
+        from py_clob_client.order_builder.constants import BUY
+
+        order_args = MarketOrderArgs(
+            token_id=token_id,
+            amount=plan.order_cost,
+            side=BUY,
+            order_type=order_type,
+        )
+    else:
+        order_args = type(
+            'InjectedMarketOrderArgs',
+            (),
+            {
+                'token_id': token_id,
+                'amount': plan.order_cost,
+                'side': 'BUY',
+                'order_type': order_type,
+            },
+        )()
     signed_order = live_client.create_market_order(order_args)
     response = live_client.post_order(signed_order, order_type)
     order_id = _validate_live_submission_response(response)
@@ -1056,6 +1080,19 @@ def _runtime_log(message: str) -> None:
     print('[' + datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S') + ' UTC] ' + message, flush=True)
 
 
+def _update_runtime_control(
+    runtime_control: RuntimeControl | None,
+    **changes,
+) -> None:
+    if runtime_control is None:
+        return
+    runtime_control.update_worker_state(**changes)
+
+
+def _safe_stop_requested(stop_when_safe: Callable[[], bool] | None) -> bool:
+    return bool(stop_when_safe and stop_when_safe())
+
+
 def _fmt_price(value: float | None) -> str:
     return 'N/A' if value is None else f'{value:.4f}'
 
@@ -1163,6 +1200,80 @@ def _settle_paper_trade(
     return updated_state, result
 
 
+def run_live_trading(
+    cfg: AppConfig | None = None,
+    *,
+    market_client: PolymarketClient | None = None,
+    clob_client: Any | None = None,
+    state_path: Path | None = None,
+    log_path: Path | None = None,
+    stop_event: threading.Event | None = None,
+    config_provider: Callable[[], AppConfig] | None = None,
+    runtime_control: RuntimeControl | None = None,
+    stop_when_safe: Callable[[], bool] | None = None,
+) -> dict[str, Any]:
+    cfg = cfg or AppConfig()
+    validate_live_runtime_config(cfg)
+    client_provided = market_client is not None
+    state_path_provided = state_path is not None
+    log_path_provided = log_path is not None
+    market_client = market_client or PolymarketClient(cfg)
+    state_path = state_path or cfg.logs_dir / 'live_session_state.json'
+    log_path = log_path or cfg.logs_dir / 'live_orders.csv'
+    initial_state = load_session_state(state_path)
+    _update_runtime_control(
+        runtime_control,
+        current_round_slug=initial_state.pending_live_slug,
+        round_in_progress=bool(initial_state.pending_live_slug),
+        safe_to_switch=not bool(initial_state.pending_live_slug),
+        pending_live_order=bool(initial_state.pending_live_slug),
+    )
+
+    while True:
+        if _is_stop_requested(stop_event):
+            return {'status': 'stopped'}
+        if _safe_stop_requested(stop_when_safe) and runtime_control is not None:
+            snapshot = runtime_control.snapshot()
+            if snapshot.safe_to_switch and not snapshot.round_in_progress and not snapshot.pending_live_order:
+                return {'status': 'stopped'}
+        if config_provider is not None:
+            candidate_cfg = config_provider()
+            if candidate_cfg is not None:
+                validate_live_runtime_config(candidate_cfg)
+                cfg = candidate_cfg
+                if not client_provided:
+                    market_client.config = cfg
+                if not state_path_provided:
+                    state_path = cfg.logs_dir / 'live_session_state.json'
+                if not log_path_provided:
+                    log_path = cfg.logs_dir / 'live_orders.csv'
+        result = place_live_order(
+            cfg=cfg,
+            market_client=market_client,
+            clob_client=clob_client,
+            state_path=state_path,
+            log_path=log_path,
+        )
+        pending_live_order = bool(result.get('status') == 'pending_settlement')
+        current_round_slug = result.get('slug') if pending_live_order else None
+        _update_runtime_control(
+            runtime_control,
+            current_round_slug=current_round_slug,
+            round_in_progress=pending_live_order,
+            safe_to_switch=not pending_live_order,
+            pending_live_order=pending_live_order,
+        )
+        if _is_stop_requested(stop_event):
+            return {'status': 'stopped'}
+        if _safe_stop_requested(stop_when_safe) and result.get('status') == 'pending_settlement':
+            return result
+        if result.get('status') in {'submitted', 'skipped', 'waiting_for_entry', 'pending_settlement', 'no_market'}:
+            if not _sleep_if_not_stopped(stop_event, cfg.poll_interval_seconds):
+                return {'status': 'stopped'}
+            continue
+        return result
+
+
 def run_paper_trading(
     cfg: AppConfig | None = None,
     *,
@@ -1172,6 +1283,8 @@ def run_paper_trading(
     dry_run_once: bool = False,
     stop_event: threading.Event | None = None,
     config_provider: Callable[[], AppConfig] | None = None,
+    runtime_control: RuntimeControl | None = None,
+    stop_when_safe: Callable[[], bool] | None = None,
 ) -> dict[str, Any]:
     cfg = cfg or AppConfig()
     client_provided = client is not None
@@ -1182,6 +1295,13 @@ def run_paper_trading(
     log_path = log_path or cfg.logs_dir / "paper_trades.csv"
     state = load_session_state(state_path)
     consecutive_errors = 0
+    _update_runtime_control(
+        runtime_control,
+        current_round_slug=None,
+        round_in_progress=False,
+        safe_to_switch=True,
+        pending_live_order=False,
+    )
     _runtime_log(
         'paper-trade started | strategy=' + str(cfg.strategy_id)
         + ' entry_timing=' + cfg.entry_timing
@@ -1191,6 +1311,15 @@ def run_paper_trading(
 
     while True:
         if _is_stop_requested(stop_event):
+            return {"status": "stopped"}
+        if _safe_stop_requested(stop_when_safe):
+            _update_runtime_control(
+                runtime_control,
+                current_round_slug=None,
+                round_in_progress=False,
+                safe_to_switch=True,
+                pending_live_order=False,
+            )
             return {"status": "stopped"}
         try:
             if config_provider is not None:
