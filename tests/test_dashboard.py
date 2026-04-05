@@ -404,6 +404,16 @@ def test_dashboard_assets_use_planned_entry_copy():
     assert "已过计划入场" in js
 
 
+def test_dashboard_market_header_prioritizes_human_time_over_slug():
+    html = _dashboard_html()
+    js = _dashboard_js()
+
+    assert 'id="marketDeadline"' in html
+    assert "function marketDeadlineText(" in js
+    assert "结束时间 --" in js
+    assert "el('marketDeadline').textContent = marketDeadlineText(round.end_time);" in js
+
+
 def test_dashboard_reason_fallback_is_human_friendly():
     js = _dashboard_js()
 

@@ -866,8 +866,9 @@ def _dashboard_html() -> str:
       <div class=\"panel-body market-grid\">
         <div class=\"market-header\">
           <div>
-            <div id=\"marketSlug\" class=\"slug\">--</div>
+            <div id=\"marketDeadline\" class=\"deadline\">--</div>
             <div id=\"marketTitle\" class=\"title\">--</div>
+            <div id=\"marketSlug\" class=\"slug\">--</div>
           </div>
           <div class=\"timer-wrap\">
             <div id=\"entryCountdownLabel\" class=\"timer-label\">距离计划入场</div>
@@ -1677,18 +1678,25 @@ body::before {
   padding: 12px;
 }
 
-.slug {
+.deadline {
   font-family: var(--mono);
   font-size: 17px;
   color: #c2f2ff;
-  word-break: break-all;
   font-weight: 700;
 }
 
 .title {
   margin-top: 4px;
+  color: #e7eefc;
+  font-size: 13px;
+}
+
+.slug {
+  margin-top: 4px;
+  font-family: var(--mono);
+  font-size: 11px;
   color: var(--muted);
-  font-size: 12px;
+  word-break: break-all;
 }
 
 .timer-wrap { text-align: right; }
@@ -2419,6 +2427,14 @@ function sourceText(source) {
   return String(source);
 }
 
+function marketDeadlineText(value) {
+  const formatted = fmtIso(value);
+  if (!formatted || formatted === "--") {
+    return "结束时间 --";
+  }
+  return "结束时间 " + formatted;
+}
+
 function marketTitleText(title) {
   if (!title) {
     return '--';
@@ -2882,11 +2898,13 @@ function renderMarket(payload) {
   const ss = payload.session_state || {};
 
   if (!round) {
+    el('marketDeadline').textContent = '结束时间 --';
     el('marketSlug').textContent = '暂无可用轮次';
     el('marketTitle').textContent = payload.message || '当前时段没有可交易轮次';
     renderEntryCountdown(null);
-    setChip('marketHealth', '无轮次', 'warn');
+    setChip('marketHealth', '???', 'warn');
   } else {
+    el('marketDeadline').textContent = marketDeadlineText(round.end_time);
     el('marketSlug').textContent = round.slug || '--';
     el('marketTitle').textContent = marketTitleText(round.title);
     renderEntryCountdown(round.seconds_to_entry);
