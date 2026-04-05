@@ -604,6 +604,47 @@ def test_run_paper_trading_dry_run_allows_trade_within_entry_grace_window(tmp_pa
     assert result["skip_reason"] is None
 
 
+def test_run_paper_trading_dry_run_prefers_next_round_when_current_entry_window_missed(tmp_path):
+    cfg = AppConfig(strategy_id=2)
+
+    class _CurrentMissedNextAvailableClient(_LiveMarketClient):
+        def find_current_and_next_rounds(self, *, now):
+            current = MarketWindow(
+                event_id="evt-current",
+                market_id="mkt-current",
+                slug="btc-updown-5m-current",
+                title="BTC 5m Current",
+                start_time=now - timedelta(minutes=1),
+                end_time=now + timedelta(minutes=4),
+                up_token_id="up-token",
+                down_token_id="down-token",
+            )
+            upcoming = MarketWindow(
+                event_id="evt-next",
+                market_id="mkt-next",
+                slug="btc-updown-5m-next",
+                title="BTC 5m Next",
+                start_time=now + timedelta(minutes=4),
+                end_time=now + timedelta(minutes=9),
+                up_token_id="up-token",
+                down_token_id="down-token",
+            )
+            return current, upcoming
+
+    result = run_paper_trading(
+        cfg,
+        client=_CurrentMissedNextAvailableClient(),
+        state_path=tmp_path / "state.json",
+        log_path=tmp_path / "paper.csv",
+        dry_run_once=True,
+    )
+
+    assert result["status"] == "dry_run"
+    assert result["slug"] == "btc-updown-5m-next"
+    assert result["should_trade"] is True
+    assert result["skip_reason"] is None
+
+
 def test_run_paper_trading_dry_run_resets_daily_loss_cap_after_day_rollover(tmp_path):
     cfg = AppConfig(strategy_id=2, daily_loss_cap=50.0)
     state_path = tmp_path / "state.json"

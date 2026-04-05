@@ -241,6 +241,66 @@ def test_market_payload_allows_trade_within_entry_grace_window(tmp_path: Path, m
         state.close()
 
 
+def test_market_payload_prefers_next_round_when_current_entry_window_has_closed(tmp_path: Path, monkeypatch):
+    class StubClient:
+        def __init__(self, cfg):
+            self.config = cfg
+
+        def close(self) -> None:
+            return
+
+        def find_current_and_next_rounds(self, *, now):
+            current = MarketWindow(
+                event_id="evt-current",
+                market_id="mkt-current",
+                slug="btc-updown-5m-current",
+                title="BTC 5m Current",
+                start_time=now - timedelta(minutes=1),
+                end_time=now + timedelta(minutes=4),
+                up_token_id="up-token",
+                down_token_id="down-token",
+            )
+            upcoming = MarketWindow(
+                event_id="evt-next",
+                market_id="mkt-next",
+                slug="btc-updown-5m-next",
+                title="BTC 5m Next",
+                start_time=now + timedelta(minutes=4),
+                end_time=now + timedelta(minutes=9),
+                up_token_id="up-token",
+                down_token_id="down-token",
+            )
+            return current, upcoming
+
+        def get_market_by_slug(self, slug: str):
+            return {"slug": slug}
+
+        def quote_from_market(self, market):
+            return MarketQuote(
+                slug=str(market.get("slug", "")),
+                up_price=0.55,
+                down_price=0.45,
+                up_best_ask=0.56,
+                fetched_at=datetime.now(timezone.utc),
+            )
+
+        def get_ws_runtime_stats(self):
+            return {}
+
+    monkeypatch.setattr(dashboard, "PolymarketClient", StubClient)
+
+    state = DashboardState(env_file=tmp_path / ".env.dashboard")
+    try:
+        payload = state.get_market_payload()
+        assert payload["round"]["slug"] == "btc-updown-5m-next"
+        assert payload["round"]["is_current"] is False
+        assert payload["round"]["seconds_to_entry"] > 0
+        assert payload["plan"]["should_trade"] is True
+        assert payload["plan"]["skip_reason"] is None
+    finally:
+        state.close()
+
+
 def test_dashboard_payload_includes_strategy_catalog_and_field_groups(tmp_path: Path):
     state = DashboardState(env_file=tmp_path / ".env.dashboard")
     try:

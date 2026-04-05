@@ -607,7 +607,7 @@ def place_live_order(
         save_session_state(state_path, state)
 
     current_round, next_round = market_client.find_current_and_next_rounds(now=now)
-    target_round = current_round or next_round
+    target_round = _select_target_round(cfg, now=now, current_round=current_round, next_round=next_round)
     if target_round is None:
         if daily_state_changed and persist_state:
             save_session_state(state_path, state)
@@ -1014,6 +1014,20 @@ def _entry_window_missed(now: datetime, entry_time: datetime, *, grace_seconds: 
     return now > (entry_time + timedelta(seconds=max(0.0, grace_seconds)))
 
 
+def _select_target_round(
+    cfg: AppConfig,
+    *,
+    now: datetime,
+    current_round: MarketWindow | None,
+    next_round: MarketWindow | None,
+) -> MarketWindow | None:
+    if current_round is not None:
+        current_entry_time = _entry_time_for_round(cfg, current_round)
+        if not _entry_window_missed(now, current_entry_time, grace_seconds=cfg.entry_grace_seconds):
+            return current_round
+    return next_round if next_round is not None else current_round
+
+
 def _sleep_until_round_end(
     cfg: AppConfig,
     window: MarketWindow,
@@ -1192,7 +1206,7 @@ def run_paper_trading(
             now = datetime.now(timezone.utc)
             _refresh_daily_session_state(state, now)
             current_round, next_round = client.find_current_and_next_rounds(now=now)
-            target_round = current_round or next_round
+            target_round = _select_target_round(cfg, now=now, current_round=current_round, next_round=next_round)
             if target_round is None:
                 if dry_run_once:
                     return {"status": "no_market"}

@@ -72,6 +72,55 @@ def _optional_float(value: Any) -> float | None:
         return None
 
 
+def _best_bid_from_levels(levels: Any) -> float | None:
+    best: float | None = None
+    if not isinstance(levels, list):
+        return None
+    for level in levels:
+        if not isinstance(level, dict):
+            continue
+        price = _optional_float(level.get("price"))
+        if price is None:
+            continue
+        if best is None or price > best:
+            best = price
+    return best
+
+
+def _best_ask_from_levels(levels: Any) -> float | None:
+    best: float | None = None
+    if not isinstance(levels, list):
+        return None
+    for level in levels:
+        if not isinstance(level, dict):
+            continue
+        price = _optional_float(level.get("price"))
+        if price is None:
+            continue
+        if best is None or price < best:
+            best = price
+    return best
+
+
+def _display_price_from_snapshot(snapshot: dict[str, Any] | None, fallback: float | None) -> float | None:
+    if not snapshot:
+        return fallback
+
+    best_bid = _optional_float(snapshot.get("best_bid"))
+    best_ask = _optional_float(snapshot.get("best_ask"))
+    last_price = _optional_float(snapshot.get("last_price"))
+
+    # Match Polymarket's UI convention: midpoint when the spread is tight, otherwise last trade.
+    if best_bid is not None and best_ask is not None and best_ask >= best_bid:
+        spread = best_ask - best_bid
+        if spread <= 0.10:
+            return (best_bid + best_ask) / 2.0
+
+    if last_price is not None:
+        return last_price
+    return fallback
+
+
 def resolve_result(
     *,
     metadata: dict[str, Any],
@@ -249,19 +298,13 @@ class PolymarketClient:
                 if best_ask is not None:
                     quote["best_ask"] = best_ask
 
-                bids = item.get("bids")
-                if isinstance(bids, list) and bids:
-                    bid0 = bids[0] if isinstance(bids[0], dict) else None
-                    bid_price = _optional_float(bid0.get("price") if bid0 else None)
-                    if bid_price is not None:
-                        quote["best_bid"] = bid_price
+                bid_price = _best_bid_from_levels(item.get("bids"))
+                if bid_price is not None:
+                    quote["best_bid"] = bid_price
 
-                asks = item.get("asks")
-                if isinstance(asks, list) and asks:
-                    ask0 = asks[0] if isinstance(asks[0], dict) else None
-                    ask_price = _optional_float(ask0.get("price") if ask0 else None)
-                    if ask_price is not None:
-                        quote["best_ask"] = ask_price
+                ask_price = _best_ask_from_levels(item.get("asks"))
+                if ask_price is not None:
+                    quote["best_ask"] = ask_price
 
     def _ensure_ws_connection(self) -> None:
         if not self.config.ws_enabled:
@@ -573,15 +616,20 @@ class PolymarketClient:
             last_price = _optional_float(snapshot.get("last_price"))
             return last_price if last_price is not None else fallback
 
+        up_best_bid = _best_bid_from_snapshot(ws_up, http_quote.up_best_bid)
+        up_best_ask = _best_ask_from_snapshot(ws_up, http_quote.up_best_ask)
+        down_best_bid = _best_bid_from_snapshot(ws_down, http_quote.down_best_bid)
+        down_best_ask = _best_ask_from_snapshot(ws_down, http_quote.down_best_ask)
+
         return MarketQuote(
             slug=http_quote.slug,
             source="websocket",
-            up_price=(ws_up or {}).get("last_price", http_quote.up_price),
-            down_price=(ws_down or {}).get("last_price", http_quote.down_price),
-            up_best_bid=_best_bid_from_snapshot(ws_up, http_quote.up_best_bid),
-            up_best_ask=_best_ask_from_snapshot(ws_up, http_quote.up_best_ask),
-            down_best_bid=_best_bid_from_snapshot(ws_down, http_quote.down_best_bid),
-            down_best_ask=_best_ask_from_snapshot(ws_down, http_quote.down_best_ask),
+            up_price=_display_price_from_snapshot(ws_up, http_quote.up_price),
+            down_price=_display_price_from_snapshot(ws_down, http_quote.down_price),
+            up_best_bid=up_best_bid,
+            up_best_ask=up_best_ask,
+            down_best_bid=down_best_bid,
+            down_best_ask=down_best_ask,
             accepting_orders=http_quote.accepting_orders,
             fetched_at=datetime.now(timezone.utc),
         )

@@ -22,6 +22,7 @@ from strategy import get_side_for_round
 from trader import (
     _entry_window_missed,
     _entry_time_for_round,
+    _select_target_round,
     _resolve_side_from_strategy,
     _ws_is_stale_for_trade,
     load_session_state,
@@ -441,7 +442,7 @@ class DashboardState:
         now = datetime.now(timezone.utc)
         session_state = load_session_state(cfg.logs_dir / "session_state.json")
         current_round, next_round = client.find_current_and_next_rounds(now=now)
-        target_round = current_round or next_round
+        target_round = _select_target_round(cfg, now=now, current_round=current_round, next_round=next_round)
         ws_runtime = client.get_ws_runtime_stats()
 
         if target_round is None:
