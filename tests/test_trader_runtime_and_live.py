@@ -1001,3 +1001,6 @@ def test_run_paper_trading_stop_event_stops_during_round_end_wait(tmp_path, monk
 
     assert result["status"] == "stopped"
     assert sleep_calls == [1.0]
+
+
+

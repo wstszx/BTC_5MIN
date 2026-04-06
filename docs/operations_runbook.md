@@ -25,11 +25,13 @@ Key fields to review:
 - `SIGNAL_WEAK_SIGNAL_MODE`
 - `TRADE_MODE`
 - `LIVE_TRADING_ENABLED`
+- `POLYMARKET_FUNDER`
 
 Trading mode rules:
 
 - Use `TRADE_MODE=paper` for paper trading.
 - Use `TRADE_MODE=live` only when live credentials are present and `LIVE_TRADING_ENABLED=true` is also set.
+- Set `POLYMARKET_FUNDER` to the wallet address (`0x...`) corresponding to `POLYMARKET_PRIVATE_KEY`.
 - A dashboard save updates `.env.dashboard` and the runtime manager target mode.
 - The current worker finishes its current round before the runtime switches modes.
 - `paper -> live` still requires confirmation and valid live credentials.
@@ -50,15 +52,15 @@ This command starts the configured trading loop and the local dashboard together
 
 ## 4. Monitor and interact
 
-Open [http://127.0.0.1:8787/](http://127.0.0.1:8787/) in your browser to inspect the current quote, signal reasoning, risk controls, and the live config editor. Every save from the editor updates `.env.dashboard`.
+Open [http://127.0.0.1:8787/](http://127.0.0.1:8787/) in your browser to inspect the current quote, signal reasoning, risk controls, and the live config editor. Every save from the editor updates `.env.dashboard`. The editor shows a single `启用实盘` switch, and it labels `POLYMARKET_FUNDER` as `实盘钱包地址`.
 
-Check the runtime mode card after every mode change:
+???????????????
 
-- `Saved Mode` is what `.env.dashboard` currently stores.
-- `Running Mode` is what the active worker is actually using right now.
-- `Desired Mode` is the manager target mode that the runtime is trying to reach.
-- `Switch State` shows `idle`, `pending`, `switching`, or `blocked`.
-- `Live Ready` reports whether the saved live configuration passes validation.
+- `????` ?? `.env.dashboard` ??????????
+- `????` ????????????????
+- `????` ??????????????????
+- `????` ?? `idle`?`pending`?`switching` ? `blocked`?
+- `????` ??????????????????
 
 Supporting files and directories:
 

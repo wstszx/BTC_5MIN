@@ -6,11 +6,32 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 
+_ENV_FILE_ENCODINGS: tuple[str, ...] = ("utf-8", "utf-8-sig", "gbk")
+
+
+def _read_env_file_text(path: Path) -> str:
+    raw_bytes = path.read_bytes()
+    last_error: UnicodeDecodeError | None = None
+    for encoding in _ENV_FILE_ENCODINGS:
+        try:
+            return raw_bytes.decode(encoding)
+        except UnicodeDecodeError as exc:
+            last_error = exc
+    assert last_error is not None
+    raise UnicodeDecodeError(
+        last_error.encoding,
+        last_error.object,
+        last_error.start,
+        last_error.end,
+        f"Unsupported env file encoding for {path}. Expected one of: {', '.join(_ENV_FILE_ENCODINGS)}",
+    )
+
+
 def load_env_file_values(path: Path) -> dict[str, str]:
     if not path.exists():
         return {}
     values: dict[str, str] = {}
-    for line in path.read_text(encoding="utf-8").splitlines():
+    for line in _read_env_file_text(path).splitlines():
         raw = line.strip()
         if not raw or raw.startswith("#") or "=" not in raw:
             continue
@@ -95,7 +116,7 @@ class AppConfig:
     data_api_base: str = "https://data-api.polymarket.com"
     series_id: int = 10684
     series_slug: str = "btc-up-or-down-5m"
-    trade_mode: str = "paper"
+    trade_mode: str = field(default_factory=lambda: (os.getenv("TRADE_MODE") or "paper").strip().lower() or "paper")
     strategy_id: int = field(default_factory=lambda: _env_int("STRATEGY_ID", 2))
     target_profit: float = field(default_factory=lambda: _env_float("TARGET_PROFIT", 1.0))
     bet_sizing_mode: str = field(default_factory=lambda: (os.getenv("BET_SIZING_MODE") or "FIXED_BASE_COST").upper())
@@ -134,9 +155,12 @@ class AppConfig:
     history_entry_max_offset_seconds: int = field(default_factory=lambda: _env_int("HISTORY_ENTRY_MAX_OFFSET_SECONDS", 120))
     history_dir: Path = Path("data")
     logs_dir: Path = Path("logs")
+    # Safety gate for real-order submission. Keep this false unless you explicitly want live trading.
     live_trading_enabled: bool = field(default_factory=lambda: _env_bool("LIVE_TRADING_ENABLED", False))
+    # Wallet private key used for live trading.
     live_private_key: str | None = field(default_factory=lambda: os.getenv("POLYMARKET_PRIVATE_KEY") or os.getenv("PRIVATE_KEY"))
     live_chain_id: int = field(default_factory=lambda: _env_int("POLYMARKET_CHAIN_ID", 137))
     live_signature_type: int = field(default_factory=lambda: _env_int("POLYMARKET_SIGNATURE_TYPE", 0))
+    # Wallet address (0x...) corresponding to POLYMARKET_PRIVATE_KEY; this is the live wallet address shown in the UI.
     live_funder: str | None = field(default_factory=lambda: os.getenv("POLYMARKET_FUNDER"))
     live_order_type: str = field(default_factory=lambda: (os.getenv("POLYMARKET_ORDER_TYPE") or "FOK").upper())

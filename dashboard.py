@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import csv
 import errno
@@ -78,6 +78,18 @@ def _iso(dt: datetime | None) -> str | None:
     return dt.astimezone(timezone.utc).isoformat()
 
 
+
+def _localize_runtime_message(message: str | None) -> str | None:
+    if not message:
+        return message
+    mapping = {
+        "Live trading is disabled.": "实盘交易未开启。",
+        "Live trading is disabled. Set LIVE_TRADING_ENABLED=true (or config flag) to submit orders.": "实盘交易未开启。请先打开实盘交易开关。",
+        "Missing private key for live trading.": "缺少实盘私钥。",
+        "Missing POLYMARKET_FUNDER for live trading.": "\u7f3a\u5c11\u5b9e\u76d8\u94b1\u5305\u5730\u5740\u3002",
+    }
+    return mapping.get(message, message)
+
 def _json_default(value: Any) -> Any:
     if isinstance(value, datetime):
         return _iso(value)
@@ -126,6 +138,16 @@ def _strategy_catalog() -> dict[str, dict[str, Any]]:
 
 def _field_groups() -> list[dict[str, Any]]:
     return [
+        {
+            "title": "运行模式",
+            "description": "控制是否启用实盘，并配置实盘所需的钱包凭证。",
+            "keys": [
+                "TRADE_MODE",
+                "LIVE_TRADING_ENABLED",
+                "POLYMARKET_PRIVATE_KEY",
+                "POLYMARKET_FUNDER",
+            ],
+        },
         {
             "title": "基础策略",
             "description": "决定方向节奏、下注模式和主要风险边界。",
@@ -207,10 +229,11 @@ class DashboardState:
     )
 
     CONFIG_LABELS: dict[str, str] = {
-        "TRADE_MODE": "Trade mode",
-        "LIVE_TRADING_ENABLED": "Live trading enabled",
-        "POLYMARKET_PRIVATE_KEY": "Live private key",
-        "POLYMARKET_FUNDER": "Live funder",
+        "ENABLE_LIVE_TRADING": "启用实盘",
+        "TRADE_MODE": "交易模式",
+        "LIVE_TRADING_ENABLED": "实盘交易开关",
+        "POLYMARKET_PRIVATE_KEY": "实盘私钥",
+        "POLYMARKET_FUNDER": "\u5b9e\u76d8\u94b1\u5305\u5730\u5740",
         "STRATEGY_ID": "基础策略",
         "TARGET_PROFIT": "每次目标净利",
         "BET_SIZING_MODE": "下注模式",
@@ -234,6 +257,7 @@ class DashboardState:
     }
 
     SELECT_OPTIONS: dict[str, list[str]] = {
+        "ENABLE_LIVE_TRADING": ["false", "true"],
         "TRADE_MODE": ["paper", "live"],
         "LIVE_TRADING_ENABLED": ["true", "false"],
         "STRATEGY_ID": ["1", "2", "3", "4", "5"],
@@ -299,10 +323,6 @@ class DashboardState:
     MASKED_SECRET_VALUE = "********"
 
     STRATEGY_CATALOG: dict[str, dict[str, Any]] = _strategy_catalog()
-    STRATEGY_CATALOG_COMPAT: dict[str, dict[str, str]] = {
-        "2": {"label": 'Ã¥Â\x8fÅ’Ã¨Â½Â®Ã¥Ë†â€\xa0Ã§Â»â€žÃ¤ÂºÂ¤Ã¦â€ºÂ¿'},
-        "5": {"label": 'Ã¥Å\xa0Â¨Ã©â€¡Â\x8fÃ¤Â¿Â¡Ã¥Â\x8fÂ· V2'},
-    }
     FIELD_GROUPS: list[dict[str, Any]] = _field_groups()
     FIELD_SCOPE: dict[str, str] = {
         "SIGNAL_MOMENTUM_THRESHOLD": "strategy_5_only",
@@ -318,6 +338,9 @@ class DashboardState:
         "STRATEGY_ID": "1~4 是固定节奏策略；5 是动量信号策略，会额外用到下方 signal_* 参数。",
         "TARGET_PROFIT": "TARGET_PROFIT 模式下，每轮希望净赚多少；FIXED_BASE_COST 模式下主要用于研究，不直接决定起始下注额。",
         "BET_SIZING_MODE": "FIXED_BASE_COST 为固定起始金额，TARGET_PROFIT 为按目标盈利反推下单金额。",
+        "ENABLE_LIVE_TRADING": "关闭时只做纸面测试；开启后会切到实盘配置，并允许真实下单。",
+        "POLYMARKET_PRIVATE_KEY": "填写实盘钱包的私钥，仅在启用实盘时需要。",
+        "POLYMARKET_FUNDER": "填写与实盘私钥对应的钱包地址（0x...），也就是实际出资的钱包地址。",
         "BASE_ORDER_COST": "仅 FIXED_BASE_COST 模式下生效，赢后回到这个起始金额。",
         "MAX_CONSECUTIVE_LOSSES": "连续亏损达到该轮数后，策略会触发止损重置。",
         "MAX_STAKE": "单笔实际花费的 USDC 上限，超过会直接跳过。",
@@ -445,7 +468,7 @@ class DashboardState:
             validate_live_runtime_config(self._build_config(validation_values))
             live_ready = True
         except Exception as exc:
-            live_validation_error = str(exc)
+            live_validation_error = _localize_runtime_message(str(exc))
         return {
             "saved_mode": saved_mode,
             "running_mode": active_mode,
@@ -490,12 +513,9 @@ class DashboardState:
             env_values, validation_errors = self._merged_env_values()
             runtime_status = self._build_runtime_status(env_values)
             strategy_catalog = json.loads(json.dumps(self.STRATEGY_CATALOG))
-            for key, compat in self.STRATEGY_CATALOG_COMPAT.items():
-                if key in strategy_catalog:
-                    strategy_catalog[key].update(compat)
             field_groups = json.loads(json.dumps(self.FIELD_GROUPS))
             if field_groups:
-                field_groups[0]["title"] = 'Ã¥Å¸ÂºÃ§Â¡â‚¬Ã§Â\xadâ€“Ã§â€¢Â¥'
+                field_groups[0]["title"] = "运行模式"
             return {
                 "env_file": str(self.env_file),
                 "env_values": self._masked_env_values(env_values),
@@ -953,7 +973,7 @@ def _dashboard_html() -> str:
   <link rel=\"stylesheet\" href=\"/dashboard.css\">
 </head>
 <body>
-  <!-- Ã¨Â®Â¡Ã¥Ë†â€™Ã¥â€¦Â¥Ã¥Å“Âº -->
+  <!-- 计划入场 -->
   <header class=\"topbar\">
     <div class=\"brand-wrap\">
       <div class=\"brand\">QUANT_CMD · BTC_5M</div>
@@ -977,6 +997,10 @@ def _dashboard_html() -> str:
         <div id=\"cfgStatus\" class=\"chip\">未保存</div>
       </div>
       <div class=\"panel-body\">
+        <div class=\"meta-item\">
+          <span class=\"meta-label\">\u8bfb\u53d6\u72b6\u6001</span>
+          <span id=\"cfgError\" class=\"meta-value\">--</span>
+        </div>
         <div class=\"meta\">
           <div class=\"meta-item\">
             <span class=\"meta-label\">配置文件</span>
@@ -990,20 +1014,20 @@ def _dashboard_html() -> str:
 
         <div id=\"strategyGuideCard\" class=\"strategy-guide-card\"></div>
 
-        <div id=\"runtimeModeCard\" class=\"strategy-guide-card\">
-          <div class=\"strategy-guide-head\">
+        <div id="runtimeModeCard" class="strategy-guide-card">
+          <div class="strategy-guide-head">
             <div>
-              <div class=\"strategy-guide-title\">Runtime mode</div>
-              <div class=\"strategy-guide-subtitle\">Saved config, running worker, restart state, and live readiness.</div>
+              <div class="strategy-guide-title">运行模式</div>
+              <div class="strategy-guide-subtitle">显示配置目标、当前实际状态、切换进度和实盘条件。</div>
             </div>
-            <span class=\"chip warn\">Restart gated</span>
+            <span class="chip warn">热切换受控</span>
           </div>
           <div class=\"rows\">
-            <div class=\"row\"><span class=\"label\">Saved mode</span><span id=\"runtimeSavedMode\" class=\"value\">--</span></div>
-            <div class=\"row\"><span class=\"label\">Running mode</span><span id=\"runtimeRunningMode\" class=\"value\">--</span></div>
-            <div class=\"row\"><span class=\"label\">Restart required</span><span id=\"runtimeRestartRequired\" class=\"value\">--</span></div>
-            <div class=\"row\"><span class=\"label\">Live ready</span><span id=\"runtimeLiveReady\" class=\"value\">--</span></div>
-            <div class=\"row\"><span class=\"label\">Live validation</span><span id=\"runtimeLiveError\" class=\"value\">--</span></div>
+            <div class="row"><span class="label">配置目标</span><span id="runtimeSavedMode" class="value">--</span></div>
+            <div class="row"><span class="label">当前状态</span><span id="runtimeRunningMode" class="value">--</span></div>
+            <div class="row"><span class="label">待切换</span><span id="runtimeRestartRequired" class="value">--</span></div>
+            <div class="row"><span class="label">实盘条件</span><span id="runtimeLiveReady" class="value">--</span></div>
+            <div class="row"><span class="label">条件说明</span><span id="runtimeLiveError" class="value">--</span></div>
           </div>
         </div>
 
@@ -1119,11 +1143,13 @@ def _dashboard_html() -> str:
               <span id=\"marketUpdatedAt\" class=\"value\">--</span>
             </div>
           </div>
+
+          </div>
         </div>
       </div>
     </section>
 
-    <section class=\"stack right-stack\">
+    <section class="stack right-stack">
       <div class=\"panel\">
         <div class=\"panel-head\">
           <div>
@@ -1174,13 +1200,13 @@ def _dashboard_html() -> str:
       </div>
     </section>
 
-    <section class=\"panel trades-panel\">
-      <div class=\"panel-head\">
+    <section class="panel trades-panel">
+      <div class="panel-head">
         <div>
-          <div class=\"head-title\">最近纸面交易明细</div>
-          <div class=\"head-desc\">最近纸面交易流水 (默认 80 行)</div>
+          <div class="head-title">最近交易明细</div>
+          <div class="head-desc">按时间倒序显示最近 80 条记录</div>
         </div>
-        <div id=\"recentStatus\" class=\"chip\">待刷新</div>
+        <div id="recentStatus" class="chip">待刷新</div>
       </div>
       <div class=\"table-wrap\">
         <table>
@@ -1651,6 +1677,11 @@ body::before {
 
 .meta-label { color: var(--muted); }
 .meta-value { font-family: var(--mono); color: var(--text); }
+
+.meta-value.flash-saved {
+  color: var(--green);
+  text-shadow: 0 0 12px rgba(90, 234, 165, 0.35);
+}
 
 .form-grid {
   display: grid;
@@ -2211,25 +2242,6 @@ const HELP_FAQ = [
   ['新手最容易改错什么？', '一次改太多参数、没分清固定节奏和动量策略、把 WS 保护误以为是策略问题。'],
 ];
 
-const LEGACY_COMPAT_STRINGS = [
-  'Ã¥Â\x8fÅ’Ã¨Â½Â®Ã¥Ë†â€\xa0Ã§Â»â€žÃ¤ÂºÂ¤Ã¦â€ºÂ¿',
-  'Ã¥Å\xa0Â¨Ã©â€¡Â\x8fÃ¤Â¿Â¡Ã¥Â\x8fÂ· V2',
-  'Ã¥â€¦Ë†Ã§Å“â€¹Ã¥â€œÂªÃ©â€¡Å’',
-  'Ã¦â‚¬Å½Ã¤Â¹Ë†Ã¥Â®â€°Ã¥â€¦Â¨Ã¦â€\x9dÂ¹Ã¥Â\x8fâ€šÃ¦â€¢Â°',
-  'Ã¦â‚¬Å½Ã¤Â¹Ë†Ã¥Ë†Â¤Ã¦â€“Â\xadÃ¥Â½â€œÃ¥â€°Â\x8dÃ¨Æ’Â½Ã¤Â¸Â\x8dÃ¨Æ’Â½Ã¨Â·â€˜',
-  'Ã¥â€¡ÂºÃ©â€”Â®Ã©Â¢ËœÃ¥â€¦Ë†Ã§Å“â€¹Ã¥â€œÂªÃ©â€¡Å’',
-  'Ã©Â¡ÂµÃ©Â\x9dÂ¢Ã¥â€¦Æ’Ã§Â´Â\xa0Ã¨Â¯Â´Ã¦ËœÅ½',
-  'Ã¤Â»â€¦Ã§Â\xadâ€“Ã§â€¢Â¥ 5 Ã©â€¡Â\x8dÃ§â€šÂ¹Ã¤Â½Â¿Ã§â€\x9dÂ¨',
-  'Ã¥Â¸Â¸Ã¨Â§Â\x81Ã©â€”Â®Ã©Â¢Ëœ',
-  'Ã¨Â®Â¡Ã¥Ë†â€™Ã¥â€¦Â¥Ã¥Å“Âº',
-  'Ã¨Â·Â\x9dÃ§Â¦Â»Ã¨Â®Â¡Ã¥Ë†â€™Ã¥â€¦Â¥Ã¥Å“Âº',
-  'Ã¥Â·Â²Ã¨Â¿â€¡Ã¨Â®Â¡Ã¥Ë†â€™Ã¥â€¦Â¥Ã¥Å“Âº',
-  'Ã§Â»â€œÃ¦Â\x9dÅ¸Ã¦â€”Â¶Ã©â€”Â´ --',
-  'Ã¦Å“ÂªÃ¨Â¯â€\xa0Ã¥Ë†Â«Ã¥Å½Å¸Ã¥â€ºÂ\xa0Ã¯Â¼Å¡',
-  'Ã¥Â\x8fÂ¯Ã¥Â°Â\x9dÃ¨Â¯â€¢Ã¥Ë†Â·Ã¦â€“Â°Ã©Â¡ÂµÃ©Â\x9dÂ¢',
-  'Ã¥Å¸ÂºÃ§Â¡â‚¬Ã§Â\xadâ€“Ã§â€¢Â¥',
-];
-
 const STORAGE_KEYS = {
   showInternalKeys: 'dashboard_show_internal_keys',
 };
@@ -2243,13 +2255,17 @@ const STRATEGY_LABELS = {
 };
 
 const OPTION_LABELS = {
+  ENABLE_LIVE_TRADING: {
+    true: '开启',
+    false: '关闭',
+  },
   TRADE_MODE: {
-    paper: 'Paper',
-    live: 'Live',
+    paper: '模拟盘',
+    live: '实盘',
   },
   LIVE_TRADING_ENABLED: {
-    true: 'Enabled',
-    false: 'Disabled',
+    true: '开启',
+    false: '关闭',
   },
   BET_SIZING_MODE: {
     FIXED_BASE_COST: '固定金额模式',
@@ -2281,10 +2297,11 @@ const REASON_LABELS = {
 };
 
 const CONFIG_KEY_NAMES = {
-  TRADE_MODE: 'Trade mode',
-  LIVE_TRADING_ENABLED: 'Live trading enabled',
-  POLYMARKET_PRIVATE_KEY: 'Live private key',
-  POLYMARKET_FUNDER: 'Live funder',
+  ENABLE_LIVE_TRADING: '启用实盘',
+  TRADE_MODE: '交易模式',
+  LIVE_TRADING_ENABLED: '实盘交易开关',
+  POLYMARKET_PRIVATE_KEY: '实盘私钥',
+  POLYMARKET_FUNDER: '\u5b9e\u76d8\u94b1\u5305\u5730\u5740',
   STRATEGY_ID: '基础策略',
   TARGET_PROFIT: '每次目标净利',
   BET_SIZING_MODE: '下注模式',
@@ -2747,6 +2764,62 @@ function buildApiError(data, status) {
   return err;
 }
 
+function setConfigError(message) {
+  el('cfgError').textContent = message || '--';
+}
+
+let saveButtonResetTimer = null;
+let savedAtFlashTimer = null;
+
+function setSaveButtonState(state) {
+  const button = el('btnSaveConfig');
+  if (!button) {
+    return;
+  }
+  if (saveButtonResetTimer) {
+    clearTimeout(saveButtonResetTimer);
+    saveButtonResetTimer = null;
+  }
+  button.disabled = state === 'saving';
+  if (state === 'saving') {
+    button.textContent = '\u4fdd\u5b58\u4e2d...';
+    return;
+  }
+  if (state === 'saved') {
+    button.textContent = '\u5df2\u4fdd\u5b58';
+    saveButtonResetTimer = setTimeout(() => {
+      button.textContent = '\u4fdd\u5b58\u53c2\u6570';
+      button.disabled = false;
+    }, 1800);
+    return;
+  }
+  if (state === 'error') {
+    button.textContent = '\u4fdd\u5b58\u5931\u8d25';
+    saveButtonResetTimer = setTimeout(() => {
+      button.textContent = '\u4fdd\u5b58\u53c2\u6570';
+      button.disabled = false;
+    }, 2200);
+    return;
+  }
+  button.textContent = '\u4fdd\u5b58\u53c2\u6570';
+  button.disabled = false;
+}
+
+function flashSavedAt() {
+  const node = el('cfgSavedAt');
+  if (!node) {
+    return;
+  }
+  if (savedAtFlashTimer) {
+    clearTimeout(savedAtFlashTimer);
+    savedAtFlashTimer = null;
+  }
+  node.classList.add('flash-saved');
+  savedAtFlashTimer = setTimeout(() => {
+    node.classList.remove('flash-saved');
+  }, 1800);
+}
+
 async function apiPost(path, payload) {
   const resp = await fetch(path, {
     method: 'POST',
@@ -2782,8 +2855,9 @@ function renderHelpConfigDictionary() {
   const help = payload.field_help || {};
   const scope = payload.field_scope || {};
   const labels = payload.labels || {};
+  const helpGroups = typeof displayFieldGroups !== "undefined" && displayFieldGroups.length > 0 ? displayFieldGroups : groups;
 
-  return groups.map((group) => {
+  return helpGroups.map((group) => {
     const items = (group.keys || []).map((key) => {
       const scopeNote = scope[key] === 'strategy_5_only' ? '仅策略 5 重点使用' : '所有策略都可参考';
       return '<li>' +
@@ -2880,11 +2954,38 @@ function renderHelpDrawer() {
   });
 }
 
+function formatModeLabel(value) {
+  const normalized = String(value || 'paper').toLowerCase();
+  return OPTION_LABELS.TRADE_MODE[normalized] || normalized;
+}
+
+function isSingleLiveToggleKey(key) {
+  return key === 'TRADE_MODE' || key === 'LIVE_TRADING_ENABLED';
+}
+
+function buildLiveToggleValue(values) {
+  const mode = String(values.TRADE_MODE || 'paper').toLowerCase();
+  const enabled = String(values.LIVE_TRADING_ENABLED || 'false').toLowerCase();
+  return mode === 'live' && enabled === 'true' ? 'true' : 'false';
+}
+
+function expandLiveToggleValues(values) {
+  const expanded = { ...values };
+  if (!Object.prototype.hasOwnProperty.call(expanded, 'ENABLE_LIVE_TRADING')) {
+    return expanded;
+  }
+  const normalized = String(expanded.ENABLE_LIVE_TRADING || 'false').toLowerCase() === 'true' ? 'true' : 'false';
+  expanded.TRADE_MODE = normalized === 'true' ? 'live' : 'paper';
+  expanded.LIVE_TRADING_ENABLED = normalized;
+  delete expanded.ENABLE_LIVE_TRADING;
+  return expanded;
+}
+
 function renderRuntimeStatus(payload) {
-  el('runtimeSavedMode').textContent = String(payload.saved_mode || 'paper').toLowerCase();
-  el('runtimeRunningMode').textContent = String(payload.running_mode || 'paper').toLowerCase();
-  el('runtimeRestartRequired').textContent = payload.restart_required ? 'yes' : 'no';
-  el('runtimeLiveReady').textContent = payload.live_ready ? 'yes' : 'no';
+  el('runtimeSavedMode').textContent = formatModeLabel(payload.saved_mode || 'paper');
+  el('runtimeRunningMode').textContent = formatModeLabel(payload.running_mode || 'paper');
+  el('runtimeRestartRequired').textContent = payload.restart_required ? '是' : '否';
+  el('runtimeLiveReady').textContent = payload.live_ready ? '已就绪' : '未就绪';
   el('runtimeLiveError').textContent = payload.live_validation_error || '--';
 }
 
@@ -2902,10 +3003,10 @@ function renderConfig(payload) {
 
   const form = el('configForm');
   form.innerHTML = '';
-
   const keys = payload.editable_keys || [];
   const labels = payload.labels || {};
   const values = payload.env_values || {};
+  const displayValues = { ...values, ENABLE_LIVE_TRADING: buildLiveToggleValue(values) };
   const options = payload.select_options || {};
   const fieldHelp = payload.field_help || {};
   const fieldScope = payload.field_scope || {};
@@ -2913,9 +3014,21 @@ function renderConfig(payload) {
   const fieldGroups = Array.isArray(payload.field_groups) && payload.field_groups.length > 0
     ? payload.field_groups
     : [{ title: '全部参数', description: '', keys }];
-  const editableKeySet = new Set(keys);
+  const editableKeySet = new Set(['ENABLE_LIVE_TRADING', ...keys.filter((key) => !isSingleLiveToggleKey(key))]);
+  const displayFieldGroups = fieldGroups.map((group) => {
+    return {
+      ...group,
+      keys: (group.keys || [])
+        .filter((key) => !isSingleLiveToggleKey(key) || key === 'TRADE_MODE')
+        .map((key) => {
+          const mappedKey = key === 'TRADE_MODE' ? 'ENABLE_LIVE_TRADING' : key;
+          return mappedKey;
+        })
+        .filter((key, index, arr) => editableKeySet.has(key) && arr.indexOf(key) === index),
+    };
+  });
 
-  for (const group of fieldGroups) {
+  for (const group of displayFieldGroups) {
     const groupKeys = (group.keys || []).filter((key) => editableKeySet.has(key));
     if (groupKeys.length === 0) {
       continue;
@@ -2954,7 +3067,7 @@ function renderConfig(payload) {
           const option = document.createElement('option');
           option.value = opt;
           option.textContent = strategyOptionLabel(key, opt, payload);
-          if (String(values[key] ?? '') === String(opt)) {
+          if (String(displayValues[key] ?? '') === String(opt)) {
             option.selected = true;
           }
           select.appendChild(option);
@@ -2964,7 +3077,7 @@ function renderConfig(payload) {
         const input = document.createElement('input');
         input.id = 'cfg_' + key;
         input.type = 'text';
-        input.value = String(values[key] ?? '');
+        input.value = String(displayValues[key] ?? '');
         wrap.appendChild(input);
       }
 
@@ -2994,20 +3107,22 @@ function renderConfig(payload) {
   }
 
   form.oninput = () => {
-    const liveValues = collectConfigValues();
+    const liveValues = expandLiveToggleValues(collectConfigValues());
     renderStrategyGuide(state.config, liveValues);
     applyConfigFieldVisibility(liveValues);
   };
   form.onchange = form.oninput;
 
-  renderStrategyGuide(payload, values);
-  applyConfigFieldVisibility(values);
+  renderStrategyGuide(payload, displayValues);
+  applyConfigFieldVisibility(expandLiveToggleValues(displayValues));
+  setConfigError('--');
   setChip('cfgStatus', '已加载', 'ok');
+  setSaveButtonState('idle');
 }
 
 function collectConfigValues() {
   const payload = {};
-  const keys = (state.config && state.config.editable_keys) || [];
+  const keys = ['ENABLE_LIVE_TRADING', ...(((state.config && state.config.editable_keys) || []).filter((key) => !isSingleLiveToggleKey(key)))];
   for (const key of keys) {
     const node = el('cfg_' + key);
     if (node) {
@@ -3017,12 +3132,26 @@ function collectConfigValues() {
   return payload;
 }
 
+function areConfigValuesEqual(left, right) {
+  const keys = new Set([
+    ...Object.keys(left || {}),
+    ...Object.keys(right || {}),
+  ]);
+  for (const key of keys) {
+    if (String((left || {})[key] ?? '') !== String((right || {})[key] ?? '')) {
+      return false;
+    }
+  }
+  return true;
+}
+
 async function refreshConfig() {
   try {
     const data = await apiGet('/api/config');
     renderConfig(data);
   } catch (err) {
-    setChip('cfgStatus', '读取失败', 'err');
+    setConfigError(err && err.message ? err.message : '\u8bfb\u53d6\u914d\u7f6e\u5931\u8d25');
+    setChip('cfgStatus', '\u8bfb\u53d6\u5931\u8d25', 'err');
     console.error(err);
   }
 }
@@ -3030,17 +3159,27 @@ async function refreshConfig() {
 async function saveConfig() {
   let values = {};
   try {
+    values = expandLiveToggleValues(collectConfigValues());
+    const currentValues = expandLiveToggleValues({ ...(((state.config || {}).env_values) || {}) });
+    if (areConfigValuesEqual(values, currentValues)) {
+      setChip('cfgStatus', '\u6ca1\u6709\u53d8\u66f4', 'warn');
+      setSaveButtonState('idle');
+      return;
+    }
     setChip('cfgStatus', '保存中', 'warn');
-    values = collectConfigValues();
+    setSaveButtonState('saving');
     const previousMode = String((((state.config || {}).env_values || {}).TRADE_MODE || 'paper')).toLowerCase();
     const nextMode = String((values.TRADE_MODE || previousMode || 'paper')).toLowerCase();
-    if (shouldConfirmLiveModeSwitch(previousMode, nextMode) && !window.confirm('This will save LIVE mode and requires a restart before real trading begins. Continue?')) {
-      setChip('cfgStatus', 'å·²å–æ¶ˆ', 'warn');
+    if (shouldConfirmLiveModeSwitch(previousMode, nextMode) && !window.confirm('切换为实盘后，后续下单会按实盘配置执行。确认继续吗？')) {
+      setChip('cfgStatus', '已取消', 'warn');
+      setSaveButtonState('idle');
       return;
     }
     const data = await apiPost('/api/config', { env_values: values });
     renderConfig(data);
+    flashSavedAt();
     setChip('cfgStatus', '已保存', 'ok');
+    setSaveButtonState('saved');
   } catch (err) {
     const fieldErrors = err && err.fieldErrors ? err.fieldErrors : {};
     if (Object.keys(fieldErrors).length > 0 && state.config) {
@@ -3050,8 +3189,10 @@ async function saveConfig() {
         validation_errors: fieldErrors,
       });
       setChip('cfgStatus', '校验失败', 'err');
+      setSaveButtonState('error');
     } else {
       setChip('cfgStatus', '保存失败', 'err');
+      setSaveButtonState('error');
     }
     console.error(err);
   }
@@ -3116,7 +3257,7 @@ function renderMarket(payload) {
     el('marketSlug').textContent = '暂无可用轮次';
     el('marketTitle').textContent = payload.message || '当前时段没有可交易轮次';
     renderEntryCountdown(null);
-    setChip('marketHealth', '???', 'warn');
+    setChip('marketHealth', '无轮次', 'warn');
   } else {
     el('marketDeadline').textContent = marketDeadlineText(round.end_time);
     el('marketSlug').textContent = round.slug || '--';
@@ -3363,3 +3504,4 @@ document.addEventListener('keydown', (event) => {
 
 document.addEventListener('DOMContentLoaded', bootstrap);
 """
+

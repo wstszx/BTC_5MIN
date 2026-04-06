@@ -13,7 +13,7 @@ python -m pip install -r requirements.txt
 
 ## 2. Configure parameters
 
-`python main.py` uses `.env.dashboard` as the primary operator config file. For overlapping keys, values in `.env.dashboard` win. If a key is missing there, the runtime can still read it from temporary environment variables for that launch; anything still missing falls back to the defaults in `config.py`. Environment-variable values do not get written back to `.env.dashboard`.
+`python main.py` uses `.env.dashboard` as the primary operator config file. You can copy `.env.dashboard.example` to create a commented starter template. For overlapping keys, values in `.env.dashboard` win. If a key is missing there, the runtime can still read it from temporary environment variables for that launch; anything still missing falls back to the defaults in `config.py`. Environment-variable values do not get written back to `.env.dashboard`.
 
 Dashboard saves write back to `.env.dashboard`, and mode changes also update the running `RuntimeManager` target mode. Common fields include:
 

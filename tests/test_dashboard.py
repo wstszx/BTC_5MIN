@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import os
 import threading
@@ -307,12 +307,12 @@ def test_dashboard_payload_includes_strategy_catalog_and_field_groups(tmp_path: 
     try:
         payload = state.get_config_payload()
 
-        assert payload["strategy_catalog"]["2"]["label"] == "Ã¥ÂÅ’Ã¨Â½Â®Ã¥Ë†â€ Ã§Â»â€žÃ¤ÂºÂ¤Ã¦â€ºÂ¿"
+        assert payload["strategy_catalog"]["2"]["label"] == "\u53cc\u8f6e\u5206\u7ec4\u4ea4\u66ff"
         assert payload["strategy_catalog"]["2"]["preview"] == ["UP", "UP", "DOWN", "DOWN"]
-        assert payload["strategy_catalog"]["5"]["label"] == "Ã¥Å Â¨Ã©â€¡ÂÃ¤Â¿Â¡Ã¥ÂÂ· V2"
+        assert payload["strategy_catalog"]["5"]["label"] == "\u52a8\u91cf\u4fe1\u53f7 V2"
         assert payload["field_help"]["STRATEGY_ID"]
         assert payload["field_scope"]["SIGNAL_MOMENTUM_THRESHOLD"] == "strategy_5_only"
-        assert payload["field_groups"][0]["title"] == "Ã¥Å¸ÂºÃ§Â¡â‚¬Ã§Â­â€“Ã§â€¢Â¥"
+        assert payload["field_groups"][0]["title"] == "\u8fd0\u884c\u6a21\u5f0f"
     finally:
         state.close()
 
@@ -323,8 +323,8 @@ def test_dashboard_assets_include_strategy_guide_and_human_labels():
 
     assert 'id="strategyGuideCard"' in html
     assert "function renderStrategyGuide(" in js
-    assert "Ã¥ÂÅ’Ã¨Â½Â®Ã¥Ë†â€ Ã§Â»â€žÃ¤ÂºÂ¤Ã¦â€ºÂ¿" in js
-    assert "Ã¥Å Â¨Ã©â€¡ÂÃ¤Â¿Â¡Ã¥ÂÂ· V2" in js
+    assert "\u53cc\u8f6e\u5206\u7ec4\u4ea4\u66ff" in js
+    assert "\u52a8\u91cf\u4fe1\u53f7 V2" in js
 
 
 def test_dashboard_assets_include_help_center_shell():
@@ -353,11 +353,11 @@ def test_dashboard_assets_include_help_center_renderers():
 def test_dashboard_help_center_includes_quickstart_copy():
     js = _dashboard_js()
 
-    assert "Ã¥â€¦Ë†Ã§Å“â€¹Ã¥â€œÂªÃ©â€¡Å’" in js
-    assert "Ã¦â‚¬Å½Ã¤Â¹Ë†Ã¥Â®â€°Ã¥â€¦Â¨Ã¦â€Â¹Ã¥Ââ€šÃ¦â€¢Â°" in js
-    assert "Ã¦â‚¬Å½Ã¤Â¹Ë†Ã¥Ë†Â¤Ã¦â€“Â­Ã¥Â½â€œÃ¥â€°ÂÃ¨Æ’Â½Ã¤Â¸ÂÃ¨Æ’Â½Ã¨Â·â€˜" in js
-    assert "Ã¥â€¡ÂºÃ©â€”Â®Ã©Â¢ËœÃ¥â€¦Ë†Ã§Å“â€¹Ã¥â€œÂªÃ©â€¡Å’" in js
-    assert "Ã©Â¡ÂµÃ©ÂÂ¢Ã¥â€¦Æ’Ã§Â´Â Ã¨Â¯Â´Ã¦ËœÅ½" in js
+    assert "\u5148\u770b\u54ea\u91cc" in js
+    assert "\u600e\u4e48\u5b89\u5168\u6539\u53c2\u6570" in js
+    assert "\u600e\u4e48\u5224\u65ad\u5f53\u524d\u80fd\u4e0d\u80fd\u8dd1" in js
+    assert "\u51fa\u95ee\u9898\u5148\u770b\u54ea\u91cc" in js
+    assert "\u9875\u9762\u5143\u7d20\u8bf4\u660e" in js
 
 
 def test_dashboard_help_center_reuses_strategy_and_field_metadata():
@@ -367,7 +367,7 @@ def test_dashboard_help_center_reuses_strategy_and_field_metadata():
     assert "function renderHelpStrategyGuide()" in js
     assert "payload.field_groups" in js
     assert "payload.strategy_catalog" in js
-    assert "Ã¤Â»â€¦Ã§Â­â€“Ã§â€¢Â¥ 5 Ã©â€¡ÂÃ§â€šÂ¹Ã¤Â½Â¿Ã§â€Â¨" in js
+    assert "\u4ec5\u7b56\u7565 5 \u4f7f\u7528" in js
     assert "help-strategy-card-active" in js
 
 
@@ -375,7 +375,7 @@ def test_dashboard_help_center_includes_faq_and_doc_links():
     html = _dashboard_html()
     js = _dashboard_js()
 
-    assert "Ã¥Â¸Â¸Ã¨Â§ÂÃ©â€”Â®Ã©Â¢Ëœ" in js
+    assert "\u5e38\u89c1\u95ee\u9898" in js
     assert "docs/dashboard_runbook.md" in js or "dashboard_runbook.md" in html
     assert "docs/operations_runbook.md" in js or "operations_runbook.md" in html
     assert "docs/daily_ops_checklist.md" in js or "daily_ops_checklist.md" in html
@@ -400,9 +400,9 @@ def test_dashboard_assets_use_planned_entry_copy():
     html = _dashboard_html()
     js = _dashboard_js()
 
-    assert "Ã¨Â®Â¡Ã¥Ë†â€™Ã¥â€¦Â¥Ã¥Å“Âº" in html
-    assert "Ã¨Â·ÂÃ§Â¦Â»Ã¨Â®Â¡Ã¥Ë†â€™Ã¥â€¦Â¥Ã¥Å“Âº" in js
-    assert "Ã¥Â·Â²Ã¨Â¿â€¡Ã¨Â®Â¡Ã¥Ë†â€™Ã¥â€¦Â¥Ã¥Å“Âº" in js
+    assert "\u8ba1\u5212\u5165\u573a" in html
+    assert "\u8ddd\u79bb\u8ba1\u5212\u5165\u573a" in js
+    assert "\u5df2\u8fc7\u8ba1\u5212\u5165\u573a" in js
 
 
 def test_dashboard_market_header_prioritizes_human_time_over_slug():
@@ -411,15 +411,15 @@ def test_dashboard_market_header_prioritizes_human_time_over_slug():
 
     assert 'id="marketDeadline"' in html
     assert "function marketDeadlineText(" in js
-    assert "Ã§Â»â€œÃ¦ÂÅ¸Ã¦â€”Â¶Ã©â€”Â´ --" in js
+    assert "\u7ed3\u675f\u65f6\u95f4 --" in js
     assert "el('marketDeadline').textContent = marketDeadlineText(round.end_time);" in js
 
 
 def test_dashboard_reason_fallback_is_human_friendly():
     js = _dashboard_js()
 
-    assert "Ã¦Å“ÂªÃ¨Â¯â€ Ã¥Ë†Â«Ã¥Å½Å¸Ã¥â€ºÂ Ã¯Â¼Å¡" in js
-    assert "Ã¥ÂÂ¯Ã¥Â°ÂÃ¨Â¯â€¢Ã¥Ë†Â·Ã¦â€“Â°Ã©Â¡ÂµÃ©ÂÂ¢" in js
+    assert "\u672a\u8bc6\u522b\u539f\u56e0\uff1a" in js
+    assert "\u53ef\u5c1d\u8bd5\u5237\u65b0\u9875\u9762" in js
 
 
 def test_dashboard_config_payload_masks_live_private_key_and_exposes_mode_fields(tmp_path: Path):

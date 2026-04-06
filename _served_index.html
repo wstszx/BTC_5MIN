@@ -1,0 +1,281 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>BTC 5分钟量化控制台</title>
+  <link rel="stylesheet" href="/dashboard.css">
+</head>
+<body>
+  <!-- 计划入场 -->
+  <header class="topbar">
+    <div class="brand-wrap">
+      <div class="brand">QUANT_CMD · BTC_5M</div>
+      <div class="subtitle">策略参数、实时盘口、信号决策、纸面收益一屏联动</div>
+    </div>
+    <div class="top-actions">
+      <div id="clockLocal" class="clock">本地时间 --</div>
+      <div id="clockUtc" class="clock">UTC --</div>
+      <button id="btnHelp" class="btn btn-ghost" type="button">帮助</button>
+      <button id="btnRefreshNow" class="btn btn-ghost" type="button">立即刷新</button>
+    </div>
+  </header>
+
+  <main class="layout">
+    <section class="panel left-stack">
+      <div class="panel-head">
+        <div>
+          <div class="head-title">参数引擎</div>
+          <div class="head-desc">参数可编辑并写回 .env</div>
+        </div>
+        <div id="cfgStatus" class="chip">未保存</div>
+      </div>
+      <div class="panel-body">
+        <div class="meta-item">
+          <span class="meta-label">读取状态</span>
+          <span id="cfgError" class="meta-value">--</span>
+        </div>
+        <div class="meta">
+          <div class="meta-item">
+            <span class="meta-label">配置文件</span>
+            <span id="cfgEnvFile" class="meta-value">--</span>
+          </div>
+          <div class="meta-item">
+            <span class="meta-label">最近保存</span>
+            <span id="cfgSavedAt" class="meta-value">--</span>
+          </div>
+        </div>
+
+        <div id="strategyGuideCard" class="strategy-guide-card"></div>
+
+        <div id="runtimeModeCard" class="strategy-guide-card">
+          <div class="strategy-guide-head">
+            <div>
+              <div class="strategy-guide-title">运行模式</div>
+              <div class="strategy-guide-subtitle">显示配置目标、当前实际状态、切换进度和实盘条件。</div>
+            </div>
+            <span class="chip warn">热切换受控</span>
+          </div>
+          <div class="rows">
+            <div class="row"><span class="label">配置目标</span><span id="runtimeSavedMode" class="value">--</span></div>
+            <div class="row"><span class="label">当前状态</span><span id="runtimeRunningMode" class="value">--</span></div>
+            <div class="row"><span class="label">待切换</span><span id="runtimeRestartRequired" class="value">--</span></div>
+            <div class="row"><span class="label">实盘条件</span><span id="runtimeLiveReady" class="value">--</span></div>
+            <div class="row"><span class="label">条件说明</span><span id="runtimeLiveError" class="value">--</span></div>
+          </div>
+        </div>
+
+        <form id="configForm" class="form-grid"></form>
+
+        <div class="actions">
+          <button id="btnToggleKeys" class="btn btn-ghost" type="button">显示内部键名：关</button>
+          <button id="btnReloadConfig" class="btn btn-ghost" type="button">重新读取参数</button>
+          <button id="btnSaveConfig" class="btn btn-primary" type="button">保存参数</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel center-stack">
+      <div class="panel-head">
+        <div>
+          <div class="head-title">行情与信号</div>
+          <div class="head-desc">5分钟轮次行情 / 方向信号 / 下注计划</div>
+        </div>
+        <div id="marketHealth" class="chip">待刷新</div>
+      </div>
+      <div class="panel-body market-grid">
+        <div class="market-header">
+          <div>
+            <div id="marketDeadline" class="deadline">--</div>
+            <div id="marketTitle" class="title">--</div>
+            <div id="marketSlug" class="slug">--</div>
+          </div>
+          <div class="timer-wrap">
+            <div id="entryCountdownLabel" class="timer-label">距离计划入场</div>
+            <div id="entryCountdown" class="timer-val">--:--</div>
+            <div id="entrySyncAt" class="timer-label">同步于 --</div>
+          </div>
+        </div>
+
+        <div class="split">
+          <div class="box">
+            <div class="box-title">盘口价格</div>
+            <div class="kv-grid">
+              <div class="kv"><div class="k">看涨买价</div><div id="upPrice" class="v cyan">--</div></div>
+              <div class="kv"><div class="k">看跌买价</div><div id="downPrice" class="v cyan">--</div></div>
+              <div class="kv"><div class="k">看涨最优卖价</div><div id="upAsk" class="v">--</div></div>
+              <div class="kv"><div class="k">看跌最优卖价</div><div id="downAsk" class="v">--</div></div>
+            </div>
+            <div class="row">
+              <span class="label">行情来源</span>
+              <span id="quoteSource" class="value">--</span>
+            </div>
+            <div class="row">
+              <span class="label">允许下单</span>
+              <span id="quoteAccepting" class="value">--</span>
+            </div>
+            <div class="row">
+              <span class="label">行情时间</span>
+              <span id="quoteFetchedAt" class="value">--</span>
+            </div>
+          </div>
+
+          <div class="box">
+            <div class="box-title">信号判断</div>
+            <div class="row">
+              <span class="label">方向</span>
+              <span id="signalSide" class="value">--</span>
+            </div>
+            <div class="row">
+              <span class="label">原因</span>
+              <span id="signalReason" class="value">--</span>
+            </div>
+            <div class="kv-grid">
+              <div class="kv"><div class="k">开盘看涨价</div><div id="signalOpenUp" class="v">--</div></div>
+              <div class="kv"><div class="k">当前看涨价</div><div id="signalCurrentUp" class="v">--</div></div>
+              <div class="kv"><div class="k">信号阈值</div><div id="signalThreshold" class="v">--</div></div>
+              <div class="kv"><div class="k">信号偏移</div><div id="signalDelta" class="v">--</div></div>
+            </div>
+            <div class="row">
+              <span class="label">已锁边</span>
+              <span id="signalLocked" class="value">--</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="split">
+          <div class="box">
+            <div class="box-title">下注计划与风控</div>
+            <div class="rows">
+              <div class="row"><span class="label">是否下单</span><span id="planShouldTrade" class="value">--</span></div>
+              <div class="row"><span class="label">方向</span><span id="planSide" class="value">--</span></div>
+              <div class="row"><span class="label">买入价格</span><span id="planPrice" class="value">--</span></div>
+              <div class="row"><span class="label">下单金额</span><span id="planOrderCost" class="value">--</span></div>
+              <div class="row"><span class="label">下单份额</span><span id="planOrderSize" class="value">--</span></div>
+              <div class="row"><span class="label">预期收益</span><span id="planExpectedProfit" class="value">--</span></div>
+              <div class="row"><span class="label">跳过原因</span><span id="planSkipReason" class="value">--</span></div>
+              <div class="row"><span class="label">触发止损重置</span><span id="planStopLoss" class="value">--</span></div>
+            </div>
+          </div>
+
+          <div class="box">
+            <div class="box-title">会话状态</div>
+            <div class="kv-grid">
+              <div class="kv"><div class="k">轮次计数</div><div id="ssRoundIndex" class="v">--</div></div>
+              <div class="kv"><div class="k">累计盈亏</div><div id="ssCashPnl" class="v">--</div></div>
+              <div class="kv"><div class="k">待回补亏损</div><div id="ssRecoveryLoss" class="v">--</div></div>
+              <div class="kv"><div class="k">连续亏损轮数</div><div id="ssConsecutiveLosses" class="v">--</div></div>
+              <div class="kv"><div class="k">止损重置次数</div><div id="ssStopLossCount" class="v">--</div></div>
+              <div class="kv"><div class="k">当日已实现盈亏</div><div id="ssDailyPnl" class="v">--</div></div>
+            </div>
+            <div class="row">
+              <span class="label">WS 交易陈旧保护</span>
+              <span id="wsGuard" class="value">--</span>
+            </div>
+            <div class="row">
+              <span class="label">最近刷新</span>
+              <span id="marketUpdatedAt" class="value">--</span>
+            </div>
+          </div>
+
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="stack right-stack">
+      <div class="panel">
+        <div class="panel-head">
+          <div>
+            <div class="head-title">实时连接状态</div>
+            <div class="head-desc">连接质量与订阅状态</div>
+          </div>
+          <div id="wsHealth" class="chip">待刷新</div>
+        </div>
+        <div class="panel-body">
+          <div id="wsRuntimeList" class="runtime-list"></div>
+          <div class="footnote">说明: 行情来源为 websocket 表示使用 WS 缓存盘口, 为 http 表示回退 HTTP 拉取。</div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-head">
+          <div>
+            <div class="head-title">纸面交易汇总</div>
+            <div class="head-desc">按北京时间聚合的纸面成绩</div>
+          </div>
+          <div id="paperStatus" class="chip">待刷新</div>
+        </div>
+        <div class="panel-body">
+          <div class="kv-grid" style="margin-bottom: 10px;">
+            <div class="kv"><div class="k">日期</div><div id="sumDate" class="v">--</div></div>
+            <div class="kv"><div class="k">交易笔数</div><div id="sumTrades" class="v">--</div></div>
+            <div class="kv"><div class="k">命中率</div><div id="sumHitRate" class="v">--</div></div>
+            <div class="kv"><div class="k">总盈亏</div><div id="sumTotalPnl" class="v">--</div></div>
+            <div class="kv"><div class="k">最大回撤</div><div id="sumDrawdown" class="v">--</div></div>
+            <div class="kv"><div class="k">强信号占比</div><div id="sumStrongRate" class="v">--</div></div>
+          </div>
+
+          <div class="days-table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>日期</th>
+                  <th>交易</th>
+                  <th>命中率</th>
+                  <th>总盈亏</th>
+                  <th>回撤</th>
+                </tr>
+              </thead>
+              <tbody id="daysTbody"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel trades-panel">
+      <div class="panel-head">
+        <div>
+          <div class="head-title">????????</div>
+          <div class="head-desc">???????? (?? 80 ?)</div>
+        </div>
+        <div id="recentStatus" class="chip">???</div>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>时间</th>
+              <th>轮次</th>
+              <th>方向</th>
+              <th>价格</th>
+              <th>下注金额</th>
+              <th>结果</th>
+              <th>单笔盈亏</th>
+              <th>累计盈亏</th>
+              <th>跳过原因</th>
+              <th>信号偏移</th>
+            </tr>
+          </thead>
+          <tbody id="recentTbody"></tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+  <div id="helpBackdrop" class="help-backdrop"></div>
+  <aside id="helpDrawer" class="help-drawer" aria-hidden="true" tabindex="-1">
+    <div class="help-head">
+      <div>
+        <div class="help-title">帮助中心</div>
+        <div class="help-subtitle">快速上手与元素说明</div>
+      </div>
+      <button id="btnHelpClose" class="btn btn-ghost" type="button">关闭</button>
+    </div>
+    <div id="helpTabs" class="help-tabs"></div>
+    <div id="helpBody" class="help-body"></div>
+    <div id="helpFooter" class="help-footer"></div>
+  </aside>
+  <script src="/dashboard.js"></script>
+</body>
+</html>
