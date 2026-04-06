@@ -729,3 +729,92 @@ def test_dashboard_assets_format_recent_trade_round_slug_as_datetime():
     assert "const match = raw.match(/-(\\d{10})(?:$|\\D)/);" in js
     assert "return dt.toLocaleString('zh-CN', { hour12: false });" in js
     assert "'<td title=\"' + esc(row.event_slug || '--') + '\">' + esc(formatRoundSlug(row.event_slug)) + '</td>' +" in js
+
+def test_recent_trades_payload_includes_result_validation_fields(tmp_path: Path, monkeypatch):
+    old_cwd = Path.cwd()
+    os.chdir(tmp_path)
+
+    class StubClient:
+        def __init__(self, cfg):
+            self.config = cfg
+
+        def close(self) -> None:
+            return
+
+        def get_event_by_slug(self, slug: str):
+            return {
+                'id': 'evt-1',
+                'slug': slug,
+                'title': 'Bitcoin Up or Down - April 6, 9:20AM-9:25AM ET',
+                'startTime': '2026-04-06T13:20:00+00:00',
+                'endDate': '2026-04-06T13:25:00+00:00',
+                'eventMetadata': {
+                    'priceToBeat': 69333.88601974999,
+                    'finalPrice': 69412.14121057303,
+                },
+                'markets': [
+                    {
+                        'id': 'mkt-1',
+                        'outcomes': '["Up", "Down"]',
+                        'outcomePrices': '["1", "0"]',
+                        'clobTokenIds': '["up-token", "down-token"]',
+                    }
+                ],
+            }
+
+    monkeypatch.setattr(dashboard, 'PolymarketClient', StubClient)
+
+    state = DashboardState(env_file=tmp_path / '.env.dashboard')
+    try:
+        logs_dir = tmp_path / 'logs'
+        logs_dir.mkdir(parents=True, exist_ok=True)
+        (logs_dir / 'paper_trades.csv').write_text(
+            'timestamp,mode,round_index,strategy,entry_timing,event_slug,start_time,end_time,side,price,order_size,order_cost,expected_profit,result,trade_pnl,cash_pnl,recovery_loss,consecutive_losses,stop_loss_triggered,skip_reason,signal_open_up_price,signal_current_up_price,signal_threshold,signal_delta,signal_locked,signal_reason\n'
+            '2026-04-06T13:32:38+00:00,paper,37,2,OPEN,btc-updown-5m-1775481600,2026-04-06T13:20:00+00:00,2026-04-06T13:25:00+00:00,UP,0.56,4.5454,2.5454,2.0,UP,2.0,4.7293,0.0,0,False,,,,,,False,\n',
+            encoding='utf-8',
+        )
+
+        payload = state.get_recent_trades_payload(limit=10)
+        row = payload['rows'][0]
+        assert row['resolved_price_to_beat'] == '69333.88601974999'
+        assert row['resolved_final_price'] == '69412.14121057303'
+        assert row['resolved_expected_result'] == 'UP'
+        assert row['result_check_status'] == 'match'
+    finally:
+        state.close()
+        os.chdir(old_cwd)
+
+
+def test_dashboard_assets_include_recent_result_validation_column():
+    html = _dashboard_html()
+    js = _dashboard_js()
+
+    assert '<th>校验</th>' in html
+    assert 'function resultCheckText(' in js
+    assert "row.result_check_status" in js
+    assert "resolved_price_to_beat" in js
+    assert "resolved_final_price" in js
+
+
+def test_dashboard_assets_include_recent_result_prices_and_status_styles():
+    html = _dashboard_html()
+    js = _dashboard_js()
+    css = dashboard._dashboard_css()
+
+    assert '<th>开盘价</th>' in html
+    assert '<th>收盘价</th>' in html
+    assert "fmtNum(row.resolved_price_to_beat, 2)" in js
+    assert "fmtNum(row.resolved_final_price, 2)" in js
+    assert "const checkCls = row.result_check_status === 'match' ? 'trade-up' : ((row.result_check_status === 'mismatch') ? 'trade-down' : 'trade-skip');" in js
+    assert '.trade-up { color: var(--green); font-weight: 700; }' in css
+    assert '.trade-down { color: var(--red); font-weight: 700; }' in css
+    assert '.trade-skip { color: var(--amber); font-weight: 700; }' in css
+
+def test_dashboard_assets_include_chinese_summary_table_headers():
+    html = _dashboard_html()
+
+    assert '<th>日期</th>' in html
+    assert '<th>交易</th>' in html
+    assert '<th>命中率</th>' in html
+    assert '<th>总盈亏</th>' in html
+    assert '<th>回撤</th>' in html

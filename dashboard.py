@@ -17,7 +17,7 @@ from urllib.parse import parse_qs, urlparse
 from config import AppConfig, build_config_from_env_values, load_env_file_values
 from models import MarketWindow, PendingPaperTrade
 from paper_report import summarize_paper_trades
-from polymarket_api import PolymarketClient
+from polymarket_api import PolymarketClient, build_resolved_round
 from risk_and_sizing import build_trade_plan
 from strategy import get_side_for_round
 from runtime_control import RuntimeControl
@@ -108,6 +108,39 @@ def _iso(dt: datetime | None) -> str | None:
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=timezone.utc)
     return dt.astimezone(timezone.utc).isoformat()
+
+
+def _validate_recent_trade_row(
+    row: dict[str, str],
+    *,
+    client: PolymarketClient | Any,
+) -> dict[str, str]:
+    validated = dict(row)
+    validated.setdefault('resolved_price_to_beat', '')
+    validated.setdefault('resolved_final_price', '')
+    validated.setdefault('resolved_expected_result', '')
+    validated.setdefault('result_check_status', '')
+
+    if validated.get('pending_status') == 'pending_settlement':
+        validated['result_check_status'] = 'pending'
+        return validated
+
+    slug = str(validated.get('event_slug') or '').strip()
+    result = str(validated.get('result') or '').strip().upper()
+    if not slug or not result or result == '--':
+        return validated
+
+    try:
+        resolved = build_resolved_round(client.get_event_by_slug(slug))
+    except Exception:
+        validated['result_check_status'] = 'error'
+        return validated
+
+    validated['resolved_price_to_beat'] = str(resolved.price_to_beat)
+    validated['resolved_final_price'] = str(resolved.final_price)
+    validated['resolved_expected_result'] = resolved.result
+    validated['result_check_status'] = 'match' if result == resolved.result else 'mismatch'
+    return validated
 
 
 
@@ -775,8 +808,9 @@ class DashboardState:
 
     def get_recent_trades_payload(self, *, limit: int) -> dict[str, Any]:
         with self._lock:
-            paper_csv = self._cfg.logs_dir / "paper_trades.csv"
-            state_path = self._cfg.logs_dir / "session_state.json"
+            cfg = self._cfg
+            paper_csv = cfg.logs_dir / "paper_trades.csv"
+            state_path = cfg.logs_dir / "session_state.json"
         capped_limit = max(1, min(300, int(limit)))
         rows = _tail_csv_rows(paper_csv, limit=capped_limit)
         pending_rows: list[dict[str, str]] = []
@@ -786,7 +820,16 @@ class DashboardState:
         merged_rows = pending_rows + rows
         merged_rows.sort(key=lambda row: str(row.get('timestamp') or ''), reverse=True)
         merged_rows = merged_rows[:capped_limit]
-        return {"csv_path": str(paper_csv), "count": len(merged_rows), "rows": merged_rows}
+
+        client = PolymarketClient(cfg)
+        try:
+            validated_rows = [_validate_recent_trade_row(row, client=client) for row in merged_rows]
+        finally:
+            close = getattr(client, 'close', None)
+            if callable(close):
+                close()
+
+        return {"csv_path": str(paper_csv), "count": len(validated_rows), "rows": validated_rows}
 
     def get_live_recent_orders_payload(self, *, limit: int) -> dict[str, Any]:
         with self._lock:
@@ -1275,6 +1318,9 @@ def _dashboard_html() -> str:
               <th>价格</th>
               <th>下注金额</th>
               <th>结果</th>
+              <th>校验</th>
+              <th>开盘价</th>
+              <th>收盘价</th>
               <th>单笔盈亏</th>
               <th>累计盈亏</th>
               <th>跳过原因</th>
@@ -2606,6 +2652,14 @@ function sideText(side) {
   return '待定';
 }
 
+function resultCheckText(status) {
+  if (status === 'match') return '一致';
+  if (status === 'mismatch') return '不一致';
+  if (status === 'pending') return '待结算';
+  if (status === 'error') return '校验失败';
+  return '--';
+}
+
 function strategyCatalog(payload) {
   return (payload && payload.strategy_catalog) || {};
 }
@@ -3477,7 +3531,7 @@ function renderRecent(payload) {
   const tbody = el('recentTbody');
 
   if (rows.length === 0) {
-    tbody.innerHTML = '<tr><td colspan=\"10\" class=\"empty\">最近没有纸面交易记录</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="13" class="empty">最近没有纸面交易记录</td></tr>';
     setChip('recentStatus', '0 行', 'warn');
     return;
   }
@@ -3490,17 +3544,23 @@ function renderRecent(payload) {
     const cashCls = classifyPnl(row.cash_pnl);
     const isPending = row.pending_status === 'pending_settlement';
     const resultText = isPending ? '待结算' : (row.result || '--');
+    const checkText = resultCheckText(row.result_check_status);
+    const checkCls = row.result_check_status === 'match' ? 'trade-up' : ((row.result_check_status === 'mismatch') ? 'trade-down' : 'trade-skip');
+    const checkTitle = '官方结果: ' + (row.resolved_expected_result || '--');
     const rowClass = isPending ? 'recent-pending' : '';
 
-    return '<tr class=\"' + esc(rowClass) + '\">' +
+    return '<tr class="' + esc(rowClass) + '">' +
       '<td>' + esc(fmtIso(row.timestamp)) + '</td>' +
       '<td title="' + esc(row.event_slug || '--') + '">' + esc(formatRoundSlug(row.event_slug)) + '</td>' +
-      '<td class=\"' + esc(sideCls) + '\">' + esc(sideText(side)) + '</td>' +
+      '<td class="' + esc(sideCls) + '">' + esc(sideText(side)) + '</td>' +
       '<td>' + esc(fmtNum(row.price, 4)) + '</td>' +
       '<td>' + esc(fmtNum(row.order_cost, 4)) + '</td>' +
-      '<td class=\"' + (isPending ? 'trade-skip' : '') + '\">' + esc(resultText) + '</td>' +
-      '<td class=\"' + esc(pnlCls) + '\">' + esc(fmtPnl(row.trade_pnl, 4)) + '</td>' +
-      '<td class=\"' + esc(cashCls) + '\">' + esc(fmtPnl(row.cash_pnl, 4)) + '</td>' +
+      '<td class="' + (isPending ? 'trade-skip' : '') + '">' + esc(resultText) + '</td>' +
+      '<td class="' + esc(checkCls) + '" title="' + esc(checkTitle) + '">' + esc(checkText) + '</td>' +
+      '<td>' + esc(fmtNum(row.resolved_price_to_beat, 2)) + '</td>' +
+      '<td>' + esc(fmtNum(row.resolved_final_price, 2)) + '</td>' +
+      '<td class="' + esc(pnlCls) + '">' + esc(fmtPnl(row.trade_pnl, 4)) + '</td>' +
+      '<td class="' + esc(cashCls) + '">' + esc(fmtPnl(row.cash_pnl, 4)) + '</td>' +
       '<td>' + esc(reasonText(row.skip_reason)) + '</td>' +
       '<td>' + esc(fmtPnl(row.signal_delta, 4)) + '</td>' +
       '</tr>';
