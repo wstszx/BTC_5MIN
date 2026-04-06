@@ -2519,6 +2519,26 @@ function fmtIso(value) {
   return dt.toLocaleString('zh-CN', { hour12: false });
 }
 
+function formatRoundSlug(value) {
+  if (!value) {
+    return '--';
+  }
+  const raw = String(value).trim();
+  const match = raw.match(/-(\\d{10})(?:$|\\D)/);
+  if (!match) {
+    return raw;
+  }
+  const ts = Number(match[1]);
+  if (!Number.isFinite(ts)) {
+    return raw;
+  }
+  const dt = new Date(ts * 1000);
+  if (Number.isNaN(dt.getTime())) {
+    return raw;
+  }
+  return dt.toLocaleString('zh-CN', { hour12: false });
+}
+
 function fmtSeconds(value) {
   const n = toNum(value);
   if (n === null) {
@@ -3474,7 +3494,7 @@ function renderRecent(payload) {
 
     return '<tr class=\"' + esc(rowClass) + '\">' +
       '<td>' + esc(fmtIso(row.timestamp)) + '</td>' +
-      '<td>' + esc(row.event_slug || '--') + '</td>' +
+      '<td title="' + esc(row.event_slug || '--') + '">' + esc(formatRoundSlug(row.event_slug)) + '</td>' +
       '<td class=\"' + esc(sideCls) + '\">' + esc(sideText(side)) + '</td>' +
       '<td>' + esc(fmtNum(row.price, 4)) + '</td>' +
       '<td>' + esc(fmtNum(row.order_cost, 4)) + '</td>' +
@@ -3589,4 +3609,5 @@ document.addEventListener('keydown', (event) => {
 
 document.addEventListener('DOMContentLoaded', bootstrap);
 """
+
 

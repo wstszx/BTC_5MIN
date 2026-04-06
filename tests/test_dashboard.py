@@ -721,3 +721,11 @@ def test_dashboard_update_config_notifies_runtime_manager(tmp_path: Path):
         assert calls == ['live']
     finally:
         state.close()
+
+def test_dashboard_assets_format_recent_trade_round_slug_as_datetime():
+    js = _dashboard_js()
+
+    assert 'function formatRoundSlug(' in js
+    assert "const match = raw.match(/-(\\d{10})(?:$|\\D)/);" in js
+    assert "return dt.toLocaleString('zh-CN', { hour12: false });" in js
+    assert "'<td title=\"' + esc(row.event_slug || '--') + '\">' + esc(formatRoundSlug(row.event_slug)) + '</td>' +" in js
