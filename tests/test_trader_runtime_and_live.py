@@ -20,6 +20,7 @@ from trader import (
     place_live_order,
     run_live_trading,
     run_paper_trading,
+    _create_live_clob_client,
     validate_live_runtime_config,
 )
 
@@ -79,6 +80,88 @@ class _NoTradeLiveMarketClient(_LiveMarketClient):
     def find_current_and_next_rounds(self, *, now):
         return None, None
 
+
+def test_create_live_clob_client_prefers_explicit_api_credentials(monkeypatch):
+    captured: dict[str, object] = {}
+
+    class _FakeClobClient:
+        def __init__(self, host, chain_id, key, signature_type, funder):
+            captured['host'] = host
+            captured['chain_id'] = chain_id
+            captured['key'] = key
+            captured['signature_type'] = signature_type
+            captured['funder'] = funder
+
+        def create_or_derive_api_creds(self):
+            captured['derived'] = True
+            return {'api_key': 'derived'}
+
+        def set_api_creds(self, creds):
+            captured['creds'] = creds
+
+    import sys
+    import types
+
+    fake_module = types.ModuleType('py_clob_client.client')
+    fake_module.ClobClient = _FakeClobClient
+    monkeypatch.setitem(sys.modules, 'py_clob_client.client', fake_module)
+
+    client = _create_live_clob_client(
+        AppConfig(
+            trade_mode='live',
+            live_trading_enabled=True,
+            live_private_key='pk-live',
+            live_funder='0xfunder',
+            live_api_key='builder-key',
+            live_api_secret='builder-secret',
+            live_api_passphrase='builder-passphrase',
+        )
+    )
+
+    assert client is not None
+    assert captured['key'] == 'pk-live'
+    assert captured['creds'] == {
+        'api_key': 'builder-key',
+        'secret': 'builder-secret',
+        'passphrase': 'builder-passphrase',
+    }
+    assert 'derived' not in captured
+
+
+def test_create_live_clob_client_derives_api_credentials_when_explicit_values_missing(monkeypatch):
+    captured: dict[str, object] = {}
+
+    class _FakeClobClient:
+        def __init__(self, host, chain_id, key, signature_type, funder):
+            captured['key'] = key
+            captured['funder'] = funder
+
+        def create_or_derive_api_creds(self):
+            captured['derived'] = True
+            return {'api_key': 'derived-key'}
+
+        def set_api_creds(self, creds):
+            captured['creds'] = creds
+
+    import sys
+    import types
+
+    fake_module = types.ModuleType('py_clob_client.client')
+    fake_module.ClobClient = _FakeClobClient
+    monkeypatch.setitem(sys.modules, 'py_clob_client.client', fake_module)
+
+    client = _create_live_clob_client(
+        AppConfig(
+            trade_mode='live',
+            live_trading_enabled=True,
+            live_private_key='pk-live',
+            live_funder='0xfunder',
+        )
+    )
+
+    assert client is not None
+    assert captured['derived'] is True
+    assert captured['creds'] == {'api_key': 'derived-key'}
 
 def test_validate_live_runtime_config_requires_private_key_and_funder():
     cfg = AppConfig(trade_mode='live', live_trading_enabled=True)

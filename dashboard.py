@@ -178,6 +178,9 @@ def _field_groups() -> list[dict[str, Any]]:
                 "LIVE_TRADING_ENABLED",
                 "POLYMARKET_PRIVATE_KEY",
                 "POLYMARKET_FUNDER",
+                "POLYMARKET_API_KEY",
+                "POLYMARKET_API_SECRET",
+                "POLYMARKET_API_PASSPHRASE",
             ],
         },
         {
@@ -238,6 +241,9 @@ class DashboardState:
         "LIVE_TRADING_ENABLED",
         "POLYMARKET_PRIVATE_KEY",
         "POLYMARKET_FUNDER",
+        "POLYMARKET_API_KEY",
+        "POLYMARKET_API_SECRET",
+        "POLYMARKET_API_PASSPHRASE",
         "STRATEGY_ID",
         "TARGET_PROFIT",
         "BET_SIZING_MODE",
@@ -266,6 +272,9 @@ class DashboardState:
         "LIVE_TRADING_ENABLED": "实盘交易开关",
         "POLYMARKET_PRIVATE_KEY": "实盘私钥",
         "POLYMARKET_FUNDER": "\u5b9e\u76d8\u94b1\u5305\u5730\u5740",
+        "POLYMARKET_API_KEY": "官方API Key",
+        "POLYMARKET_API_SECRET": "官方API Secret",
+        "POLYMARKET_API_PASSPHRASE": "官方API Passphrase",
         "STRATEGY_ID": "基础策略",
         "TARGET_PROFIT": "每次目标净利",
         "BET_SIZING_MODE": "下注模式",
@@ -304,6 +313,9 @@ class DashboardState:
         "LIVE_TRADING_ENABLED": "live_trading_enabled",
         "POLYMARKET_PRIVATE_KEY": "live_private_key",
         "POLYMARKET_FUNDER": "live_funder",
+        "POLYMARKET_API_KEY": "live_api_key",
+        "POLYMARKET_API_SECRET": "live_api_secret",
+        "POLYMARKET_API_PASSPHRASE": "live_api_passphrase",
         "STRATEGY_ID": "strategy_id",
         "TARGET_PROFIT": "target_profit",
         "BET_SIZING_MODE": "bet_sizing_mode",
@@ -350,8 +362,8 @@ class DashboardState:
     )
 
     BOOL_CONFIG_KEYS: tuple[str, ...] = ("LIVE_TRADING_ENABLED", "WS_ENABLED")
-    STRING_CONFIG_KEYS: tuple[str, ...] = ("POLYMARKET_PRIVATE_KEY", "POLYMARKET_FUNDER")
-    SECRET_CONFIG_KEYS: tuple[str, ...] = ("POLYMARKET_PRIVATE_KEY",)
+    STRING_CONFIG_KEYS: tuple[str, ...] = ("POLYMARKET_PRIVATE_KEY", "POLYMARKET_FUNDER", "POLYMARKET_API_KEY", "POLYMARKET_API_SECRET", "POLYMARKET_API_PASSPHRASE")
+    SECRET_CONFIG_KEYS: tuple[str, ...] = ("POLYMARKET_PRIVATE_KEY", "POLYMARKET_API_SECRET", "POLYMARKET_API_PASSPHRASE")
     MASKED_SECRET_VALUE = "********"
 
     STRATEGY_CATALOG: dict[str, dict[str, Any]] = _strategy_catalog()
@@ -373,6 +385,9 @@ class DashboardState:
         "ENABLE_LIVE_TRADING": "关闭时只做纸面测试；开启后会切到实盘配置，并允许真实下单。",
         "POLYMARKET_PRIVATE_KEY": "填写实盘钱包的私钥，仅在启用实盘时需要。",
         "POLYMARKET_FUNDER": "填写与实盘私钥对应的钱包地址（0x...），也就是实际出资的钱包地址。",
+        "POLYMARKET_API_KEY": "官方 Builder API Key；如果填写了官方三元组，实盘下单会优先使用它。",
+        "POLYMARKET_API_SECRET": "官方 Builder API Secret；通常只会显示一次，请妥善保存。",
+        "POLYMARKET_API_PASSPHRASE": "官方 Builder API Passphrase；通常只会显示一次，请妥善保存。",
         "BASE_ORDER_COST": "仅 FIXED_BASE_COST 模式下生效，赢后回到这个起始金额。",
         "MAX_CONSECUTIVE_LOSSES": "连续亏损达到该轮数后，策略会触发止损重置。",
         "MAX_STAKE": "单笔实际花费的 USDC 上限，超过会直接跳过。",

@@ -584,9 +584,17 @@ def _create_live_clob_client(cfg: AppConfig):
         signature_type=cfg.live_signature_type,
         funder=cfg.live_funder,
     )
-    clob_client.set_api_creds(clob_client.create_or_derive_api_creds())
+    if cfg.live_api_key and cfg.live_api_secret and cfg.live_api_passphrase:
+        clob_client.set_api_creds(
+            {
+                "api_key": cfg.live_api_key,
+                "secret": cfg.live_api_secret,
+                "passphrase": cfg.live_api_passphrase,
+            }
+        )
+    else:
+        clob_client.set_api_creds(clob_client.create_or_derive_api_creds())
     return clob_client
-
 
 def place_live_order(
     cfg: AppConfig | None = None,

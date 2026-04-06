@@ -542,6 +542,31 @@ def test_dashboard_config_payload_masks_live_private_key_and_exposes_mode_fields
 
 
 
+def test_dashboard_config_payload_exposes_official_api_credential_fields(tmp_path: Path):
+    env_file = tmp_path / '.env.dashboard'
+    env_file.write_text(
+        'TRADE_MODE=live\n'
+        'LIVE_TRADING_ENABLED=true\n'
+        'POLYMARKET_API_KEY=builder-key\n'
+        'POLYMARKET_API_SECRET=builder-secret\n'
+        'POLYMARKET_API_PASSPHRASE=builder-passphrase\n',
+        encoding='utf-8',
+    )
+    state = DashboardState(env_file=env_file)
+    try:
+        payload = state.get_config_payload()
+
+        assert 'POLYMARKET_API_KEY' in payload['editable_keys']
+        assert 'POLYMARKET_API_SECRET' in payload['editable_keys']
+        assert 'POLYMARKET_API_PASSPHRASE' in payload['editable_keys']
+        assert payload['env_values']['POLYMARKET_API_KEY'] == 'builder-key'
+        assert payload['env_values']['POLYMARKET_API_SECRET'] != 'builder-secret'
+        assert payload['env_values']['POLYMARKET_API_PASSPHRASE'] != 'builder-passphrase'
+        assert payload['env_values']['POLYMARKET_API_SECRET']
+        assert payload['env_values']['POLYMARKET_API_PASSPHRASE']
+    finally:
+        state.close()
+
 def test_dashboard_update_config_preserves_masked_private_key_on_unrelated_save(tmp_path: Path):
     env_file = tmp_path / '.env.dashboard'
     env_file.write_text(

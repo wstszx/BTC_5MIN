@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import os
 from contextlib import contextmanager
@@ -159,6 +159,9 @@ class AppConfig:
     live_trading_enabled: bool = field(default_factory=lambda: _env_bool("LIVE_TRADING_ENABLED", False))
     # Wallet private key used for live trading.
     live_private_key: str | None = field(default_factory=lambda: os.getenv("POLYMARKET_PRIVATE_KEY") or os.getenv("PRIVATE_KEY"))
+    live_api_key: str | None = field(default_factory=lambda: os.getenv("POLYMARKET_API_KEY"))
+    live_api_secret: str | None = field(default_factory=lambda: os.getenv("POLYMARKET_API_SECRET"))
+    live_api_passphrase: str | None = field(default_factory=lambda: os.getenv("POLYMARKET_API_PASSPHRASE"))
     live_chain_id: int = field(default_factory=lambda: _env_int("POLYMARKET_CHAIN_ID", 137))
     live_signature_type: int = field(default_factory=lambda: _env_int("POLYMARKET_SIGNATURE_TYPE", 0))
     # Wallet address (0x...) corresponding to POLYMARKET_PRIVATE_KEY; this is the live wallet address shown in the UI.

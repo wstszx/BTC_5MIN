@@ -1,6 +1,7 @@
-requests
+﻿requests
 pandas
 python-dateutil
 pytest
 websocket-client
 tenacity
+py-clob-client

@@ -9,3 +9,9 @@ data/*.csv
 logs/*.csv
 logs/*.json
 !logs/.gitkeep
+.env.dashboard
+tmp_main_stdout.log
+tmp_main_stderr.log
+_served_dashboard.js
+_served_index.html
+_tmp_dashboard_check.js
