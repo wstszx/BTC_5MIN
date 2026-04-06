@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import csv
 import json
@@ -12,7 +12,7 @@ from statistics import pstdev
 from typing import Any
 
 from config import AppConfig
-from models import MarketQuote, MarketWindow, SessionState, TradePlan, TradeRecord
+from models import MarketQuote, MarketWindow, PendingPaperTrade, SessionState, TradePlan, TradeRecord
 from polymarket_api import PolymarketClient, extract_token_ids, parse_iso_datetime
 from risk_and_sizing import apply_round_outcome, build_trade_plan, reset_after_stop_loss
 from strategy import get_side_for_round
@@ -42,7 +42,11 @@ def load_session_state(path: Path) -> SessionState:
     if not path.exists():
         return SessionState()
     payload = json.loads(path.read_text(encoding="utf-8"))
-    return SessionState(**payload)
+    pending_paper_trades = [
+        item if isinstance(item, PendingPaperTrade) else PendingPaperTrade(**item)
+        for item in payload.pop("pending_paper_trades", [])
+    ]
+    return SessionState(pending_paper_trades=pending_paper_trades, **payload)
 
 
 def append_trade_log(path: Path, record: TradeRecord) -> None:
@@ -1169,6 +1173,163 @@ def _ws_is_stale_for_trade(client: PolymarketClient | Any, cfg: AppConfig) -> bo
     return age > max(0.0, cfg.ws_trade_guard_stale_seconds)
 
 
+def _pending_paper_trade_exists(state: SessionState, slug: str) -> bool:
+    return any(item.event_slug == slug for item in state.pending_paper_trades)
+
+
+def _build_pending_paper_trade(
+    *,
+    state: SessionState,
+    window: MarketWindow,
+    plan: TradePlan,
+    side: str,
+    cfg: AppConfig,
+    side_decision: SideDecision,
+) -> PendingPaperTrade:
+    return PendingPaperTrade(
+        round_index=state.round_index,
+        event_slug=window.slug,
+        start_time=window.start_time.isoformat(),
+        end_time=window.end_time.isoformat(),
+        side=side,
+        price=float(plan.price or 0.0),
+        order_size=plan.order_size,
+        order_cost=plan.order_cost,
+        expected_profit=plan.expected_profit,
+        strategy=cfg.strategy_id,
+        entry_timing=cfg.entry_timing,
+        signal_open_up_price=side_decision.signal_open_up_price,
+        signal_current_up_price=side_decision.signal_current_up_price,
+        signal_threshold=side_decision.signal_threshold,
+        signal_delta=side_decision.signal_delta,
+        signal_locked=side_decision.signal_locked,
+        signal_reason=side_decision.reason,
+        queued_at=datetime.now(timezone.utc).isoformat(),
+    )
+
+
+def _queue_pending_paper_trade(
+    *,
+    state: SessionState,
+    window: MarketWindow,
+    plan: TradePlan,
+    side: str,
+    cfg: AppConfig,
+    side_decision: SideDecision,
+) -> bool:
+    if _pending_paper_trade_exists(state, window.slug):
+        return False
+    state.pending_paper_trades.append(
+        _build_pending_paper_trade(
+            state=state,
+            window=window,
+            plan=plan,
+            side=side,
+            cfg=cfg,
+            side_decision=side_decision,
+        )
+    )
+    return True
+
+
+def _build_frozen_pending_paper_plan(item: PendingPaperTrade) -> TradePlan:
+    return TradePlan(
+        True,
+        side=item.side,
+        price=item.price,
+        order_size=item.order_size,
+        order_cost=item.order_cost,
+        expected_profit=item.expected_profit,
+    )
+
+
+def _settle_pending_paper_trade(
+    *,
+    client: PolymarketClient | Any,
+    state: SessionState,
+    item: PendingPaperTrade,
+) -> tuple[SessionState, str, float]:
+    event = client.get_event_by_slug(item.event_slug)
+    metadata = event.get('eventMetadata') or {}
+    if metadata.get('priceToBeat') is None or metadata.get('finalPrice') is None:
+        raise RuntimeError(f'Round {item.event_slug} is not resolved yet.')
+
+    result = 'UP' if float(metadata['finalPrice']) >= float(metadata['priceToBeat']) else 'DOWN'
+    plan = _build_frozen_pending_paper_plan(item)
+    updated_state = apply_round_outcome(state, plan, won=(result == item.side))
+    trade_pnl = updated_state.cash_pnl - state.cash_pnl
+    return updated_state, result, trade_pnl
+
+
+def _settle_pending_paper_trades(
+    *,
+    client: PolymarketClient | Any,
+    state: SessionState,
+    log_path: Path,
+) -> tuple[SessionState, bool]:
+    if not state.pending_paper_trades:
+        return state, False
+
+    updated_state = state
+    changed = False
+    remaining: list[PendingPaperTrade] = []
+    for item in updated_state.pending_paper_trades:
+        try:
+            next_state, result, trade_pnl = _settle_pending_paper_trade(
+                client=client,
+                state=updated_state,
+                item=item,
+            )
+        except RuntimeError as exc:
+            if 'is not resolved yet' in str(exc):
+                _runtime_log('round=' + item.event_slug + ' pending resolution')
+                remaining.append(item)
+                continue
+            raise
+
+        updated_state = next_state
+        append_trade_log(
+            log_path,
+            TradeRecord(
+                timestamp=datetime.now(timezone.utc),
+                mode='paper',
+                round_index=item.round_index,
+                strategy=item.strategy,
+                entry_timing=item.entry_timing,
+                event_slug=item.event_slug,
+                start_time=parse_iso_datetime(item.start_time) or datetime.now(timezone.utc),
+                end_time=parse_iso_datetime(item.end_time) or datetime.now(timezone.utc),
+                side=item.side,
+                price=item.price,
+                order_size=item.order_size,
+                order_cost=item.order_cost,
+                expected_profit=item.expected_profit,
+                result=result,
+                trade_pnl=trade_pnl,
+                cash_pnl=updated_state.cash_pnl,
+                recovery_loss=updated_state.recovery_loss,
+                consecutive_losses=updated_state.consecutive_losses,
+                signal_open_up_price=item.signal_open_up_price,
+                signal_current_up_price=item.signal_current_up_price,
+                signal_threshold=item.signal_threshold,
+                signal_delta=item.signal_delta,
+                signal_locked=item.signal_locked,
+                signal_reason=item.signal_reason,
+            ),
+        )
+        _runtime_log(
+            'round=' + item.event_slug
+            + ' settled result=' + result
+            + ' trade_pnl=' + f'{trade_pnl:.4f}'
+            + ' total_cash_pnl=' + f'{updated_state.cash_pnl:.4f}'
+            + ' consecutive_losses=' + str(updated_state.consecutive_losses)
+        )
+        changed = True
+
+    updated_state.pending_paper_trades = remaining
+    return updated_state, changed
+
+
 def _settle_paper_trade(
     client: PolymarketClient,
     state: SessionState,
@@ -1312,15 +1473,6 @@ def run_paper_trading(
     while True:
         if _is_stop_requested(stop_event):
             return {"status": "stopped"}
-        if _safe_stop_requested(stop_when_safe):
-            _update_runtime_control(
-                runtime_control,
-                current_round_slug=None,
-                round_in_progress=False,
-                safe_to_switch=True,
-                pending_live_order=False,
-            )
-            return {"status": "stopped"}
         try:
             if config_provider is not None:
                 candidate_cfg = config_provider()
@@ -1334,6 +1486,35 @@ def run_paper_trading(
                         log_path = cfg.logs_dir / "paper_trades.csv"
             now = datetime.now(timezone.utc)
             _refresh_daily_session_state(state, now)
+            state, settled_any_pending = _settle_pending_paper_trades(
+                client=client,
+                state=state,
+                log_path=log_path,
+            )
+            if settled_any_pending:
+                save_session_state(state_path, state)
+            if state.pending_paper_trades:
+                _update_runtime_control(
+                    runtime_control,
+                    current_round_slug=state.pending_paper_trades[0].event_slug,
+                    round_in_progress=True,
+                    safe_to_switch=False,
+                    pending_live_order=False,
+                )
+                if _safe_stop_requested(stop_when_safe):
+                    return {"status": "pending_settlement"}
+                if not _sleep_if_not_stopped(stop_event, cfg.poll_interval_seconds):
+                    return {"status": "stopped"}
+                continue
+            if _safe_stop_requested(stop_when_safe):
+                _update_runtime_control(
+                    runtime_control,
+                    current_round_slug=None,
+                    round_in_progress=False,
+                    safe_to_switch=True,
+                    pending_live_order=False,
+                )
+                return {"status": "stopped"}
             current_round, next_round = client.find_current_and_next_rounds(now=now)
             target_round = _select_target_round(cfg, now=now, current_round=current_round, next_round=next_round)
             if target_round is None:
@@ -1695,60 +1876,24 @@ def run_paper_trading(
                     return {"status": "stopped"}
                 continue
 
-            _runtime_log('round=' + target_round.slug + ' entered trade; waiting for settlement')
-            if not _sleep_until_round_end(cfg, target_round, stop_event):
-                return {"status": "stopped"}
-            _refresh_daily_session_state(state, datetime.now(timezone.utc))
-
-            while True:
-                try:
-                    settled_state, result = _settle_paper_trade(client, state, target_round, plan.price or 0.0, side=side, cfg=cfg)
-                    break
-                except RuntimeError as exc:
-                    # Polymarket resolution metadata can lag a few polling cycles after round end.
-                    if "is not resolved yet" in str(exc):
-                        _runtime_log('round=' + target_round.slug + ' pending resolution')
-                        if not _sleep_if_not_stopped(stop_event, cfg.poll_interval_seconds):
-                            return {"status": "stopped"}
-                        continue
-                    raise
-            settled_state.round_index = state.round_index + 1
-            trade_pnl = settled_state.cash_pnl - state.cash_pnl
-            state = settled_state
-            _runtime_log(
-                'round=' + target_round.slug
-                + ' settled result=' + result
-                + ' trade_pnl=' + f'{trade_pnl:.4f}'
-                + ' total_cash_pnl=' + f'{state.cash_pnl:.4f}'
-                + ' consecutive_losses=' + str(state.consecutive_losses)
+            queued = _queue_pending_paper_trade(
+                state=state,
+                window=target_round,
+                plan=plan,
+                side=side,
+                cfg=cfg,
+                side_decision=side_decision,
             )
-
-            append_trade_log(
-                log_path,
-                TradeRecord(
-                    timestamp=datetime.now(timezone.utc),
-                    mode="paper",
-                    round_index=state.round_index,
-                    strategy=cfg.strategy_id,
-                    entry_timing=cfg.entry_timing,
-                    event_slug=target_round.slug,
-                    start_time=target_round.start_time,
-                    end_time=target_round.end_time,
-                    side=side,
-                    price=plan.price,
-                    order_size=plan.order_size,
-                    order_cost=plan.order_cost,
-                    expected_profit=plan.expected_profit,
-                    result=result,
-                    trade_pnl=trade_pnl,
-                    cash_pnl=state.cash_pnl,
-                    recovery_loss=state.recovery_loss,
-                    consecutive_losses=state.consecutive_losses,
-                    **_signal_record_kwargs(side_decision),
-                ),
-            )
-            save_session_state(state_path, state)
+            if queued:
+                _runtime_log('round=' + target_round.slug + ' entered trade; queued for later settlement')
+                state.round_index += 1
+                save_session_state(state_path, state)
+            else:
+                _runtime_log('round=' + target_round.slug + ' already queued; skip duplicate pending trade')
             consecutive_errors = 0
+            if not _sleep_if_not_stopped(stop_event, cfg.poll_interval_seconds):
+                return {"status": "stopped"}
+            continue
         except Exception as exc:
             if dry_run_once:
                 return {"status": "error", "error": str(exc)}

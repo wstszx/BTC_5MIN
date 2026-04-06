@@ -1,5 +1,6 @@
 ﻿from __future__ import annotations
 
+import json
 import os
 import threading
 import time
@@ -129,6 +130,78 @@ def test_dashboard_payload_uses_effective_values_for_invalid_env_file(tmp_path: 
         assert payload["validation_errors"]["WS_ENABLED"]
     finally:
         state.close()
+
+
+def test_recent_trades_payload_includes_pending_paper_trades(tmp_path: Path):
+    old_cwd = Path.cwd()
+    os.chdir(tmp_path)
+    state = DashboardState(env_file=tmp_path / ".env.dashboard")
+    try:
+        logs_dir = tmp_path / 'logs'
+        logs_dir.mkdir(parents=True, exist_ok=True)
+        (logs_dir / 'paper_trades.csv').write_text(
+            "timestamp,mode,round_index,strategy,entry_timing,event_slug,start_time,end_time,side,price,order_size,order_cost,expected_profit,result,trade_pnl,cash_pnl,recovery_loss,consecutive_losses,stop_loss_triggered,skip_reason,signal_open_up_price,signal_current_up_price,signal_threshold,signal_delta,signal_locked,signal_reason\n"
+            "2026-04-06T08:00:00+00:00,paper,10,2,OPEN,settled-slug,2026-04-06T07:55:00+00:00,2026-04-06T08:00:00+00:00,UP,0.50,2.0,1.0,1.0,UP,1.0,5.0,0.0,0,False,,,,,,False,\n",
+            encoding='utf-8',
+        )
+        (logs_dir / 'session_state.json').write_text(
+            json.dumps(
+                {
+                    'round_index': 12,
+                    'cash_pnl': 5.0,
+                    'recovery_loss': 0.0,
+                    'consecutive_losses': 0,
+                    'consecutive_max_stake_skips': 0,
+                    'signal_round_slug': None,
+                    'signal_round_open_up_price': None,
+                    'signal_round_locked_side': None,
+                    'stop_loss_count': 0,
+                    'daily_realized_pnl': 5.0,
+                    'current_day': '2026-04-06',
+                    'pending_live_slug': None,
+                    'pending_live_side': None,
+                    'pending_live_price': None,
+                    'pending_live_order_size': None,
+                    'pending_live_order_cost': None,
+                    'pending_live_expected_profit': None,
+                    'pending_live_order_id': None,
+                    'pending_live_end_time': None,
+                    'pending_paper_trades': [
+                        {
+                            'round_index': 11,
+                            'event_slug': 'pending-slug',
+                            'start_time': '2026-04-06T08:05:00+00:00',
+                            'end_time': '2026-04-06T08:10:00+00:00',
+                            'side': 'DOWN',
+                            'price': 0.47,
+                            'order_size': 2.5,
+                            'order_cost': 1.175,
+                            'expected_profit': 1.325,
+                            'strategy': 2,
+                            'entry_timing': 'OPEN',
+                            'signal_open_up_price': None,
+                            'signal_current_up_price': None,
+                            'signal_threshold': None,
+                            'signal_delta': None,
+                            'signal_locked': False,
+                            'signal_reason': None,
+                            'queued_at': '2026-04-06T08:05:05+00:00'
+                        }
+                    ],
+                }
+            ),
+            encoding='utf-8',
+        )
+
+        payload = state.get_recent_trades_payload(limit=10)
+        assert payload['count'] == 2
+        assert payload['rows'][0]['event_slug'] == 'pending-slug'
+        assert payload['rows'][0]['result'] == '--'
+        assert payload['rows'][0]['pending_status'] == 'pending_settlement'
+        assert payload['rows'][1]['event_slug'] == 'settled-slug'
+    finally:
+        state.close()
+        os.chdir(old_cwd)
 
 
 def test_recent_trades_payload_handles_missing_csv(tmp_path: Path):
@@ -421,6 +494,25 @@ def test_dashboard_reason_fallback_is_human_friendly():
     assert "\u672a\u8bc6\u522b\u539f\u56e0\uff1a" in js
     assert "\u53ef\u5c1d\u8bd5\u5237\u65b0\u9875\u9762" in js
 
+
+
+def test_dashboard_assets_mark_pending_recent_trades_clearly():
+    js = _dashboard_js()
+
+    assert "const isPending = row.pending_status === 'pending_settlement';" in js
+    assert "const resultText = isPending ? '待结算' : (row.result || '--');" in js
+    assert "const rowClass = isPending ? 'recent-pending' : '';" in js
+    assert "setChip('recentStatus', pendingCount > 0 ? (rows.length + ' 行 · ' + pendingCount + ' 待结算') : (rows.length + ' 行'), pendingCount > 0 ? 'warn' : 'ok');" in js
+
+def test_dashboard_assets_show_serial_waiting_hint_for_pending_paper_trades():
+    html = _dashboard_html()
+    js = _dashboard_js()
+
+    assert 'id="paperSerialHint"' in html
+    assert "const pendingPaperTrades = Array.isArray(ss.pending_paper_trades) ? ss.pending_paper_trades : [];" in js
+    assert "const serialHintNode = el('paperSerialHint');" in js
+    assert "serialHintNode.textContent = pendingPaperTrades.length > 0 ? ('上一轮未结算，当前按串行模式等待，共 ' + pendingPaperTrades.length + ' 笔待结算') : '当前没有待结算轮次';" in js
+    assert "serialHintNode.className = pendingPaperTrades.length > 0 ? 'serial-hint warn' : 'serial-hint';" in js
 
 def test_dashboard_config_payload_masks_live_private_key_and_exposes_mode_fields(tmp_path: Path):
     env_file = tmp_path / '.env.dashboard'

@@ -92,6 +92,28 @@ class TradeRecord:
 
 
 @dataclass(slots=True)
+class PendingPaperTrade:
+    round_index: int
+    event_slug: str
+    start_time: str
+    end_time: str
+    side: str
+    price: float
+    order_size: float
+    order_cost: float
+    expected_profit: float
+    strategy: int
+    entry_timing: str
+    signal_open_up_price: float | None = None
+    signal_current_up_price: float | None = None
+    signal_threshold: float | None = None
+    signal_delta: float | None = None
+    signal_locked: bool = False
+    signal_reason: str | None = None
+    queued_at: str | None = None
+
+
+@dataclass(slots=True)
 class SessionState:
     round_index: int = 0
     cash_pnl: float = 0.0
@@ -112,6 +134,7 @@ class SessionState:
     pending_live_expected_profit: float | None = None
     pending_live_order_id: str | None = None
     pending_live_end_time: str | None = None
+    pending_paper_trades: list[PendingPaperTrade] = field(default_factory=list)
 
 
 @dataclass(slots=True)

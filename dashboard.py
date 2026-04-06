@@ -15,7 +15,7 @@ from typing import Any
 from urllib.parse import parse_qs, urlparse
 
 from config import AppConfig, build_config_from_env_values, load_env_file_values
-from models import MarketWindow
+from models import MarketWindow, PendingPaperTrade
 from paper_report import summarize_paper_trades
 from polymarket_api import PolymarketClient
 from risk_and_sizing import build_trade_plan
@@ -68,6 +68,38 @@ def _tail_csv_rows(path: Path, *, limit: int) -> list[dict[str, str]]:
     rows = list(buffer)
     rows.reverse()
     return rows
+
+
+def _pending_paper_trade_to_recent_row(item: PendingPaperTrade) -> dict[str, str]:
+    return {
+        'timestamp': item.queued_at or item.end_time,
+        'mode': 'paper',
+        'round_index': str(item.round_index),
+        'strategy': str(item.strategy),
+        'entry_timing': item.entry_timing,
+        'event_slug': item.event_slug,
+        'start_time': item.start_time,
+        'end_time': item.end_time,
+        'side': item.side,
+        'price': str(item.price),
+        'order_size': str(item.order_size),
+        'order_cost': str(item.order_cost),
+        'expected_profit': str(item.expected_profit),
+        'result': '--',
+        'trade_pnl': '0.0',
+        'cash_pnl': '--',
+        'recovery_loss': '--',
+        'consecutive_losses': '--',
+        'stop_loss_triggered': 'False',
+        'skip_reason': '',
+        'signal_open_up_price': '' if item.signal_open_up_price is None else str(item.signal_open_up_price),
+        'signal_current_up_price': '' if item.signal_current_up_price is None else str(item.signal_current_up_price),
+        'signal_threshold': '' if item.signal_threshold is None else str(item.signal_threshold),
+        'signal_delta': '' if item.signal_delta is None else str(item.signal_delta),
+        'signal_locked': str(item.signal_locked),
+        'signal_reason': item.signal_reason or '',
+        'pending_status': 'pending_settlement',
+    }
 
 
 def _iso(dt: datetime | None) -> str | None:
@@ -729,8 +761,17 @@ class DashboardState:
     def get_recent_trades_payload(self, *, limit: int) -> dict[str, Any]:
         with self._lock:
             paper_csv = self._cfg.logs_dir / "paper_trades.csv"
-        rows = _tail_csv_rows(paper_csv, limit=max(1, min(300, int(limit))))
-        return {"csv_path": str(paper_csv), "count": len(rows), "rows": rows}
+            state_path = self._cfg.logs_dir / "session_state.json"
+        capped_limit = max(1, min(300, int(limit)))
+        rows = _tail_csv_rows(paper_csv, limit=capped_limit)
+        pending_rows: list[dict[str, str]] = []
+        session_state = load_session_state(state_path)
+        for item in getattr(session_state, 'pending_paper_trades', []) or []:
+            pending_rows.append(_pending_paper_trade_to_recent_row(item))
+        merged_rows = pending_rows + rows
+        merged_rows.sort(key=lambda row: str(row.get('timestamp') or ''), reverse=True)
+        merged_rows = merged_rows[:capped_limit]
+        return {"csv_path": str(paper_csv), "count": len(merged_rows), "rows": merged_rows}
 
     def get_live_recent_orders_payload(self, *, limit: int) -> dict[str, Any]:
         with self._lock:
@@ -1126,6 +1167,7 @@ def _dashboard_html() -> str:
 
           <div class=\"box\">
             <div class=\"box-title\">会话状态</div>
+            <div id=\"paperSerialHint\" class=\"serial-hint\">当前没有待结算轮次</div>
             <div class=\"kv-grid\">
               <div class=\"kv\"><div class=\"k\">轮次计数</div><div id=\"ssRoundIndex\" class=\"v\">--</div></div>
               <div class=\"kv\"><div class=\"k\">累计盈亏</div><div id=\"ssCashPnl\" class=\"v\">--</div></div>
@@ -1928,6 +1970,22 @@ body::before {
   font-family: var(--mono);
 }
 
+.serial-hint {
+  margin-bottom: 10px;
+  padding: 8px 10px;
+  border: 1px solid rgba(122, 146, 178, 0.28);
+  border-radius: 10px;
+  color: var(--muted);
+  background: rgba(10, 18, 31, 0.58);
+  font-size: 12px;
+}
+
+.serial-hint.warn {
+  color: var(--amber);
+  border-color: rgba(245, 166, 35, 0.35);
+  background: rgba(245, 166, 35, 0.08);
+}
+
 .kv-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -2056,6 +2114,9 @@ tr:hover td { background: rgba(50, 88, 131, 0.1); }
 .trade-skip { color: var(--amber); font-weight: 700; }
 .pnl-plus { color: var(--green); font-family: var(--mono); }
 .pnl-minus { color: var(--red); font-family: var(--mono); }
+.recent-pending td {
+  background: rgba(245, 166, 35, 0.08);
+}
 
 .empty {
   text-align: center;
@@ -3315,6 +3376,11 @@ function renderMarket(payload) {
   dayNode.textContent = fmtPnl(ss.daily_realized_pnl, 4);
   dayNode.className = 'v ' + classifyPnl(ss.daily_realized_pnl);
 
+  const pendingPaperTrades = Array.isArray(ss.pending_paper_trades) ? ss.pending_paper_trades : [];
+  const serialHintNode = el('paperSerialHint');
+  serialHintNode.textContent = pendingPaperTrades.length > 0 ? ('上一轮未结算，当前按串行模式等待，共 ' + pendingPaperTrades.length + ' 笔待结算') : '当前没有待结算轮次';
+  serialHintNode.className = pendingPaperTrades.length > 0 ? 'serial-hint warn' : 'serial-hint';
+
   const guardNode = el('wsGuard');
   guardNode.textContent = payload.ws_stale_guard_triggered ? '触发' : '正常';
   guardNode.className = 'value ' + (payload.ws_stale_guard_triggered ? 'trade-down' : 'trade-up');
@@ -3381,19 +3447,23 @@ function renderRecent(payload) {
     return;
   }
 
+  const pendingCount = rows.filter((row) => row.pending_status === 'pending_settlement').length;
   const html = rows.map((row) => {
     const side = String(row.side || '').toUpperCase();
     const sideCls = sideClass(side);
     const pnlCls = classifyPnl(row.trade_pnl);
     const cashCls = classifyPnl(row.cash_pnl);
+    const isPending = row.pending_status === 'pending_settlement';
+    const resultText = isPending ? '待结算' : (row.result || '--');
+    const rowClass = isPending ? 'recent-pending' : '';
 
-    return '<tr>' +
+    return '<tr class=\"' + esc(rowClass) + '\">' +
       '<td>' + esc(fmtIso(row.timestamp)) + '</td>' +
       '<td>' + esc(row.event_slug || '--') + '</td>' +
       '<td class=\"' + esc(sideCls) + '\">' + esc(sideText(side)) + '</td>' +
       '<td>' + esc(fmtNum(row.price, 4)) + '</td>' +
       '<td>' + esc(fmtNum(row.order_cost, 4)) + '</td>' +
-      '<td>' + esc(row.result || '--') + '</td>' +
+      '<td class=\"' + (isPending ? 'trade-skip' : '') + '\">' + esc(resultText) + '</td>' +
       '<td class=\"' + esc(pnlCls) + '\">' + esc(fmtPnl(row.trade_pnl, 4)) + '</td>' +
       '<td class=\"' + esc(cashCls) + '\">' + esc(fmtPnl(row.cash_pnl, 4)) + '</td>' +
       '<td>' + esc(reasonText(row.skip_reason)) + '</td>' +
@@ -3402,7 +3472,7 @@ function renderRecent(payload) {
   }).join('');
 
   tbody.innerHTML = html;
-  setChip('recentStatus', rows.length + ' 行', 'ok');
+  setChip('recentStatus', pendingCount > 0 ? (rows.length + ' 行 · ' + pendingCount + ' 待结算') : (rows.length + ' 行'), pendingCount > 0 ? 'warn' : 'ok');
 }
 
 async function refreshMarket() {

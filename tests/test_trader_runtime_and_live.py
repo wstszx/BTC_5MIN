@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import json
 import threading
@@ -211,6 +211,160 @@ class _UnresolvedSettlingLiveClient(_LiveMarketClient):
         if slug != "btc-updown-5m-prev":
             raise AssertionError(f"Unexpected slug {slug}")
         return {"eventMetadata": {"priceToBeat": None, "finalPrice": None}}
+
+
+def test_session_state_roundtrip_preserves_pending_paper_trades(tmp_path):
+    state_path = tmp_path / "session_state.json"
+    state_path.write_text(
+        json.dumps(
+            {
+                "round_index": 7,
+                "cash_pnl": 12.5,
+                "recovery_loss": 1.0,
+                "consecutive_losses": 1,
+                "consecutive_max_stake_skips": 0,
+                "signal_round_slug": None,
+                "signal_round_open_up_price": None,
+                "signal_round_locked_side": None,
+                "stop_loss_count": 0,
+                "daily_realized_pnl": 3.0,
+                "current_day": "2026-04-06",
+                "pending_live_slug": None,
+                "pending_live_side": None,
+                "pending_live_price": None,
+                "pending_live_order_size": None,
+                "pending_live_order_cost": None,
+                "pending_live_expected_profit": None,
+                "pending_live_order_id": None,
+                "pending_live_end_time": None,
+                "pending_paper_trades": [
+                    {
+                        "round_index": 7,
+                        "event_slug": "btc-updown-5m-queued",
+                        "start_time": "2026-04-06T06:00:00+00:00",
+                        "end_time": "2026-04-06T06:05:00+00:00",
+                        "side": "UP",
+                        "price": 0.44,
+                        "order_size": 2.0,
+                        "order_cost": 0.88,
+                        "expected_profit": 1.12,
+                        "strategy": 2,
+                        "entry_timing": "OPEN",
+                        "signal_open_up_price": 0.5,
+                        "signal_current_up_price": 0.49,
+                        "signal_threshold": 0.01,
+                        "signal_delta": -0.01,
+                        "signal_locked": False,
+                        "signal_reason": None,
+                        "queued_at": "2026-04-06T06:00:05+00:00"
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    state = load_session_state(state_path)
+
+    assert len(state.pending_paper_trades) == 1
+    queued = state.pending_paper_trades[0]
+    assert queued.event_slug == "btc-updown-5m-queued"
+    assert queued.order_cost == 0.88
+    assert queued.expected_profit == 1.12
+
+
+class _ImmediatePaperRoundClient(_LiveMarketClient):
+    def find_current_and_next_rounds(self, *, now):
+        window = MarketWindow(
+            event_id="evt-paper-1",
+            market_id="mkt-paper-1",
+            slug="btc-updown-5m-paper-now",
+            title="BTC 5m Paper Now",
+            start_time=now - timedelta(seconds=10),
+            end_time=now + timedelta(minutes=4, seconds=50),
+            up_token_id="up-token",
+            down_token_id="down-token",
+        )
+        return window, None
+
+
+def test_run_paper_trading_waits_for_pending_settlement_before_next_round(tmp_path, monkeypatch):
+    stop_event = threading.Event()
+
+    def fake_sleep(_seconds):
+        stop_event.set()
+
+    monkeypatch.setattr('trader.time.sleep', fake_sleep)
+
+    state_path = tmp_path / 'state.json'
+    state_path.write_text(
+        json.dumps(
+            {
+                'round_index': 1,
+                'cash_pnl': 0.0,
+                'recovery_loss': 0.0,
+                'consecutive_losses': 0,
+                'consecutive_max_stake_skips': 0,
+                'signal_round_slug': None,
+                'signal_round_open_up_price': None,
+                'signal_round_locked_side': None,
+                'stop_loss_count': 0,
+                'daily_realized_pnl': 0.0,
+                'current_day': '2026-04-06',
+                'pending_live_slug': None,
+                'pending_live_side': None,
+                'pending_live_price': None,
+                'pending_live_order_size': None,
+                'pending_live_order_cost': None,
+                'pending_live_expected_profit': None,
+                'pending_live_order_id': None,
+                'pending_live_end_time': None,
+                'pending_paper_trades': [
+                    {
+                        'round_index': 0,
+                        'event_slug': 'btc-updown-5m-paper-prev',
+                        'start_time': '2026-04-06T06:00:00+00:00',
+                        'end_time': '2099-04-06T06:05:00+00:00',
+                        'side': 'UP',
+                        'price': 0.5,
+                        'order_size': 2.0,
+                        'order_cost': 1.0,
+                        'expected_profit': 1.0,
+                        'strategy': 2,
+                        'entry_timing': 'OPEN',
+                        'signal_open_up_price': None,
+                        'signal_current_up_price': None,
+                        'signal_threshold': None,
+                        'signal_delta': None,
+                        'signal_locked': False,
+                        'signal_reason': None,
+                        'queued_at': '2026-04-06T06:00:05+00:00',
+                    }
+                ],
+            }
+        ),
+        encoding='utf-8',
+    )
+
+    class _UnresolvedPaperClient(_ImmediatePaperRoundClient):
+        def get_event_by_slug(self, slug: str):
+            assert slug == 'btc-updown-5m-paper-prev'
+            return {'eventMetadata': {'priceToBeat': None, 'finalPrice': None}}
+
+    result = run_paper_trading(
+        AppConfig(strategy_id=2, poll_interval_seconds=1),
+        client=_UnresolvedPaperClient(),
+        state_path=state_path,
+        log_path=tmp_path / 'paper.csv',
+        stop_event=stop_event,
+    )
+
+    state = load_session_state(state_path)
+    assert result['status'] == 'stopped'
+    assert state.round_index == 1
+    assert len(state.pending_paper_trades) == 1
+    assert state.pending_paper_trades[0].event_slug == 'btc-updown-5m-paper-prev'
+    assert not (tmp_path / 'paper.csv').exists()
 
 
 def test_run_paper_trading_continues_after_transient_exception(tmp_path, monkeypatch):
@@ -918,6 +1072,151 @@ def test_run_paper_trading_config_provider_refreshes_default_client(tmp_path, mo
     assert client_instances[0].config.poll_interval_seconds == 99
 
 
+def test_settled_pending_paper_trade_writes_single_final_csv_row(tmp_path):
+    state_path = tmp_path / 'state.json'
+    log_path = tmp_path / 'paper.csv'
+    state_path.write_text(
+        json.dumps(
+            {
+                'round_index': 1,
+                'cash_pnl': 0.0,
+                'recovery_loss': 0.0,
+                'consecutive_losses': 0,
+                'consecutive_max_stake_skips': 0,
+                'signal_round_slug': None,
+                'signal_round_open_up_price': None,
+                'signal_round_locked_side': None,
+                'stop_loss_count': 0,
+                'daily_realized_pnl': 0.0,
+                'current_day': '2026-04-06',
+                'pending_live_slug': None,
+                'pending_live_side': None,
+                'pending_live_price': None,
+                'pending_live_order_size': None,
+                'pending_live_order_cost': None,
+                'pending_live_expected_profit': None,
+                'pending_live_order_id': None,
+                'pending_live_end_time': None,
+                'pending_paper_trades': [
+                    {
+                        'round_index': 0,
+                        'event_slug': 'btc-updown-5m-paper-prev',
+                        'start_time': '2026-04-06T06:00:00+00:00',
+                        'end_time': '2026-04-06T06:05:00+00:00',
+                        'side': 'UP',
+                        'price': 0.5,
+                        'order_size': 2.0,
+                        'order_cost': 1.0,
+                        'expected_profit': 1.0,
+                        'strategy': 2,
+                        'entry_timing': 'OPEN',
+                        'signal_open_up_price': 0.51,
+                        'signal_current_up_price': 0.5,
+                        'signal_threshold': 0.01,
+                        'signal_delta': -0.01,
+                        'signal_locked': False,
+                        'signal_reason': None,
+                        'queued_at': '2026-04-06T06:00:05+00:00',
+                    }
+                ],
+            }
+        ),
+        encoding='utf-8',
+    )
+
+    class _SettlingPaperClient(_NoMarketClient):
+        def get_event_by_slug(self, slug: str):
+            assert slug == 'btc-updown-5m-paper-prev'
+            return {'eventMetadata': {'priceToBeat': 100.0, 'finalPrice': 120.0}}
+
+    result = run_paper_trading(
+        AppConfig(poll_interval_seconds=1),
+        client=_SettlingPaperClient(),
+        state_path=state_path,
+        log_path=log_path,
+        stop_when_safe=lambda: True,
+    )
+
+    rows = log_path.read_text(encoding='utf-8').splitlines()
+    assert result['status'] == 'stopped'
+    assert len(rows) == 2
+    assert 'btc-updown-5m-paper-prev' in rows[1]
+    assert ',UP,0.5,2.0,1.0,1.0,UP,1.0,1.0,0.0,0,' in rows[1]
+
+
+def test_run_paper_trading_settles_pending_paper_trade_before_processing_new_round(tmp_path):
+    state_path = tmp_path / 'state.json'
+    state_path.write_text(
+        json.dumps(
+            {
+                'round_index': 1,
+                'cash_pnl': 0.0,
+                'recovery_loss': 0.0,
+                'consecutive_losses': 0,
+                'consecutive_max_stake_skips': 0,
+                'signal_round_slug': None,
+                'signal_round_open_up_price': None,
+                'signal_round_locked_side': None,
+                'stop_loss_count': 0,
+                'daily_realized_pnl': 0.0,
+                'current_day': '2026-04-06',
+                'pending_live_slug': None,
+                'pending_live_side': None,
+                'pending_live_price': None,
+                'pending_live_order_size': None,
+                'pending_live_order_cost': None,
+                'pending_live_expected_profit': None,
+                'pending_live_order_id': None,
+                'pending_live_end_time': None,
+                'pending_paper_trades': [
+                    {
+                        'round_index': 0,
+                        'event_slug': 'btc-updown-5m-paper-prev',
+                        'start_time': '2026-04-06T06:00:00+00:00',
+                        'end_time': '2026-04-06T06:05:00+00:00',
+                        'side': 'UP',
+                        'price': 0.5,
+                        'order_size': 2.0,
+                        'order_cost': 1.0,
+                        'expected_profit': 1.0,
+                        'strategy': 2,
+                        'entry_timing': 'OPEN',
+                        'signal_open_up_price': None,
+                        'signal_current_up_price': None,
+                        'signal_threshold': None,
+                        'signal_delta': None,
+                        'signal_locked': False,
+                        'signal_reason': None,
+                        'queued_at': '2026-04-06T06:00:05+00:00',
+                    }
+                ],
+            }
+        ),
+        encoding='utf-8',
+    )
+
+    class _SettlingPaperClient(_NoMarketClient):
+        def get_event_by_slug(self, slug: str):
+            assert slug == 'btc-updown-5m-paper-prev'
+            return {'eventMetadata': {'priceToBeat': 100.0, 'finalPrice': 120.0}}
+
+    result = run_paper_trading(
+        AppConfig(poll_interval_seconds=1),
+        client=_SettlingPaperClient(),
+        state_path=state_path,
+        log_path=tmp_path / 'paper.csv',
+        stop_when_safe=lambda: True,
+    )
+
+    state = load_session_state(state_path)
+    assert result['status'] == 'stopped'
+    assert state.cash_pnl == 1.0
+    assert state.daily_realized_pnl == 1.0
+    assert state.recovery_loss == 0.0
+    assert state.consecutive_losses == 0
+    assert state.pending_paper_trades == []
+
+
 def test_run_paper_trading_stop_event_during_settlement_wait_prevents_settlement(tmp_path, monkeypatch):
     stop_event = threading.Event()
     sleep_calls: list[float] = []
@@ -960,7 +1259,9 @@ def test_run_paper_trading_stop_event_during_settlement_wait_prevents_settlement
     )
 
     assert result["status"] == "stopped"
-    assert settle_calls == ["called"]
+    assert settle_calls == []
+    state = load_session_state(tmp_path / "state.json")
+    assert len(state.pending_paper_trades) == 1
 
 
 def test_run_paper_trading_stop_event_stops_during_round_end_wait(tmp_path, monkeypatch):
