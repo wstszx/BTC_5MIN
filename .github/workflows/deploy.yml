@@ -1,0 +1,40 @@
+name: Deploy BTC_5MIN to VPS
+
+# 触发条件：当代码推送到 main 分支时自动触发
+on:
+  push:
+    branches:
+      - main 
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy to VPS via SSH
+        # 使用第三方写好的 SSH 动作插件
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.VPSHOST }}
+          username: ${{ secrets.VPSUSERNAME }}
+          key: ${{ secrets.VPSSSHKEY }}
+          port: ${{ secrets.VPSPORT }}
+          # 连接到 VPS 后要执行的具体命令
+          script: |
+            echo "Starting deployment..."
+            # 1. 进入项目目录
+            cd /root/btc_5min
+            
+            # 2. 强制拉取 GitHub 上的最新代码，丢弃服务器上的任何本地修改
+            git fetch --all
+            git reset --hard origin/main
+            git pull origin main
+            
+            # 3. 激活虚拟环境并更新依赖 (如果 requirements.txt 有变化)
+            source venv/bin/activate
+            pip install -r requirements.txt
+            
+            # 4. 重载守护进程并重启核心服务
+            systemctl daemon-reload
+            systemctl restart btc_5min
+            
+            echo "Deployment successful! Service restarted."
