@@ -586,6 +586,61 @@ def test_place_live_order_rejects_submission_response_without_acceptance(tmp_pat
     assert state.round_index == 0
 
 
+def test_place_live_order_resets_state_after_repeated_max_stake_skips(tmp_path):
+    cfg = AppConfig(
+        live_trading_enabled=True,
+        max_stake=1.0,
+        max_consecutive_losses=3,
+    )
+    stub_clob = _StubClobClient()
+    state_path = tmp_path / "state.json"
+    state_path.write_text(
+        json.dumps(
+            {
+                "round_index": 3,
+                "cash_pnl": -5.0,
+                "recovery_loss": 5.0,
+                "consecutive_losses": 2,
+                "consecutive_max_stake_skips": 2,
+                "signal_round_slug": None,
+                "signal_round_open_up_price": None,
+                "signal_round_locked_side": None,
+                "stop_loss_count": 0,
+                "daily_realized_pnl": -5.0,
+                "current_day": "2026-04-07",
+                "pending_live_slug": None,
+                "pending_live_side": None,
+                "pending_live_price": None,
+                "pending_live_order_size": None,
+                "pending_live_order_cost": None,
+                "pending_live_expected_profit": None,
+                "pending_live_order_id": None,
+                "pending_live_end_time": None,
+                "pending_paper_trades": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = place_live_order(
+        cfg=cfg,
+        market_client=_LiveMarketClient(),
+        clob_client=stub_clob,
+        state_path=state_path,
+        log_path=tmp_path / "live.csv",
+    )
+
+    state = load_session_state(state_path)
+    assert result["status"] == "skipped"
+    assert result["skip_reason"] == "order_cost_above_max_stake"
+    assert stub_clob.created_orders == []
+    assert state.round_index == 4
+    assert state.recovery_loss == 0.0
+    assert state.consecutive_losses == 0
+    assert state.consecutive_max_stake_skips == 0
+    assert state.stop_loss_count == 1
+
+
 def test_place_live_order_settles_previous_pending_trade_before_new_submission(tmp_path):
     cfg = AppConfig(live_trading_enabled=True, max_stake=25.0)
     stub_clob = _StubClobClient(
@@ -1021,6 +1076,73 @@ def test_run_paper_trading_dry_run_resets_daily_loss_cap_after_day_rollover(tmp_
 
     assert result["status"] == "dry_run"
     assert result["should_trade"] is True
+
+
+def test_run_paper_trading_resets_state_after_repeated_max_stake_skips(tmp_path, monkeypatch):
+    monkeypatch.setattr("trader._sleep_until_round_end", lambda cfg, window, stop_event=None: False)
+    cfg = AppConfig(
+        strategy_id=2,
+        max_stake=1.0,
+        max_consecutive_losses=3,
+        poll_interval_seconds=1,
+    )
+    state_path = tmp_path / "state.json"
+    state_path.write_text(
+        json.dumps(
+            {
+                "round_index": 3,
+                "cash_pnl": -5.0,
+                "recovery_loss": 5.0,
+                "consecutive_losses": 2,
+                "consecutive_max_stake_skips": 2,
+                "signal_round_slug": None,
+                "signal_round_open_up_price": None,
+                "signal_round_locked_side": None,
+                "stop_loss_count": 0,
+                "daily_realized_pnl": -5.0,
+                "current_day": "2026-04-07",
+                "pending_live_slug": None,
+                "pending_live_side": None,
+                "pending_live_price": None,
+                "pending_live_order_size": None,
+                "pending_live_order_cost": None,
+                "pending_live_expected_profit": None,
+                "pending_live_order_id": None,
+                "pending_live_end_time": None,
+                "pending_paper_trades": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    class _NearEntryPaperClient(_LiveMarketClient):
+        def find_current_and_next_rounds(self, *, now):
+            window = MarketWindow(
+                event_id="evt-paper-reset",
+                market_id="mkt-paper-reset",
+                slug="btc-updown-5m-paper-reset",
+                title="BTC 5m Paper Reset",
+                start_time=now - timedelta(seconds=7),
+                end_time=now + timedelta(minutes=4, seconds=53),
+                up_token_id="up-token",
+                down_token_id="down-token",
+            )
+            return window, None
+
+    result = run_paper_trading(
+        cfg,
+        client=_NearEntryPaperClient(),
+        state_path=state_path,
+        log_path=tmp_path / "paper.csv",
+    )
+
+    state = load_session_state(state_path)
+    assert result["status"] == "stopped"
+    assert state.round_index == 4
+    assert state.recovery_loss == 0.0
+    assert state.consecutive_losses == 0
+    assert state.consecutive_max_stake_skips == 0
+    assert state.stop_loss_count == 1
 
 
 def test_run_paper_trading_stops_when_stop_event_is_set(tmp_path, monkeypatch):

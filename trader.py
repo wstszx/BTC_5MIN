@@ -307,14 +307,54 @@ def _emit_max_stake_skip_alert(
     price: float | None,
     state: SessionState,
     cfg: AppConfig,
+    skip_streak: int | None = None,
 ) -> None:
     printable_price = "N/A" if price is None else f"{price:.4f}"
+    streak = state.consecutive_max_stake_skips if skip_streak is None else skip_streak
     print(
         "[WARN] order_cost_above_max_stake triggered "
-        f"{state.consecutive_max_stake_skips} times | slug={slug} side={side} price={printable_price} "
+        f"{streak} times | slug={slug} side={side} price={printable_price} "
         f"recovery_loss={state.recovery_loss:.4f} max_stake={cfg.max_stake:.4f} "
-        "(alert only; strategy state is not reset automatically)"
+        f"max_consecutive_losses={cfg.max_consecutive_losses}"
     )
+
+
+def _should_reset_after_risk_gate_skip(
+    state: SessionState,
+    *,
+    skip_reason: str | None,
+    cfg: AppConfig,
+    stop_loss_triggered: bool,
+) -> bool:
+    if stop_loss_triggered:
+        return True
+    if skip_reason != "order_cost_above_max_stake":
+        return False
+    return (state.consecutive_max_stake_skips + 1) >= max(1, cfg.max_consecutive_losses)
+
+
+def _apply_post_entry_risk_gate_skip(
+    state: SessionState,
+    *,
+    skip_reason: str | None,
+    cfg: AppConfig,
+    stop_loss_triggered: bool,
+) -> tuple[SessionState, bool, bool, int]:
+    should_alert = _update_max_stake_skip_streak(
+        state,
+        skip_reason=skip_reason,
+        threshold=cfg.max_stake_skip_alert_threshold,
+    )
+    skip_streak = state.consecutive_max_stake_skips
+    should_reset = stop_loss_triggered
+    if not should_reset and skip_reason == "order_cost_above_max_stake":
+        should_reset = state.consecutive_max_stake_skips >= max(1, cfg.max_consecutive_losses)
+    if should_reset:
+        state = reset_after_stop_loss(state)
+        state.consecutive_max_stake_skips = 0
+    state.round_index += 1
+    return state, should_alert, should_reset, skip_streak
+
 
 def _runtime_backoff_seconds(cfg: AppConfig, consecutive_errors: int) -> int:
     scaled = cfg.runtime_error_backoff_base_seconds * (2 ** max(0, consecutive_errors - 1))
@@ -856,6 +896,12 @@ def place_live_order(
     if not cfg.live_trading_enabled:
         raise RuntimeError("Live trading is disabled. Set LIVE_TRADING_ENABLED=true (or config flag) to submit orders.")
     if not plan.should_trade:
+        skip_stop_loss_triggered = _should_reset_after_risk_gate_skip(
+            state,
+            skip_reason=plan.skip_reason,
+            cfg=cfg,
+            stop_loss_triggered=plan.stop_loss_triggered,
+        )
         if now < entry_time:
             if persist_state:
                 save_session_state(state_path, state)
@@ -899,14 +945,15 @@ def place_live_order(
                 recovery_loss=state.recovery_loss,
                 consecutive_losses=state.consecutive_losses,
                 skip_reason=plan.skip_reason,
-                stop_loss_triggered=plan.stop_loss_triggered,
+                stop_loss_triggered=skip_stop_loss_triggered,
                 **_signal_record_kwargs(side_decision),
             ),
         )
-        should_alert = _update_max_stake_skip_streak(
+        state, should_alert, skip_stop_loss_triggered, skip_streak = _apply_post_entry_risk_gate_skip(
             state,
             skip_reason=plan.skip_reason,
-            threshold=cfg.max_stake_skip_alert_threshold,
+            cfg=cfg,
+            stop_loss_triggered=plan.stop_loss_triggered,
         )
         if should_alert:
             _emit_max_stake_skip_alert(
@@ -915,6 +962,7 @@ def place_live_order(
                 price=price,
                 state=state,
                 cfg=cfg,
+                skip_streak=skip_streak,
             )
         if persist_state:
             save_session_state(state_path, state)
@@ -925,6 +973,7 @@ def place_live_order(
             "price": price,
             "skip_reason": plan.skip_reason,
             "max_stake_skip_streak": state.consecutive_max_stake_skips,
+            "stop_loss_triggered": skip_stop_loss_triggered,
             "signal_open_up_price": side_decision.signal_open_up_price,
             "signal_current_up_price": side_decision.signal_current_up_price,
             "signal_threshold": side_decision.signal_threshold,
@@ -1810,6 +1859,12 @@ def run_paper_trading(
                 }
 
             if not plan.should_trade:
+                skip_stop_loss_triggered = _should_reset_after_risk_gate_skip(
+                    state,
+                    skip_reason=plan.skip_reason,
+                    cfg=cfg,
+                    stop_loss_triggered=plan.stop_loss_triggered,
+                )
                 if now < entry_time:
                     sleep_seconds = min(cfg.poll_interval_seconds, max(1, int((entry_time - now).total_seconds())))
                     _runtime_log(
@@ -1824,19 +1879,6 @@ def run_paper_trading(
                     'round=' + target_round.slug
                     + ' skip trade due to risk gate; reason=' + str(plan.skip_reason)
                 )
-                should_alert = _update_max_stake_skip_streak(
-                    state,
-                    skip_reason=plan.skip_reason,
-                    threshold=cfg.max_stake_skip_alert_threshold,
-                )
-                if should_alert:
-                    _emit_max_stake_skip_alert(
-                        slug=target_round.slug,
-                        side=side,
-                        price=price,
-                        state=state,
-                        cfg=cfg,
-                    )
                 append_trade_log(
                     log_path,
                     TradeRecord(
@@ -1858,14 +1900,26 @@ def run_paper_trading(
                         cash_pnl=state.cash_pnl,
                         recovery_loss=state.recovery_loss,
                         consecutive_losses=state.consecutive_losses,
-                        stop_loss_triggered=plan.stop_loss_triggered,
+                        stop_loss_triggered=skip_stop_loss_triggered,
                         skip_reason=plan.skip_reason,
                         **_signal_record_kwargs(side_decision),
                     ),
                 )
-                if plan.stop_loss_triggered:
-                    state = reset_after_stop_loss(state)
-                state.round_index += 1
+                state, should_alert, _, skip_streak = _apply_post_entry_risk_gate_skip(
+                    state,
+                    skip_reason=plan.skip_reason,
+                    cfg=cfg,
+                    stop_loss_triggered=plan.stop_loss_triggered,
+                )
+                if should_alert:
+                    _emit_max_stake_skip_alert(
+                        slug=target_round.slug,
+                        side=side,
+                        price=price,
+                        state=state,
+                        cfg=cfg,
+                        skip_streak=skip_streak,
+                    )
                 save_session_state(state_path, state)
                 consecutive_errors = 0
                 if not _sleep_until_round_end(cfg, target_round, stop_event):
