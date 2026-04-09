@@ -2451,7 +2451,7 @@ function reasonText(reason) {
   if (REASON_LABELS[reason]) {
     return REASON_LABELS[reason];
   }
-  return '未识别原因：' + String(reason) + '（可尝试刷新页面）';
+  return '当前状态暂未识别，请刷新页面；若持续出现，请联系维护者。';
 }
 
 function formatConfigLabel(key, labels) {

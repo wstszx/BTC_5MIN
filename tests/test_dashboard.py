@@ -491,8 +491,9 @@ def test_dashboard_market_header_prioritizes_human_time_over_slug():
 def test_dashboard_reason_fallback_is_human_friendly():
     js = _dashboard_js()
 
-    assert "\u672a\u8bc6\u522b\u539f\u56e0\uff1a" in js
-    assert "\u53ef\u5c1d\u8bd5\u5237\u65b0\u9875\u9762" in js
+    assert "\u5f53\u524d\u72b6\u6001\u6682\u672a\u8bc6\u522b" in js
+    assert "\u8bf7\u5237\u65b0\u9875\u9762" in js
+    assert "\u8054\u7cfb\u7ef4\u62a4\u8005" in js
 
 
 
