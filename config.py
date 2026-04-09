@@ -109,6 +109,19 @@ def _env_float(name: str, default: float) -> float:
         return default
 
 
+def _env_optional_float(name: str) -> float | None:
+    raw = os.getenv(name)
+    if raw is None:
+        return None
+    raw = raw.strip()
+    if raw == "":
+        return None
+    try:
+        return float(raw)
+    except ValueError:
+        return None
+
+
 @dataclass(slots=True)
 class AppConfig:
     gamma_api_base: str = "https://gamma-api.polymarket.com"
@@ -122,7 +135,7 @@ class AppConfig:
     bet_sizing_mode: str = field(default_factory=lambda: (os.getenv("BET_SIZING_MODE") or "FIXED_BASE_COST").upper())
     base_order_cost: float = field(default_factory=lambda: _env_float("BASE_ORDER_COST", 1.0))
     max_consecutive_losses: int = field(default_factory=lambda: _env_int("MAX_CONSECUTIVE_LOSSES", 6))
-    max_stake: float = field(default_factory=lambda: _env_float("MAX_STAKE", 15.0))
+    max_stake: float | None = field(default_factory=lambda: _env_optional_float("MAX_STAKE"))
     max_price_threshold: float = field(default_factory=lambda: _env_float("MAX_PRICE_THRESHOLD", 0.65))
     signal_momentum_threshold: float = field(default_factory=lambda: _env_float("SIGNAL_MOMENTUM_THRESHOLD", 0.015))
     signal_fallback_strategy_id: int = field(default_factory=lambda: _env_int("SIGNAL_FALLBACK_STRATEGY_ID", 2))
@@ -133,7 +146,6 @@ class AppConfig:
     signal_dynamic_threshold_min_points: int = field(default_factory=lambda: _env_int("SIGNAL_DYNAMIC_THRESHOLD_MIN_POINTS", 8))
     signal_lock_before_entry_seconds: int = field(default_factory=lambda: _env_int("SIGNAL_LOCK_BEFORE_ENTRY_SECONDS", 20))
     max_stake_skip_alert_threshold: int = field(default_factory=lambda: _env_int("MAX_STAKE_SKIP_ALERT_THRESHOLD", 5))
-    daily_loss_cap: float = 50.0
     poll_interval_seconds: int = 5
     ws_enabled: bool = field(default_factory=lambda: _env_bool("WS_ENABLED", True))
     ws_market_url: str = field(default_factory=lambda: os.getenv("WS_MARKET_URL") or "wss://ws-subscriptions-clob.polymarket.com/ws/market")
@@ -155,15 +167,12 @@ class AppConfig:
     history_entry_max_offset_seconds: int = field(default_factory=lambda: _env_int("HISTORY_ENTRY_MAX_OFFSET_SECONDS", 120))
     history_dir: Path = Path("data")
     logs_dir: Path = Path("logs")
-    # Safety gate for real-order submission. Keep this false unless you explicitly want live trading.
     live_trading_enabled: bool = field(default_factory=lambda: _env_bool("LIVE_TRADING_ENABLED", False))
-    # Wallet private key used for live trading.
     live_private_key: str | None = field(default_factory=lambda: os.getenv("POLYMARKET_PRIVATE_KEY") or os.getenv("PRIVATE_KEY"))
     live_api_key: str | None = field(default_factory=lambda: os.getenv("POLYMARKET_API_KEY"))
     live_api_secret: str | None = field(default_factory=lambda: os.getenv("POLYMARKET_API_SECRET"))
     live_api_passphrase: str | None = field(default_factory=lambda: os.getenv("POLYMARKET_API_PASSPHRASE"))
     live_chain_id: int = field(default_factory=lambda: _env_int("POLYMARKET_CHAIN_ID", 137))
     live_signature_type: int = field(default_factory=lambda: _env_int("POLYMARKET_SIGNATURE_TYPE", 0))
-    # Wallet address (0x...) corresponding to POLYMARKET_PRIVATE_KEY; this is the live wallet address shown in the UI.
     live_funder: str | None = field(default_factory=lambda: os.getenv("POLYMARKET_FUNDER"))
     live_order_type: str = field(default_factory=lambda: (os.getenv("POLYMARKET_ORDER_TYPE") or "FOK").upper())

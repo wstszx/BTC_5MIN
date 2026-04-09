@@ -14,7 +14,6 @@ def test_build_trade_plan_without_loss_uses_target_profit_formula():
         target_profit=0.5,
         max_price_threshold=0.65,
         max_stake=10,
-        daily_loss_cap=20,
         max_consecutive_losses=8,
     )
     assert round(plan.order_size, 4) == 1.0
@@ -30,7 +29,6 @@ def test_apply_round_outcome_loss_updates_recovery_pool():
         target_profit=0.5,
         max_price_threshold=0.65,
         max_stake=10,
-        daily_loss_cap=20,
         max_consecutive_losses=8,
     )
     updated = apply_round_outcome(state, plan, won=False)
@@ -47,7 +45,6 @@ def test_build_trade_plan_with_recovery_loss_uses_recovery_formula():
         target_profit=0.5,
         max_price_threshold=0.65,
         max_stake=10,
-        daily_loss_cap=20,
         max_consecutive_losses=8,
     )
     assert round(plan.order_size, 4) == 9.4737
@@ -63,7 +60,6 @@ def test_build_trade_plan_skips_when_price_above_threshold():
         target_profit=0.5,
         max_price_threshold=0.65,
         max_stake=10,
-        daily_loss_cap=20,
         max_consecutive_losses=8,
     )
     assert plan.should_trade is False
@@ -79,14 +75,13 @@ def test_build_trade_plan_skips_when_order_cost_exceeds_max_stake():
         target_profit=0.5,
         max_price_threshold=0.65,
         max_stake=0.4,
-        daily_loss_cap=20,
         max_consecutive_losses=8,
     )
     assert plan.should_trade is False
     assert plan.skip_reason == "order_cost_above_max_stake"
 
 
-def test_build_trade_plan_skips_when_daily_loss_cap_is_reached():
+def test_build_trade_plan_does_not_skip_when_daily_realized_pnl_is_negative():
     state = SessionState(daily_realized_pnl=-20)
     plan = build_trade_plan(
         state=state,
@@ -95,11 +90,25 @@ def test_build_trade_plan_skips_when_daily_loss_cap_is_reached():
         target_profit=0.5,
         max_price_threshold=0.65,
         max_stake=10,
-        daily_loss_cap=20,
         max_consecutive_losses=8,
     )
-    assert plan.should_trade is False
-    assert plan.skip_reason == "daily_loss_cap_reached"
+    assert plan.should_trade is True
+    assert plan.skip_reason is None
+
+
+def test_build_trade_plan_allows_unlimited_max_stake_when_value_is_none():
+    state = SessionState(recovery_loss=3.1)
+    plan = build_trade_plan(
+        state=state,
+        side="UP",
+        price=0.62,
+        target_profit=0.5,
+        max_price_threshold=0.65,
+        max_stake=None,
+        max_consecutive_losses=8,
+    )
+    assert plan.should_trade is True
+    assert plan.skip_reason is None
 
 
 def test_reset_after_stop_loss_clears_recovery_pool_and_counts_event():
@@ -128,7 +137,6 @@ def test_fixed_base_cost_mode_uses_constant_starting_order_cost():
         target_profit=0.5,
         max_price_threshold=0.65,
         max_stake=10,
-        daily_loss_cap=20,
         max_consecutive_losses=8,
         bet_sizing_mode="FIXED_BASE_COST",
         base_order_cost=1.0,
@@ -147,7 +155,6 @@ def test_fixed_base_cost_mode_resets_to_base_after_win():
         target_profit=0.5,
         max_price_threshold=0.65,
         max_stake=100,
-        daily_loss_cap=20,
         max_consecutive_losses=8,
         bet_sizing_mode="FIXED_BASE_COST",
         base_order_cost=1.0,
@@ -162,7 +169,6 @@ def test_fixed_base_cost_mode_resets_to_base_after_win():
         target_profit=0.5,
         max_price_threshold=0.65,
         max_stake=100,
-        daily_loss_cap=20,
         max_consecutive_losses=8,
         bet_sizing_mode="FIXED_BASE_COST",
         base_order_cost=1.0,
@@ -177,7 +183,6 @@ def test_fixed_base_cost_mode_resets_to_base_after_win():
         target_profit=0.5,
         max_price_threshold=0.65,
         max_stake=100,
-        daily_loss_cap=20,
         max_consecutive_losses=8,
         bet_sizing_mode="FIXED_BASE_COST",
         base_order_cost=1.0,

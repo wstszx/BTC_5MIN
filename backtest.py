@@ -141,7 +141,6 @@ def run_backtest(csv_path: Path, cfg: AppConfig | None = None) -> BacktestResult
             target_profit=cfg.target_profit,
             max_price_threshold=cfg.max_price_threshold,
             max_stake=cfg.max_stake,
-            daily_loss_cap=cfg.daily_loss_cap,
             max_consecutive_losses=cfg.max_consecutive_losses,
             bet_sizing_mode=cfg.bet_sizing_mode,
             base_order_cost=cfg.base_order_cost,

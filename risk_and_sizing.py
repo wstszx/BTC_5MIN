@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from dataclasses import replace
 
@@ -16,10 +16,6 @@ def compute_order_size(recovery_loss: float, target_profit: float, price: float)
 
 def compute_order_cost(order_size: float, price: float) -> float:
     return order_size * price
-
-
-def should_stop_for_daily_loss(daily_realized_pnl: float, daily_loss_cap: float) -> bool:
-    return daily_realized_pnl <= -abs(daily_loss_cap)
 
 
 def should_reset_after_max_losses(consecutive_losses: int, max_consecutive_losses: int) -> bool:
@@ -41,17 +37,13 @@ def build_trade_plan(
     price: float | None,
     target_profit: float,
     max_price_threshold: float,
-    max_stake: float,
-    daily_loss_cap: float,
+    max_stake: float | None,
     max_consecutive_losses: int,
     bet_sizing_mode: str = "TARGET_PROFIT",
     base_order_cost: float = 1.0,
 ) -> TradePlan:
     if side not in {"UP", "DOWN"}:
         raise ValueError(f"Unsupported side: {side}")
-
-    if should_stop_for_daily_loss(state.daily_realized_pnl, daily_loss_cap):
-        return TradePlan(False, side=side, price=price, skip_reason="daily_loss_cap_reached")
 
     if should_reset_after_max_losses(state.consecutive_losses, max_consecutive_losses):
         return TradePlan(
@@ -86,7 +78,7 @@ def build_trade_plan(
     else:
         return TradePlan(False, side=side, price=price, skip_reason="invalid_bet_sizing_mode")
 
-    if order_cost > max_stake:
+    if max_stake is not None and order_cost > max_stake:
         return TradePlan(False, side=side, price=price, skip_reason="order_cost_above_max_stake")
 
     return TradePlan(

@@ -1030,8 +1030,8 @@ def test_run_paper_trading_dry_run_prefers_next_round_when_current_entry_window_
     assert result["skip_reason"] is None
 
 
-def test_run_paper_trading_dry_run_resets_daily_loss_cap_after_day_rollover(tmp_path):
-    cfg = AppConfig(strategy_id=2, daily_loss_cap=50.0)
+def test_run_paper_trading_dry_run_allows_trade_after_day_rollover(tmp_path):
+    cfg = AppConfig(strategy_id=2)
     state_path = tmp_path / "state.json"
     state_path.write_text(
         json.dumps(

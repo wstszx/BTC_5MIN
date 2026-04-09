@@ -123,7 +123,7 @@ def test_dashboard_payload_uses_effective_values_for_invalid_env_file(tmp_path: 
     try:
         payload = state.get_config_payload()
 
-        assert payload["env_values"]["MAX_STAKE"] == "15.0"
+        assert payload["env_values"]["MAX_STAKE"] == ""
         assert payload["env_values"]["WS_ENABLED"] == "true"
         assert payload["env_values"]["TARGET_PROFIT"] == "1.2"
         assert payload["validation_errors"]["MAX_STAKE"]
