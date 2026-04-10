@@ -778,7 +778,8 @@ def test_resolve_side_from_strategy_uses_quote_momentum_for_strategy_5():
 
     first_quote = MarketQuote(slug="s1", up_best_ask=0.56, up_price=0.55)
     side_first = _resolve_side_from_strategy(cfg=cfg, state=state, slug="s1", quote=first_quote)
-    assert side_first.side == "UP"
+    assert side_first.side is None
+    assert side_first.reason == "signal_too_weak_skip"
     assert state.signal_round_open_up_price == 0.55
 
     lower_quote = MarketQuote(slug="s1", up_best_ask=0.52, up_price=0.52)

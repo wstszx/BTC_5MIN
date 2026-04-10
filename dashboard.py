@@ -2460,6 +2460,7 @@ const STRATEGY_LABELS = {
   3: '三轮分组交替',
   4: '四轮分组交替',
   5: '动量信号 V2',
+  6: 'Binance OFI',
 };
 
 const OPTION_LABELS = {
@@ -2481,7 +2482,7 @@ const OPTION_LABELS = {
   },
   SIGNAL_WEAK_SIGNAL_MODE: {
     SKIP: '弱信号跳过',
-    FALLBACK: '弱信号回退',
+    FALLBACK: '按跳过处理',
   },
   WS_ENABLED: {
     true: '开启',
@@ -2777,7 +2778,9 @@ function strategyPreviewText(token) {
   if (token === 'DOWN') return '看跌';
   if (token === 'MOMENTUM') return '动量判断';
   if (token === 'THRESHOLD') return '阈值过滤';
-  if (token === 'FALLBACK') return '弱信号回退';
+  if (token === 'FALLBACK') return '弱信号跳过';
+  if (token === 'SKIP') return '弱信号跳过';
+  if (token === 'OFI') return 'OFI 判断';
   return String(token || '--');
 }
 
@@ -2815,13 +2818,9 @@ function renderStrategyGuide(payload, values) {
   if (strategyId === '5') {
     const weakModeRaw = String(currentValues.SIGNAL_WEAK_SIGNAL_MODE ?? envValues.SIGNAL_WEAK_SIGNAL_MODE ?? '--');
     const weakModeText = (OPTION_LABELS.SIGNAL_WEAK_SIGNAL_MODE || {})[weakModeRaw] || weakModeRaw;
-    const fallbackId = String(currentValues.SIGNAL_FALLBACK_STRATEGY_ID ?? envValues.SIGNAL_FALLBACK_STRATEGY_ID ?? '');
-    const fallbackMeta = strategyMeta(payload, fallbackId);
-    const fallbackPreview = fallbackMeta && Array.isArray(fallbackMeta.preview) ? renderStrategyPills(fallbackMeta.preview) : '';
     extra =
       '<div class="strategy-guide-note">弱信号处理：' + esc(weakModeText) +
-      '；回退策略：' + esc(strategyShortLabel(payload, fallbackId)) + '</div>' +
-      '<div class="strategy-guide-meta">' + fallbackPreview + '</div>';
+      '</div>';
   }
 
   node.innerHTML =
@@ -3124,7 +3123,6 @@ function renderHelpStrategyGuide() {
       const weakModeText = (OPTION_LABELS.SIGNAL_WEAK_SIGNAL_MODE || {})[weakModeRaw] || weakModeRaw;
       extra = '<div class="help-strategy-extra">' +
         '弱信号模式：' + esc(weakModeText) +
-        '；回退策略：' + esc(strategyShortLabel(payload, envValues.SIGNAL_FALLBACK_STRATEGY_ID)) +
         '</div>';
     }
     return '<section class="help-strategy-card' + activeCls + '">' +

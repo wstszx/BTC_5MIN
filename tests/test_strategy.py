@@ -46,15 +46,15 @@ def test_signal_strategy_chooses_up_when_momentum_exceeds_threshold():
 
 
 def test_signal_strategy_falls_back_when_momentum_is_small():
-    side = get_side_for_round(
-        5,
-        3,
-        signal_open_up_price=0.50,
-        signal_current_up_price=0.505,
-        signal_threshold=0.02,
-        signal_fallback_strategy_id=2,
-    )
-    assert side == 'DOWN'
+    with pytest.raises(ValueError, match='weak momentum'):
+        get_side_for_round(
+            5,
+            3,
+            signal_open_up_price=0.50,
+            signal_current_up_price=0.505,
+            signal_threshold=0.02,
+            signal_fallback_strategy_id=2,
+        )
 
 
 def test_compute_ofi_score_returns_positive_when_bid_pressure_dominates():
