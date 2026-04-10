@@ -612,15 +612,23 @@ class DashboardState:
             env_values, validation_errors = self._merged_env_values()
             runtime_status = self._build_runtime_status(env_values)
             strategy_catalog = json.loads(json.dumps(self.STRATEGY_CATALOG))
+            strategy_catalog.setdefault("6", {
+                "label": "Binance OFI",
+                "summary": "根据 Binance 深度盘口的 OFI 强弱决定方向。",
+                "preview": ["OFI", "THRESHOLD", "SKIP"],
+                "detail": "仅在 OFI 信号足够强且未过期时给出方向，否则按规则跳过。",
+            })
             field_groups = json.loads(json.dumps(self.FIELD_GROUPS))
             if field_groups:
                 field_groups[0]["title"] = "运行模式"
+            select_options = json.loads(json.dumps(self.SELECT_OPTIONS))
+            select_options["STRATEGY_ID"] = ["1", "2", "3", "4", "5", "6"]
             return {
                 "env_file": str(self.env_file),
                 "env_values": self._masked_env_values(env_values),
                 "editable_keys": list(self.EDITABLE_CONFIG_KEYS),
                 "labels": self.CONFIG_LABELS,
-                "select_options": self.SELECT_OPTIONS,
+                "select_options": select_options,
                 "strategy_catalog": strategy_catalog,
                 "field_groups": field_groups,
                 "field_scope": self.FIELD_SCOPE,
