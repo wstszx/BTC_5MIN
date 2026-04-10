@@ -1182,7 +1182,7 @@ def _dashboard_html() -> str:
             <span id=\"cfgSavedAt\" class=\"meta-value\">--</span>
           </div>
 
-          <div class=box>
+          <div id=strategy6Panel class=box>
             <div class=box-title>策略 6 OFI</div>
             <div class=row>
               <span class=label>OFI 分数</span>
@@ -3532,6 +3532,10 @@ function renderMarket(payload) {
   el('signalLocked').textContent = signal.locked ? '是' : '否';
 
   const strategy6Enabled = !!strategy6.enabled;
+  const strategy6Panel = el('strategy6Panel');
+  if (strategy6Panel) {
+    strategy6Panel.style.display = strategy6Enabled ? '' : 'none';
+  }
   el('strategy6OfiScore').textContent = strategy6Enabled ? fmtNum(strategy6.ofi_score, 4) : '--';
   el('strategy6SignalAt').textContent = strategy6Enabled ? fmtIso(strategy6.signal_at) : '--';
   el('strategy6Stale').textContent = strategy6Enabled ? (strategy6.stale ? '是' : '否') : '--';
