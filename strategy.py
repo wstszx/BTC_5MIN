@@ -63,11 +63,7 @@ def get_side_for_round(
                 return 'UP'
             if delta <= -threshold:
                 return 'DOWN'
-
-        fallback = signal_fallback_strategy_id
-        if fallback == 5:
-            fallback = 2
-        return _pattern_side_for_round(fallback, round_index)
+        raise ValueError('strategy_id=5 requires strong momentum signal; weak momentum should skip')
 
     if strategy_id == 6:
         if ofi_score is None:

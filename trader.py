@@ -273,9 +273,8 @@ def _resolve_side_from_strategy(
     )
 
     weak_mode = cfg.signal_weak_signal_mode.upper()
-    fallback_strategy = cfg.signal_fallback_strategy_id
-    if fallback_strategy == 5:
-        fallback_strategy = 2
+    if weak_mode == 'FALLBACK':
+        weak_mode = 'SKIP'
 
     if _is_valid_signal_price(signal_open_up_price) and _is_valid_signal_price(signal_current_up_price):
         signal_delta = signal_current_up_price - signal_open_up_price
