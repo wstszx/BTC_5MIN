@@ -15,6 +15,7 @@ from typing import Any
 from urllib.parse import parse_qs, urlparse
 
 from config import AppConfig, build_config_from_env_values, load_env_file_values
+from binance_signal import BinanceDepth5SignalService
 from models import MarketWindow, PendingPaperTrade
 from paper_report import summarize_paper_trades
 from polymarket_api import PolymarketClient, build_resolved_round
@@ -25,6 +26,8 @@ from trader import (
     _entry_window_missed,
     _entry_time_for_round,
     _resolve_side_from_strategy,
+    _apply_strategy6_signal_to_quote,
+    _is_strategy6_signal_stale,
     _ws_is_stale_for_trade,
     load_session_state,
     resolve_quote_price,
@@ -503,17 +506,29 @@ class DashboardState:
         self._env_values = load_env_file_values(self.env_file)
         self._cfg = self._build_config(self._env_values)
         self._client = PolymarketClient(self._cfg)
+        self._binance_signal_service = self._build_binance_signal_service(self._cfg)
         self._last_saved_at: datetime | None = None
 
     def close(self) -> None:
         with self._lock:
             client = self._client
+            binance_signal_service = self._binance_signal_service
             self._client = None  # type: ignore[assignment]
+            self._binance_signal_service = None
         if client is not None:
             client.close()
+        if binance_signal_service is not None:
+            binance_signal_service.close()
 
     def _build_config(self, env_values: dict[str, str]) -> AppConfig:
         return build_config_from_env_values(env_values)
+
+    def _build_binance_signal_service(self, cfg: AppConfig) -> BinanceDepth5SignalService | None:
+        if cfg.strategy_id != 6:
+            return None
+        service = BinanceDepth5SignalService(ws_url=cfg.binance_ws_url, stream=cfg.binance_depth_stream)
+        service.start()
+        return service
 
     @classmethod
     def _mask_secret(cls, value: str | None) -> str:
@@ -568,9 +583,13 @@ class DashboardState:
     def _refresh_runtime(self) -> None:
         with self._lock:
             old_client = self._client
+            old_binance_signal_service = self._binance_signal_service
             self._cfg = self._build_config(self._env_values)
             self._client = PolymarketClient(self._cfg)
+            self._binance_signal_service = self._build_binance_signal_service(self._cfg)
         old_client.close()
+        if old_binance_signal_service is not None:
+            old_binance_signal_service.close()
 
     def _merged_env_values(self) -> tuple[dict[str, str], dict[str, str]]:
         merged: dict[str, str] = {}
@@ -662,6 +681,7 @@ class DashboardState:
         with self._lock:
             cfg = self._cfg
             client = self._client
+            binance_signal_service = self._binance_signal_service
 
         now = datetime.now(timezone.utc)
         session_state = load_session_state(cfg.logs_dir / "session_state.json")
@@ -687,6 +707,23 @@ class DashboardState:
         market = client.get_market_by_slug(target_round.slug)
         quote = client.quote_from_market(market)
         entry_time = _entry_time_for_round(cfg, target_round)
+        _apply_strategy6_signal_to_quote(cfg=cfg, quote=quote, binance_signal_service=binance_signal_service)
+        latest_binance_signal = binance_signal_service.latest() if binance_signal_service is not None else None
+        strategy6_payload = {
+            'enabled': cfg.strategy_id == 6,
+            'ofi_score': quote.strategy6_ofi_score,
+            'signal_at': _iso(quote.strategy6_signal_at),
+            'stale': (
+                quote.strategy6_signal_at is None
+                or (now - quote.strategy6_signal_at).total_seconds() > cfg.binance_signal_stale_seconds
+            ),
+            'threshold': cfg.ofi_threshold,
+            'max_entry_price': cfg.max_entry_price,
+            'bid_price': latest_binance_signal.bid_price if latest_binance_signal is not None else None,
+            'bid_qty': latest_binance_signal.bid_qty if latest_binance_signal is not None else None,
+            'ask_price': latest_binance_signal.ask_price if latest_binance_signal is not None else None,
+            'ask_qty': latest_binance_signal.ask_qty if latest_binance_signal is not None else None,
+        }
 
         side_decision = _resolve_side_from_strategy(
             cfg=cfg,
@@ -713,6 +750,7 @@ class DashboardState:
                 side=side,
                 price=price,
                 target_profit=cfg.target_profit,
+                min_price_threshold=getattr(cfg, 'min_price_threshold', None),
                 max_price_threshold=cfg.max_price_threshold,
                 max_stake=cfg.max_stake,
                 max_consecutive_losses=cfg.max_consecutive_losses,
@@ -789,6 +827,8 @@ class DashboardState:
             "ws_runtime": ws_runtime,
             "ws_stale_guard_triggered": ws_stale,
         }
+        payload['strategy6'] = strategy6_payload
+        return payload
 
     def get_paper_summary_payload(self) -> dict[str, Any]:
         with self._lock:
@@ -1019,6 +1059,31 @@ class DashboardRuntime:
                 self.state.close()
 
 
+def _install_dashboard_min_price_threshold() -> None:
+    if 'MIN_PRICE_THRESHOLD' not in DashboardState.EDITABLE_CONFIG_KEYS:
+        editable = list(DashboardState.EDITABLE_CONFIG_KEYS)
+        editable.insert(editable.index('MAX_PRICE_THRESHOLD'), 'MIN_PRICE_THRESHOLD')
+        DashboardState.EDITABLE_CONFIG_KEYS = tuple(editable)
+
+    DashboardState.CONFIG_LABELS['MIN_PRICE_THRESHOLD'] = '最低买入价格阈值'
+    DashboardState.CONFIG_ATTR_MAP['MIN_PRICE_THRESHOLD'] = 'min_price_threshold'
+    DashboardState.FIELD_HELP['MIN_PRICE_THRESHOLD'] = '目标方向价格低于此阈值就不入场，和最高价格阈值一起构成允许入场的价格区间。'
+
+    if 'MIN_PRICE_THRESHOLD' not in DashboardState.FLOAT_CONFIG_KEYS:
+        float_keys = list(DashboardState.FLOAT_CONFIG_KEYS)
+        float_keys.insert(float_keys.index('MAX_PRICE_THRESHOLD'), 'MIN_PRICE_THRESHOLD')
+        DashboardState.FLOAT_CONFIG_KEYS = tuple(float_keys)
+
+    for group in DashboardState.FIELD_GROUPS:
+        keys = group.get('keys') or []
+        if 'MAX_PRICE_THRESHOLD' in keys and 'MIN_PRICE_THRESHOLD' not in keys:
+            keys.insert(keys.index('MAX_PRICE_THRESHOLD'), 'MIN_PRICE_THRESHOLD')
+            break
+
+
+_install_dashboard_min_price_threshold()
+
+
 def create_dashboard_runtime(
     *,
     host: str = "127.0.0.1",
@@ -1107,6 +1172,28 @@ def _dashboard_html() -> str:
           <div class=\"meta-item\">
             <span class=\"meta-label\">最近保存</span>
             <span id=\"cfgSavedAt\" class=\"meta-value\">--</span>
+          </div>
+
+          <div class=box>
+            <div class=box-title>策略 6 OFI</div>
+            <div class=row>
+              <span class=label>OFI 分数</span>
+              <span id=strategy6OfiScore class=value>--</span>
+            </div>
+            <div class=row>
+              <span class=label>信号时间</span>
+              <span id=strategy6SignalAt class=value>--</span>
+            </div>
+            <div class=row>
+              <span class=label>是否陈旧</span>
+              <span id=strategy6Stale class=value>--</span>
+            </div>
+            <div class=kv-grid>
+              <div class=kv><div class=k>买一价</div><div id=strategy6BidPrice class=v>--</div></div>
+              <div class=kv><div class=k>买一量</div><div id=strategy6BidQty class=v>--</div></div>
+              <div class=kv><div class=k>卖一价</div><div id=strategy6AskPrice class=v>--</div></div>
+              <div class=kv><div class=k>卖一量</div><div id=strategy6AskQty class=v>--</div></div>
+            </div>
           </div>
         </div>
 
@@ -3397,6 +3484,7 @@ function renderMarket(payload) {
   const round = payload.round || null;
   const quote = payload.quote || {};
   const signal = payload.signal || {};
+  const strategy6 = payload.strategy6 || {};
   const plan = payload.plan || {};
   const ss = payload.session_state || {};
 
@@ -3436,6 +3524,15 @@ function renderMarket(payload) {
   const dn = toNum(signal.delta);
   deltaNode.className = 'v ' + (dn > 0 ? 'pos' : (dn < 0 ? 'neg' : ''));
   el('signalLocked').textContent = signal.locked ? '是' : '否';
+
+  const strategy6Enabled = !!strategy6.enabled;
+  el('strategy6OfiScore').textContent = strategy6Enabled ? fmtNum(strategy6.ofi_score, 4) : '--';
+  el('strategy6SignalAt').textContent = strategy6Enabled ? fmtIso(strategy6.signal_at) : '--';
+  el('strategy6Stale').textContent = strategy6Enabled ? (strategy6.stale ? '是' : '否') : '--';
+  el('strategy6BidPrice').textContent = strategy6Enabled ? fmtNum(strategy6.bid_price, 2) : '--';
+  el('strategy6BidQty').textContent = strategy6Enabled ? fmtNum(strategy6.bid_qty, 4) : '--';
+  el('strategy6AskPrice').textContent = strategy6Enabled ? fmtNum(strategy6.ask_price, 2) : '--';
+  el('strategy6AskQty').textContent = strategy6Enabled ? fmtNum(strategy6.ask_qty, 4) : '--';
 
   el('planShouldTrade').textContent = plan.should_trade ? '执行' : '跳过';
   el('planSide').textContent = sideText(plan.side || signalSide);

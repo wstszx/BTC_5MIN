@@ -36,6 +36,7 @@ def build_trade_plan(
     side: str,
     price: float | None,
     target_profit: float,
+    min_price_threshold: float | None = None,
     max_price_threshold: float,
     max_stake: float | None,
     max_consecutive_losses: int,
@@ -56,6 +57,9 @@ def build_trade_plan(
 
     if not validate_price(price):
         return TradePlan(False, side=side, price=price, skip_reason="invalid_price")
+
+    if min_price_threshold is not None and price < min_price_threshold:
+        return TradePlan(False, side=side, price=price, skip_reason='price_below_threshold')
 
     if price > max_price_threshold:
         return TradePlan(False, side=side, price=price, skip_reason="price_above_threshold")

@@ -146,6 +146,12 @@ class AppConfig:
     signal_dynamic_threshold_min_points: int = field(default_factory=lambda: _env_int("SIGNAL_DYNAMIC_THRESHOLD_MIN_POINTS", 8))
     signal_lock_before_entry_seconds: int = field(default_factory=lambda: _env_int("SIGNAL_LOCK_BEFORE_ENTRY_SECONDS", 20))
     max_stake_skip_alert_threshold: int = field(default_factory=lambda: _env_int("MAX_STAKE_SKIP_ALERT_THRESHOLD", 5))
+    min_price_threshold: float | None = field(default_factory=lambda: _env_optional_float('MIN_PRICE_THRESHOLD'))
+    ofi_threshold: float = field(default_factory=lambda: _env_float('OFI_THRESHOLD', 0.65))
+    max_entry_price: float = field(default_factory=lambda: _env_float('MAX_ENTRY_PRICE', 0.56))
+    binance_ws_url: str = field(default_factory=lambda: os.getenv('BINANCE_WS_URL') or 'wss://stream.binance.com:9443/ws')
+    binance_depth_stream: str = field(default_factory=lambda: os.getenv('BINANCE_DEPTH_STREAM') or 'btcusdt@depth5')
+    binance_signal_stale_seconds: float = field(default_factory=lambda: _env_float('BINANCE_SIGNAL_STALE_SECONDS', 2.0))
     poll_interval_seconds: int = 5
     ws_enabled: bool = field(default_factory=lambda: _env_bool("WS_ENABLED", True))
     ws_market_url: str = field(default_factory=lambda: os.getenv("WS_MARKET_URL") or "wss://ws-subscriptions-clob.polymarket.com/ws/market")

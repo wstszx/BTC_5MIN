@@ -12,6 +12,7 @@ from statistics import pstdev
 from typing import Any
 
 from config import AppConfig
+from binance_signal import BinanceDepth5SignalService
 from models import MarketQuote, MarketWindow, PendingPaperTrade, SessionState, TradePlan, TradeRecord
 from polymarket_api import PolymarketClient, extract_token_ids, parse_iso_datetime
 from risk_and_sizing import apply_round_outcome, build_trade_plan, reset_after_stop_loss
@@ -178,6 +179,36 @@ def _compute_signal_threshold(
     return max(base_threshold, dynamic_threshold)
 
 
+def _resolve_strategy6_ofi_score(quote: MarketQuote) -> float | None:
+    raw = quote.strategy6_ofi_score if hasattr(quote, 'strategy6_ofi_score') else getattr(quote, 'strategy6_ofi_score', None)
+    try:
+        return None if raw is None else float(raw)
+    except (TypeError, ValueError):
+        return None
+
+
+def _is_strategy6_signal_stale(*, quote: MarketQuote, now: datetime, stale_seconds: float) -> bool:
+    signal_at = getattr(quote, 'strategy6_signal_at', None) or quote.fetched_at
+    if signal_at is None:
+        return True
+    return (now - signal_at).total_seconds() > max(0.0, stale_seconds)
+
+
+def _apply_strategy6_signal_to_quote(
+    *,
+    cfg: AppConfig,
+    quote: MarketQuote,
+    binance_signal_service: BinanceDepth5SignalService | None,
+) -> None:
+    if cfg.strategy_id != 6 or binance_signal_service is None:
+        return
+    latest = binance_signal_service.latest()
+    if latest is None:
+        return
+    quote.strategy6_ofi_score = latest.ofi_score
+    quote.strategy6_signal_at = latest.signal_at
+
+
 def _resolve_side_from_strategy(
     *,
     cfg: AppConfig,
@@ -189,6 +220,20 @@ def _resolve_side_from_strategy(
     now: datetime | None = None,
     entry_time: datetime | None = None,
 ) -> SideDecision:
+    if cfg.strategy_id == 6:
+        now = now or datetime.now(timezone.utc)
+        ofi_score = _resolve_strategy6_ofi_score(quote)
+        state.strategy6_last_ofi_score = ofi_score
+        if ofi_score is None:
+            return SideDecision(side=None, reason='ofi_unavailable')
+        if _is_strategy6_signal_stale(quote=quote, now=now, stale_seconds=cfg.binance_signal_stale_seconds):
+            return SideDecision(side=None, reason='ofi_stale', signal_threshold=cfg.ofi_threshold, signal_delta=ofi_score)
+        if ofi_score >= cfg.ofi_threshold:
+            return SideDecision(side='UP', signal_threshold=cfg.ofi_threshold, signal_delta=ofi_score)
+        if ofi_score <= -cfg.ofi_threshold:
+            return SideDecision(side='DOWN', signal_threshold=cfg.ofi_threshold, signal_delta=ofi_score)
+        return SideDecision(side=None, reason='ofi_too_weak', signal_threshold=cfg.ofi_threshold, signal_delta=ofi_score)
+
     if cfg.strategy_id != 5:
         return SideDecision(side=get_side_for_round(cfg.strategy_id, state.round_index))
 
@@ -640,6 +685,7 @@ def place_live_order(
     cfg: AppConfig | None = None,
     *,
     market_client: PolymarketClient | None = None,
+    binance_signal_service: BinanceDepth5SignalService | None = None,
     clob_client: Any | None = None,
     state_path: Path | None = None,
     log_path: Path | None = None,
@@ -680,6 +726,7 @@ def place_live_order(
     entry_time = _entry_time_for_round(cfg, target_round)
     market = market_client.get_market_by_slug(target_round.slug)
     quote = market_client.quote_from_market(market)
+    _apply_strategy6_signal_to_quote(cfg=cfg, quote=quote, binance_signal_service=binance_signal_service)
     print('[live] quote {' + _describe_quote_source(quote) + '}', flush=True)
     print('[live] ws_runtime {' + _describe_ws_runtime(market_client) + '}', flush=True)
     side_decision = _resolve_side_from_strategy(
@@ -857,6 +904,7 @@ def place_live_order(
         side=side,
         price=price,
         target_profit=cfg.target_profit,
+        min_price_threshold=getattr(cfg, 'min_price_threshold', None),
         max_price_threshold=cfg.max_price_threshold,
         max_stake=cfg.max_stake,
         max_consecutive_losses=cfg.max_consecutive_losses,
@@ -1406,6 +1454,7 @@ def _settle_paper_trade(
         side=side,
         price=price,
         target_profit=cfg.target_profit,
+        min_price_threshold=getattr(cfg, 'min_price_threshold', None),
         max_price_threshold=cfg.max_price_threshold,
         max_stake=cfg.max_stake,
         max_consecutive_losses=cfg.max_consecutive_losses,
@@ -1434,6 +1483,13 @@ def run_live_trading(
     state_path_provided = state_path is not None
     log_path_provided = log_path is not None
     market_client = market_client or PolymarketClient(cfg)
+    binance_signal_service = (
+        BinanceDepth5SignalService(ws_url=cfg.binance_ws_url, stream=cfg.binance_depth_stream)
+        if cfg.strategy_id == 6
+        else None
+    )
+    if binance_signal_service is not None:
+        binance_signal_service.start()
     state_path = state_path or cfg.logs_dir / 'live_session_state.json'
     log_path = log_path or cfg.logs_dir / 'live_orders.csv'
     initial_state = load_session_state(state_path)
@@ -1445,55 +1501,61 @@ def run_live_trading(
         pending_live_order=bool(initial_state.pending_live_slug),
     )
 
-    while True:
-        if _is_stop_requested(stop_event):
-            return {'status': 'stopped'}
-        if _safe_stop_requested(stop_when_safe) and runtime_control is not None:
-            snapshot = runtime_control.snapshot()
-            if snapshot.safe_to_switch and not snapshot.round_in_progress and not snapshot.pending_live_order:
+    try:
+        while True:
+            if _is_stop_requested(stop_event):
                 return {'status': 'stopped'}
-        if config_provider is not None:
-            candidate_cfg = config_provider()
-            if candidate_cfg is not None:
-                validate_live_runtime_config(candidate_cfg)
-                cfg = candidate_cfg
-                if not client_provided:
-                    market_client.config = cfg
-                if not state_path_provided:
-                    state_path = cfg.logs_dir / 'live_session_state.json'
-                if not log_path_provided:
-                    log_path = cfg.logs_dir / 'live_orders.csv'
-        result = place_live_order(
-            cfg=cfg,
-            market_client=market_client,
-            clob_client=clob_client,
-            state_path=state_path,
-            log_path=log_path,
-        )
-        pending_live_order = bool(result.get('status') == 'pending_settlement')
-        current_round_slug = result.get('slug') if pending_live_order else None
-        _update_runtime_control(
-            runtime_control,
-            current_round_slug=current_round_slug,
-            round_in_progress=pending_live_order,
-            safe_to_switch=not pending_live_order,
-            pending_live_order=pending_live_order,
-        )
-        if _is_stop_requested(stop_event):
-            return {'status': 'stopped'}
-        if _safe_stop_requested(stop_when_safe) and result.get('status') == 'pending_settlement':
+            if _safe_stop_requested(stop_when_safe) and runtime_control is not None:
+                snapshot = runtime_control.snapshot()
+                if snapshot.safe_to_switch and not snapshot.round_in_progress and not snapshot.pending_live_order:
+                    return {'status': 'stopped'}
+            if config_provider is not None:
+                candidate_cfg = config_provider()
+                if candidate_cfg is not None:
+                    validate_live_runtime_config(candidate_cfg)
+                    cfg = candidate_cfg
+                    if not client_provided:
+                        market_client.config = cfg
+                    if not state_path_provided:
+                        state_path = cfg.logs_dir / 'live_session_state.json'
+                    if not log_path_provided:
+                        log_path = cfg.logs_dir / 'live_orders.csv'
+            result = place_live_order(
+                cfg=cfg,
+                market_client=market_client,
+                binance_signal_service=binance_signal_service,
+                clob_client=clob_client,
+                state_path=state_path,
+                log_path=log_path,
+            )
+            pending_live_order = bool(result.get('status') == 'pending_settlement')
+            current_round_slug = result.get('slug') if pending_live_order else None
+            _update_runtime_control(
+                runtime_control,
+                current_round_slug=current_round_slug,
+                round_in_progress=pending_live_order,
+                safe_to_switch=not pending_live_order,
+                pending_live_order=pending_live_order,
+            )
+            if _is_stop_requested(stop_event):
+                return {'status': 'stopped'}
+            if _safe_stop_requested(stop_when_safe) and result.get('status') == 'pending_settlement':
+                return result
+            if result.get('status') in {'submitted', 'skipped', 'waiting_for_entry', 'pending_settlement', 'no_market'}:
+                if not _sleep_if_not_stopped(stop_event, cfg.poll_interval_seconds):
+                    return {'status': 'stopped'}
+                continue
             return result
-        if result.get('status') in {'submitted', 'skipped', 'waiting_for_entry', 'pending_settlement', 'no_market'}:
-            if not _sleep_if_not_stopped(stop_event, cfg.poll_interval_seconds):
-                return {'status': 'stopped'}
-            continue
-        return result
+    finally:
+        if binance_signal_service is not None:
+            binance_signal_service.close()
 
 
 def run_paper_trading(
     cfg: AppConfig | None = None,
     *,
     client: PolymarketClient | None = None,
+    binance_signal_service: BinanceDepth5SignalService | None = None,
     state_path: Path | None = None,
     log_path: Path | None = None,
     dry_run_once: bool = False,
@@ -1507,6 +1569,12 @@ def run_paper_trading(
     state_path_provided = state_path is not None
     log_path_provided = log_path is not None
     client = client or PolymarketClient(cfg)
+    if binance_signal_service is None and cfg.strategy_id == 6:
+        binance_signal_service = BinanceDepth5SignalService(
+            ws_url=cfg.binance_ws_url,
+            stream=cfg.binance_depth_stream,
+        )
+        binance_signal_service.start()
     state_path = state_path or cfg.logs_dir / "session_state.json"
     log_path = log_path or cfg.logs_dir / "paper_trades.csv"
     state = load_session_state(state_path)
@@ -1584,6 +1652,7 @@ def run_paper_trading(
             entry_time = _entry_time_for_round(cfg, target_round)
             market = client.get_market_by_slug(target_round.slug)
             quote = client.quote_from_market(market)
+            _apply_strategy6_signal_to_quote(cfg=cfg, quote=quote, binance_signal_service=binance_signal_service)
             _runtime_log('round=' + target_round.slug + ' quote {' + _describe_quote_source(quote) + '}')
             _runtime_log('round=' + target_round.slug + ' ws_runtime {' + _describe_ws_runtime(client) + '}')
             side_decision = _resolve_side_from_strategy(
@@ -1809,6 +1878,7 @@ def run_paper_trading(
                 side=side,
                 price=price,
                 target_profit=cfg.target_profit,
+                min_price_threshold=getattr(cfg, 'min_price_threshold', None),
                 max_price_threshold=cfg.max_price_threshold,
                 max_stake=cfg.max_stake,
                 max_consecutive_losses=cfg.max_consecutive_losses,

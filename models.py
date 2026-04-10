@@ -20,6 +20,8 @@ class MarketWindow:
 class MarketQuote:
     slug: str
     source: str = "http"
+    strategy6_ofi_score: float | None = None
+    strategy6_signal_at: datetime | None = None
     up_price: float | None = None
     down_price: float | None = None
     up_best_bid: float | None = None
@@ -123,6 +125,7 @@ class SessionState:
     signal_round_slug: str | None = None
     signal_round_open_up_price: float | None = None
     signal_round_locked_side: str | None = None
+    strategy6_last_ofi_score: float | None = None
     stop_loss_count: int = 0
     daily_realized_pnl: float = 0.0
     current_day: str | None = None
