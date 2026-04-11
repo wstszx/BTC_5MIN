@@ -688,6 +688,22 @@ def test_dashboard_assets_switch_recent_endpoint_by_running_mode():
 
 
 
+
+def test_dashboard_assets_use_unified_strategy_selector_for_config_and_views():
+    html = _dashboard_html()
+    js = _dashboard_js()
+
+    assert '统一策略' in js
+    assert "'STRATEGY_ID', 'PAPER_STRATEGY_IDS'" in js
+    assert 'multiple = true' in js
+    assert "state.paperStrategyFilter = focusStrategy;" in js
+    assert "const summaryEndpoint = '/api/paper/summary?strategy=' + strategy;" in js
+    assert 'function resolveUnifiedStrategySelection(' in js
+    assert 'function renderUnifiedStrategyToolbar(' in js
+    assert 'function collectUnifiedStrategyValues(' in js
+    assert 'id="strategyGuideCard"' in html
+
+
 def test_dashboard_assets_confirm_before_switching_to_live_mode():
     js = _dashboard_js()
 
@@ -941,3 +957,22 @@ def test_dashboard_paper_payloads_filter_by_strategy(tmp_path: Path):
     finally:
         state.close()
         os.chdir(old_cwd)
+
+def test_dashboard_market_payload_can_switch_strategy_view(tmp_path: Path):
+    env_file = tmp_path / '.env.dashboard'
+    env_file.write_text('STRATEGY_ID=1\nPAPER_STRATEGY_IDS=1,6\n', encoding='utf-8')
+    old_cwd = Path.cwd()
+    os.chdir(tmp_path)
+    state = DashboardState(env_file=env_file)
+    try:
+        base_payload = state.get_market_payload()
+        strategy_six_payload = state.get_market_payload(strategy=6)
+
+        assert base_payload['strategy_view']['selected'] == '1'
+        assert base_payload['strategy6']['enabled'] is False
+        assert strategy_six_payload['strategy_view']['selected'] == '6'
+        assert strategy_six_payload['strategy6']['enabled'] is True
+    finally:
+        state.close()
+        os.chdir(old_cwd)
+

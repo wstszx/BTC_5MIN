@@ -6,7 +6,7 @@ import json
 import os
 import threading
 from collections import deque
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from datetime import datetime, timezone
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -734,18 +734,35 @@ class DashboardState:
             self.notify_mode_change(next_mode)
         return self.get_config_payload()
 
-    def get_market_payload(self) -> dict[str, Any]:
+    def get_market_payload(self, *, strategy: int | str | None = None) -> dict[str, Any]:
         with self._lock:
             cfg = self._cfg
             client = self._client
             binance_signal_service = self._binance_signal_service
 
         now = datetime.now(timezone.utc)
-        session_state = load_session_state(cfg.logs_dir / "session_state.json")
+        strategy_filter = _normalize_strategy_filter(strategy)
+        selected_strategy = int(strategy_filter or str(cfg.strategy_id))
+        effective_cfg = replace(cfg, strategy_id=selected_strategy)
+        effective_paper_strategy_ids = list(getattr(cfg, "paper_strategy_ids", []) or [cfg.strategy_id])
+        if selected_strategy not in effective_paper_strategy_ids:
+            effective_paper_strategy_ids.append(selected_strategy)
+        session_state = load_session_state(
+            cfg.logs_dir / "session_state.json",
+            effective_paper_strategy_ids=effective_paper_strategy_ids,
+        )
+        strategy_session = session_state
+        if getattr(session_state, "paper_strategies", None):
+            strategy_session = session_state.paper_strategies.get(selected_strategy) or session_state
         current_round, next_round = client.find_current_and_next_rounds(now=now)
         display_round = _select_display_round(current_round=current_round, next_round=next_round)
         target_round = display_round
         ws_runtime = client.get_ws_runtime_stats()
+        strategy_view = {
+            "selected": str(selected_strategy),
+            "paper_strategy_ids": [str(item) for item in effective_paper_strategy_ids],
+            "available": [str(item) for item in effective_paper_strategy_ids],
+        }
 
         if target_round is None:
             return {
@@ -755,36 +772,49 @@ class DashboardState:
                 "quote": None,
                 "signal": None,
                 "plan": None,
-                "session_state": asdict(session_state),
+                "session_state": asdict(strategy_session),
                 "ws_runtime": ws_runtime,
                 "ws_stale_guard_triggered": False,
-                "message": "当前没有可用的5分钟轮次。",
+                "message": "\u5f53\u524d\u6ca1\u6709\u53ef\u7528\u76845\u5206\u949f\u8f6e\u6b21\u3002",
+                "strategy_view": strategy_view,
+                "strategy6": {
+                    "enabled": selected_strategy == 6,
+                    "ofi_score": None,
+                    "signal_at": None,
+                    "stale": True,
+                    "threshold": effective_cfg.ofi_threshold,
+                    "max_entry_price": effective_cfg.max_entry_price,
+                    "bid_price": None,
+                    "bid_qty": None,
+                    "ask_price": None,
+                    "ask_qty": None,
+                },
             }
 
         market = client.get_market_by_slug(target_round.slug)
         quote = client.quote_from_market(market)
-        entry_time = _entry_time_for_round(cfg, target_round)
-        _apply_strategy6_signal_to_quote(cfg=cfg, quote=quote, binance_signal_service=binance_signal_service)
+        entry_time = _entry_time_for_round(effective_cfg, target_round)
+        _apply_strategy6_signal_to_quote(cfg=effective_cfg, quote=quote, binance_signal_service=binance_signal_service)
         latest_binance_signal = binance_signal_service.latest() if binance_signal_service is not None else None
         strategy6_payload = {
-            'enabled': cfg.strategy_id == 6,
-            'ofi_score': quote.strategy6_ofi_score,
-            'signal_at': _iso(quote.strategy6_signal_at),
-            'stale': (
+            "enabled": selected_strategy == 6,
+            "ofi_score": quote.strategy6_ofi_score,
+            "signal_at": _iso(quote.strategy6_signal_at),
+            "stale": (
                 quote.strategy6_signal_at is None
-                or (now - quote.strategy6_signal_at).total_seconds() > cfg.binance_signal_stale_seconds
+                or (now - quote.strategy6_signal_at).total_seconds() > effective_cfg.binance_signal_stale_seconds
             ),
-            'threshold': cfg.ofi_threshold,
-            'max_entry_price': cfg.max_entry_price,
-            'bid_price': latest_binance_signal.bid_price if latest_binance_signal is not None else None,
-            'bid_qty': latest_binance_signal.bid_qty if latest_binance_signal is not None else None,
-            'ask_price': latest_binance_signal.ask_price if latest_binance_signal is not None else None,
-            'ask_qty': latest_binance_signal.ask_qty if latest_binance_signal is not None else None,
+            "threshold": effective_cfg.ofi_threshold,
+            "max_entry_price": effective_cfg.max_entry_price,
+            "bid_price": latest_binance_signal.bid_price if latest_binance_signal is not None else None,
+            "bid_qty": latest_binance_signal.bid_qty if latest_binance_signal is not None else None,
+            "ask_price": latest_binance_signal.ask_price if latest_binance_signal is not None else None,
+            "ask_qty": latest_binance_signal.ask_qty if latest_binance_signal is not None else None,
         }
 
         side_decision = _resolve_side_from_strategy(
-            cfg=cfg,
-            state=session_state,
+            cfg=effective_cfg,
+            state=strategy_session,
             slug=target_round.slug,
             quote=quote,
             market_client=client,
@@ -795,24 +825,24 @@ class DashboardState:
 
         side = side_decision.side
         price = resolve_quote_price(side, quote) if side in {"UP", "DOWN"} else None
-        ws_stale = _ws_is_stale_for_trade(client, cfg)
+        ws_stale = _ws_is_stale_for_trade(client, effective_cfg)
 
         if side in {"UP", "DOWN"} and not ws_stale and not _entry_window_missed(
             now,
             entry_time,
-            grace_seconds=cfg.entry_grace_seconds,
+            grace_seconds=effective_cfg.entry_grace_seconds,
         ):
             plan_obj = build_trade_plan(
-                state=session_state,
+                state=strategy_session,
                 side=side,
                 price=price,
-                target_profit=cfg.target_profit,
-                min_price_threshold=getattr(cfg, 'min_price_threshold', None),
-                max_price_threshold=cfg.max_price_threshold,
-                max_stake=cfg.max_stake,
-                max_consecutive_losses=cfg.max_consecutive_losses,
-                bet_sizing_mode=cfg.bet_sizing_mode,
-                base_order_cost=cfg.base_order_cost,
+                target_profit=effective_cfg.target_profit,
+                min_price_threshold=getattr(effective_cfg, 'min_price_threshold', None),
+                max_price_threshold=effective_cfg.max_price_threshold,
+                max_stake=effective_cfg.max_stake,
+                max_consecutive_losses=effective_cfg.max_consecutive_losses,
+                bet_sizing_mode=effective_cfg.bet_sizing_mode,
+                base_order_cost=effective_cfg.base_order_cost,
             )
             plan = {
                 "should_trade": plan_obj.should_trade,
@@ -830,7 +860,7 @@ class DashboardState:
             elif side in {"UP", "DOWN"} and _entry_window_missed(
                 now,
                 entry_time,
-                grace_seconds=cfg.entry_grace_seconds,
+                grace_seconds=effective_cfg.entry_grace_seconds,
             ):
                 reason = "entry_window_missed"
             else:
@@ -880,13 +910,12 @@ class DashboardState:
                 "locked": side_decision.signal_locked,
             },
             "plan": plan,
-            "session_state": asdict(session_state),
+            "session_state": asdict(strategy_session),
             "ws_runtime": ws_runtime,
             "ws_stale_guard_triggered": ws_stale,
+            "strategy6": strategy6_payload,
+            "strategy_view": strategy_view,
         }
-        payload['strategy6'] = strategy6_payload
-        return payload
-
     def get_paper_summary_payload(self, *, strategy: int | str | None = None) -> dict[str, Any]:
         with self._lock:
             paper_csv = self._cfg.logs_dir / "paper_trades.csv"
@@ -1027,15 +1056,20 @@ class _DashboardRequestHandler(BaseHTTPRequestHandler):
                 self._send_json(self.dashboard_state.get_config_payload())
                 return
             if parsed.path == "/api/market":
-                self._send_json(self.dashboard_state.get_market_payload())
+                query = parse_qs(parsed.query)
+                strategy = (query.get("strategy") or [None])[0]
+                self._send_json(self.dashboard_state.get_market_payload(strategy=strategy))
                 return
             if parsed.path == "/api/paper/summary":
-                self._send_json(self.dashboard_state.get_paper_summary_payload())
+                query = parse_qs(parsed.query)
+                strategy = (query.get("strategy") or [None])[0]
+                self._send_json(self.dashboard_state.get_paper_summary_payload(strategy=strategy))
                 return
             if parsed.path == "/api/paper/recent":
                 query = parse_qs(parsed.query)
                 limit = int((query.get("limit") or ["20"])[0])
-                self._send_json(self.dashboard_state.get_recent_trades_payload(limit=limit))
+                strategy = (query.get("strategy") or [None])[0]
+                self._send_json(self.dashboard_state.get_recent_trades_payload(limit=limit, strategy=strategy))
                 return
             if parsed.path == "/api/live/recent":
                 query = parse_qs(parsed.query)
@@ -2848,7 +2882,7 @@ function strategyShortLabel(payload, strategyId) {
 }
 
 function strategyOptionLabel(key, opt, payload) {
-  if (key === 'STRATEGY_ID' || key === 'SIGNAL_FALLBACK_STRATEGY_ID') {
+  if (key === 'STRATEGY_ID' || key === 'PAPER_STRATEGY_IDS' || key === 'SIGNAL_FALLBACK_STRATEGY_ID') {
     return String(opt) + ' | ' + strategyShortLabel(payload, opt);
   }
   const optMap = OPTION_LABELS[key] || {};
@@ -2856,13 +2890,13 @@ function strategyOptionLabel(key, opt, payload) {
 }
 
 function strategyPreviewText(token) {
-  if (token === 'UP') return '看涨';
-  if (token === 'DOWN') return '看跌';
-  if (token === 'MOMENTUM') return '动量判断';
-  if (token === 'THRESHOLD') return '阈值过滤';
-  if (token === 'FALLBACK') return '弱信号跳过';
-  if (token === 'SKIP') return '弱信号跳过';
-  if (token === 'OFI') return 'OFI 判断';
+  if (token === 'UP') return '\u770b\u6da8';
+  if (token === 'DOWN') return '\u770b\u8dcc';
+  if (token === 'MOMENTUM') return '\u52a8\u91cf\u5224\u65ad';
+  if (token === 'THRESHOLD') return '\u9608\u503c\u8fc7\u6ee4';
+  if (token === 'FALLBACK') return '\u5f31\u4fe1\u53f7\u8df3\u8fc7';
+  if (token === 'SKIP') return '\u5f31\u4fe1\u53f7\u8df3\u8fc7';
+  if (token === 'OFI') return 'OFI \u5224\u65ad';
   return String(token || '--');
 }
 
@@ -2874,11 +2908,73 @@ function strategyPreviewClass(token) {
 
 function renderStrategyPills(tokens) {
   if (!Array.isArray(tokens) || tokens.length === 0) {
-    return '<span class="strategy-pill strategy-info">暂无节奏预览</span>';
+    return '<span class="strategy-pill strategy-info">\u6682\u65e0\u8282\u594f\u9884\u89c8</span>';
   }
   return tokens.map((token) => {
     return '<span class="strategy-pill ' + esc(strategyPreviewClass(token)) + '">' + esc(strategyPreviewText(token)) + '</span>';
   }).join('');
+}
+
+function parseStrategyIdList(rawValue) {
+  return String(rawValue || '')
+    .split(',')
+    .map((item) => String(item || '').trim())
+    .filter((item, index, arr) => item && arr.indexOf(item) === index);
+}
+
+function resolveUnifiedStrategySelection(payload, values) {
+  const envValues = (payload && payload.env_values) || {};
+  const options = (((payload || {}).select_options || {}).PAPER_STRATEGY_IDS || []).map((item) => String(item));
+  const focusRaw = String((values && values.STRATEGY_ID) ?? envValues.STRATEGY_ID ?? options[0] ?? '');
+  const selectedRaw = parseStrategyIdList((values && values.PAPER_STRATEGY_IDS) ?? envValues.PAPER_STRATEGY_IDS ?? '');
+  const selected = selectedRaw.filter((item) => options.indexOf(item) >= 0);
+  const focus = options.indexOf(focusRaw) >= 0 ? focusRaw : (selected[0] || options[0] || '');
+  const mergedSelected = selected.slice();
+  if (focus && mergedSelected.indexOf(focus) < 0) {
+    mergedSelected.unshift(focus);
+  }
+  return {
+    focus,
+    selected: mergedSelected,
+    options,
+  };
+}
+
+function collectUnifiedStrategyValues(payload, currentValues) {
+  const unified = resolveUnifiedStrategySelection(payload || state.config || {}, currentValues || {});
+  return {
+    STRATEGY_ID: unified.focus,
+    PAPER_STRATEGY_IDS: unified.selected.join(','),
+  };
+}
+
+function renderUnifiedStrategyToolbar(payload, values) {
+  const focusNode = el('cfg_STRATEGY_ID');
+  const multiNode = el('cfg_PAPER_STRATEGY_IDS');
+  if (!focusNode || !multiNode) {
+    return;
+  }
+  const unified = resolveUnifiedStrategySelection(payload, values);
+  const focusStrategy = unified.focus || 'all';
+  focusNode.innerHTML = '';
+  unified.options.forEach((opt) => {
+    const option = document.createElement('option');
+    option.value = opt;
+    option.textContent = strategyOptionLabel('STRATEGY_ID', opt, payload);
+    option.selected = String(unified.focus) === String(opt);
+    focusNode.appendChild(option);
+  });
+  multiNode.innerHTML = '';
+  multiNode.multiple = true;
+  multiNode.size = Math.max(4, unified.options.length);
+  unified.options.forEach((opt) => {
+    const option = document.createElement('option');
+    option.value = opt;
+    option.textContent = strategyOptionLabel('PAPER_STRATEGY_IDS', opt, payload);
+    option.selected = unified.selected.indexOf(String(opt)) >= 0;
+    multiNode.appendChild(option);
+  });
+  state.paperStrategyFilter = focusStrategy;
 }
 
 function renderStrategyGuide(payload, values) {
@@ -2888,21 +2984,20 @@ function renderStrategyGuide(payload, values) {
   }
 
   const currentValues = values || {};
-  const envValues = (payload && payload.env_values) || {};
-  const strategyId = String(currentValues.STRATEGY_ID ?? envValues.STRATEGY_ID ?? '');
+  const unified = resolveUnifiedStrategySelection(payload, currentValues);
+  const strategyId = String(unified.focus || '');
   const meta = strategyMeta(payload, strategyId);
   if (!meta) {
-    node.innerHTML = '<div class="empty">暂无策略说明</div>';
+    node.innerHTML = '<div class="empty">\u6682\u65e0\u7b56\u7565\u8bf4\u660e</div>';
     return;
   }
 
   let extra = '';
   if (strategyId === '5') {
+    const envValues = (payload && payload.env_values) || {};
     const weakModeRaw = String(currentValues.SIGNAL_WEAK_SIGNAL_MODE ?? envValues.SIGNAL_WEAK_SIGNAL_MODE ?? '--');
     const weakModeText = (OPTION_LABELS.SIGNAL_WEAK_SIGNAL_MODE || {})[weakModeRaw] || weakModeRaw;
-    extra =
-      '<div class="strategy-guide-note">弱信号处理：' + esc(weakModeText) +
-      '</div>';
+    extra = '<div class="strategy-guide-note">\u5f31\u4fe1\u53f7\u5904\u7406\uff1a' + esc(weakModeText) + '</div>';
   }
 
   node.innerHTML =
@@ -2911,15 +3006,16 @@ function renderStrategyGuide(payload, values) {
         '<div class="strategy-guide-title">' + esc(strategyId + ' | ' + meta.label) + '</div>' +
         '<div class="strategy-guide-subtitle">' + esc(meta.summary || '') + '</div>' +
       '</div>' +
-      '<span class="chip ok">配置解读</span>' +
+      '<span class="chip ok">\u7edf\u4e00\u7b56\u7565</span>' +
     '</div>' +
     '<div class="strategy-guide-preview">' + renderStrategyPills(meta.preview || []) + '</div>' +
+    '<div class="strategy-guide-note">\u67e5\u770b\u7b56\u7565\uff1a' + esc(strategyId) + '\uff1b\u7eb8\u9762\u8fd0\u884c\uff1a' + esc(unified.selected.join(',') || '--') + '</div>' +
     '<div class="strategy-guide-note">' + esc(meta.detail || '') + '</div>' +
     extra;
 }
 
 function applyConfigFieldVisibility(values) {
-  const strategyId = String((values && values.STRATEGY_ID) || '');
+  const strategyId = String(resolveUnifiedStrategySelection(state.config || {}, values || {}).focus || '');
   const isStrategyFive = strategyId === '5';
 
   document.querySelectorAll('.field[data-field-scope]').forEach((node) => {
@@ -2928,7 +3024,7 @@ function applyConfigFieldVisibility(values) {
     node.classList.toggle('field-muted', shouldMute);
     const note = node.querySelector('.field-scope-note');
     if (note) {
-      note.textContent = shouldMute ? '当前基础策略未使用此参数，仅策略 5 使用' : '';
+      note.textContent = shouldMute ? '\u5f53\u524d\u67e5\u770b\u7b56\u7565\u672a\u4f7f\u7528\u6b64\u53c2\u6570\uff0c\u4ec5\u7b56\u7565 5 \u4f7f\u7528' : '';
     }
   });
 
@@ -2938,7 +3034,6 @@ function applyConfigFieldVisibility(values) {
     node.classList.toggle('config-group-muted', shouldMute);
   });
 }
-
 function sourceText(source) {
   if (!source) {
     return '--';
@@ -3193,7 +3288,7 @@ function renderHelpConfigDictionary() {
 function renderHelpStrategyGuide() {
   const payload = state.config || {};
   const envValues = payload.env_values || {};
-  const activeId = String(envValues.STRATEGY_ID || '');
+  const activeId = String(resolveUnifiedStrategySelection(payload, envValues).focus || '');
   const catalog = payload.strategy_catalog || {};
 
   return Object.entries(catalog).map(([strategyId, meta]) => {
@@ -3328,18 +3423,16 @@ function renderConfig(payload) {
   const validationErrors = payload.validation_errors || {};
   const fieldGroups = Array.isArray(payload.field_groups) && payload.field_groups.length > 0
     ? payload.field_groups
-    : [{ title: '全部参数', description: '', keys }];
+    : [{ title: '\u5168\u90e8\u53c2\u6570', description: '', keys }];
   const editableKeySet = new Set(['ENABLE_LIVE_TRADING', ...keys.filter((key) => !isSingleLiveToggleKey(key))]);
+  const hiddenKeys = new Set(['PAPER_STRATEGY_IDS']);
   const displayFieldGroups = fieldGroups.map((group) => {
     return {
       ...group,
       keys: (group.keys || [])
         .filter((key) => !isSingleLiveToggleKey(key) || key === 'TRADE_MODE')
-        .map((key) => {
-          const mappedKey = key === 'TRADE_MODE' ? 'ENABLE_LIVE_TRADING' : key;
-          return mappedKey;
-        })
-        .filter((key, index, arr) => editableKeySet.has(key) && arr.indexOf(key) === index),
+        .map((key) => (key === 'TRADE_MODE' ? 'ENABLE_LIVE_TRADING' : key))
+        .filter((key, index, arr) => editableKeySet.has(key) && arr.indexOf(key) === index && !hiddenKeys.has(key)),
     };
   });
 
@@ -3358,7 +3451,7 @@ function renderConfig(payload) {
     const head = document.createElement('div');
     head.className = 'config-group-head';
     head.innerHTML =
-      '<div class="config-group-title">' + esc(group.title || '参数分组') + '</div>' +
+      '<div class="config-group-title">' + esc(group.title || '\u53c2\u6570\u5206\u7ec4') + '</div>' +
       '<div class="config-group-desc">' + esc(group.description || '') + '</div>';
     section.appendChild(head);
 
@@ -3375,7 +3468,30 @@ function renderConfig(payload) {
       label.textContent = formatConfigLabel(key, labels);
       wrap.appendChild(label);
 
-      if (Array.isArray(options[key]) && options[key].length > 0) {
+      if (key === 'STRATEGY_ID') {
+        const unifiedWrap = document.createElement('div');
+        unifiedWrap.className = 'rows';
+
+        const focusLabel = document.createElement('div');
+        focusLabel.className = 'field-help';
+        focusLabel.textContent = '\u7edf\u4e00\u7b56\u7565\uff1a\u5f53\u524d\u9875\u9762\u6309\u8fd9\u91cc\u5207\u6362\u67e5\u770b\u548c\u89e3\u8bfb\u3002';
+        unifiedWrap.appendChild(focusLabel);
+
+        const focusSelect = document.createElement('select');
+        focusSelect.id = 'cfg_STRATEGY_ID';
+        unifiedWrap.appendChild(focusSelect);
+
+        const multiLabel = document.createElement('div');
+        multiLabel.className = 'field-help';
+        multiLabel.textContent = '\u7eb8\u9762\u8fd0\u884c\u7b56\u7565\uff1a\u53ef\u591a\u9009\uff0c\u7ed3\u679c\u6c47\u603b\u548c\u6700\u8fd1\u4ea4\u6613\u4f1a\u8ddf\u968f\u5f53\u524d\u67e5\u770b\u7b56\u7565\u5207\u6362\u3002';
+        unifiedWrap.appendChild(multiLabel);
+
+        const multiSelect = document.createElement('select');
+        multiSelect.id = 'cfg_PAPER_STRATEGY_IDS';
+        multiSelect.multiple = true;
+        unifiedWrap.appendChild(multiSelect);
+        wrap.appendChild(unifiedWrap);
+      } else if (Array.isArray(options[key]) && options[key].length > 0) {
         const select = document.createElement('select');
         select.id = 'cfg_' + key;
         for (const opt of options[key]) {
@@ -3413,6 +3529,12 @@ function renderConfig(payload) {
         err.textContent = validationErrors[key];
         wrap.appendChild(err);
       }
+      if (key === 'STRATEGY_ID' && validationErrors.PAPER_STRATEGY_IDS) {
+        const err = document.createElement('div');
+        err.className = 'field-error';
+        err.textContent = validationErrors.PAPER_STRATEGY_IDS;
+        wrap.appendChild(err);
+      }
 
       grid.appendChild(wrap);
     }
@@ -3421,8 +3543,10 @@ function renderConfig(payload) {
     form.appendChild(section);
   }
 
+  renderUnifiedStrategyToolbar(payload, displayValues);
   form.oninput = () => {
     const liveValues = expandLiveToggleValues(collectConfigValues());
+    renderUnifiedStrategyToolbar(state.config, liveValues);
     renderStrategyGuide(state.config, liveValues);
     applyConfigFieldVisibility(liveValues);
   };
@@ -3431,22 +3555,42 @@ function renderConfig(payload) {
   renderStrategyGuide(payload, displayValues);
   applyConfigFieldVisibility(expandLiveToggleValues(displayValues));
   setConfigError('--');
-  setChip('cfgStatus', '已加载', 'ok');
+  setChip('cfgStatus', '\u5df2\u52a0\u8f7d', 'ok');
   setSaveButtonState('idle');
 }
 
-function collectConfigValues() {
+function collectConfigValues(options) {
+  const settings = options || {};
   const payload = {};
+  const unifiedStrategyKeys = ['STRATEGY_ID', 'PAPER_STRATEGY_IDS'];
   const keys = ['ENABLE_LIVE_TRADING', ...(((state.config && state.config.editable_keys) || []).filter((key) => !isSingleLiveToggleKey(key)))];
   for (const key of keys) {
-    const node = el('cfg_' + key);
-    if (node) {
-      payload[key] = node.value;
+    if (unifiedStrategyKeys.indexOf(key) >= 0) {
+      continue;
     }
+    const node = el('cfg_' + key);
+    if (!node) {
+      continue;
+    }
+    payload[key] = node.value;
   }
+  if (settings.includeUnified === false) {
+    return payload;
+  }
+  const focusNode = el('cfg_STRATEGY_ID');
+  const multiNode = el('cfg_PAPER_STRATEGY_IDS');
+  const rawValues = {
+    ...payload,
+    STRATEGY_ID: focusNode ? focusNode.value : '',
+    PAPER_STRATEGY_IDS: multiNode
+      ? Array.from(multiNode.options || []).filter((option) => option.selected).map((option) => option.value).join(',')
+      : '',
+  };
+  const unifiedValues = collectUnifiedStrategyValues(state.config || {}, rawValues);
+  payload.STRATEGY_ID = unifiedValues.STRATEGY_ID;
+  payload.PAPER_STRATEGY_IDS = unifiedValues.PAPER_STRATEGY_IDS;
   return payload;
 }
-
 function areConfigValuesEqual(left, right) {
   const keys = new Set([
     ...Object.keys(left || {}),
@@ -3561,6 +3705,8 @@ function renderWsRuntime(ws, staleGuard) {
 
 function renderMarket(payload) {
   state.market = payload;
+  const strategyView = payload.strategy_view || {};
+  state.paperStrategyFilter = String(strategyView.selected || state.paperStrategyFilter || 'all');
   const round = payload.round || null;
   const quote = payload.quote || {};
   const signal = payload.signal || {};
@@ -3751,7 +3897,8 @@ function renderRecent(payload) {
 
 async function refreshMarket() {
   try {
-    const data = await apiGet('/api/market');
+    const strategy = encodeURIComponent(String(state.paperStrategyFilter || 'all'));
+    const data = await apiGet('/api/market?strategy=' + strategy);
     renderMarket(data);
   } catch (err) {
     setChip('marketHealth', '刷新失败', 'err');
@@ -3761,7 +3908,9 @@ async function refreshMarket() {
 
 async function refreshSummary() {
   try {
-    const data = await apiGet('/api/paper/summary');
+    const strategy = encodeURIComponent(String(state.paperStrategyFilter || 'all'));
+    const summaryEndpoint = '/api/paper/summary?strategy=' + strategy;
+    const data = await apiGet(summaryEndpoint);
     renderSummary(data);
   } catch (err) {
     setChip('paperStatus', '刷新失败', 'err');
