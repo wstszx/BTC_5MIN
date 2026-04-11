@@ -7,6 +7,7 @@ import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+import pytest
 import dashboard
 from dashboard import (
     ConfigValidationError,
@@ -682,7 +683,8 @@ def test_dashboard_assets_switch_recent_endpoint_by_running_mode():
     js = _dashboard_js()
 
     assert "const runningMode = String((((state.config || {}).runtime_status || {}).active_mode || (((state.config || {}).runtime_status || {}).running_mode) || 'paper')).toLowerCase();" in js
-    assert "const recentEndpoint = runningMode === 'live' ? '/api/live/recent?limit=80' : '/api/paper/recent?limit=80';" in js
+    assert "const strategy = encodeURIComponent(String(state.paperStrategyFilter || 'all'));" in js
+    assert "const recentEndpoint = runningMode === 'live' ? '/api/live/recent?limit=80' : '/api/paper/recent?limit=80&strategy=' + strategy;" in js
 
 
 
@@ -819,3 +821,123 @@ def test_dashboard_assets_include_chinese_summary_table_headers():
     assert '<th>命中率</th>' in html
     assert '<th>总盈亏</th>' in html
     assert '<th>回撤</th>' in html
+
+def test_dashboard_config_payload_includes_paper_strategy_ids(tmp_path: Path):
+    state = DashboardState(env_file=tmp_path / '.env.dashboard')
+    try:
+        payload = state.get_config_payload()
+        assert 'PAPER_STRATEGY_IDS' in payload['editable_keys']
+        assert payload['select_options']['PAPER_STRATEGY_IDS'] == ['1', '2', '3', '4', '5', '6']
+    finally:
+        state.close()
+
+
+def test_dashboard_update_config_normalizes_paper_strategy_ids(tmp_path: Path):
+    env_file = tmp_path / '.env.dashboard'
+    state = DashboardState(env_file=env_file)
+    try:
+        payload = state.update_config({'PAPER_STRATEGY_IDS': '6, 2, 6, 1'})
+        assert payload['env_values']['PAPER_STRATEGY_IDS'] == '6,2,1'
+        text = env_file.read_text(encoding='utf-8')
+        assert 'PAPER_STRATEGY_IDS=6,2,1' in text
+    finally:
+        state.close()
+
+
+def test_dashboard_rejects_invalid_paper_strategy_ids(tmp_path: Path):
+    state = DashboardState(env_file=tmp_path / '.env.dashboard')
+    try:
+        with pytest.raises(ConfigValidationError) as excinfo:
+            state.update_config({'PAPER_STRATEGY_IDS': '9,x'})
+        assert 'PAPER_STRATEGY_IDS' in excinfo.value.field_errors
+    finally:
+        state.close()
+
+
+def test_dashboard_paper_payloads_filter_by_strategy(tmp_path: Path):
+    old_cwd = Path.cwd()
+    os.chdir(tmp_path)
+    state = DashboardState(env_file=tmp_path / '.env.dashboard')
+    try:
+        logs_dir = tmp_path / 'logs'
+        logs_dir.mkdir(parents=True, exist_ok=True)
+        (logs_dir / 'paper_trades.csv').write_text(
+            'timestamp,mode,round_index,strategy,entry_timing,event_slug,start_time,end_time,side,price,order_size,order_cost,expected_profit,result,trade_pnl,cash_pnl,recovery_loss,consecutive_losses,stop_loss_triggered,skip_reason,signal_open_up_price,signal_current_up_price,signal_threshold,signal_delta,signal_locked,signal_reason\n'
+            '2026-04-06T08:00:00+00:00,paper,10,1,OPEN,slug-one,2026-04-06T07:55:00+00:00,2026-04-06T08:00:00+00:00,UP,0.50,2.0,1.0,1.0,UP,1.0,1.0,0.0,0,False,,,,,,False,\n'
+            '2026-04-06T08:05:00+00:00,paper,11,6,OPEN,slug-six,2026-04-06T08:00:00+00:00,2026-04-06T08:05:00+00:00,DOWN,0.40,2.5,1.0,1.5,DOWN,1.5,2.5,0.0,0,False,,,,,,False,\n',
+            encoding='utf-8',
+        )
+        (logs_dir / 'session_state.json').write_text(
+            json.dumps(
+                {
+                    'paper_strategies': {
+                        '1': {
+                            'round_index': 12,
+                            'cash_pnl': 1.0,
+                            'recovery_loss': 0.0,
+                            'consecutive_losses': 0,
+                            'consecutive_max_stake_skips': 0,
+                            'signal_round_slug': None,
+                            'signal_round_open_up_price': None,
+                            'signal_round_locked_side': None,
+                            'strategy6_last_ofi_score': None,
+                            'stop_loss_count': 0,
+                            'daily_realized_pnl': 1.0,
+                            'current_day': '2026-04-06',
+                            'pending_paper_trades': []
+                        },
+                        '6': {
+                            'round_index': 13,
+                            'cash_pnl': 2.5,
+                            'recovery_loss': 0.0,
+                            'consecutive_losses': 0,
+                            'consecutive_max_stake_skips': 0,
+                            'signal_round_slug': None,
+                            'signal_round_open_up_price': None,
+                            'signal_round_locked_side': None,
+                            'strategy6_last_ofi_score': 0.7,
+                            'stop_loss_count': 0,
+                            'daily_realized_pnl': 2.5,
+                            'current_day': '2026-04-06',
+                            'pending_paper_trades': [
+                                {
+                                    'round_index': 12,
+                                    'event_slug': 'pending-six',
+                                    'start_time': '2026-04-06T08:10:00+00:00',
+                                    'end_time': '2026-04-06T08:15:00+00:00',
+                                    'side': 'UP',
+                                    'price': 0.45,
+                                    'order_size': 2.0,
+                                    'order_cost': 0.9,
+                                    'expected_profit': 1.1,
+                                    'strategy': 6,
+                                    'entry_timing': 'OPEN',
+                                    'signal_open_up_price': None,
+                                    'signal_current_up_price': None,
+                                    'signal_threshold': 0.2,
+                                    'signal_delta': 0.4,
+                                    'signal_locked': False,
+                                    'signal_reason': None,
+                                    'queued_at': '2026-04-06T08:10:05+00:00'
+                                }
+                            ]
+                        }
+                    }
+                }
+            ),
+            encoding='utf-8',
+        )
+
+        summary_all = state.get_paper_summary_payload()
+        summary_six = state.get_paper_summary_payload(strategy=6)
+        recent_six = state.get_recent_trades_payload(limit=10, strategy=6)
+
+        assert summary_all['latest']['trade_rows'] == 2
+        assert summary_six['latest']['trade_rows'] == 1
+        assert summary_six['latest']['total_pnl'] == 1.5
+        assert recent_six['count'] == 2
+        assert recent_six['rows'][0]['event_slug'] == 'pending-six'
+        assert all(row['strategy'] == '6' for row in recent_six['rows'])
+    finally:
+        state.close()
+        os.chdir(old_cwd)

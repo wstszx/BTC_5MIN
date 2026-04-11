@@ -5,7 +5,7 @@ import json
 import threading
 import time
 from collections.abc import Callable
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from statistics import pstdev
@@ -13,7 +13,7 @@ from typing import Any
 
 from config import AppConfig
 from binance_signal import BinanceDepth5SignalService
-from models import MarketQuote, MarketWindow, PendingPaperTrade, SessionState, TradePlan, TradeRecord
+from models import MarketQuote, MarketWindow, PaperStrategyState, PendingPaperTrade, SessionState, TradePlan, TradeRecord
 from polymarket_api import PolymarketClient, extract_token_ids, parse_iso_datetime
 from risk_and_sizing import apply_round_outcome, build_trade_plan, reset_after_stop_loss
 from strategy import get_side_for_round
@@ -34,12 +34,26 @@ class SideDecision:
 SESSION_DAY_TZ = timezone(timedelta(hours=8))
 
 
+def _hydrate_pending_paper_trades(items: list[dict[str, Any]] | list[PendingPaperTrade] | None) -> list[PendingPaperTrade]:
+    return [
+        item if isinstance(item, PendingPaperTrade) else PendingPaperTrade(**item)
+        for item in (items or [])
+    ]
+
+
+def _hydrate_paper_strategy_state(payload: dict[str, Any]) -> PaperStrategyState:
+    strategy_payload = dict(payload)
+    pending_key = bytes([112, 101, 110, 100, 105, 110, 103, 95, 112, 97, 112, 101, 114, 95, 116, 114, 97, 100, 101, 115]).decode()
+    strategy_payload[pending_key] = _hydrate_pending_paper_trades(strategy_payload.get(pending_key))
+    return PaperStrategyState(**strategy_payload)
+
+
 def save_session_state(path: Path, state: SessionState) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(asdict(state), indent=2), encoding="utf-8")
 
 
-def load_session_state(path: Path) -> SessionState:
+def _load_session_state_legacy(path: Path) -> SessionState:
     if not path.exists():
         return SessionState()
     payload = json.loads(path.read_text(encoding="utf-8"))
@@ -48,6 +62,172 @@ def load_session_state(path: Path) -> SessionState:
         for item in payload.pop("pending_paper_trades", [])
     ]
     return SessionState(pending_paper_trades=pending_paper_trades, **payload)
+
+
+def load_session_state(path: Path, *, effective_paper_strategy_ids: list[int] | None = None) -> SessionState:
+    state = _load_session_state_legacy(path)
+    selected_strategy_ids = list(effective_paper_strategy_ids or [])
+    if not path.exists() or not selected_strategy_ids:
+        return state
+
+    payload = json.loads(path.read_text(encoding=bytes([117, 116, 102, 45, 56]).decode()))
+    raw_strategy_map = payload.get(bytes([112, 97, 112, 101, 114, 95, 115, 116, 114, 97, 116, 101, 103, 105, 101, 115]).decode())
+    if not isinstance(raw_strategy_map, dict):
+        state.paper_strategies = {
+            strategy_id: PaperStrategyState(
+                round_index=state.round_index,
+                cash_pnl=state.cash_pnl,
+                recovery_loss=state.recovery_loss,
+                consecutive_losses=state.consecutive_losses,
+                consecutive_max_stake_skips=state.consecutive_max_stake_skips,
+                signal_round_slug=state.signal_round_slug,
+                signal_round_open_up_price=state.signal_round_open_up_price,
+                signal_round_locked_side=state.signal_round_locked_side,
+                strategy6_last_ofi_score=state.strategy6_last_ofi_score,
+                stop_loss_count=state.stop_loss_count,
+                daily_realized_pnl=state.daily_realized_pnl,
+                current_day=state.current_day,
+                pending_paper_trades=list(state.pending_paper_trades),
+            )
+            for strategy_id in selected_strategy_ids
+        }
+        return state
+
+    hydrated_map: dict[int, PaperStrategyState] = {}
+    for raw_key, raw_value in raw_strategy_map.items():
+        hydrated_map[int(raw_key)] = _hydrate_paper_strategy_state(raw_value)
+    for strategy_id in selected_strategy_ids:
+        hydrated_map.setdefault(strategy_id, PaperStrategyState())
+    state.paper_strategies = hydrated_map
+    return state
+
+
+def _paper_strategy_ids_for_runtime(cfg: AppConfig) -> list[int]:
+    strategy_ids = list(getattr(cfg, "paper_strategy_ids", []) or [])
+    if strategy_ids:
+        return strategy_ids
+    return [cfg.strategy_id]
+
+def _load_session_state_for_paper_runtime(path: Path, strategy_ids: list[int]) -> SessionState:
+    try:
+        return load_session_state(path, effective_paper_strategy_ids=strategy_ids)
+    except TypeError:
+        return load_session_state(path)
+
+
+
+def _paper_strategy_state_to_session_state(state: PaperStrategyState, base_state: SessionState) -> SessionState:
+    return SessionState(
+        round_index=state.round_index,
+        cash_pnl=state.cash_pnl,
+        recovery_loss=state.recovery_loss,
+        consecutive_losses=state.consecutive_losses,
+        consecutive_max_stake_skips=state.consecutive_max_stake_skips,
+        signal_round_slug=state.signal_round_slug,
+        signal_round_open_up_price=state.signal_round_open_up_price,
+        signal_round_locked_side=state.signal_round_locked_side,
+        strategy6_last_ofi_score=state.strategy6_last_ofi_score,
+        stop_loss_count=state.stop_loss_count,
+        daily_realized_pnl=state.daily_realized_pnl,
+        current_day=state.current_day,
+        pending_live_slug=base_state.pending_live_slug,
+        pending_live_side=base_state.pending_live_side,
+        pending_live_price=base_state.pending_live_price,
+        pending_live_order_size=base_state.pending_live_order_size,
+        pending_live_order_cost=base_state.pending_live_order_cost,
+        pending_live_expected_profit=base_state.pending_live_expected_profit,
+        pending_live_order_id=base_state.pending_live_order_id,
+        pending_live_end_time=base_state.pending_live_end_time,
+        pending_paper_trades=list(state.pending_paper_trades),
+        paper_strategies=dict(base_state.paper_strategies),
+    )
+
+
+def _session_state_to_paper_strategy_state(state: SessionState) -> PaperStrategyState:
+    return PaperStrategyState(
+        round_index=state.round_index,
+        cash_pnl=state.cash_pnl,
+        recovery_loss=state.recovery_loss,
+        consecutive_losses=state.consecutive_losses,
+        consecutive_max_stake_skips=state.consecutive_max_stake_skips,
+        signal_round_slug=state.signal_round_slug,
+        signal_round_open_up_price=state.signal_round_open_up_price,
+        signal_round_locked_side=state.signal_round_locked_side,
+        strategy6_last_ofi_score=state.strategy6_last_ofi_score,
+        stop_loss_count=state.stop_loss_count,
+        daily_realized_pnl=state.daily_realized_pnl,
+        current_day=state.current_day,
+        pending_paper_trades=list(state.pending_paper_trades),
+    )
+
+
+def _ensure_paper_strategy_state_map(state: SessionState, strategy_ids: list[int]) -> None:
+    if state.paper_strategies:
+        for strategy_id in strategy_ids:
+            state.paper_strategies.setdefault(strategy_id, PaperStrategyState())
+        return
+    state.paper_strategies = {
+        strategy_id: PaperStrategyState(
+            round_index=state.round_index,
+            cash_pnl=state.cash_pnl,
+            recovery_loss=state.recovery_loss,
+            consecutive_losses=state.consecutive_losses,
+            consecutive_max_stake_skips=state.consecutive_max_stake_skips,
+            signal_round_slug=state.signal_round_slug,
+            signal_round_open_up_price=state.signal_round_open_up_price,
+            signal_round_locked_side=state.signal_round_locked_side,
+            strategy6_last_ofi_score=state.strategy6_last_ofi_score,
+            stop_loss_count=state.stop_loss_count,
+            daily_realized_pnl=state.daily_realized_pnl,
+            current_day=state.current_day,
+            pending_paper_trades=list(state.pending_paper_trades),
+        )
+        for strategy_id in strategy_ids
+    }
+
+
+def _sync_legacy_paper_state_fields(state: SessionState, strategy_ids: list[int]) -> None:
+    if not strategy_ids:
+        return
+    strategy_state = state.paper_strategies.get(strategy_ids[0])
+    if strategy_state is None:
+        return
+    state.round_index = strategy_state.round_index
+    state.cash_pnl = strategy_state.cash_pnl
+    state.recovery_loss = strategy_state.recovery_loss
+    state.consecutive_losses = strategy_state.consecutive_losses
+    state.consecutive_max_stake_skips = strategy_state.consecutive_max_stake_skips
+    state.signal_round_slug = strategy_state.signal_round_slug
+    state.signal_round_open_up_price = strategy_state.signal_round_open_up_price
+    state.signal_round_locked_side = strategy_state.signal_round_locked_side
+    state.strategy6_last_ofi_score = strategy_state.strategy6_last_ofi_score
+    state.stop_loss_count = strategy_state.stop_loss_count
+    state.daily_realized_pnl = strategy_state.daily_realized_pnl
+    state.current_day = strategy_state.current_day
+    state.pending_paper_trades = list(strategy_state.pending_paper_trades)
+
+def _clone_session_state(state: SessionState) -> SessionState:
+    payload = asdict(state)
+    payload["pending_paper_trades"] = _hydrate_pending_paper_trades(payload.get("pending_paper_trades"))
+    raw_strategy_map = payload.get("paper_strategies") or {}
+    payload["paper_strategies"] = {
+        int(raw_key): _hydrate_paper_strategy_state(raw_value)
+        for raw_key, raw_value in raw_strategy_map.items()
+    }
+    return SessionState(**payload)
+
+def _copy_session_state_into(target: SessionState, source: SessionState) -> None:
+    payload = asdict(source)
+    payload["pending_paper_trades"] = _hydrate_pending_paper_trades(payload.get("pending_paper_trades"))
+    raw_strategy_map = payload.get("paper_strategies") or {}
+    payload["paper_strategies"] = {
+        int(raw_key): _hydrate_paper_strategy_state(raw_value)
+        for raw_key, raw_value in raw_strategy_map.items()
+    }
+    for field_name, value in payload.items():
+        setattr(target, field_name, value)
+
+
 
 
 def append_trade_log(path: Path, record: TradeRecord) -> None:
@@ -1568,15 +1748,19 @@ def run_paper_trading(
     state_path_provided = state_path is not None
     log_path_provided = log_path is not None
     client = client or PolymarketClient(cfg)
-    if binance_signal_service is None and cfg.strategy_id == 6:
+    state_path = state_path or cfg.logs_dir / "session_state.json"
+    log_path = log_path or cfg.logs_dir / "paper_trades.csv"
+    strategy_ids = _paper_strategy_ids_for_runtime(cfg)
+    if binance_signal_service is None and 6 in strategy_ids:
         binance_signal_service = BinanceDepth5SignalService(
             ws_url=cfg.binance_ws_url,
             stream=cfg.binance_depth_stream,
         )
         binance_signal_service.start()
-    state_path = state_path or cfg.logs_dir / "session_state.json"
-    log_path = log_path or cfg.logs_dir / "paper_trades.csv"
-    state = load_session_state(state_path)
+    loaded_state = _load_session_state_for_paper_runtime(state_path, strategy_ids)
+    state = _clone_session_state(loaded_state)
+    _ensure_paper_strategy_state_map(state, strategy_ids)
+    _sync_legacy_paper_state_fields(state, strategy_ids)
     consecutive_errors = 0
     _update_runtime_control(
         runtime_control,
@@ -1586,7 +1770,7 @@ def run_paper_trading(
         pending_live_order=False,
     )
     _runtime_log(
-        'paper-trade started | strategy=' + str(cfg.strategy_id)
+        'paper-trade started | strategies=' + ','.join(str(item) for item in strategy_ids)
         + ' entry_timing=' + cfg.entry_timing
         + ' poll=' + str(cfg.poll_interval_seconds)
         + 's dry_run_once=' + str(dry_run_once)
@@ -1600,35 +1784,51 @@ def run_paper_trading(
                 candidate_cfg = config_provider()
                 if candidate_cfg is not None:
                     cfg = candidate_cfg
+                    strategy_ids = _paper_strategy_ids_for_runtime(cfg)
                     if not client_provided:
                         client.config = cfg
                     if not state_path_provided:
                         state_path = cfg.logs_dir / "session_state.json"
                     if not log_path_provided:
                         log_path = cfg.logs_dir / "paper_trades.csv"
+                    _ensure_paper_strategy_state_map(state, strategy_ids)
+                    _sync_legacy_paper_state_fields(state, strategy_ids)
             now = datetime.now(timezone.utc)
-            _refresh_daily_session_state(state, now)
-            state, settled_any_pending = _settle_pending_paper_trades(
-                client=client,
-                state=state,
-                log_path=log_path,
-            )
-            if settled_any_pending:
+            pending_strategy_ids: list[int] = []
+            settled_any_pending = False
+            state_changed = False
+            for strategy_id in strategy_ids:
+                strategy_state = state.paper_strategies.setdefault(strategy_id, PaperStrategyState())
+                strategy_session = _paper_strategy_state_to_session_state(strategy_state, state)
+                if _refresh_daily_session_state(strategy_session, now):
+                    state_changed = True
+                strategy_session, settled_changed = _settle_pending_paper_trades(
+                    client=client,
+                    state=strategy_session,
+                    log_path=log_path,
+                )
+                if settled_changed:
+                    settled_any_pending = True
+                    state_changed = True
+                state.paper_strategies[strategy_id] = _session_state_to_paper_strategy_state(strategy_session)
+                if state.paper_strategies[strategy_id].pending_paper_trades:
+                    pending_strategy_ids.append(strategy_id)
+            if state_changed or settled_any_pending:
+                _sync_legacy_paper_state_fields(state, strategy_ids)
+                round_completed = True
+                _copy_session_state_into(loaded_state, state)
                 save_session_state(state_path, state)
-            if state.pending_paper_trades:
+            if pending_strategy_ids:
                 _update_runtime_control(
                     runtime_control,
-                    current_round_slug=state.pending_paper_trades[0].event_slug,
+                    current_round_slug=state.paper_strategies[pending_strategy_ids[0]].pending_paper_trades[0].event_slug,
                     round_in_progress=True,
                     safe_to_switch=False,
                     pending_live_order=False,
                 )
                 if _safe_stop_requested(stop_when_safe):
                     return {"status": "pending_settlement"}
-                if not _sleep_if_not_stopped(stop_event, cfg.poll_interval_seconds):
-                    return {"status": "stopped"}
-                continue
-            if _safe_stop_requested(stop_when_safe):
+            elif _safe_stop_requested(stop_when_safe):
                 _update_runtime_control(
                     runtime_control,
                     current_round_slug=None,
@@ -1651,374 +1851,326 @@ def run_paper_trading(
             entry_time = _entry_time_for_round(cfg, target_round)
             market = client.get_market_by_slug(target_round.slug)
             quote = client.quote_from_market(market)
-            _apply_strategy6_signal_to_quote(cfg=cfg, quote=quote, binance_signal_service=binance_signal_service)
-            _runtime_log('round=' + target_round.slug + ' quote {' + _describe_quote_source(quote) + '}')
-            _runtime_log('round=' + target_round.slug + ' ws_runtime {' + _describe_ws_runtime(client) + '}')
-            side_decision = _resolve_side_from_strategy(
-                cfg=cfg,
-                state=state,
-                slug=target_round.slug,
-                quote=quote,
-                market_client=client,
-                window=target_round,
-                now=now,
-                entry_time=entry_time,
-            )
-            _runtime_log(
-                'round=' + target_round.slug
-                + ' side=' + str(side_decision.side)
-                + ' entry_at=' + entry_time.isoformat()
-                + ' signal={' + _describe_side_decision(side_decision) + '}'
-                + ' quote_source=' + str(quote.source)
-            )
-            if side_decision.side is None:
-                if dry_run_once:
-                    _runtime_log(
-                        'dry-run round=' + target_round.slug
-                        + ' skip due to signal; reason=' + str(side_decision.reason or 'signal_unavailable')
-                    )
-                    return {
-                        "status": "dry_run",
-                        "slug": target_round.slug,
-                        "side": None,
-                        "price": None,
-                        "should_trade": False,
-                        "skip_reason": side_decision.reason or "signal_unavailable",
-                        "entry_time": entry_time.isoformat(),
-                        "signal_open_up_price": side_decision.signal_open_up_price,
-                        "signal_current_up_price": side_decision.signal_current_up_price,
-                        "signal_threshold": side_decision.signal_threshold,
-                        "signal_delta": side_decision.signal_delta,
-                        "signal_locked": side_decision.signal_locked,
-                    }
-                if now < entry_time:
-                    sleep_seconds = min(cfg.poll_interval_seconds, max(1, int((entry_time - now).total_seconds())))
-                    _runtime_log(
-                        'round=' + target_round.slug
-                        + ' weak/no signal before entry; sleep ' + str(sleep_seconds) + 's then retry'
-                    )
-                    consecutive_errors = 0
-                    if not _sleep_if_not_stopped(stop_event, sleep_seconds):
-                        return {"status": "stopped"}
+            any_processed = False
+            round_completed = False
+            for strategy_id in strategy_ids:
+                strategy_state = state.paper_strategies.setdefault(strategy_id, PaperStrategyState())
+                if strategy_state.pending_paper_trades:
                     continue
+                strategy_cfg = replace(cfg, strategy_id=strategy_id)
+                strategy_session = _paper_strategy_state_to_session_state(strategy_state, state)
+                strategy_quote = replace(quote)
+                _apply_strategy6_signal_to_quote(
+                    cfg=strategy_cfg,
+                    quote=strategy_quote,
+                    binance_signal_service=binance_signal_service,
+                )
+                _runtime_log('strategy=' + str(strategy_id) + ' round=' + target_round.slug + ' quote {' + _describe_quote_source(strategy_quote) + '}')
+                _runtime_log('strategy=' + str(strategy_id) + ' round=' + target_round.slug + ' ws_runtime {' + _describe_ws_runtime(client) + '}')
+                side_decision = _resolve_side_from_strategy(
+                    cfg=strategy_cfg,
+                    state=strategy_session,
+                    slug=target_round.slug,
+                    quote=strategy_quote,
+                    market_client=client,
+                    window=target_round,
+                    now=now,
+                    entry_time=entry_time,
+                )
                 _runtime_log(
-                    'round=' + target_round.slug
-                    + ' skip trade due to signal; reason=' + str(side_decision.reason or 'signal_unavailable')
+                    'strategy=' + str(strategy_id)
+                    + ' round=' + target_round.slug
+                    + ' side=' + str(side_decision.side)
+                    + ' entry_at=' + entry_time.isoformat()
+                    + ' signal={' + _describe_side_decision(side_decision) + '}'
+                    + ' quote_source=' + str(strategy_quote.source)
                 )
-                append_trade_log(
-                    log_path,
-                    TradeRecord(
-                        timestamp=datetime.now(timezone.utc),
-                        mode="paper",
-                        round_index=state.round_index,
-                        strategy=cfg.strategy_id,
-                        entry_timing=cfg.entry_timing,
-                        event_slug=target_round.slug,
-                        start_time=target_round.start_time,
-                        end_time=target_round.end_time,
-                        side="SKIP",
-                        price=None,
-                        order_size=0.0,
-                        order_cost=0.0,
-                        expected_profit=0.0,
-                        result=None,
-                        trade_pnl=0.0,
-                        cash_pnl=state.cash_pnl,
-                        recovery_loss=state.recovery_loss,
-                        consecutive_losses=state.consecutive_losses,
-                        skip_reason=side_decision.reason or "signal_unavailable",
-                        **_signal_record_kwargs(side_decision),
-                    ),
+                state.paper_strategies[strategy_id] = _session_state_to_paper_strategy_state(strategy_session)
+                any_processed = True
+
+                if side_decision.side is None:
+                    if dry_run_once:
+                        _runtime_log(
+                            'dry-run strategy=' + str(strategy_id)
+                            + ' round=' + target_round.slug
+                            + ' skip due to signal; reason=' + str(side_decision.reason or 'signal_unavailable')
+                        )
+                        return {
+                            "status": "dry_run",
+                            "slug": target_round.slug,
+                            "side": None,
+                            "price": None,
+                            "should_trade": False,
+                            "skip_reason": side_decision.reason or "signal_unavailable",
+                            "entry_time": entry_time.isoformat(),
+                            "signal_open_up_price": side_decision.signal_open_up_price,
+                            "signal_current_up_price": side_decision.signal_current_up_price,
+                            "signal_threshold": side_decision.signal_threshold,
+                            "signal_delta": side_decision.signal_delta,
+                            "signal_locked": side_decision.signal_locked,
+                        }
+                    if (entry_time - now).total_seconds() > 1:
+                        continue
+                    append_trade_log(
+                        log_path,
+                        TradeRecord(
+                            timestamp=datetime.now(timezone.utc),
+                            mode="paper",
+                            round_index=strategy_session.round_index,
+                            strategy=strategy_id,
+                            entry_timing=strategy_cfg.entry_timing,
+                            event_slug=target_round.slug,
+                            start_time=target_round.start_time,
+                            end_time=target_round.end_time,
+                            side="SKIP",
+                            price=None,
+                            order_size=0.0,
+                            order_cost=0.0,
+                            expected_profit=0.0,
+                            result=None,
+                            trade_pnl=0.0,
+                            cash_pnl=strategy_session.cash_pnl,
+                            recovery_loss=strategy_session.recovery_loss,
+                            consecutive_losses=strategy_session.consecutive_losses,
+                            skip_reason=side_decision.reason or "signal_unavailable",
+                            **_signal_record_kwargs(side_decision),
+                        ),
+                    )
+                    strategy_session.round_index += 1
+                    state.paper_strategies[strategy_id] = _session_state_to_paper_strategy_state(strategy_session)
+                    _sync_legacy_paper_state_fields(state, strategy_ids)
+                    round_completed = True
+                    _copy_session_state_into(loaded_state, state)
+                    save_session_state(state_path, state)
+                    continue
+
+                side = side_decision.side
+                price = resolve_quote_price(side, strategy_quote)
+                if _ws_is_stale_for_trade(client, strategy_cfg):
+                    if dry_run_once:
+                        return {
+                            "status": "dry_run",
+                            "slug": target_round.slug,
+                            "side": side,
+                            "price": price,
+                            "should_trade": False,
+                            "skip_reason": "ws_stale",
+                            "entry_time": entry_time.isoformat(),
+                            "projected_max_stake_skip_streak": 0,
+                            "signal_open_up_price": side_decision.signal_open_up_price,
+                            "signal_current_up_price": side_decision.signal_current_up_price,
+                            "signal_threshold": side_decision.signal_threshold,
+                            "signal_delta": side_decision.signal_delta,
+                            "signal_locked": side_decision.signal_locked,
+                        }
+                    if (entry_time - now).total_seconds() > 1:
+                        continue
+                    append_trade_log(
+                        log_path,
+                        TradeRecord(
+                            timestamp=datetime.now(timezone.utc),
+                            mode="paper",
+                            round_index=strategy_session.round_index,
+                            strategy=strategy_id,
+                            entry_timing=strategy_cfg.entry_timing,
+                            event_slug=target_round.slug,
+                            start_time=target_round.start_time,
+                            end_time=target_round.end_time,
+                            side=side,
+                            price=price,
+                            order_size=0.0,
+                            order_cost=0.0,
+                            expected_profit=0.0,
+                            result=None,
+                            trade_pnl=0.0,
+                            cash_pnl=strategy_session.cash_pnl,
+                            recovery_loss=strategy_session.recovery_loss,
+                            consecutive_losses=strategy_session.consecutive_losses,
+                            skip_reason="ws_stale",
+                            **_signal_record_kwargs(side_decision),
+                        ),
+                    )
+                    strategy_session.round_index += 1
+                    state.paper_strategies[strategy_id] = _session_state_to_paper_strategy_state(strategy_session)
+                    _sync_legacy_paper_state_fields(state, strategy_ids)
+                    round_completed = True
+                    _copy_session_state_into(loaded_state, state)
+                    save_session_state(state_path, state)
+                    continue
+
+                if _entry_window_missed(now, entry_time, grace_seconds=strategy_cfg.entry_grace_seconds):
+                    if dry_run_once:
+                        return {
+                            "status": "dry_run",
+                            "slug": target_round.slug,
+                            "side": side,
+                            "price": price,
+                            "should_trade": False,
+                            "skip_reason": "entry_window_missed",
+                            "entry_time": entry_time.isoformat(),
+                            "projected_max_stake_skip_streak": 0,
+                            "signal_open_up_price": side_decision.signal_open_up_price,
+                            "signal_current_up_price": side_decision.signal_current_up_price,
+                            "signal_threshold": side_decision.signal_threshold,
+                            "signal_delta": side_decision.signal_delta,
+                            "signal_locked": side_decision.signal_locked,
+                        }
+                    append_trade_log(
+                        log_path,
+                        TradeRecord(
+                            timestamp=datetime.now(timezone.utc),
+                            mode="paper",
+                            round_index=strategy_session.round_index,
+                            strategy=strategy_id,
+                            entry_timing=strategy_cfg.entry_timing,
+                            event_slug=target_round.slug,
+                            start_time=target_round.start_time,
+                            end_time=target_round.end_time,
+                            side=side,
+                            price=price,
+                            order_size=0.0,
+                            order_cost=0.0,
+                            expected_profit=0.0,
+                            result=None,
+                            trade_pnl=0.0,
+                            cash_pnl=strategy_session.cash_pnl,
+                            recovery_loss=strategy_session.recovery_loss,
+                            consecutive_losses=strategy_session.consecutive_losses,
+                            skip_reason="entry_window_missed",
+                            **_signal_record_kwargs(side_decision),
+                        ),
+                    )
+                    strategy_session.round_index += 1
+                    state.paper_strategies[strategy_id] = _session_state_to_paper_strategy_state(strategy_session)
+                    _sync_legacy_paper_state_fields(state, strategy_ids)
+                    round_completed = True
+                    _copy_session_state_into(loaded_state, state)
+                    save_session_state(state_path, state)
+                    continue
+
+                plan = build_trade_plan(
+                    state=strategy_session,
+                    side=side,
+                    price=price,
+                    target_profit=strategy_cfg.target_profit,
+                    min_price_threshold=getattr(strategy_cfg, 'min_price_threshold', None),
+                    max_price_threshold=strategy_cfg.max_price_threshold,
+                    max_stake=strategy_cfg.max_stake,
+                    max_consecutive_losses=strategy_cfg.max_consecutive_losses,
+                    bet_sizing_mode=strategy_cfg.bet_sizing_mode,
+                    base_order_cost=strategy_cfg.base_order_cost,
                 )
-                state.round_index += 1
-                save_session_state(state_path, state)
-                consecutive_errors = 0
-                if not _sleep_until_round_end(cfg, target_round, stop_event):
-                    return {"status": "stopped"}
-                continue
-
-            side = side_decision.side
-            price = resolve_quote_price(side, quote)
-
-            if _ws_is_stale_for_trade(client, cfg):
-                ws_skip_reason = 'ws_stale'
                 if dry_run_once:
-                    _runtime_log(
-                        'dry-run round=' + target_round.slug
-                        + ' side=' + side
-                        + ' should_trade=False'
-                        + ' price=' + _fmt_price(price)
-                        + ' skip_reason=' + ws_skip_reason
+                    projected_streak = (
+                        strategy_session.consecutive_max_stake_skips + 1
+                        if plan.skip_reason == "order_cost_above_max_stake"
+                        else 0
                     )
                     return {
                         "status": "dry_run",
                         "slug": target_round.slug,
                         "side": side,
                         "price": price,
-                        "should_trade": False,
-                        "skip_reason": ws_skip_reason,
+                        "should_trade": plan.should_trade,
+                        "skip_reason": plan.skip_reason,
                         "entry_time": entry_time.isoformat(),
-                        "projected_max_stake_skip_streak": 0,
+                        "projected_max_stake_skip_streak": projected_streak,
                         "signal_open_up_price": side_decision.signal_open_up_price,
                         "signal_current_up_price": side_decision.signal_current_up_price,
                         "signal_threshold": side_decision.signal_threshold,
                         "signal_delta": side_decision.signal_delta,
                         "signal_locked": side_decision.signal_locked,
                     }
-                if now < entry_time:
-                    sleep_seconds = min(cfg.poll_interval_seconds, max(1, int((entry_time - now).total_seconds())))
-                    _runtime_log(
-                        'round=' + target_round.slug
-                        + ' ws stale before entry; sleep ' + str(sleep_seconds) + 's then retry'
-                    )
-                    consecutive_errors = 0
-                    if not _sleep_if_not_stopped(stop_event, sleep_seconds):
-                        return {"status": "stopped"}
-                    continue
-                _runtime_log(
-                    'round=' + target_round.slug
-                    + ' skip trade due to ws stale; reason=' + ws_skip_reason
-                )
-                append_trade_log(
-                    log_path,
-                    TradeRecord(
-                        timestamp=datetime.now(timezone.utc),
-                        mode="paper",
-                        round_index=state.round_index,
-                        strategy=cfg.strategy_id,
-                        entry_timing=cfg.entry_timing,
-                        event_slug=target_round.slug,
-                        start_time=target_round.start_time,
-                        end_time=target_round.end_time,
-                        side=side,
-                        price=price,
-                        order_size=0.0,
-                        order_cost=0.0,
-                        expected_profit=0.0,
-                        result=None,
-                        trade_pnl=0.0,
-                        cash_pnl=state.cash_pnl,
-                        recovery_loss=state.recovery_loss,
-                        consecutive_losses=state.consecutive_losses,
-                        skip_reason=ws_skip_reason,
-                        **_signal_record_kwargs(side_decision),
-                    ),
-                )
-                state.round_index += 1
-                save_session_state(state_path, state)
-                consecutive_errors = 0
-                if not _sleep_until_round_end(cfg, target_round, stop_event):
-                    return {"status": "stopped"}
-                continue
-
-            if _entry_window_missed(now, entry_time, grace_seconds=cfg.entry_grace_seconds):
-                missed_reason = "entry_window_missed"
-                if dry_run_once:
-                    _runtime_log(
-                        'dry-run round=' + target_round.slug
-                        + ' side=' + side
-                        + ' should_trade=False'
-                        + ' price=' + _fmt_price(price)
-                        + ' skip_reason=' + missed_reason
-                    )
-                    return {
-                        "status": "dry_run",
-                        "slug": target_round.slug,
-                        "side": side,
-                        "price": price,
-                        "should_trade": False,
-                        "skip_reason": missed_reason,
-                        "entry_time": entry_time.isoformat(),
-                        "projected_max_stake_skip_streak": 0,
-                        "signal_open_up_price": side_decision.signal_open_up_price,
-                        "signal_current_up_price": side_decision.signal_current_up_price,
-                        "signal_threshold": side_decision.signal_threshold,
-                        "signal_delta": side_decision.signal_delta,
-                        "signal_locked": side_decision.signal_locked,
-                    }
-                _runtime_log(
-                    'round=' + target_round.slug
-                    + ' skip trade due to missed entry window; reason=' + missed_reason
-                )
-                append_trade_log(
-                    log_path,
-                    TradeRecord(
-                        timestamp=datetime.now(timezone.utc),
-                        mode="paper",
-                        round_index=state.round_index,
-                        strategy=cfg.strategy_id,
-                        entry_timing=cfg.entry_timing,
-                        event_slug=target_round.slug,
-                        start_time=target_round.start_time,
-                        end_time=target_round.end_time,
-                        side=side,
-                        price=price,
-                        order_size=0.0,
-                        order_cost=0.0,
-                        expected_profit=0.0,
-                        result=None,
-                        trade_pnl=0.0,
-                        cash_pnl=state.cash_pnl,
-                        recovery_loss=state.recovery_loss,
-                        consecutive_losses=state.consecutive_losses,
-                        skip_reason=missed_reason,
-                        **_signal_record_kwargs(side_decision),
-                    ),
-                )
-                state.round_index += 1
-                save_session_state(state_path, state)
-                consecutive_errors = 0
-                if not _sleep_until_round_end(cfg, target_round, stop_event):
-                    return {"status": "stopped"}
-                continue
-
-            plan = build_trade_plan(
-                state=state,
-                side=side,
-                price=price,
-                target_profit=cfg.target_profit,
-                min_price_threshold=getattr(cfg, 'min_price_threshold', None),
-                max_price_threshold=cfg.max_price_threshold,
-                max_stake=cfg.max_stake,
-                max_consecutive_losses=cfg.max_consecutive_losses,
-                bet_sizing_mode=cfg.bet_sizing_mode,
-                base_order_cost=cfg.base_order_cost,
-            )
-            _runtime_log(
-                'round=' + target_round.slug
-                + ' plan should_trade=' + str(plan.should_trade)
-                + ' side=' + side
-                + ' price=' + _fmt_price(price)
-                + ' order_cost=' + f'{plan.order_cost:.4f}'
-                + ' order_size=' + f'{plan.order_size:.4f}'
-                + ' skip_reason=' + str(plan.skip_reason)
-                + ' quote_source=' + str(quote.source)
-            )
-
-            if dry_run_once:
-                projected_streak = (
-                    state.consecutive_max_stake_skips + 1
-                    if plan.skip_reason == "order_cost_above_max_stake"
-                    else 0
-                )
-                _runtime_log(
-                    'dry-run round=' + target_round.slug
-                    + ' side=' + side
-                    + ' should_trade=' + str(plan.should_trade)
-                    + ' price=' + _fmt_price(price)
-                    + ' skip_reason=' + str(plan.skip_reason)
-                )
-                return {
-                    "status": "dry_run",
-                    "slug": target_round.slug,
-                    "side": side,
-                    "price": price,
-                    "should_trade": plan.should_trade,
-                    "skip_reason": plan.skip_reason,
-                    "entry_time": entry_time.isoformat(),
-                    "projected_max_stake_skip_streak": projected_streak,
-                    "signal_open_up_price": side_decision.signal_open_up_price,
-                    "signal_current_up_price": side_decision.signal_current_up_price,
-                    "signal_threshold": side_decision.signal_threshold,
-                    "signal_delta": side_decision.signal_delta,
-                    "signal_locked": side_decision.signal_locked,
-                }
-
-            if not plan.should_trade:
-                skip_stop_loss_triggered = _should_reset_after_risk_gate_skip(
-                    state,
-                    skip_reason=plan.skip_reason,
-                    cfg=cfg,
-                    stop_loss_triggered=plan.stop_loss_triggered,
-                )
-                if now < entry_time:
-                    sleep_seconds = min(cfg.poll_interval_seconds, max(1, int((entry_time - now).total_seconds())))
-                    _runtime_log(
-                        'round=' + target_round.slug
-                        + ' not tradable before entry; sleep ' + str(sleep_seconds) + 's then retry'
-                    )
-                    consecutive_errors = 0
-                    if not _sleep_if_not_stopped(stop_event, sleep_seconds):
-                        return {"status": "stopped"}
-                    continue
-                _runtime_log(
-                    'round=' + target_round.slug
-                    + ' skip trade due to risk gate; reason=' + str(plan.skip_reason)
-                )
-                append_trade_log(
-                    log_path,
-                    TradeRecord(
-                        timestamp=datetime.now(timezone.utc),
-                        mode="paper",
-                        round_index=state.round_index,
-                        strategy=cfg.strategy_id,
-                        entry_timing=cfg.entry_timing,
-                        event_slug=target_round.slug,
-                        start_time=target_round.start_time,
-                        end_time=target_round.end_time,
-                        side=side,
-                        price=price,
-                        order_size=0.0,
-                        order_cost=0.0,
-                        expected_profit=0.0,
-                        result=None,
-                        trade_pnl=0.0,
-                        cash_pnl=state.cash_pnl,
-                        recovery_loss=state.recovery_loss,
-                        consecutive_losses=state.consecutive_losses,
-                        stop_loss_triggered=skip_stop_loss_triggered,
+                if not plan.should_trade:
+                    if (entry_time - now).total_seconds() > 1:
+                        continue
+                    skip_stop_loss_triggered = _should_reset_after_risk_gate_skip(
+                        strategy_session,
                         skip_reason=plan.skip_reason,
-                        **_signal_record_kwargs(side_decision),
-                    ),
-                )
-                state, should_alert, _, skip_streak = _apply_post_entry_risk_gate_skip(
-                    state,
-                    skip_reason=plan.skip_reason,
-                    cfg=cfg,
-                    stop_loss_triggered=plan.stop_loss_triggered,
-                )
-                if should_alert:
-                    _emit_max_stake_skip_alert(
-                        slug=target_round.slug,
-                        side=side,
-                        price=price,
-                        state=state,
-                        cfg=cfg,
-                        skip_streak=skip_streak,
+                        cfg=strategy_cfg,
+                        stop_loss_triggered=plan.stop_loss_triggered,
                     )
+                    append_trade_log(
+                        log_path,
+                        TradeRecord(
+                            timestamp=datetime.now(timezone.utc),
+                            mode="paper",
+                            round_index=strategy_session.round_index,
+                            strategy=strategy_id,
+                            entry_timing=strategy_cfg.entry_timing,
+                            event_slug=target_round.slug,
+                            start_time=target_round.start_time,
+                            end_time=target_round.end_time,
+                            side=side,
+                            price=price,
+                            order_size=0.0,
+                            order_cost=0.0,
+                            expected_profit=0.0,
+                            result=None,
+                            trade_pnl=0.0,
+                            cash_pnl=strategy_session.cash_pnl,
+                            recovery_loss=strategy_session.recovery_loss,
+                            consecutive_losses=strategy_session.consecutive_losses,
+                            stop_loss_triggered=skip_stop_loss_triggered,
+                            skip_reason=plan.skip_reason,
+                            **_signal_record_kwargs(side_decision),
+                        ),
+                    )
+                    strategy_session, should_alert, _, skip_streak = _apply_post_entry_risk_gate_skip(
+                        strategy_session,
+                        skip_reason=plan.skip_reason,
+                        cfg=strategy_cfg,
+                        stop_loss_triggered=plan.stop_loss_triggered,
+                    )
+                    if should_alert:
+                        _emit_max_stake_skip_alert(
+                            slug=target_round.slug,
+                            side=side,
+                            price=price,
+                            state=strategy_session,
+                            cfg=strategy_cfg,
+                            skip_streak=skip_streak,
+                        )
+                    state.paper_strategies[strategy_id] = _session_state_to_paper_strategy_state(strategy_session)
+                    _sync_legacy_paper_state_fields(state, strategy_ids)
+                    round_completed = True
+                    _copy_session_state_into(loaded_state, state)
+                    save_session_state(state_path, state)
+                    continue
+
+                strategy_session.consecutive_max_stake_skips = 0
+                if (entry_time - now).total_seconds() > 1:
+                    state.paper_strategies[strategy_id] = _session_state_to_paper_strategy_state(strategy_session)
+                    continue
+                queued = _queue_pending_paper_trade(
+                    state=strategy_session,
+                    window=target_round,
+                    plan=plan,
+                    side=side,
+                    cfg=strategy_cfg,
+                    side_decision=side_decision,
+                )
+                if queued:
+                    strategy_session.round_index += 1
+                state.paper_strategies[strategy_id] = _session_state_to_paper_strategy_state(strategy_session)
+                _sync_legacy_paper_state_fields(state, strategy_ids)
+                round_completed = True
+                _copy_session_state_into(loaded_state, state)
                 save_session_state(state_path, state)
-                consecutive_errors = 0
+
+            consecutive_errors = 0
+            if round_completed:
                 if not _sleep_until_round_end(cfg, target_round, stop_event):
                     return {"status": "stopped"}
                 continue
-            state.consecutive_max_stake_skips = 0
-
-            if now < entry_time:
-                sleep_seconds = min(cfg.poll_interval_seconds, max(1, int((entry_time - now).total_seconds())))
-                _runtime_log(
-                    'round=' + target_round.slug
-                    + ' waiting for entry; sleep ' + str(sleep_seconds) + 's'
-                )
-                consecutive_errors = 0
-                if not _sleep_if_not_stopped(stop_event, sleep_seconds):
+            if not any_processed and pending_strategy_ids:
+                if not _sleep_if_not_stopped(stop_event, cfg.poll_interval_seconds):
                     return {"status": "stopped"}
                 continue
-
-            queued = _queue_pending_paper_trade(
-                state=state,
-                window=target_round,
-                plan=plan,
-                side=side,
-                cfg=cfg,
-                side_decision=side_decision,
-            )
-            if queued:
-                _runtime_log('round=' + target_round.slug + ' entered trade; queued for later settlement')
-                state.round_index += 1
-                save_session_state(state_path, state)
-            else:
-                _runtime_log('round=' + target_round.slug + ' already queued; skip duplicate pending trade')
-            consecutive_errors = 0
+            if any_processed and datetime.now(timezone.utc) < target_round.end_time:
+                if not _sleep_if_not_stopped(stop_event, cfg.poll_interval_seconds):
+                    return {"status": "stopped"}
+                continue
             if not _sleep_if_not_stopped(stop_event, cfg.poll_interval_seconds):
                 return {"status": "stopped"}
             continue

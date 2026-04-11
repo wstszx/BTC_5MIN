@@ -356,6 +356,96 @@ def test_session_state_roundtrip_preserves_pending_paper_trades(tmp_path):
     assert queued.expected_profit == 1.12
 
 
+def test_load_session_state_wraps_legacy_paper_state_for_effective_strategy(tmp_path):
+    state_path = tmp_path / bytes([115, 101, 115, 115, 105, 111, 110, 95, 115, 116, 97, 116, 101, 46, 106, 115, 111, 110]).decode()
+    state_path.write_text(
+        json.dumps(
+            dict(
+                round_index=3,
+                cash_pnl=1.5,
+                recovery_loss=0.5,
+                consecutive_losses=1,
+                consecutive_max_stake_skips=0,
+                signal_round_slug=None,
+                signal_round_open_up_price=None,
+                signal_round_locked_side=None,
+                strategy6_last_ofi_score=None,
+                stop_loss_count=0,
+                daily_realized_pnl=1.5,
+                current_day=bytes([50, 48, 50, 54, 45, 48, 52, 45, 49, 49]).decode(),
+                pending_live_slug=None,
+                pending_live_side=None,
+                pending_live_price=None,
+                pending_live_order_size=None,
+                pending_live_order_cost=None,
+                pending_live_expected_profit=None,
+                pending_live_order_id=None,
+                pending_live_end_time=None,
+                pending_paper_trades=[],
+            )
+        ),
+        encoding=bytes([117, 116, 102, 45, 56]).decode(),
+    )
+
+    state = load_session_state(state_path, effective_paper_strategy_ids=[6])
+
+    assert sorted(state.paper_strategies.keys()) == [6]
+    assert state.paper_strategies[6].round_index == 3
+    assert state.paper_strategies[6].cash_pnl == 1.5
+
+
+def test_load_session_state_preserves_multi_strategy_payload(tmp_path):
+    state_path = tmp_path / bytes([115, 101, 115, 115, 105, 111, 110, 95, 115, 116, 97, 116, 101, 46, 106, 115, 111, 110]).decode()
+    state_path.write_text(
+        json.dumps(
+            dict(
+                paper_strategies={
+                    1: dict(
+                        round_index=2,
+                        cash_pnl=0.5,
+                        recovery_loss=0.0,
+                        consecutive_losses=0,
+                        consecutive_max_stake_skips=0,
+                        signal_round_slug=None,
+                        signal_round_open_up_price=None,
+                        signal_round_locked_side=None,
+                        strategy6_last_ofi_score=None,
+                        stop_loss_count=0,
+                        daily_realized_pnl=0.5,
+                        current_day=bytes([50, 48, 50, 54, 45, 48, 52, 45, 49, 49]).decode(),
+                        pending_paper_trades=[],
+                    ),
+                    6: dict(
+                        round_index=4,
+                        cash_pnl=3.0,
+                        recovery_loss=1.0,
+                        consecutive_losses=2,
+                        consecutive_max_stake_skips=0,
+                        signal_round_slug=None,
+                        signal_round_open_up_price=None,
+                        signal_round_locked_side=None,
+                        strategy6_last_ofi_score=0.75,
+                        stop_loss_count=1,
+                        daily_realized_pnl=3.0,
+                        current_day=bytes([50, 48, 50, 54, 45, 48, 52, 45, 49, 49]).decode(),
+                        pending_paper_trades=[],
+                    ),
+                },
+            )
+        ),
+        encoding=bytes([117, 116, 102, 45, 56]).decode(),
+    )
+
+    state = load_session_state(state_path, effective_paper_strategy_ids=[1, 6])
+
+    assert state.paper_strategies[1].round_index == 2
+    assert state.paper_strategies[6].round_index == 4
+    assert state.paper_strategies[6].strategy6_last_ofi_score == 0.75
+
+
+
+
+
 class _ImmediatePaperRoundClient(_LiveMarketClient):
     def find_current_and_next_rounds(self, *, now):
         window = MarketWindow(
@@ -1511,3 +1601,120 @@ def test_run_paper_trading_stop_event_stops_during_round_end_wait(tmp_path, monk
 
 
 
+
+def test_run_paper_trading_multi_strategy_settles_ready_strategy_without_blocking_others(tmp_path, monkeypatch):
+    stop_event = threading.Event()
+
+    def fake_sleep(_seconds):
+        stop_event.set()
+
+    monkeypatch.setattr("trader.time.sleep", fake_sleep)
+
+    state_path = tmp_path / "state.json"
+    log_path = tmp_path / "paper.csv"
+    state_path.write_text(
+        json.dumps(
+            {
+                "paper_strategies": {
+                    "1": {
+                        "round_index": 1,
+                        "cash_pnl": 0.0,
+                        "recovery_loss": 0.0,
+                        "consecutive_losses": 0,
+                        "consecutive_max_stake_skips": 0,
+                        "signal_round_slug": None,
+                        "signal_round_open_up_price": None,
+                        "signal_round_locked_side": None,
+                        "strategy6_last_ofi_score": None,
+                        "stop_loss_count": 0,
+                        "daily_realized_pnl": 0.0,
+                        "current_day": "2026-04-11",
+                        "pending_paper_trades": [
+                            {
+                                "round_index": 1,
+                                "event_slug": "btc-updown-5m-paper-s1",
+                                "start_time": "2026-04-11T06:00:00+00:00",
+                                "end_time": "2099-04-11T06:05:00+00:00",
+                                "side": "UP",
+                                "price": 0.5,
+                                "order_size": 2.0,
+                                "order_cost": 1.0,
+                                "expected_profit": 1.0,
+                                "strategy": 1,
+                                "entry_timing": "OPEN",
+                                "signal_open_up_price": None,
+                                "signal_current_up_price": None,
+                                "signal_threshold": None,
+                                "signal_delta": None,
+                                "signal_locked": False,
+                                "signal_reason": None,
+                                "queued_at": "2026-04-11T06:00:05+00:00"
+                            }
+                        ]
+                    },
+                    "6": {
+                        "round_index": 4,
+                        "cash_pnl": 0.0,
+                        "recovery_loss": 0.0,
+                        "consecutive_losses": 0,
+                        "consecutive_max_stake_skips": 0,
+                        "signal_round_slug": None,
+                        "signal_round_open_up_price": None,
+                        "signal_round_locked_side": None,
+                        "strategy6_last_ofi_score": None,
+                        "stop_loss_count": 0,
+                        "daily_realized_pnl": 0.0,
+                        "current_day": "2026-04-11",
+                        "pending_paper_trades": [
+                            {
+                                "round_index": 4,
+                                "event_slug": "btc-updown-5m-paper-s6",
+                                "start_time": "2026-04-11T06:05:00+00:00",
+                                "end_time": "2026-04-11T06:10:00+00:00",
+                                "side": "DOWN",
+                                "price": 0.4,
+                                "order_size": 2.5,
+                                "order_cost": 1.0,
+                                "expected_profit": 1.5,
+                                "strategy": 6,
+                                "entry_timing": "OPEN",
+                                "signal_open_up_price": None,
+                                "signal_current_up_price": None,
+                                "signal_threshold": 0.2,
+                                "signal_delta": -0.4,
+                                "signal_locked": False,
+                                "signal_reason": None,
+                                "queued_at": "2026-04-11T06:05:05+00:00"
+                            }
+                        ]
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    class _MultiStrategySettlementClient(_NoMarketClient):
+        def get_event_by_slug(self, slug: str):
+            if slug == "btc-updown-5m-paper-s1":
+                return {"eventMetadata": {"priceToBeat": None, "finalPrice": None}}
+            if slug == "btc-updown-5m-paper-s6":
+                return {"eventMetadata": {"priceToBeat": 100.0, "finalPrice": 80.0}}
+            raise AssertionError(slug)
+
+    result = run_paper_trading(
+        AppConfig(strategy_id=2, paper_strategy_ids=[1, 6], poll_interval_seconds=1),
+        client=_MultiStrategySettlementClient(),
+        state_path=state_path,
+        log_path=log_path,
+        stop_event=stop_event,
+    )
+
+    state = load_session_state(state_path, effective_paper_strategy_ids=[1, 6])
+    assert result["status"] == "stopped"
+    assert len(state.paper_strategies[1].pending_paper_trades) == 1
+    assert state.paper_strategies[6].pending_paper_trades == []
+    rows = log_path.read_text(encoding="utf-8").splitlines()
+    assert len(rows) == 2
+    assert "btc-updown-5m-paper-s6" in rows[1]
+    assert ",6,OPEN,btc-updown-5m-paper-s6," in rows[1]

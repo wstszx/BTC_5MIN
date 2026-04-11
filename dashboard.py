@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
-from config import AppConfig, build_config_from_env_values, load_env_file_values
+from config import AppConfig, build_config_from_env_values, load_env_file_values, PAPER_STRATEGY_IDS
 from binance_signal import BinanceDepth5SignalService
 from models import MarketWindow, PendingPaperTrade
 from paper_report import summarize_paper_trades
@@ -60,6 +60,18 @@ def _write_env_file(path: Path, values: dict[str, str]) -> None:
     path.write_text(text, encoding="utf-8")
 
 
+def _normalize_strategy_id_list_value(value: str) -> str:
+    cfg = build_config_from_env_values({PAPER_STRATEGY_IDS: value})
+    raw = [item.strip() for item in str(value).split(',') if item.strip()]
+    if raw and len(cfg.paper_strategy_ids) == 1 and cfg.paper_strategy_ids[0] == cfg.strategy_id:
+        has_valid = any(item in {"1", "2", "3", "4", "5", "6"} for item in raw)
+        if not has_valid:
+            raise ValueError(f"Invalid value for PAPER_STRATEGY_IDS: expected comma-separated strategy ids 1-6, got {value!r}")
+    normalized = [str(item) for item in cfg.paper_strategy_ids]
+    if not normalized:
+        raise ValueError(f"Invalid value for PAPER_STRATEGY_IDS: expected comma-separated strategy ids 1-6, got {value!r}")
+    return ",".join(normalized)
+
 def _tail_csv_rows(path: Path, *, limit: int) -> list[dict[str, str]]:
     if limit <= 0 or not path.exists():
         return []
@@ -71,6 +83,31 @@ def _tail_csv_rows(path: Path, *, limit: int) -> list[dict[str, str]]:
     rows = list(buffer)
     rows.reverse()
     return rows
+
+
+def _normalize_strategy_filter(strategy: int | str | None) -> str | None:
+    if strategy is None:
+        return None
+    raw = str(strategy).strip().lower()
+    if raw in {"", "all"}:
+        return None
+    if raw in {"1", "2", "3", "4", "5", "6"}:
+        return raw
+    raise ValueError(f"Invalid strategy filter: {strategy!r}")
+
+
+def _filter_trade_rows_by_strategy(rows: list[dict[str, str]], strategy: int | str | None) -> list[dict[str, str]]:
+    strategy_filter = _normalize_strategy_filter(strategy)
+    if strategy_filter is None:
+        return list(rows)
+    return [row for row in rows if str(row.get("strategy") or "").strip() == strategy_filter]
+
+
+def _filter_pending_paper_trades_by_strategy(items: list[PendingPaperTrade], strategy: int | str | None) -> list[PendingPaperTrade]:
+    strategy_filter = _normalize_strategy_filter(strategy)
+    if strategy_filter is None:
+        return list(items)
+    return [item for item in items if str(item.strategy) == strategy_filter]
 
 
 def _pending_paper_trade_to_recent_row(item: PendingPaperTrade) -> dict[str, str]:
@@ -224,6 +261,7 @@ def _field_groups() -> list[dict[str, Any]]:
             "description": "决定方向节奏、下注模式和主要风险边界。",
             "keys": [
                 "STRATEGY_ID",
+                "PAPER_STRATEGY_IDS",
                 "TARGET_PROFIT",
                 "BET_SIZING_MODE",
                 "BASE_ORDER_COST",
@@ -281,6 +319,7 @@ class DashboardState:
         "POLYMARKET_API_SECRET",
         "POLYMARKET_API_PASSPHRASE",
         "STRATEGY_ID",
+        "PAPER_STRATEGY_IDS",
         "TARGET_PROFIT",
         "BET_SIZING_MODE",
         "BASE_ORDER_COST",
@@ -312,6 +351,7 @@ class DashboardState:
         "POLYMARKET_API_SECRET": "官方API Secret",
         "POLYMARKET_API_PASSPHRASE": "官方API Passphrase",
         "STRATEGY_ID": "基础策略",
+        "PAPER_STRATEGY_IDS": "纸面策略组合",
         "TARGET_PROFIT": "每次目标净利",
         "BET_SIZING_MODE": "下注模式",
         "BASE_ORDER_COST": "固定起始下注金额",
@@ -338,6 +378,7 @@ class DashboardState:
         "TRADE_MODE": ["paper", "live"],
         "LIVE_TRADING_ENABLED": ["true", "false"],
         "STRATEGY_ID": ["1", "2", "3", "4", "5"],
+        "PAPER_STRATEGY_IDS": ["1", "2", "3", "4", "5", "6"],
         "BET_SIZING_MODE": ["FIXED_BASE_COST", "TARGET_PROFIT"],
         "SIGNAL_WEAK_SIGNAL_MODE": ["SKIP", "FALLBACK"],
         "SIGNAL_FALLBACK_STRATEGY_ID": ["1", "2", "3", "4"],
@@ -353,6 +394,7 @@ class DashboardState:
         "POLYMARKET_API_SECRET": "live_api_secret",
         "POLYMARKET_API_PASSPHRASE": "live_api_passphrase",
         "STRATEGY_ID": "strategy_id",
+        "PAPER_STRATEGY_IDS": "paper_strategy_ids",
         "TARGET_PROFIT": "target_profit",
         "BET_SIZING_MODE": "bet_sizing_mode",
         "BASE_ORDER_COST": "base_order_cost",
@@ -415,7 +457,8 @@ class DashboardState:
         "SIGNAL_LOCK_BEFORE_ENTRY_SECONDS": "strategy_5_only",
     }
     FIELD_HELP: dict[str, str] = {
-        "STRATEGY_ID": "1~4 是固定节奏策略；5 是动量信号策略，会额外用到下方 signal_* 参数。",
+        "STRATEGY_ID": "1~4 是固定节奏策略；5 是动量信号策略；6 是 Binance OFI 策略。",
+        "PAPER_STRATEGY_IDS": "纸面测试可多选策略，按输入顺序去重保存，例如 1,2,6。",
         "TARGET_PROFIT": "TARGET_PROFIT 模式下，每轮希望净赚多少；FIXED_BASE_COST 模式下主要用于研究，不直接决定起始下注额。",
         "BET_SIZING_MODE": "FIXED_BASE_COST 为固定起始金额，TARGET_PROFIT 为按目标盈利反推下单金额。",
         "ENABLE_LIVE_TRADING": "关闭时只做纸面测试；开启后会切到实盘配置，并允许真实下单。",
@@ -453,10 +496,14 @@ class DashboardState:
         raise ValueError(f"Invalid value for {key}: expected true/false, got {value!r}")
 
     @classmethod
+    @classmethod
     def _normalize_config_value(cls, key: str, value: str) -> str:
         normalized = value.strip()
         if normalized == "":
             return ""
+
+        if key == "PAPER_STRATEGY_IDS":
+            return _normalize_strategy_id_list_value(normalized)
 
         if key in cls.BOOL_CONFIG_KEYS:
             return cls._normalize_bool_config_value(key, normalized)
@@ -540,6 +587,8 @@ class DashboardState:
         value = getattr(self._cfg, self.CONFIG_ATTR_MAP[key])
         if value is None:
             return ""
+        if key == "PAPER_STRATEGY_IDS":
+            return ",".join(str(item) for item in value)
         return _fmt_env(value)
 
     def _masked_env_values(self, env_values: dict[str, str]) -> dict[str, str]:
@@ -838,45 +887,69 @@ class DashboardState:
         payload['strategy6'] = strategy6_payload
         return payload
 
-    def get_paper_summary_payload(self) -> dict[str, Any]:
+    def get_paper_summary_payload(self, *, strategy: int | str | None = None) -> dict[str, Any]:
         with self._lock:
             paper_csv = self._cfg.logs_dir / "paper_trades.csv"
+        strategy_filter = _normalize_strategy_filter(strategy)
         try:
-            daily = summarize_paper_trades(paper_csv, tz_offset="+08:00")
+            if strategy_filter is None:
+                daily = summarize_paper_trades(paper_csv, tz_offset="+08:00")
+            else:
+                filtered_rows = list(reversed(_filter_trade_rows_by_strategy(_tail_csv_rows(paper_csv, limit=1000000), strategy_filter)))
+                if not filtered_rows:
+                    daily = []
+                else:
+                    filtered_csv = paper_csv.with_name(f"{paper_csv.stem}_strategy_{strategy_filter}_summary{paper_csv.suffix}")
+                    with filtered_csv.open("w", newline="", encoding="utf-8") as handle:
+                        writer = csv.DictWriter(handle, fieldnames=list(filtered_rows[0].keys()))
+                        writer.writeheader()
+                        writer.writerows(filtered_rows)
+                    try:
+                        daily = summarize_paper_trades(filtered_csv, tz_offset="+08:00")
+                    finally:
+                        if filtered_csv.exists():
+                            filtered_csv.unlink()
         except (FileNotFoundError, ValueError):
             daily = []
         days = [asdict(item) for item in daily[-14:]]
         return {
             "csv_path": str(paper_csv),
             "tz_offset": "+08:00",
+            "strategy": strategy_filter or "all",
             "days": days,
             "latest": days[-1] if days else None,
         }
 
-    def get_recent_trades_payload(self, *, limit: int) -> dict[str, Any]:
+    def get_recent_trades_payload(self, *, limit: int, strategy: int | str | None = None) -> dict[str, Any]:
         with self._lock:
             cfg = self._cfg
             paper_csv = cfg.logs_dir / "paper_trades.csv"
             state_path = cfg.logs_dir / "session_state.json"
         capped_limit = max(1, min(300, int(limit)))
-        rows = _tail_csv_rows(paper_csv, limit=capped_limit)
+        strategy_filter = _normalize_strategy_filter(strategy)
+        rows = _filter_trade_rows_by_strategy(_tail_csv_rows(paper_csv, limit=capped_limit * 4), strategy_filter)
         pending_rows: list[dict[str, str]] = []
-        session_state = load_session_state(state_path)
-        for item in getattr(session_state, 'pending_paper_trades', []) or []:
+        session_state = load_session_state(state_path, effective_paper_strategy_ids=cfg.paper_strategy_ids)
+        pending_items = list(getattr(session_state, "pending_paper_trades", []) or [])
+        if getattr(session_state, "paper_strategies", None):
+            pending_items = []
+            for strategy_state in session_state.paper_strategies.values():
+                pending_items.extend(getattr(strategy_state, "pending_paper_trades", []) or [])
+        for item in _filter_pending_paper_trades_by_strategy(pending_items, strategy_filter):
             pending_rows.append(_pending_paper_trade_to_recent_row(item))
         merged_rows = pending_rows + rows
-        merged_rows.sort(key=lambda row: str(row.get('timestamp') or ''), reverse=True)
+        merged_rows.sort(key=lambda row: str(row.get("timestamp") or ""), reverse=True)
         merged_rows = merged_rows[:capped_limit]
 
         client = PolymarketClient(cfg)
         try:
             validated_rows = [_validate_recent_trade_row(row, client=client) for row in merged_rows]
         finally:
-            close = getattr(client, 'close', None)
+            close = getattr(client, "close", None)
             if callable(close):
                 close()
 
-        return {"csv_path": str(paper_csv), "count": len(validated_rows), "rows": validated_rows}
+        return {"csv_path": str(paper_csv), "strategy": strategy_filter or "all", "count": len(validated_rows), "rows": validated_rows}
 
     def get_live_recent_orders_payload(self, *, limit: int) -> dict[str, Any]:
         with self._lock:
@@ -2325,6 +2398,7 @@ const state = {
   market: null,
   summary: null,
   recent: null,
+  paperStrategyFilter: 'all',
   countdownSnapshotAtMs: null,
   countdownBaseSeconds: null,
   showInternalKeys: false,
@@ -3698,7 +3772,7 @@ async function refreshSummary() {
 async function refreshRecent() {
   try {
     const runningMode = String((((state.config || {}).runtime_status || {}).active_mode || (((state.config || {}).runtime_status || {}).running_mode) || 'paper')).toLowerCase();
-    const recentEndpoint = runningMode === 'live' ? '/api/live/recent?limit=80' : '/api/paper/recent?limit=80';
+    const strategy = encodeURIComponent(String(state.paperStrategyFilter || 'all'));`r`n    const recentEndpoint = runningMode === 'live' ? '/api/live/recent?limit=80' : '/api/paper/recent?limit=80&strategy=' + strategy;
     const data = await apiGet(recentEndpoint);
     renderRecent(data);
   } catch (err) {

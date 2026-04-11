@@ -5,6 +5,9 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 
+PAPER_STRATEGY_IDS = bytes([80, 65, 80, 69, 82, 95, 83, 84, 82, 65, 84, 69, 71, 89, 95, 73, 68, 83]).decode()
+STRATEGY_ID = bytes([83, 84, 82, 65, 84, 69, 71, 89, 95, 73, 68]).decode()
+
 
 _ENV_FILE_ENCODINGS: tuple[str, ...] = ("utf-8", "utf-8-sig", "gbk")
 
@@ -122,12 +125,35 @@ def _env_optional_float(name: str) -> float | None:
         return None
 
 
+def _parse_strategy_id_list(raw: str | None, *, fallback: int) -> list[int]:
+    if raw is None:
+        return [fallback]
+
+    strategy_ids: list[int] = []
+    seen: set[int] = set()
+    for item in raw.split(','):
+        candidate = item.strip()
+        if not candidate:
+            continue
+        try:
+            strategy_id = int(candidate)
+        except ValueError:
+            continue
+        if strategy_id < 1 or strategy_id > 6 or strategy_id in seen:
+            continue
+        seen.add(strategy_id)
+        strategy_ids.append(strategy_id)
+
+    return strategy_ids or [fallback]
+
+
 @dataclass(slots=True)
 class AppConfig:
     gamma_api_base: str = "https://gamma-api.polymarket.com"
     clob_api_base: str = "https://clob.polymarket.com"
     data_api_base: str = "https://data-api.polymarket.com"
     series_id: int = 10684
+    paper_strategy_ids: list[int] = field(default_factory=lambda: _parse_strategy_id_list(os.getenv(PAPER_STRATEGY_IDS), fallback=_env_int(STRATEGY_ID, 2)))
     series_slug: str = "btc-up-or-down-5m"
     trade_mode: str = field(default_factory=lambda: (os.getenv("TRADE_MODE") or "paper").strip().lower() or "paper")
     strategy_id: int = field(default_factory=lambda: _env_int("STRATEGY_ID", 2))
