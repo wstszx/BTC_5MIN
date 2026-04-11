@@ -2123,6 +2123,11 @@ body::before {
   font-family: var(--mono);
 }
 
+.field input.input-compact,
+.field select.input-compact {
+  width: min(100%, 156px);
+}
+
 .field-help,
 .field-scope-note,
 .field-error {
@@ -3373,6 +3378,27 @@ function isSingleLiveToggleKey(key) {
   return key === 'TRADE_MODE' || key === 'LIVE_TRADING_ENABLED';
 }
 
+function isCompactConfigField(key) {
+  return [
+    'TARGET_PROFIT',
+    'BASE_ORDER_COST',
+    'MAX_CONSECUTIVE_LOSSES',
+    'MAX_STAKE',
+    'MAX_PRICE_THRESHOLD',
+    'SIGNAL_MOMENTUM_THRESHOLD',
+    'SIGNAL_FALLBACK_STRATEGY_ID',
+    'SIGNAL_HISTORY_FIDELITY_SECONDS',
+    'SIGNAL_ANCHOR_MAX_OFFSET_SECONDS',
+    'SIGNAL_DYNAMIC_THRESHOLD_K',
+    'SIGNAL_DYNAMIC_THRESHOLD_MIN_POINTS',
+    'SIGNAL_LOCK_BEFORE_ENTRY_SECONDS',
+    'MAX_STAKE_SKIP_ALERT_THRESHOLD',
+    'WS_QUOTE_STALE_SECONDS',
+    'WS_TRADE_GUARD_STALE_SECONDS',
+    'WS_CONNECT_TIMEOUT_SECONDS'
+  ].indexOf(String(key || '')) >= 0;
+}
+
 function buildLiveToggleValue(values) {
   const mode = String(values.TRADE_MODE || 'paper').toLowerCase();
   const enabled = String(values.LIVE_TRADING_ENABLED || 'false').toLowerCase();
@@ -3494,6 +3520,9 @@ function renderConfig(payload) {
       } else if (Array.isArray(options[key]) && options[key].length > 0) {
         const select = document.createElement('select');
         select.id = 'cfg_' + key;
+        if (isCompactConfigField(key)) {
+          select.classList.add('input-compact');
+        }
         for (const opt of options[key]) {
           const option = document.createElement('option');
           option.value = opt;
@@ -3509,6 +3538,9 @@ function renderConfig(payload) {
         input.id = 'cfg_' + key;
         input.type = 'text';
         input.value = String(displayValues[key] ?? '');
+        if (isCompactConfigField(key)) {
+          input.classList.add('input-compact');
+        }
         wrap.appendChild(input);
       }
 

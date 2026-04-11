@@ -704,6 +704,19 @@ def test_dashboard_assets_use_unified_strategy_selector_for_config_and_views():
     assert 'id="strategyGuideCard"' in html
 
 
+
+def test_dashboard_assets_render_compact_inputs_for_short_numeric_fields():
+    js = _dashboard_js()
+    css = dashboard._dashboard_css()
+
+    assert "function isCompactConfigField(key) {" in js
+    assert "'TARGET_PROFIT'" in js
+    assert "input.classList.add('input-compact');" in js
+    assert "select.classList.add('input-compact');" in js
+    assert '.field input.input-compact,' in css
+    assert 'width: min(100%, 156px);' in css
+
+
 def test_dashboard_assets_confirm_before_switching_to_live_mode():
     js = _dashboard_js()
 
@@ -975,4 +988,5 @@ def test_dashboard_market_payload_can_switch_strategy_view(tmp_path: Path):
     finally:
         state.close()
         os.chdir(old_cwd)
+
 
