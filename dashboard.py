@@ -3772,7 +3772,8 @@ async function refreshSummary() {
 async function refreshRecent() {
   try {
     const runningMode = String((((state.config || {}).runtime_status || {}).active_mode || (((state.config || {}).runtime_status || {}).running_mode) || 'paper')).toLowerCase();
-    const strategy = encodeURIComponent(String(state.paperStrategyFilter || 'all'));`r`n    const recentEndpoint = runningMode === 'live' ? '/api/live/recent?limit=80' : '/api/paper/recent?limit=80&strategy=' + strategy;
+    const strategy = encodeURIComponent(String(state.paperStrategyFilter || 'all'));
+    const recentEndpoint = runningMode === 'live' ? '/api/live/recent?limit=80' : '/api/paper/recent?limit=80&strategy=' + strategy;
     const data = await apiGet(recentEndpoint);
     renderRecent(data);
   } catch (err) {
