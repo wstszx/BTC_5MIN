@@ -2114,6 +2114,8 @@ body::before {
 .field input,
 .field select {
   width: 100%;
+  min-height: 32px;
+  box-sizing: border-box;
   border: 1px solid #2f4b70;
   border-radius: 8px;
   background: #0a1528;

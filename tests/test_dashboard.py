@@ -715,6 +715,8 @@ def test_dashboard_assets_render_compact_inputs_for_short_numeric_fields():
     assert "select.classList.add('input-compact');" in js
     assert '.field input.input-compact,' in css
     assert 'width: min(100%, 156px);' in css
+    assert 'min-height: 32px;' in css
+    assert 'box-sizing: border-box;' in css
 
 
 def test_dashboard_assets_confirm_before_switching_to_live_mode():
@@ -988,5 +990,6 @@ def test_dashboard_market_payload_can_switch_strategy_view(tmp_path: Path):
     finally:
         state.close()
         os.chdir(old_cwd)
+
 
 
