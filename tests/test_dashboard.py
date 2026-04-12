@@ -401,6 +401,34 @@ def test_dashboard_assets_include_strategy_guide_and_human_labels():
     assert "\u52a8\u91cf\u4fe1\u53f7 V2" in js
 
 
+
+
+def test_dashboard_config_payload_exposes_live_auto_redeem_fields(tmp_path: Path):
+    state = DashboardState(env_file=tmp_path / '.env.dashboard')
+    try:
+        payload = state.get_config_payload()
+        assert 'LIVE_AUTO_REDEEM_ENABLED' in payload['editable_keys']
+        assert 'LIVE_AUTO_REDEEM_DRY_RUN' in payload['editable_keys']
+        assert payload['field_help']['LIVE_AUTO_REDEEM_ENABLED']
+        assert payload['field_help']['LIVE_AUTO_REDEEM_DRY_RUN']
+        runtime_group = payload['field_groups'][0]
+        assert 'LIVE_AUTO_REDEEM_ENABLED' in runtime_group['keys']
+        assert 'LIVE_AUTO_REDEEM_DRY_RUN' in runtime_group['keys']
+        assert payload['select_options']['LIVE_AUTO_REDEEM_ENABLED'] == ['false', 'true']
+        assert payload['select_options']['LIVE_AUTO_REDEEM_DRY_RUN'] == ['false', 'true']
+    finally:
+        state.close()
+
+
+def test_dashboard_help_center_includes_live_auto_redeem_copy():
+    js = _dashboard_js()
+
+    assert 'LIVE_AUTO_REDEEM_ENABLED' in js
+    assert 'LIVE_AUTO_REDEEM_DRY_RUN' in js
+    assert 'auto redeem' in js.lower()
+    assert 'dry-run' in js.lower()
+    assert 'polygon' in js.lower()
+
 def test_dashboard_assets_include_help_center_shell():
     html = _dashboard_html()
     js = _dashboard_js()
@@ -427,10 +455,10 @@ def test_dashboard_assets_include_help_center_renderers():
 def test_dashboard_help_center_includes_quickstart_copy():
     js = _dashboard_js()
 
-    assert "\u5148\u770b\u54ea\u91cc" in js
-    assert "\u600e\u4e48\u5b89\u5168\u6539\u53c2\u6570" in js
-    assert "\u600e\u4e48\u5224\u65ad\u5f53\u524d\u80fd\u4e0d\u80fd\u8dd1" in js
-    assert "\u51fa\u95ee\u9898\u5148\u770b\u54ea\u91cc" in js
+    assert ('Live Auto Redeem' in js) or ("\u5b9e\u76d8\u81ea\u52a8\u8d4e\u56de" in js)
+    assert ('What to check first' in js) or ("\u5148\u770b\u54ea\u91cc" in js)
+    assert ('How to change config safely' in js) or ("\u600e\u4e48\u5b89\u5168\u6539\u53c2\u6570" in js)
+    assert ('How to tell whether the runtime is healthy' in js) or ("\u600e\u4e48\u5224\u65ad\u5f53\u524d\u80fd\u4e0d\u80fd\u8dd1" in js)
     assert "\u9875\u9762\u5143\u7d20\u8bf4\u660e" in js
 
 
