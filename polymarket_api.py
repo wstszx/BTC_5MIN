@@ -520,6 +520,24 @@ class PolymarketClient:
             return payload[0] if payload else {}
         return payload
 
+    def get_current_positions(
+        self,
+        *,
+        user: str,
+        redeemable: bool | None = None,
+    ) -> list[dict[str, Any]]:
+        params: dict[str, Any] = {"user": user}
+        if redeemable is not None:
+            params["redeemable"] = str(redeemable).lower()
+        payload = self._get_json("/positions", base_url=self.config.data_api_base, params=params)
+        if isinstance(payload, list):
+            return [item for item in payload if isinstance(item, dict)]
+        if isinstance(payload, dict):
+            items = payload.get("value", payload.get("data", payload.get("positions", [])))
+            if isinstance(items, list):
+                return [item for item in items if isinstance(item, dict)]
+        return []
+
     def get_price_history(
         self,
         token_id: str,

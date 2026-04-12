@@ -98,6 +98,17 @@ def test_build_config_from_env_values_defaults_trade_mode_to_paper():
     assert cfg.trade_mode == 'paper'
 
 
+def test_build_config_from_env_values_defaults_live_auto_redeem_settings():
+    cfg = build_config_from_env_values({})
+
+    assert cfg.live_auto_redeem_enabled is False
+    assert cfg.live_auto_redeem_poll_seconds == 20
+    assert cfg.live_auto_redeem_max_retries == 6
+    assert cfg.live_auto_redeem_initial_backoff_seconds == 30
+    assert cfg.live_auto_redeem_max_backoff_seconds == 300
+    assert cfg.live_auto_redeem_dry_run is False
+
+
 def test_run_single_command_runtime_loads_shared_config_for_startup_and_refresh(monkeypatch, tmp_path: Path):
     env_file = tmp_path / ".env.dashboard"
     startup_cfg = object()
@@ -151,7 +162,8 @@ def test_run_single_command_runtime_loads_shared_config_for_startup_and_refresh(
     exit_code = main.run_single_command_runtime(env_file=env_file)
 
     assert exit_code == 0
-    assert load_calls == [env_file, env_file]
+    assert load_calls[:2] == [env_file, env_file]
+    assert len(load_calls) >= 2
     assert build_calls == payloads
     assert trader_calls["cfg"] is startup_cfg
     assert trader_calls["provider_cfg"] is refreshed_cfg
@@ -189,7 +201,7 @@ def test_run_single_command_runtime_keyboard_interrupt_triggers_coordinated_shut
         trader_stopped.set()
         return {"status": "stopped"}
 
-    def fake_wait_for_runtime_exit(*, stop_event, dashboard_thread, trader_thread):
+    def fake_wait_for_runtime_exit(*, stop_event, dashboard_thread, worker_threads):
         raise KeyboardInterrupt
 
     monkeypatch.setattr(main, "load_env_file_values", lambda _: {})
@@ -294,11 +306,119 @@ def test_run_single_command_runtime_uses_live_worker_when_trade_mode_live(monkey
     exit_code = main.run_single_command_runtime(env_file=env_file)
 
     assert exit_code == 0
-    assert load_calls == [env_file, env_file]
+    assert load_calls[:3] == [env_file, env_file, env_file]
     assert live_calls['cfg'] is startup_cfg
     assert live_calls['provider_cfg'] is refreshed_cfg
     assert dashboard_runtime.shutdown_calls >= 1
     assert dashboard_runtime.close_calls == 1
+
+
+def test_run_single_command_runtime_starts_live_redeem_worker_in_live_mode(monkeypatch, tmp_path: Path):
+    env_file = tmp_path / ".env.dashboard"
+    startup_cfg = AppConfig(
+        trade_mode="live",
+        live_trading_enabled=True,
+        live_private_key="pk",
+        live_funder="0xfunder",
+        live_auto_redeem_enabled=True,
+    )
+    load_calls: list[Path] = []
+
+    def fake_load_shared_config(path: Path):
+        load_calls.append(path)
+        return startup_cfg
+
+    class FakeDashboardRuntime:
+        def __init__(self) -> None:
+            self.shutdown_calls = 0
+            self.close_calls = 0
+        def serve_forever(self) -> None:
+            return
+        def shutdown(self) -> None:
+            self.shutdown_calls += 1
+        def close(self) -> None:
+            self.close_calls += 1
+
+    dashboard_runtime = FakeDashboardRuntime()
+    live_calls = {"trading": 0, "redeem": 0}
+
+    def fake_run_live_trading(cfg, *, stop_event, config_provider):
+        live_calls["trading"] += 1
+        return {"status": "stopped"}
+
+    def fake_run_live_redeem_worker(cfg, *, stop_event, config_provider):
+        live_calls["redeem"] += 1
+        stop_event.set()
+        return {"status": "stopped"}
+
+    monkeypatch.setattr(main, "_load_shared_config", fake_load_shared_config)
+    monkeypatch.setattr(main, "create_dashboard_runtime", lambda **_: dashboard_runtime)
+    monkeypatch.setattr(main, "run_live_trading", fake_run_live_trading, raising=False)
+    monkeypatch.setattr(main, "run_live_redeem_worker", fake_run_live_redeem_worker, raising=False)
+    monkeypatch.setattr(main, "run_paper_trading", lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("paper worker should not start in live mode")))
+
+    exit_code = main.run_single_command_runtime(env_file=env_file)
+
+    assert exit_code == 0
+    assert load_calls[0] == env_file
+    assert live_calls == {"trading": 1, "redeem": 1}
+
+
+def test_run_single_command_runtime_does_not_start_live_redeem_worker_in_paper_mode(monkeypatch):
+    class FakeDashboardRuntime:
+        def serve_forever(self) -> None:
+            return
+        def shutdown(self) -> None:
+            return
+        def close(self) -> None:
+            return
+
+    redeem_calls = {"count": 0}
+
+    def fake_run_paper_trading(cfg, *, stop_event, config_provider):
+        stop_event.set()
+        return {"status": "stopped"}
+
+    def fake_run_live_redeem_worker(*args, **kwargs):
+        redeem_calls["count"] += 1
+        return {"status": "stopped"}
+
+    monkeypatch.setattr(main, "_load_shared_config", lambda _: AppConfig(trade_mode="paper"))
+    monkeypatch.setattr(main, "create_dashboard_runtime", lambda **_: FakeDashboardRuntime())
+    monkeypatch.setattr(main, "run_paper_trading", fake_run_paper_trading)
+    monkeypatch.setattr(main, "run_live_redeem_worker", fake_run_live_redeem_worker, raising=False)
+
+    exit_code = main.run_single_command_runtime()
+
+    assert exit_code == 0
+    assert redeem_calls["count"] == 0
+
+
+def test_run_single_command_runtime_surfaces_live_redeem_worker_failures(monkeypatch):
+    class FakeDashboardRuntime:
+        def serve_forever(self) -> None:
+            return
+        def shutdown(self) -> None:
+            return
+        def close(self) -> None:
+            return
+
+    startup_cfg = AppConfig(
+        trade_mode="live",
+        live_trading_enabled=True,
+        live_private_key="pk",
+        live_funder="0xfunder",
+        live_auto_redeem_enabled=True,
+    )
+
+    monkeypatch.setattr(main, "_load_shared_config", lambda _: startup_cfg)
+    monkeypatch.setattr(main, "create_dashboard_runtime", lambda **_: FakeDashboardRuntime())
+    monkeypatch.setattr(main, "run_live_trading", lambda cfg, *, stop_event, config_provider: {"status": "stopped"}, raising=False)
+    monkeypatch.setattr(main, "run_live_redeem_worker", lambda cfg, *, stop_event, config_provider: (_ for _ in ()).throw(RuntimeError("redeem boom")), raising=False)
+
+    exit_code = main.run_single_command_runtime()
+
+    assert exit_code == 1
 
 
 def test_run_single_command_runtime_fails_fast_when_live_startup_validation_fails(monkeypatch):

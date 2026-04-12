@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import os
 from contextlib import contextmanager
@@ -208,3 +208,9 @@ class AppConfig:
     live_signature_type: int = field(default_factory=lambda: _env_int("POLYMARKET_SIGNATURE_TYPE", 0))
     live_funder: str | None = field(default_factory=lambda: os.getenv("POLYMARKET_FUNDER"))
     live_order_type: str = field(default_factory=lambda: (os.getenv("POLYMARKET_ORDER_TYPE") or "FOK").upper())
+    live_auto_redeem_enabled: bool = field(default_factory=lambda: _env_bool("LIVE_AUTO_REDEEM_ENABLED", False))
+    live_auto_redeem_poll_seconds: int = field(default_factory=lambda: _env_int("LIVE_AUTO_REDEEM_POLL_SECONDS", 20))
+    live_auto_redeem_max_retries: int = field(default_factory=lambda: _env_int("LIVE_AUTO_REDEEM_MAX_RETRIES", 6))
+    live_auto_redeem_initial_backoff_seconds: int = field(default_factory=lambda: _env_int("LIVE_AUTO_REDEEM_INITIAL_BACKOFF_SECONDS", 30))
+    live_auto_redeem_max_backoff_seconds: int = field(default_factory=lambda: _env_int("LIVE_AUTO_REDEEM_MAX_BACKOFF_SECONDS", 300))
+    live_auto_redeem_dry_run: bool = field(default_factory=lambda: _env_bool("LIVE_AUTO_REDEEM_DRY_RUN", False))

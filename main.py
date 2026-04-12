@@ -11,7 +11,7 @@ from typing import Sequence
 from config import AppConfig, build_config_from_env_values, load_env_file_values
 from dashboard import create_dashboard_runtime
 from runtime_control import RuntimeControl
-from trader import run_live_trading, run_paper_trading, validate_live_runtime_config
+from trader import run_live_redeem_worker, run_live_trading, run_paper_trading, validate_live_runtime_config
 
 
 
@@ -73,12 +73,14 @@ def _wait_for_runtime_exit(
     *,
     stop_event: threading.Event,
     dashboard_thread: threading.Thread,
-    trader_thread: threading.Thread,
+    worker_threads: list[threading.Thread],
 ) -> None:
     while True:
         if stop_event.is_set():
             return
-        if not dashboard_thread.is_alive() or not trader_thread.is_alive():
+        if not dashboard_thread.is_alive():
+            return
+        if any(not worker_thread.is_alive() for worker_thread in worker_threads):
             return
         time.sleep(0.1)
 
@@ -162,7 +164,7 @@ def run_single_command_runtime(
 
     dashboard_runtime = None
     dashboard_thread = None
-    trader_thread = None
+    trader_threads: list[threading.Thread] = []
     printed_startup = False
     first_worker = True
     try:
@@ -209,13 +211,28 @@ def run_single_command_runtime(
                 runtime_control=manager.runtime_control,
                 stop_when_safe=lambda: manager.snapshot().desired_mode != manager.snapshot().active_mode,
             )
+            worker_targets: list[tuple[str, object]] = []
             trader_target = lambda worker=worker, cfg=current_cfg, worker_kwargs=worker_kwargs: worker(cfg, **worker_kwargs)
-            trader_thread = _spawn_runtime_worker(
-                name=worker_name,
-                target=trader_target,
-                stop_event=stop_event,
-                worker_errors=worker_errors,
-            )
+            worker_targets.append((worker_name, trader_target))
+            if active_mode == 'live':
+                redeem_kwargs = _build_worker_call_kwargs(
+                    run_live_redeem_worker,
+                    stop_event=stop_event,
+                    config_provider=_config_provider,
+                    runtime_control=manager.runtime_control,
+                    stop_when_safe=lambda: manager.snapshot().desired_mode != manager.snapshot().active_mode,
+                )
+                redeem_target = lambda cfg=current_cfg, redeem_kwargs=redeem_kwargs: run_live_redeem_worker(cfg, **redeem_kwargs)
+                worker_targets.append(('live-redeem-worker', redeem_target))
+            trader_threads = [
+                _spawn_runtime_worker(
+                    name=name,
+                    target=target,
+                    stop_event=stop_event,
+                    worker_errors=worker_errors,
+                )
+                for name, target in worker_targets
+            ]
 
             if not printed_startup:
                 print(f'Runtime started: {startup_label} + dashboard')
@@ -226,9 +243,10 @@ def run_single_command_runtime(
             _wait_for_runtime_exit(
                 stop_event=stop_event,
                 dashboard_thread=dashboard_thread,
-                trader_thread=trader_thread,
+                worker_threads=trader_threads,
             )
-            trader_thread.join(timeout=10)
+            for trader_thread in trader_threads:
+                trader_thread.join(timeout=10)
 
             if worker_errors or stop_event.is_set():
                 break
@@ -256,7 +274,7 @@ def run_single_command_runtime(
         stop_event.set()
         if dashboard_runtime is not None:
             dashboard_runtime.shutdown()
-        if trader_thread is not None:
+        for trader_thread in trader_threads:
             trader_thread.join(timeout=10)
         if dashboard_thread is not None:
             dashboard_thread.join(timeout=10)

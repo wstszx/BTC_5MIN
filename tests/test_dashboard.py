@@ -679,6 +679,80 @@ def test_dashboard_assets_include_runtime_mode_status_shell():
 
 
 
+
+
+def test_dashboard_runtime_status_includes_live_redeem_snapshot(tmp_path: Path):
+    env_file = tmp_path / '.env.dashboard'
+    env_file.write_text(
+        'TRADE_MODE=live\n'
+        'LIVE_TRADING_ENABLED=true\n'
+        'POLYMARKET_PRIVATE_KEY=super-secret-private-key\n'
+        'POLYMARKET_FUNDER=0xfunder\n'
+        'LIVE_AUTO_REDEEM_ENABLED=true\n',
+        encoding='utf-8',
+    )
+    state = DashboardState(env_file=env_file)
+    logs_dir = state._cfg.logs_dir
+    logs_dir.mkdir(parents=True, exist_ok=True)
+    (logs_dir / 'live_redeem_state.json').write_text(
+        json.dumps(
+            {
+                'conditions': {
+                    'cond-1': {
+                        'status': 'pending',
+                        'attempt_count': 1,
+                        'event_slug': 'resolved-one',
+                    },
+                    'cond-2': {
+                        'status': 'retry_wait',
+                        'attempt_count': 2,
+                        'event_slug': 'resolved-two',
+                    },
+                },
+                'runtime': {
+                    'enabled': True,
+                    'last_poll_at': '2026-04-12T08:00:00+00:00',
+                    'last_attempt_at': '2026-04-12T08:00:05+00:00',
+                    'last_result': 'submitted',
+                    'last_tx_hash': '0xabc123',
+                    'pending_redeem_count': 2,
+                },
+            }
+        ),
+        encoding='utf-8',
+    )
+    state = DashboardState(env_file=env_file)
+    try:
+        payload = state.get_config_payload()
+        runtime = payload['runtime_status']
+        assert runtime['redeem_visible'] is True
+        assert runtime['redeem_enabled'] is True
+        assert runtime['redeem_pending_count'] == 2
+        assert runtime['redeem_last_result'] == 'submitted'
+        assert runtime['redeem_last_attempt_at'] == '2026-04-12T08:00:05+00:00'
+        assert runtime['redeem_last_tx_hash'] == '0xabc123'
+    finally:
+        state.close()
+
+
+def test_dashboard_assets_include_live_redeem_runtime_rows():
+    html = _dashboard_html()
+    js = _dashboard_js()
+
+    assert 'id="runtimeRedeemRows"' in html
+    assert 'id="runtimeRedeemEnabled"' in html
+    assert 'id="runtimeRedeemPending"' in html
+    assert 'id="runtimeRedeemResult"' in html
+    assert 'id="runtimeRedeemAttempt"' in html
+    assert 'id="runtimeRedeemTxHash"' in html
+    assert "const redeemVisible = !!(payload.redeem_visible || payload.redeem_enabled || ((payload.running_mode || payload.active_mode || 'paper') === 'live'));" in js
+    assert "el('runtimeRedeemRows').style.display = redeemVisible ? '' : 'none';" in js
+    assert "el('runtimeRedeemEnabled').textContent = payload.redeem_enabled ? 'Enabled' : 'Disabled';" in js
+    assert "el('runtimeRedeemPending').textContent = String(payload.redeem_pending_count ?? 0);" in js
+    assert "el('runtimeRedeemResult').textContent = payload.redeem_last_result || '--';" in js
+    assert "el('runtimeRedeemAttempt').textContent = payload.redeem_last_attempt_at ? fmtIso(payload.redeem_last_attempt_at) : '--';" in js
+    assert "el('runtimeRedeemTxHash').textContent = payload.redeem_last_tx_hash || '--';" in js
+
 def test_dashboard_assets_switch_recent_endpoint_by_running_mode():
     js = _dashboard_js()
 

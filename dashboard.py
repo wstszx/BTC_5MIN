@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import csv
 import errno
@@ -31,6 +31,7 @@ from trader import (
     _ws_is_stale_for_trade,
     load_session_state,
     resolve_quote_price,
+    load_live_redeem_state,
     validate_live_runtime_config,
 )
 
@@ -604,15 +605,39 @@ class DashboardState:
         desired_mode = str((runtime_snapshot.desired_mode if runtime_snapshot is not None else saved_mode) or "paper").strip().lower() or "paper"
         switch_state = runtime_snapshot.switch_state if runtime_snapshot is not None else ("idle" if desired_mode == active_mode else "pending")
         switch_reason = runtime_snapshot.switch_reason if runtime_snapshot is not None else None
-        validation_values = dict(env_values)
+        validation_values = dict(self._env_values)
+        validation_values.update(env_values)
         validation_values["TRADE_MODE"] = "live"
         live_ready = False
         live_validation_error = None
+        validated_live_cfg = None
         try:
-            validate_live_runtime_config(self._build_config(validation_values))
+            validated_live_cfg = self._build_config(validation_values)
+            validate_live_runtime_config(validated_live_cfg)
             live_ready = True
         except Exception as exc:
             live_validation_error = _localize_runtime_message(str(exc))
+
+        redeem_cfg = validated_live_cfg if validated_live_cfg is not None else self._build_config(validation_values)
+        redeem_state = load_live_redeem_state(redeem_cfg.logs_dir / "live_redeem_state.json")
+        redeem_runtime = redeem_state.get("runtime") if isinstance(redeem_state, dict) else {}
+        redeem_runtime = redeem_runtime if isinstance(redeem_runtime, dict) else {}
+        redeem_conditions = redeem_state.get("conditions") if isinstance(redeem_state, dict) else {}
+        redeem_conditions = redeem_conditions if isinstance(redeem_conditions, dict) else {}
+        redeem_pending_count = redeem_runtime.get("pending_redeem_count")
+        if redeem_pending_count in (None, ""):
+            redeem_pending_count = sum(
+                1
+                for raw_entry in redeem_conditions.values()
+                if isinstance(raw_entry, dict) and str(raw_entry.get("status") or "pending").strip().lower() not in {"completed", "terminal_error"}
+            )
+        try:
+            redeem_pending_count = max(0, int(redeem_pending_count or 0))
+        except (TypeError, ValueError):
+            redeem_pending_count = 0
+        redeem_enabled = bool(getattr(redeem_cfg, "live_auto_redeem_enabled", False) or redeem_runtime.get("enabled"))
+        redeem_visible = bool(redeem_enabled or active_mode == "live" or saved_mode == "live")
+
         return {
             "saved_mode": saved_mode,
             "running_mode": active_mode,
@@ -627,6 +652,12 @@ class DashboardState:
             "round_in_progress": runtime_snapshot.round_in_progress if runtime_snapshot is not None else False,
             "safe_to_switch": runtime_snapshot.safe_to_switch if runtime_snapshot is not None else (saved_mode == active_mode),
             "pending_live_order": runtime_snapshot.pending_live_order if runtime_snapshot is not None else False,
+            "redeem_visible": redeem_visible,
+            "redeem_enabled": redeem_enabled,
+            "redeem_pending_count": redeem_pending_count,
+            "redeem_last_result": redeem_runtime.get("last_result") or None,
+            "redeem_last_attempt_at": redeem_runtime.get("last_attempt_at") or None,
+            "redeem_last_tx_hash": redeem_runtime.get("last_tx_hash") or None,
         }
 
     def _refresh_runtime(self) -> None:
@@ -1322,12 +1353,19 @@ def _dashboard_html() -> str:
             </div>
             <span class="chip warn">热切换受控</span>
           </div>
-          <div class=\"rows\">
-            <div class="row"><span class="label">配置目标</span><span id="runtimeSavedMode" class="value">--</span></div>
-            <div class="row"><span class="label">当前状态</span><span id="runtimeRunningMode" class="value">--</span></div>
-            <div class="row"><span class="label">待切换</span><span id="runtimeRestartRequired" class="value">--</span></div>
-            <div class="row"><span class="label">实盘条件</span><span id="runtimeLiveReady" class="value">--</span></div>
-            <div class="row"><span class="label">条件说明</span><span id="runtimeLiveError" class="value">--</span></div>
+          <div class="rows">
+            <div class="row"><span class="label">Target Mode</span><span id="runtimeSavedMode" class="value">--</span></div>
+            <div class="row"><span class="label">Running Mode</span><span id="runtimeRunningMode" class="value">--</span></div>
+            <div class="row"><span class="label">Switch Pending</span><span id="runtimeRestartRequired" class="value">--</span></div>
+            <div class="row"><span class="label">Live Ready</span><span id="runtimeLiveReady" class="value">--</span></div>
+            <div class="row"><span class="label">Validation</span><span id="runtimeLiveError" class="value">--</span></div>
+            <div id="runtimeRedeemRows">
+              <div class="row"><span class="label">Auto Redeem</span><span id="runtimeRedeemEnabled" class="value">--</span></div>
+              <div class="row"><span class="label">Pending Redeems</span><span id="runtimeRedeemPending" class="value">--</span></div>
+              <div class="row"><span class="label">Last Result</span><span id="runtimeRedeemResult" class="value">--</span></div>
+              <div class="row"><span class="label">Last Attempt</span><span id="runtimeRedeemAttempt" class="value">--</span></div>
+              <div class="row"><span class="label">Last Tx Hash</span><span id="runtimeRedeemTxHash" class="value">--</span></div>
+            </div>
           </div>
         </div>
 
@@ -3422,10 +3460,18 @@ function expandLiveToggleValues(values) {
 function renderRuntimeStatus(payload) {
   el('runtimeSavedMode').textContent = formatModeLabel(payload.saved_mode || 'paper');
   el('runtimeRunningMode').textContent = formatModeLabel(payload.running_mode || 'paper');
-  el('runtimeRestartRequired').textContent = payload.restart_required ? '是' : '否';
-  el('runtimeLiveReady').textContent = payload.live_ready ? '已就绪' : '未就绪';
+  el('runtimeRestartRequired').textContent = payload.restart_required ? 'Yes' : 'No';
+  el('runtimeLiveReady').textContent = payload.live_ready ? 'Ready' : 'Blocked';
   el('runtimeLiveError').textContent = payload.live_validation_error || '--';
+  const redeemVisible = !!(payload.redeem_visible || payload.redeem_enabled || ((payload.running_mode || payload.active_mode || 'paper') === 'live'));
+  el('runtimeRedeemRows').style.display = redeemVisible ? '' : 'none';
+  el('runtimeRedeemEnabled').textContent = payload.redeem_enabled ? 'Enabled' : 'Disabled';
+  el('runtimeRedeemPending').textContent = String(payload.redeem_pending_count ?? 0);
+  el('runtimeRedeemResult').textContent = payload.redeem_last_result || '--';
+  el('runtimeRedeemAttempt').textContent = payload.redeem_last_attempt_at ? fmtIso(payload.redeem_last_attempt_at) : '--';
+  el('runtimeRedeemTxHash').textContent = payload.redeem_last_tx_hash || '--';
 }
+
 
 function shouldConfirmLiveModeSwitch(previousMode, nextMode) {
   previousMode = String(previousMode || 'paper').toLowerCase();

@@ -1,7 +1,8 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import json
 import threading
+from pathlib import Path
 from dataclasses import asdict
 from datetime import datetime, timedelta, timezone
 
@@ -13,6 +14,12 @@ from models import MarketQuote, MarketWindow, SessionState, TradePlan, TradeReco
 from runtime_control import RuntimeControl
 from trader import (
     SideDecision,
+    _list_redeemable_live_positions,
+    load_live_redeem_state,
+    save_live_redeem_state,
+    execute_live_redeem,
+    attempt_live_redeem,
+    run_live_redeem_worker,
     _resolve_side_from_strategy,
     _update_max_stake_skip_streak,
     append_trade_log,
@@ -163,11 +170,474 @@ def test_create_live_clob_client_derives_api_credentials_when_explicit_values_mi
     assert captured['derived'] is True
     assert captured['creds'] == {'api_key': 'derived-key'}
 
+def test_redeemable_positions_filters_live_user_and_required_fields():
+    class _RedeemablePositionsClient:
+        def __init__(self):
+            self.users: list[str] = []
+
+        def get_current_positions(self, *, user: str, redeemable: bool | None = None):
+            self.users.append(user)
+            assert redeemable is True
+            return [
+                {
+                    'proxyWallet': '0xfunder',
+                    'conditionId': 'cond-yes',
+                    'eventSlug': 'btc-updown-5m-1',
+                    'outcome': 'Yes',
+                    'size': '12.5',
+                    'redeemable': True,
+                },
+                {
+                    'proxyWallet': '0xfunder',
+                    'conditionId': 'cond-zero',
+                    'eventSlug': 'btc-updown-5m-2',
+                    'outcome': 'No',
+                    'size': '0',
+                    'redeemable': True,
+                },
+                {
+                    'proxyWallet': '0xfunder',
+                    'conditionId': None,
+                    'eventSlug': 'btc-updown-5m-3',
+                    'outcome': 'Yes',
+                    'size': '3',
+                    'redeemable': True,
+                },
+                {
+                    'proxyWallet': '0xother',
+                    'conditionId': 'cond-other',
+                    'eventSlug': 'btc-updown-5m-4',
+                    'outcome': 'No',
+                    'size': '4',
+                    'redeemable': True,
+                },
+                {
+                    'proxyWallet': '0xfunder',
+                    'conditionId': 'cond-false',
+                    'eventSlug': 'btc-updown-5m-5',
+                    'outcome': 'Yes',
+                    'size': '4',
+                    'redeemable': False,
+                },
+            ]
+
+    cfg = AppConfig(trade_mode='live', live_trading_enabled=True, live_private_key='pk', live_funder='0xFunder')
+
+    positions = _list_redeemable_live_positions(cfg, client=_RedeemablePositionsClient())
+
+    assert positions == [
+        {
+            'condition_id': 'cond-yes',
+            'event_slug': 'btc-updown-5m-1',
+            'outcome': 'Yes',
+            'size': 12.5,
+            'redeemable': True,
+            'user': '0xfunder',
+        }
+    ]
+
+
+def test_redeem_state_defaults_when_file_missing(tmp_path):
+    state = load_live_redeem_state(tmp_path / "live_redeem_state.json")
+
+    assert state == {
+        "conditions": {},
+        "runtime": {
+            "enabled": False,
+            "last_poll_at": None,
+            "last_attempt_at": None,
+            "last_result": None,
+            "last_tx_hash": None,
+            "pending_redeem_count": 0,
+        },
+    }
+
+
+def test_redeem_state_roundtrip_preserves_retry_fields(tmp_path):
+    state_path = tmp_path / "live_redeem_state.json"
+    original = {
+        "conditions": {
+            "cond-1": {
+                "status": "retry_wait",
+                "attempt_count": 3,
+                "last_attempt_at": "2026-04-12T08:00:00+00:00",
+                "next_attempt_at": "2026-04-12T08:05:00+00:00",
+                "last_tx_hash": "0xabc",
+                "event_slug": "btc-updown-5m-1",
+                "outcome": "Yes",
+                "size": 12.5,
+                "redeemable": True,
+                "user": "0xfunder",
+                "last_error": "rpc timeout",
+                "completed_at": None,
+            }
+        },
+        "runtime": {
+            "enabled": True,
+            "last_poll_at": "2026-04-12T08:00:30+00:00",
+            "last_attempt_at": "2026-04-12T08:00:00+00:00",
+            "last_result": "retry_wait",
+            "last_tx_hash": "0xabc",
+            "pending_redeem_count": 1,
+        },
+    }
+
+    save_live_redeem_state(state_path, original)
+    loaded = load_live_redeem_state(state_path)
+
+    assert loaded == original
+
+
 def test_validate_live_runtime_config_requires_private_key_and_funder():
     cfg = AppConfig(trade_mode='live', live_trading_enabled=True)
 
     with pytest.raises(RuntimeError, match='private key'):
         validate_live_runtime_config(cfg)
+
+
+def test_redeem_executor_uses_binary_index_sets_and_supports_dry_run():
+    calls: list[dict[str, object]] = []
+
+    def fake_executor(*, condition_id, event_slug, index_sets, dry_run):
+        calls.append({
+            "condition_id": condition_id,
+            "event_slug": event_slug,
+            "index_sets": list(index_sets),
+            "dry_run": dry_run,
+        })
+        return "0xtxhash"
+
+    cfg = AppConfig(trade_mode="live", live_trading_enabled=True, live_private_key="pk", live_funder="0xfunder")
+
+    dry_run_result = execute_live_redeem(
+        cfg,
+        condition_id="cond-1",
+        event_slug="btc-updown-5m-1",
+        dry_run=True,
+        executor=fake_executor,
+    )
+    live_result = execute_live_redeem(
+        cfg,
+        condition_id="cond-1",
+        event_slug="btc-updown-5m-1",
+        executor=fake_executor,
+    )
+
+    assert dry_run_result == "dry-run:cond-1"
+    assert live_result == "0xtxhash"
+    assert calls == [
+        {
+            "condition_id": "cond-1",
+            "event_slug": "btc-updown-5m-1",
+            "index_sets": [1, 2],
+            "dry_run": False,
+        }
+    ]
+
+
+
+
+def test_redeem_executor_uses_web3_contract_when_no_injected_executor(monkeypatch):
+    captured: dict[str, object] = {}
+
+    class _FakeAccount:
+        address = '0xabc1230000000000000000000000000000000000'
+
+        def sign_transaction(self, tx, private_key):
+            captured['signed_tx'] = dict(tx)
+            captured['private_key'] = private_key
+            return type('SignedTx', (), {'raw_transaction': b'rawtx'})()
+
+    class _FakeAccountModule:
+        def from_key(self, private_key):
+            captured['from_key'] = private_key
+            return _FakeAccount()
+
+    class _FakeFunctionCall:
+        def build_transaction(self, tx):
+            captured['build_tx'] = dict(tx)
+            return dict(tx)
+
+    class _FakeFunctions:
+        def redeemPositions(self, collateral_token, parent_collection_id, condition_id, index_sets):
+            captured['redeem_args'] = {
+                'collateral_token': collateral_token,
+                'parent_collection_id': parent_collection_id,
+                'condition_id': condition_id,
+                'index_sets': list(index_sets),
+            }
+            return _FakeFunctionCall()
+
+    class _FakeContract:
+        functions = _FakeFunctions()
+
+    class _FakeEth:
+        account = _FakeAccountModule()
+
+        def contract(self, *, address, abi):
+            captured['contract_address'] = address
+            captured['contract_abi'] = abi
+            return _FakeContract()
+
+        def get_transaction_count(self, address):
+            captured['nonce_address'] = address
+            return 7
+
+        @property
+        def gas_price(self):
+            return 123456789
+
+        def send_raw_transaction(self, raw_tx):
+            captured['raw_tx'] = raw_tx
+            return bytes.fromhex('12' * 32)
+
+        def wait_for_transaction_receipt(self, tx_hash, timeout=120):
+            captured['wait_tx_hash'] = tx_hash
+            captured['wait_timeout'] = timeout
+            return {'status': 1, 'transactionHash': tx_hash}
+
+    class _FakeWeb3:
+        def __init__(self, provider):
+            captured['provider'] = provider
+            self.eth = _FakeEth()
+
+        @staticmethod
+        def HTTPProvider(url, request_kwargs=None):
+            captured['provider_url'] = url
+            captured['provider_kwargs'] = dict(request_kwargs or {})
+            return {'url': url, 'request_kwargs': dict(request_kwargs or {})}
+
+        @staticmethod
+        def to_checksum_address(value):
+            return str(value)
+
+        @staticmethod
+        def to_bytes(hexstr=None):
+            if hexstr is None:
+                return b''
+            normalized = str(hexstr)
+            if normalized.startswith('0x'):
+                normalized = normalized[2:]
+            return bytes.fromhex(normalized)
+
+        @staticmethod
+        def to_hex(value):
+            if isinstance(value, (bytes, bytearray)):
+                return '0x' + bytes(value).hex()
+            return str(value)
+
+    import trader as trader_module
+    monkeypatch.setattr(trader_module, '_import_live_redeem_web3', lambda: _FakeWeb3)
+
+    cfg = AppConfig(
+        trade_mode='live',
+        live_trading_enabled=True,
+        live_private_key='pk-live',
+        live_funder='0xfunder',
+        live_chain_id=137,
+    )
+
+    tx_hash = execute_live_redeem(
+        cfg,
+        condition_id='0x' + ('34' * 32),
+        event_slug='btc-updown-5m-live',
+    )
+
+    assert tx_hash == '0x' + ('12' * 32)
+    assert captured['provider_url'] == 'https://polygon-rpc.com'
+    assert captured['provider_kwargs'] == {'timeout': 30}
+    assert captured['from_key'] == 'pk-live'
+    assert captured['contract_address'] == '0x4D97DCd97eC945f40cF65F87097ACe5EA0476045'
+    assert captured['redeem_args'] == {
+        'collateral_token': '0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174',
+        'parent_collection_id': bytes(32),
+        'condition_id': bytes.fromhex('34' * 32),
+        'index_sets': [1, 2],
+    }
+    assert captured['build_tx'] == {
+        'from': '0xabc1230000000000000000000000000000000000',
+        'chainId': 137,
+        'nonce': 7,
+        'gas': 350000,
+        'gasPrice': 123456789,
+    }
+    assert captured['private_key'] == 'pk-live'
+    assert captured['raw_tx'] == b'rawtx'
+    assert captured['wait_timeout'] == 120
+
+
+def test_redeem_executor_requires_web3_dependency_for_real_execution(monkeypatch):
+    import trader as trader_module
+    monkeypatch.setattr(trader_module, '_import_live_redeem_web3', lambda: (_ for _ in ()).throw(ModuleNotFoundError('No module named web3')))
+
+    cfg = AppConfig(
+        trade_mode='live',
+        live_trading_enabled=True,
+        live_private_key='pk-live',
+        live_funder='0xfunder',
+    )
+
+    with pytest.raises(RuntimeError, match='web3'):
+        execute_live_redeem(
+            cfg,
+            condition_id='0x' + ('56' * 32),
+            event_slug='btc-updown-5m-live',
+        )
+
+def test_redeem_retry_marks_terminal_errors_without_reschedule():
+    cfg = AppConfig(
+        trade_mode="live",
+        live_trading_enabled=True,
+        live_private_key="pk",
+        live_funder="0xfunder",
+        live_auto_redeem_enabled=True,
+    )
+    state = load_live_redeem_state(Path("missing.json"))
+    position = {
+        "condition_id": "cond-terminal",
+        "event_slug": "btc-updown-5m-terminal",
+        "outcome": "Yes",
+        "size": 2.0,
+        "redeemable": True,
+        "user": "0xfunder",
+    }
+
+    def terminal_executor(**kwargs):
+        raise RuntimeError("already redeemed")
+
+    result = attempt_live_redeem(
+        cfg,
+        state,
+        position,
+        now=datetime(2026, 4, 12, 8, 0, tzinfo=timezone.utc),
+        executor=terminal_executor,
+    )
+
+    entry = state["conditions"]["cond-terminal"]
+    assert result["status"] == "terminal_error"
+    assert entry["status"] == "terminal_error"
+    assert entry["attempt_count"] == 1
+    assert entry["next_attempt_at"] is None
+
+
+def test_redeem_retry_schedules_backoff_for_transient_failures():
+    cfg = AppConfig(
+        trade_mode="live",
+        live_trading_enabled=True,
+        live_private_key="pk",
+        live_funder="0xfunder",
+        live_auto_redeem_enabled=True,
+        live_auto_redeem_initial_backoff_seconds=30,
+        live_auto_redeem_max_backoff_seconds=300,
+    )
+    state = load_live_redeem_state(Path("missing.json"))
+    position = {
+        "condition_id": "cond-retry",
+        "event_slug": "btc-updown-5m-retry",
+        "outcome": "No",
+        "size": 3.0,
+        "redeemable": True,
+        "user": "0xfunder",
+    }
+    now = datetime(2026, 4, 12, 8, 0, tzinfo=timezone.utc)
+
+    def transient_executor(**kwargs):
+        raise RuntimeError("rpc timeout")
+
+    first = attempt_live_redeem(cfg, state, position, now=now, executor=transient_executor)
+    second = attempt_live_redeem(
+        cfg,
+        state,
+        position,
+        now=datetime(2026, 4, 12, 8, 0, 31, tzinfo=timezone.utc),
+        executor=transient_executor,
+    )
+
+    entry = state["conditions"]["cond-retry"]
+    assert first["status"] == "retry_wait"
+    assert second["status"] == "retry_wait"
+    assert entry["attempt_count"] == 2
+    assert entry["next_attempt_at"] == "2026-04-12T08:01:31+00:00"
+
+
+def test_live_redeem_worker_skips_when_disabled_and_processes_due_positions(tmp_path, monkeypatch):
+    disabled_stop = threading.Event()
+    disabled_calls = {"positions": 0}
+
+    class DisabledClient:
+        def get_current_positions(self, *, user: str, redeemable: bool | None = None):
+            disabled_calls["positions"] += 1
+            return []
+
+    def stop_immediately(_seconds):
+        disabled_stop.set()
+
+    monkeypatch.setattr("trader.time.sleep", stop_immediately)
+
+    disabled_result = run_live_redeem_worker(
+        AppConfig(
+            trade_mode="live",
+            live_trading_enabled=True,
+            live_private_key="pk",
+            live_funder="0xfunder",
+            live_auto_redeem_enabled=False,
+            live_auto_redeem_poll_seconds=1,
+        ),
+        market_client=DisabledClient(),
+        state_path=tmp_path / "disabled_redeem_state.json",
+        stop_event=disabled_stop,
+    )
+
+    assert disabled_result["status"] == "stopped"
+    assert disabled_calls["positions"] == 0
+
+    active_stop = threading.Event()
+    submitted: list[dict[str, object]] = []
+
+    class ActiveClient:
+        def get_current_positions(self, *, user: str, redeemable: bool | None = None):
+            return [
+                {
+                    "proxyWallet": "0xfunder",
+                    "conditionId": "cond-live",
+                    "eventSlug": "btc-updown-5m-live",
+                    "outcome": "Yes",
+                    "size": "5",
+                    "redeemable": True,
+                }
+            ]
+
+    def fake_executor(**kwargs):
+        submitted.append(dict(kwargs))
+        return "0xlive"
+
+    def stop_after_first_sleep(_seconds):
+        active_stop.set()
+
+    monkeypatch.setattr("trader.time.sleep", stop_after_first_sleep)
+    state_path = tmp_path / "active_redeem_state.json"
+    active_result = run_live_redeem_worker(
+        AppConfig(
+            trade_mode="live",
+            live_trading_enabled=True,
+            live_private_key="pk",
+            live_funder="0xfunder",
+            live_auto_redeem_enabled=True,
+            live_auto_redeem_poll_seconds=1,
+        ),
+        market_client=ActiveClient(),
+        state_path=state_path,
+        stop_event=active_stop,
+        executor=fake_executor,
+    )
+
+    saved = load_live_redeem_state(state_path)
+    assert active_result["status"] == "stopped"
+    assert len(submitted) == 1
+    assert submitted[0]["condition_id"] == "cond-live"
+    assert submitted[0]["index_sets"] == [1, 2]
+    assert saved["conditions"]["cond-live"]["status"] == "submitted"
+    assert saved["runtime"]["pending_redeem_count"] == 1
 
 
 def test_run_live_trading_stops_when_stop_event_is_set(tmp_path, monkeypatch):

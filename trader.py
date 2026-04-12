@@ -1,7 +1,8 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import csv
 import json
+import os
 import threading
 import time
 from collections.abc import Callable
@@ -100,6 +101,446 @@ def load_session_state(path: Path, *, effective_paper_strategy_ids: list[int] | 
         hydrated_map.setdefault(strategy_id, PaperStrategyState())
     state.paper_strategies = hydrated_map
     return state
+
+
+def _list_redeemable_live_positions(
+    cfg: AppConfig,
+    *,
+    client: PolymarketClient | Any,
+) -> list[dict[str, Any]]:
+    target_user = (cfg.live_funder or "").strip().lower()
+    if not target_user:
+        return []
+
+    rows = client.get_current_positions(user=target_user, redeemable=True)
+    positions: list[dict[str, Any]] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        row_user = str(row.get("proxyWallet") or row.get("user") or row.get("owner") or "").strip().lower()
+        if row_user != target_user:
+            continue
+        if not bool(row.get("redeemable")):
+            continue
+        condition_id = str(row.get("conditionId") or "").strip()
+        if not condition_id:
+            continue
+        size = row.get("size")
+        try:
+            parsed_size = float(size)
+        except (TypeError, ValueError):
+            continue
+        if parsed_size <= 0:
+            continue
+        positions.append(
+            {
+                "condition_id": condition_id,
+                "event_slug": str(row.get("eventSlug") or row.get("event_slug") or "").strip(),
+                "outcome": str(row.get("outcome") or "").strip(),
+                "size": parsed_size,
+                "redeemable": True,
+                "user": row_user,
+            }
+        )
+    return positions
+
+_LIVE_REDEEM_RUNTIME_FIELDS = (
+    "enabled",
+    "last_poll_at",
+    "last_attempt_at",
+    "last_result",
+    "last_tx_hash",
+    "pending_redeem_count",
+)
+_LIVE_REDEEM_ENTRY_FIELDS = (
+    "status",
+    "attempt_count",
+    "last_attempt_at",
+    "next_attempt_at",
+    "last_tx_hash",
+    "event_slug",
+    "outcome",
+    "size",
+    "redeemable",
+    "user",
+    "last_error",
+    "completed_at",
+)
+
+def _default_live_redeem_runtime() -> dict[str, Any]:
+    return {
+        "enabled": False,
+        "last_poll_at": None,
+        "last_attempt_at": None,
+        "last_result": None,
+        "last_tx_hash": None,
+        "pending_redeem_count": 0,
+    }
+
+
+def _default_live_redeem_state() -> dict[str, Any]:
+    return {"conditions": {}, "runtime": _default_live_redeem_runtime()}
+
+
+def _normalize_live_redeem_runtime(payload: Any) -> dict[str, Any]:
+    runtime = _default_live_redeem_runtime()
+    if not isinstance(payload, dict):
+        return runtime
+    for field_name in _LIVE_REDEEM_RUNTIME_FIELDS:
+        runtime[field_name] = payload.get(field_name)
+    try:
+        runtime["pending_redeem_count"] = max(0, int(runtime.get("pending_redeem_count") or 0))
+    except (TypeError, ValueError):
+        runtime["pending_redeem_count"] = 0
+    runtime["enabled"] = bool(runtime.get("enabled"))
+    return runtime
+
+
+def _normalize_live_redeem_entry(payload: Any) -> dict[str, Any]:
+    entry = {
+        "status": "pending",
+        "attempt_count": 0,
+        "last_attempt_at": None,
+        "next_attempt_at": None,
+        "last_tx_hash": None,
+        "event_slug": None,
+        "outcome": None,
+        "size": None,
+        "redeemable": True,
+        "user": None,
+        "last_error": None,
+        "completed_at": None,
+    }
+    if not isinstance(payload, dict):
+        return entry
+    for field_name in _LIVE_REDEEM_ENTRY_FIELDS:
+        entry[field_name] = payload.get(field_name)
+    try:
+        entry["attempt_count"] = max(0, int(entry.get("attempt_count") or 0))
+    except (TypeError, ValueError):
+        entry["attempt_count"] = 0
+    try:
+        size = entry.get("size")
+        entry["size"] = None if size in (None, "") else float(size)
+    except (TypeError, ValueError):
+        entry["size"] = None
+    entry["redeemable"] = bool(entry.get("redeemable", True))
+    status = str(entry.get("status") or "pending").strip().lower()
+    entry["status"] = status or "pending"
+    return entry
+
+
+def load_live_redeem_state(path: Path) -> dict[str, Any]:
+    if not path.exists():
+        return _default_live_redeem_state()
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    state = _default_live_redeem_state()
+    if isinstance(payload, dict):
+        raw_conditions = payload.get("conditions") or {}
+        if isinstance(raw_conditions, dict):
+            state["conditions"] = {
+                str(condition_id): _normalize_live_redeem_entry(raw_entry)
+                for condition_id, raw_entry in raw_conditions.items()
+            }
+        state["runtime"] = _normalize_live_redeem_runtime(payload.get("runtime"))
+    return state
+
+
+def save_live_redeem_state(path: Path, state: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    sanitized = _default_live_redeem_state()
+    raw_conditions = state.get("conditions") if isinstance(state, dict) else {}
+    if isinstance(raw_conditions, dict):
+        sanitized["conditions"] = {
+            str(condition_id): _normalize_live_redeem_entry(raw_entry)
+            for condition_id, raw_entry in raw_conditions.items()
+        }
+    sanitized["runtime"] = _normalize_live_redeem_runtime((state or {}).get("runtime") if isinstance(state, dict) else None)
+    path.write_text(json.dumps(sanitized, indent=2), encoding="utf-8")
+
+
+_LIVE_REDEEM_CTF_CONTRACT = os.getenv("POLYMARKET_CTF_CONTRACT") or "0x4D97DCd97eC945f40cF65F87097ACe5EA0476045"
+_LIVE_REDEEM_COLLATERAL_TOKEN = os.getenv("POLYMARKET_COLLATERAL_TOKEN") or "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174"
+_LIVE_REDEEM_PARENT_COLLECTION_ID = "0x" + ("00" * 32)
+_LIVE_REDEEM_INDEX_SETS = [1, 2]
+_LIVE_REDEEM_TERMINAL_STATUSES = {"completed", "submitted", "terminal_error", "dry_run"}
+
+_LIVE_REDEEM_CTF_ABI = [
+    {
+        "inputs": [
+            {"internalType": "contract IERC20", "name": "collateralToken", "type": "address"},
+            {"internalType": "bytes32", "name": "parentCollectionId", "type": "bytes32"},
+            {"internalType": "bytes32", "name": "conditionId", "type": "bytes32"},
+            {"internalType": "uint256[]", "name": "indexSets", "type": "uint256[]"},
+        ],
+        "name": "redeemPositions",
+        "outputs": [],
+        "stateMutability": "nonpayable",
+        "type": "function",
+    }
+]
+
+
+def _import_live_redeem_web3():
+    try:
+        from web3 import Web3
+    except ModuleNotFoundError as exc:
+        raise RuntimeError("Live redeem requires the `web3` package for real execution.") from exc
+    return Web3
+
+
+def _build_live_redeem_web3(cfg: AppConfig):
+    try:
+        Web3 = _import_live_redeem_web3()
+    except ModuleNotFoundError as exc:
+        raise RuntimeError("Live redeem requires the `web3` package for real execution.") from exc
+    rpc_url = os.getenv("POLYGON_RPC_URL") or "https://polygon-rpc.com"
+    provider = Web3.HTTPProvider(rpc_url, request_kwargs={"timeout": 30})
+    return Web3(provider)
+
+
+def _execute_live_redeem_onchain(
+    cfg: AppConfig,
+    *,
+    condition_id: str,
+    index_sets: list[int],
+) -> str:
+    if not cfg.live_private_key:
+        raise RuntimeError("Missing PRIVATE_KEY/POLYMARKET_PRIVATE_KEY for live redeem.")
+
+    web3 = _build_live_redeem_web3(cfg)
+    account = web3.eth.account.from_key(cfg.live_private_key)
+    contract = web3.eth.contract(
+        address=web3.to_checksum_address(_LIVE_REDEEM_CTF_CONTRACT),
+        abi=_LIVE_REDEEM_CTF_ABI,
+    )
+    transaction = contract.functions.redeemPositions(
+        web3.to_checksum_address(_LIVE_REDEEM_COLLATERAL_TOKEN),
+        web3.to_bytes(hexstr=_LIVE_REDEEM_PARENT_COLLECTION_ID),
+        web3.to_bytes(hexstr=condition_id),
+        list(index_sets),
+    ).build_transaction(
+        {
+            "from": account.address,
+            "chainId": int(cfg.live_chain_id),
+            "nonce": web3.eth.get_transaction_count(account.address),
+            "gas": 350000,
+            "gasPrice": web3.eth.gas_price,
+        }
+    )
+    signed = account.sign_transaction(transaction, cfg.live_private_key)
+    tx_hash = web3.eth.send_raw_transaction(signed.raw_transaction)
+    receipt = web3.eth.wait_for_transaction_receipt(tx_hash, timeout=120)
+    if int(receipt.get("status", 0) or 0) != 1:
+        raise RuntimeError("Live redeem transaction reverted.")
+    return web3.to_hex(tx_hash)
+
+def execute_live_redeem(
+    cfg: AppConfig,
+    *,
+    condition_id: str,
+    event_slug: str,
+    index_sets: list[int] | None = None,
+    dry_run: bool = False,
+    executor: Any | None = None,
+) -> str:
+    resolved_index_sets = list(index_sets or _LIVE_REDEEM_INDEX_SETS)
+    if dry_run:
+        return f"dry-run:{condition_id}"
+    if executor is not None:
+        return str(
+            executor(
+                condition_id=condition_id,
+                event_slug=event_slug,
+                index_sets=resolved_index_sets,
+                dry_run=False,
+            )
+        )
+    return _execute_live_redeem_onchain(
+        cfg,
+        condition_id=condition_id,
+        index_sets=resolved_index_sets,
+    )
+
+
+def _live_redeem_backoff_seconds(cfg: AppConfig, attempt_count: int) -> int:
+    base = max(1, int(cfg.live_auto_redeem_initial_backoff_seconds or 1))
+    maximum = max(base, int(cfg.live_auto_redeem_max_backoff_seconds or base))
+    scaled = base * (2 ** max(0, int(attempt_count) - 1))
+    return min(maximum, scaled)
+
+
+def _is_terminal_live_redeem_error(exc: Exception) -> bool:
+    message = str(exc or "").strip().lower()
+    terminal_markers = (
+        "already redeemed",
+        "no redeemable",
+        "no position",
+        "insufficient balance",
+        "balance is zero",
+        "zero balance",
+        "nothing to redeem",
+    )
+    return any(marker in message for marker in terminal_markers)
+
+
+def _live_redeem_entry_is_due(entry: dict[str, Any], now: datetime) -> bool:
+    status = str(entry.get("status") or "pending").strip().lower()
+    if status in _LIVE_REDEEM_TERMINAL_STATUSES:
+        return False
+    next_attempt_at = parse_iso_datetime(entry.get("next_attempt_at"))
+    if next_attempt_at is not None and next_attempt_at > now:
+        return False
+    return True
+
+
+def _upsert_live_redeem_position_state(
+    state: dict[str, Any],
+    position: dict[str, Any],
+) -> dict[str, Any]:
+    conditions = state.setdefault("conditions", {})
+    condition_id = str(position.get("condition_id") or "").strip()
+    entry = _normalize_live_redeem_entry(conditions.get(condition_id))
+    entry["event_slug"] = position.get("event_slug") or entry.get("event_slug")
+    entry["outcome"] = position.get("outcome") or entry.get("outcome")
+    entry["size"] = position.get("size")
+    entry["redeemable"] = bool(position.get("redeemable", True))
+    entry["user"] = position.get("user") or entry.get("user")
+    conditions[condition_id] = entry
+    return entry
+
+
+def attempt_live_redeem(
+    cfg: AppConfig,
+    state: dict[str, Any],
+    position: dict[str, Any],
+    *,
+    now: datetime | None = None,
+    executor: Any | None = None,
+) -> dict[str, Any]:
+    now = now or datetime.now(timezone.utc)
+    runtime = state.setdefault("runtime", _default_live_redeem_runtime())
+    entry = _upsert_live_redeem_position_state(state, position)
+    condition_id = str(position.get("condition_id") or "").strip()
+    event_slug = str(position.get("event_slug") or entry.get("event_slug") or "").strip()
+
+    if not _live_redeem_entry_is_due(entry, now):
+        return {"status": "skipped", "reason": "not_due", "condition_id": condition_id}
+
+    try:
+        tx_hash = execute_live_redeem(
+            cfg,
+            condition_id=condition_id,
+            event_slug=event_slug,
+            index_sets=_LIVE_REDEEM_INDEX_SETS,
+            dry_run=bool(cfg.live_auto_redeem_dry_run),
+            executor=executor,
+        )
+    except Exception as exc:
+        entry["attempt_count"] = int(entry.get("attempt_count") or 0) + 1
+        entry["last_attempt_at"] = now.isoformat()
+        entry["last_error"] = str(exc)
+        if _is_terminal_live_redeem_error(exc):
+            entry["status"] = "terminal_error"
+            entry["next_attempt_at"] = None
+            runtime["last_result"] = "terminal_error"
+        else:
+            entry["status"] = "retry_wait"
+            entry["next_attempt_at"] = (now + timedelta(seconds=_live_redeem_backoff_seconds(cfg, entry["attempt_count"]))).isoformat()
+            runtime["last_result"] = "retry_wait"
+        runtime["last_attempt_at"] = entry["last_attempt_at"]
+        state["conditions"][condition_id] = entry
+        return {
+            "status": entry["status"],
+            "condition_id": condition_id,
+            "error": str(exc),
+            "next_attempt_at": entry.get("next_attempt_at"),
+        }
+
+    entry["attempt_count"] = int(entry.get("attempt_count") or 0) + 1
+    entry["last_attempt_at"] = now.isoformat()
+    entry["next_attempt_at"] = None
+    entry["last_error"] = None
+    entry["last_tx_hash"] = tx_hash
+    entry["status"] = "dry_run" if str(tx_hash).startswith("dry-run:") else "submitted"
+    runtime["last_attempt_at"] = entry["last_attempt_at"]
+    runtime["last_result"] = entry["status"]
+    runtime["last_tx_hash"] = tx_hash
+    state["conditions"][condition_id] = entry
+    return {"status": entry["status"], "condition_id": condition_id, "tx_hash": tx_hash}
+
+
+def _reconcile_live_redeem_state(
+    state: dict[str, Any],
+    positions: list[dict[str, Any]],
+    *,
+    now: datetime,
+) -> None:
+    present_condition_ids = set()
+    for position in positions:
+        condition_id = str(position.get("condition_id") or "").strip()
+        if not condition_id:
+            continue
+        present_condition_ids.add(condition_id)
+        _upsert_live_redeem_position_state(state, position)
+    conditions = state.setdefault("conditions", {})
+    for condition_id, raw_entry in list(conditions.items()):
+        entry = _normalize_live_redeem_entry(raw_entry)
+        if condition_id not in present_condition_ids and entry.get("status") in {"submitted", "retry_wait", "dry_run"}:
+            entry["status"] = "completed"
+            entry["next_attempt_at"] = None
+            entry["completed_at"] = now.isoformat()
+            conditions[condition_id] = entry
+
+
+def run_live_redeem_worker(
+    cfg: AppConfig | None = None,
+    *,
+    market_client: PolymarketClient | None = None,
+    state_path: Path | None = None,
+    stop_event: threading.Event | None = None,
+    config_provider: Callable[[], AppConfig] | None = None,
+    stop_when_safe: Callable[[], bool] | None = None,
+    executor: Any | None = None,
+) -> dict[str, Any]:
+    cfg = cfg or AppConfig()
+    if cfg.trade_mode != "live":
+        return {"status": "skipped_non_live"}
+    client_provided = market_client is not None
+    state_path_provided = state_path is not None
+    market_client = market_client or PolymarketClient(cfg)
+    state_path = state_path or cfg.logs_dir / "live_redeem_state.json"
+    while True:
+        if _is_stop_requested(stop_event):
+            return {"status": "stopped"}
+        if _safe_stop_requested(stop_when_safe):
+            return {"status": "stopped"}
+        if config_provider is not None:
+            candidate_cfg = config_provider()
+            if candidate_cfg is not None:
+                cfg = candidate_cfg
+                if not client_provided:
+                    market_client.config = cfg
+                if not state_path_provided:
+                    state_path = cfg.logs_dir / "live_redeem_state.json"
+        state = load_live_redeem_state(state_path)
+        runtime = state.setdefault("runtime", _default_live_redeem_runtime())
+        now = datetime.now(timezone.utc)
+        runtime["enabled"] = bool(cfg.live_auto_redeem_enabled)
+        runtime["last_poll_at"] = now.isoformat()
+        positions: list[dict[str, Any]] = []
+        if cfg.live_auto_redeem_enabled:
+            validate_live_runtime_config(cfg)
+            positions = _list_redeemable_live_positions(cfg, client=market_client)
+            _reconcile_live_redeem_state(state, positions, now=now)
+            for position in positions:
+                attempt_live_redeem(cfg, state, position, now=now, executor=executor)
+        else:
+            runtime["last_result"] = runtime.get("last_result") or "disabled"
+        runtime["pending_redeem_count"] = len(positions)
+        save_live_redeem_state(state_path, state)
+        if not _sleep_if_not_stopped(stop_event, max(1, cfg.live_auto_redeem_poll_seconds)):
+            return {"status": "stopped"}
 
 
 def _paper_strategy_ids_for_runtime(cfg: AppConfig) -> list[int]:

@@ -5,3 +5,4 @@ pytest
 websocket-client
 tenacity
 py-clob-client
+web3
