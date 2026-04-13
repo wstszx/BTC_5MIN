@@ -1390,17 +1390,17 @@ def _dashboard_html() -> str:
             <span class="chip warn">热切换受控</span>
           </div>
           <div class="rows">
-            <div class="row"><span class="label">Target Mode</span><span id="runtimeSavedMode" class="value">--</span></div>
-            <div class="row"><span class="label">Running Mode</span><span id="runtimeRunningMode" class="value">--</span></div>
-            <div class="row"><span class="label">Switch Pending</span><span id="runtimeRestartRequired" class="value">--</span></div>
-            <div class="row"><span class="label">Live Ready</span><span id="runtimeLiveReady" class="value">--</span></div>
-            <div class="row"><span class="label">Validation</span><span id="runtimeLiveError" class="value">--</span></div>
+            <div class="row"><span class="label">目标模式</span><span id="runtimeSavedMode" class="value">--</span></div>
+            <div class="row"><span class="label">当前模式</span><span id="runtimeRunningMode" class="value">--</span></div>
+            <div class="row"><span class="label">是否待切换</span><span id="runtimeRestartRequired" class="value">--</span></div>
+            <div class="row"><span class="label">实盘就绪</span><span id="runtimeLiveReady" class="value">--</span></div>
+            <div class="row"><span class="label">校验结果</span><span id="runtimeLiveError" class="value">--</span></div>
             <div id="runtimeRedeemRows">
-              <div class="row"><span class="label">Auto Redeem</span><span id="runtimeRedeemEnabled" class="value">--</span></div>
-              <div class="row"><span class="label">Pending Redeems</span><span id="runtimeRedeemPending" class="value">--</span></div>
-              <div class="row"><span class="label">Last Result</span><span id="runtimeRedeemResult" class="value">--</span></div>
-              <div class="row"><span class="label">Last Attempt</span><span id="runtimeRedeemAttempt" class="value">--</span></div>
-              <div class="row"><span class="label">Last Tx Hash</span><span id="runtimeRedeemTxHash" class="value">--</span></div>
+              <div class="row"><span class="label">自动赎回</span><span id="runtimeRedeemEnabled" class="value">--</span></div>
+              <div class="row"><span class="label">待赎回数量</span><span id="runtimeRedeemPending" class="value">--</span></div>
+              <div class="row"><span class="label">最近结果</span><span id="runtimeRedeemResult" class="value">--</span></div>
+              <div class="row"><span class="label">最近尝试</span><span id="runtimeRedeemAttempt" class="value">--</span></div>
+              <div class="row"><span class="label">最近交易哈希</span><span id="runtimeRedeemTxHash" class="value">--</span></div>
             </div>
           </div>
         </div>

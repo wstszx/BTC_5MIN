@@ -702,6 +702,16 @@ def test_dashboard_assets_include_runtime_mode_status_shell():
     js = _dashboard_js()
 
     assert 'id="runtimeModeCard"' in html
+    assert '目标模式' in html
+    assert '当前模式' in html
+    assert '是否待切换' in html
+    assert '实盘就绪' in html
+    assert '校验结果' in html
+    assert '自动赎回' in html
+    assert '待赎回数量' in html
+    assert '最近结果' in html
+    assert '最近尝试' in html
+    assert '最近交易哈希' in html
     assert 'id="runtimeSavedMode"' in html
     assert 'id="runtimeRunningMode"' in html
     assert 'id="runtimeRestartRequired"' in html
