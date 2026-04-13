@@ -724,6 +724,14 @@ def test_dashboard_assets_include_runtime_mode_status_shell():
 
 
 
+def test_dashboard_html_includes_btc_favicon():
+    html = _dashboard_html()
+
+    assert 'rel="icon"' in html
+    assert 'data:image/svg+xml' in html
+    assert 'BTC' in html
+
+
 def test_dashboard_runtime_status_includes_live_redeem_snapshot(tmp_path: Path):
     env_file = tmp_path / '.env.dashboard'
     env_file.write_text(

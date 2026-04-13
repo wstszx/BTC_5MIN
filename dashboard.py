@@ -1315,6 +1315,7 @@ def _dashboard_html() -> str:
   <meta charset=\"utf-8\">
   <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">
   <title>BTC 5分钟量化控制台</title>
+  <link rel=\"icon\" type=\"image/svg+xml\" href='data:image/svg+xml;utf8,<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 64 64\"><rect width=\"64\" height=\"64\" rx=\"14\" fill=\"%230b1220\"/><text x=\"50%\" y=\"54%\" text-anchor=\"middle\" dominant-baseline=\"middle\" font-family=\"Arial,sans-serif\" font-size=\"24\" font-weight=\"700\" fill=\"%23f59e0b\">BTC</text></svg>'>
   <link rel=\"stylesheet\" href=\"/dashboard.css\">
 </head>
 <body>
