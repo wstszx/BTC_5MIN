@@ -409,8 +409,10 @@ def test_dashboard_config_payload_exposes_live_auto_redeem_fields(tmp_path: Path
         payload = state.get_config_payload()
         assert 'LIVE_AUTO_REDEEM_ENABLED' in payload['editable_keys']
         assert 'LIVE_AUTO_REDEEM_DRY_RUN' in payload['editable_keys']
-        assert payload['field_help']['LIVE_AUTO_REDEEM_ENABLED']
-        assert payload['field_help']['LIVE_AUTO_REDEEM_DRY_RUN']
+        assert payload['labels']['LIVE_AUTO_REDEEM_ENABLED'] == '实盘自动赎回'
+        assert payload['labels']['LIVE_AUTO_REDEEM_DRY_RUN'] == '自动赎回演练模式'
+        assert payload['field_help']['LIVE_AUTO_REDEEM_ENABLED'].startswith('仅实盘模式使用')
+        assert 'Polygon 链上赎回交易' in payload['field_help']['LIVE_AUTO_REDEEM_DRY_RUN']
         runtime_group = payload['field_groups'][0]
         assert 'LIVE_AUTO_REDEEM_ENABLED' in runtime_group['keys']
         assert 'LIVE_AUTO_REDEEM_DRY_RUN' in runtime_group['keys']
@@ -425,9 +427,9 @@ def test_dashboard_help_center_includes_live_auto_redeem_copy():
 
     assert 'LIVE_AUTO_REDEEM_ENABLED' in js
     assert 'LIVE_AUTO_REDEEM_DRY_RUN' in js
-    assert 'auto redeem' in js.lower()
-    assert 'dry-run' in js.lower()
-    assert 'polygon' in js.lower()
+    assert '实盘自动赎回' in js
+    assert '演练' in js
+    assert 'Polygon' in js
 
 def test_dashboard_assets_include_help_center_shell():
     html = _dashboard_html()
@@ -455,10 +457,13 @@ def test_dashboard_assets_include_help_center_renderers():
 def test_dashboard_help_center_includes_quickstart_copy():
     js = _dashboard_js()
 
-    assert ('Live Auto Redeem' in js) or ("\u5b9e\u76d8\u81ea\u52a8\u8d4e\u56de" in js)
-    assert ('What to check first' in js) or ("\u5148\u770b\u54ea\u91cc" in js)
-    assert ('How to change config safely' in js) or ("\u600e\u4e48\u5b89\u5168\u6539\u53c2\u6570" in js)
-    assert ('How to tell whether the runtime is healthy' in js) or ("\u600e\u4e48\u5224\u65ad\u5f53\u524d\u80fd\u4e0d\u80fd\u8dd1" in js)
+    assert "实盘自动赎回" in js
+    assert "先看哪里" in js
+    assert "怎么安全改参数" in js
+    assert "怎么判断当前能不能跑" in js
+    assert "Dashboard 操作说明" in js
+    assert "运行操作手册" in js
+    assert "日常检查清单" in js
     assert "\u9875\u9762\u5143\u7d20\u8bf4\u660e" in js
 
 
@@ -775,11 +780,32 @@ def test_dashboard_assets_include_live_redeem_runtime_rows():
     assert 'id="runtimeRedeemTxHash"' in html
     assert "const redeemVisible = !!(payload.redeem_visible || payload.redeem_enabled || ((payload.running_mode || payload.active_mode || 'paper') === 'live'));" in js
     assert "el('runtimeRedeemRows').style.display = redeemVisible ? '' : 'none';" in js
-    assert "el('runtimeRedeemEnabled').textContent = payload.redeem_enabled ? 'Enabled' : 'Disabled';" in js
+    assert "el('runtimeRestartRequired').textContent = payload.restart_required ? '需要' : '不需要';" in js
+    assert "el('runtimeLiveReady').textContent = payload.live_ready ? '已就绪' : '未就绪';" in js
+    assert "el('runtimeRedeemEnabled').textContent = payload.redeem_enabled ? '已开启' : '未开启';" in js
     assert "el('runtimeRedeemPending').textContent = String(payload.redeem_pending_count ?? 0);" in js
     assert "el('runtimeRedeemResult').textContent = payload.redeem_last_result || '--';" in js
     assert "el('runtimeRedeemAttempt').textContent = payload.redeem_last_attempt_at ? fmtIso(payload.redeem_last_attempt_at) : '--';" in js
     assert "el('runtimeRedeemTxHash').textContent = payload.redeem_last_tx_hash || '--';" in js
+
+
+def test_dashboard_runtime_mode_labels_are_localized(tmp_path: Path):
+    state = DashboardState(env_file=tmp_path / '.env.dashboard')
+    try:
+        payload = state.get_config_payload()
+
+        assert payload['labels']['TRADE_MODE'] == '交易模式'
+        assert payload['labels']['LIVE_TRADING_ENABLED'] == '实盘交易开关'
+        assert payload['labels']['POLYMARKET_PRIVATE_KEY'] == '实盘私钥'
+        assert payload['labels']['POLYMARKET_API_KEY'] == '官方 API 访问密钥'
+        assert payload['labels']['POLYMARKET_API_SECRET'] == '官方 API 签名密钥'
+        assert payload['labels']['POLYMARKET_API_PASSPHRASE'] == '官方 API 通行口令'
+        assert payload['field_help']['ENABLE_LIVE_TRADING'].startswith('关闭时仅运行纸面测试')
+        assert payload['field_help']['POLYMARKET_PRIVATE_KEY'].startswith('实盘钱包私钥')
+        assert payload['field_help']['POLYMARKET_FUNDER'].startswith('与私钥对应的实盘钱包地址')
+        assert payload['field_help']['POLYMARKET_API_KEY'].startswith('官方 Builder API 的访问密钥')
+    finally:
+        state.close()
 
 def test_dashboard_assets_switch_recent_endpoint_by_running_mode():
     js = _dashboard_js()

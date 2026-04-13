@@ -360,15 +360,15 @@ class DashboardState:
         "LIVE_TRADING_ENABLED": "实盘交易开关",
         "POLYMARKET_PRIVATE_KEY": "实盘私钥",
         "POLYMARKET_FUNDER": "\u5b9e\u76d8\u94b1\u5305\u5730\u5740",
-        "POLYMARKET_API_KEY": "官方API Key",
-        "POLYMARKET_API_SECRET": "官方API Secret",
-        "POLYMARKET_API_PASSPHRASE": "官方API Passphrase",
-        "LIVE_AUTO_REDEEM_ENABLED": "?? live ?????????????? auto redeem worker????????????????????",
-        "LIVE_AUTO_REDEEM_DRY_RUN": "?? auto redeem ?????????????????? dashboard ???????? Polygon ???????????????????????????? false?",
-        "LIVE_AUTO_REDEEM_POLL_SECONDS": "auto redeem worker ?????????????",
-        "LIVE_AUTO_REDEEM_MAX_RETRIES": "?? condition ?????????????? RPC ??????",
-        "LIVE_AUTO_REDEEM_INITIAL_BACKOFF_SECONDS": "?????????????????????",
-        "LIVE_AUTO_REDEEM_MAX_BACKOFF_SECONDS": "??????????????",
+        "POLYMARKET_API_KEY": "官方 API 访问密钥",
+        "POLYMARKET_API_SECRET": "官方 API 签名密钥",
+        "POLYMARKET_API_PASSPHRASE": "官方 API 通行口令",
+        "LIVE_AUTO_REDEEM_ENABLED": "实盘自动赎回",
+        "LIVE_AUTO_REDEEM_DRY_RUN": "自动赎回演练模式",
+        "LIVE_AUTO_REDEEM_POLL_SECONDS": "自动赎回轮询秒数",
+        "LIVE_AUTO_REDEEM_MAX_RETRIES": "自动赎回最大重试次数",
+        "LIVE_AUTO_REDEEM_INITIAL_BACKOFF_SECONDS": "自动赎回初始退避秒数",
+        "LIVE_AUTO_REDEEM_MAX_BACKOFF_SECONDS": "自动赎回最大退避秒数",
         "STRATEGY_ID": "基础策略",
         "PAPER_STRATEGY_IDS": "纸面策略组合",
         "TARGET_PROFIT": "每次目标净利",
@@ -488,39 +488,39 @@ class DashboardState:
         "SIGNAL_LOCK_BEFORE_ENTRY_SECONDS": "strategy_5_only",
     }
     FIELD_HELP: dict[str, str] = {
-        "STRATEGY_ID": "Strategies 1-4 are fixed cadence strategies; 5 is momentum; 6 is Binance OFI.",
-        "PAPER_STRATEGY_IDS": "Paper trading can run multiple strategies, deduplicated in input order, for example 1,2,6.",
-        "TARGET_PROFIT": "In TARGET_PROFIT mode this is the desired net profit per round; in FIXED_BASE_COST mode it is mainly for research and does not directly set the opening stake.",
-        "BET_SIZING_MODE": "FIXED_BASE_COST uses a fixed opening amount; TARGET_PROFIT back-solves order size from desired profit.",
-        "ENABLE_LIVE_TRADING": "When off, only paper trading runs. When on, the runtime can switch to live configuration and allow real orders.",
-        "POLYMARKET_PRIVATE_KEY": "Live wallet private key. Required only for live trading.",
-        "POLYMARKET_FUNDER": "Live wallet address (0x...) that matches the private key and actually funds live orders.",
-        "POLYMARKET_API_KEY": "Official Builder API key. If the full API credential set is present, live order placement prefers it.",
-        "POLYMARKET_API_SECRET": "Official Builder API secret. Usually shown only once, so store it carefully.",
-        "POLYMARKET_API_PASSPHRASE": "Official Builder API passphrase. Usually shown only once, so store it carefully.",
-        "LIVE_AUTO_REDEEM_ENABLED": "Live mode only. Starts a separate auto redeem worker that scans redeemable winning positions and attempts redemption automatically.",
-        "LIVE_AUTO_REDEEM_DRY_RUN": "Meaningful only when auto redeem is enabled. When true, the worker still detects positions, writes state, and updates the dashboard, but does not send a real Polygon redeem transaction. Keep this false for normal live usage; turn it on only for first-time validation or debugging.",
-        "LIVE_AUTO_REDEEM_POLL_SECONDS": "Polling interval, in seconds, for checking redeemable live positions.",
-        "LIVE_AUTO_REDEEM_MAX_RETRIES": "Maximum retry count per condition when redeem attempts hit transient RPC or chain errors.",
-        "LIVE_AUTO_REDEEM_INITIAL_BACKOFF_SECONDS": "Initial wait before retrying a failed redeem attempt.",
-        "LIVE_AUTO_REDEEM_MAX_BACKOFF_SECONDS": "Upper bound for retry backoff between redeem attempts.",
-        "BASE_ORDER_COST": "Used only in FIXED_BASE_COST mode; after a win the strategy resets to this opening amount.",
-        "MAX_CONSECUTIVE_LOSSES": "After this many consecutive losses, the strategy triggers a stop-loss reset.",
-        "MAX_STAKE": "Maximum USDC spend for a single order. If exceeded, the trade is skipped.",
-        "MAX_PRICE_THRESHOLD": "Do not enter when the target-side price is above this threshold.",
-        "SIGNAL_MOMENTUM_THRESHOLD": "Base threshold for strategy 5, comparing abs(current_up - open_up).",
-        "SIGNAL_WEAK_SIGNAL_MODE": "How weak momentum signals are handled: skip directly or fall back to a fixed strategy.",
-        "SIGNAL_FALLBACK_STRATEGY_ID": "Used only when strategy 5 falls back after a weak signal.",
-        "SIGNAL_HISTORY_FIDELITY_SECONDS": "Sampling granularity for historical price pulls; smaller values are more precise but heavier.",
-        "SIGNAL_ANCHOR_MAX_OFFSET_SECONDS": "Maximum allowed time offset when aligning the open anchor for momentum logic.",
-        "SIGNAL_DYNAMIC_THRESHOLD_K": "Dynamic threshold coefficient where the runtime uses max(base threshold, k * sigma).",
-        "SIGNAL_DYNAMIC_THRESHOLD_MIN_POINTS": "Minimum sample points required before dynamic thresholding is used.",
-        "SIGNAL_LOCK_BEFORE_ENTRY_SECONDS": "Lock the side shortly before entry to avoid last-second flips.",
-        "MAX_STAKE_SKIP_ALERT_THRESHOLD": "How many consecutive MAX_STAKE skips trigger an alert.",
-        "WS_ENABLED": "Prefer WebSocket quote cache when available; fall back to HTTP if needed.",
-        "WS_QUOTE_STALE_SECONDS": "Treat WebSocket quotes as stale after this many seconds without updates.",
-        "WS_TRADE_GUARD_STALE_SECONDS": "Block trading when WS quotes are older than this threshold before entry.",
-        "WS_CONNECT_TIMEOUT_SECONDS": "Connection timeout, in seconds, when establishing the WebSocket session.",
+        "STRATEGY_ID": "策略 1-4 是固定节奏策略，策略 5 是动量策略，策略 6 是 Binance OFI 盘口失衡策略。",
+        "PAPER_STRATEGY_IDS": "纸面测试可同时运行多个策略，按输入顺序去重，例如 1,2,6。",
+        "TARGET_PROFIT": "在目标收益模式下，这里表示每轮期望净利；在固定金额模式下，它更多用于观察研究，不直接决定首笔下注金额。",
+        "BET_SIZING_MODE": "固定金额模式会使用固定首笔下注额；目标收益模式会根据目标净利反推下注金额。",
+        "ENABLE_LIVE_TRADING": "关闭时仅运行纸面测试；开启后，运行时可以切换到实盘配置并允许真实下单。",
+        "POLYMARKET_PRIVATE_KEY": "实盘钱包私钥，仅在实盘模式下需要。",
+        "POLYMARKET_FUNDER": "与私钥对应的实盘钱包地址（0x...），并且需要实际承担实盘订单资金。",
+        "POLYMARKET_API_KEY": "官方 Builder API 的访问密钥。若整套官方 API 凭证齐全，实盘下单会优先使用它。",
+        "POLYMARKET_API_SECRET": "官方 Builder API 的签名密钥，通常只展示一次，请妥善保存。",
+        "POLYMARKET_API_PASSPHRASE": "官方 Builder API 的通行口令，通常只展示一次，请妥善保存。",
+        "LIVE_AUTO_REDEEM_ENABLED": "仅实盘模式使用。开启后会启动独立的自动赎回线程，扫描可赎回的获胜仓位并自动尝试赎回。",
+        "LIVE_AUTO_REDEEM_DRY_RUN": "仅在开启自动赎回后才有意义。设为 true 时，自动赎回线程仍会检测仓位、写入状态并更新监控页面，但不会发送真实的 Polygon 链上赎回交易。正常实盘请保持 false，只在首次验证或调试时临时开启。",
+        "LIVE_AUTO_REDEEM_POLL_SECONDS": "检查可赎回实盘仓位的轮询间隔，单位秒。",
+        "LIVE_AUTO_REDEEM_MAX_RETRIES": "单个 condition 在遇到临时 RPC 或链上错误时的最大重试次数。",
+        "LIVE_AUTO_REDEEM_INITIAL_BACKOFF_SECONDS": "自动赎回失败后的首次退避等待秒数。",
+        "LIVE_AUTO_REDEEM_MAX_BACKOFF_SECONDS": "自动赎回重试之间的最大退避上限秒数。",
+        "BASE_ORDER_COST": "仅固定金额模式使用；获胜后策略会重置回这个起始下注金额。",
+        "MAX_CONSECUTIVE_LOSSES": "连续亏损达到这个次数后，策略会执行一次止损重置。",
+        "MAX_STAKE": "单笔订单允许投入的最大 USDC；超过后会直接跳过本轮。",
+        "MAX_PRICE_THRESHOLD": "目标方向价格高于该阈值时不入场。",
+        "SIGNAL_MOMENTUM_THRESHOLD": "策略 5 的基础动量阈值，比较 abs(current_up - open_up)。",
+        "SIGNAL_WEAK_SIGNAL_MODE": "弱动量信号的处理方式：直接跳过，或回退到固定节奏策略。",
+        "SIGNAL_FALLBACK_STRATEGY_ID": "仅当策略 5 在弱信号下回退时使用。",
+        "SIGNAL_HISTORY_FIDELITY_SECONDS": "历史价格拉取的采样粒度；数值越小越精确，但请求也更重。",
+        "SIGNAL_ANCHOR_MAX_OFFSET_SECONDS": "动量逻辑对齐开盘锚点时允许的最大时间偏移。",
+        "SIGNAL_DYNAMIC_THRESHOLD_K": "动态阈值系数，运行时会使用 max(基础阈值, k * sigma)。",
+        "SIGNAL_DYNAMIC_THRESHOLD_MIN_POINTS": "启用动态阈值前要求的最少样本点数量。",
+        "SIGNAL_LOCK_BEFORE_ENTRY_SECONDS": "在计划入场前提前锁定方向，避免最后几秒来回翻边。",
+        "MAX_STAKE_SKIP_ALERT_THRESHOLD": "连续因超过 MAX_STAKE 而跳过多少次后触发提醒。",
+        "WS_ENABLED": "优先使用 WS(WebSocket) 行情缓存；必要时再回退到 HTTP。",
+        "WS_QUOTE_STALE_SECONDS": "WS(WebSocket) 行情在多久未更新后视为过期。",
+        "WS_TRADE_GUARD_STALE_SECONDS": "入场前若 WS 行情年龄超过该阈值，则禁止本轮交易。",
+        "WS_CONNECT_TIMEOUT_SECONDS": "建立 WebSocket 会话时的连接超时秒数。",
     }
 
     @classmethod
@@ -729,7 +729,7 @@ class DashboardState:
             runtime_status = self._build_runtime_status(env_values)
             strategy_catalog = json.loads(json.dumps(self.STRATEGY_CATALOG))
             strategy_catalog.setdefault("6", {
-                "label": "Binance OFI",
+                "label": "Binance OFI 失衡",
                 "summary": "根据 Binance 深度盘口的 OFI 强弱决定方向。",
                 "preview": ["OFI", "THRESHOLD", "SKIP"],
                 "detail": "仅在 OFI 信号足够强且未过期时给出方向，否则按规则跳过。",
@@ -1535,7 +1535,7 @@ def _dashboard_html() -> str:
         </div>
         <div class=\"panel-body\">
           <div id=\"wsRuntimeList\" class=\"runtime-list\"></div>
-          <div class=\"footnote\">说明: 行情来源为 websocket 表示使用 WS 缓存盘口, 为 http 表示回退 HTTP 拉取。</div>
+          <div class=\"footnote\">说明：行情来源显示为 websocket 时，表示使用 WS 缓存盘口；显示为 http 时，表示回退到 HTTP 拉取。</div>
         </div>
       </div>
 
@@ -2539,43 +2539,43 @@ const HELP_TABS = [
 
 const HELP_SECTIONS = {
   quickstart: {
-    title: 'Quick Start',
-    intro: 'Confirm your base strategy, sizing mode, and max stake first. Then observe 3-5 rounds before changing multiple settings at once.',
+    title: '快速上手',
+    intro: '先确认基础策略、下注模式和单笔最大下注金额，再连续观察 3-5 轮后再决定是否同时改多个参数。',
     sections: [
       {
-        title: 'Live Auto Redeem',
+        title: '实盘自动赎回',
         bullets: [
-          'LIVE_AUTO_REDEEM_ENABLED only matters in live mode and starts a separate auto redeem worker.',
-          'The worker scans redeemable winning positions and attempts to convert them back into available balance via Polygon redeemPositions.',
-          'When LIVE_AUTO_REDEEM_DRY_RUN=true, the worker runs in dry-run mode: it only detects, records, and updates the dashboard, and does not send a real redeem transaction.',
-          'For normal live usage, keep LIVE_AUTO_REDEEM_DRY_RUN=false. Turn it on only for first-time validation or debugging.',
+          'LIVE_AUTO_REDEEM_ENABLED 只在实盘模式下生效，开启后会启动独立的自动赎回线程。',
+          '该线程会扫描可赎回的获胜仓位，并通过 Polygon 的 redeemPositions 方法尝试把它们转回可用余额。',
+          '当 LIVE_AUTO_REDEEM_DRY_RUN=true 时，自动赎回线程只做检测、记录和监控页面展示，不会发送真实赎回交易。',
+          '正常实盘请保持 LIVE_AUTO_REDEEM_DRY_RUN=false，只在首次验证或调试时临时打开。',
         ],
       },
       {
-        title: 'What to check first',
+        title: '先看哪里',
         bullets: [
-          'Start with Market and Signal to confirm the current round, side decision, and countdown.',
-          'Then check Trade Plan and Risk to see whether the runtime wants to trade, why it might skip, and what profit it expects.',
-          'Then check Session State for cumulative pnl, recovery loss, and loss streaks.',
-          'Finally check Realtime Connection Health to judge whether WebSocket data is reliable.',
+          '先看行情与信号，确认当前轮次、方向判断和倒计时是否正常。',
+          '再看下注计划与风控，确认当前是否准备下注、为什么跳过、以及预期收益是多少。',
+          '然后看会话状态，关注累计盈亏、待回补亏损和连续亏损轮数。',
+          '最后看实时连接状态，判断 WS(WebSocket) 数据是否可靠。',
         ],
       },
       {
-        title: 'How to change config safely',
+        title: '怎么安全改参数',
         bullets: [
-          'Confirm which base strategy is active before tuning, because fixed cadence strategies and strategy 5 do not use the same parameters.',
-          'Change one class of setting at a time instead of strategy, thresholds, and sizing all together.',
-          'After saving, trust the effective values and field messages shown in the page instead of only what you typed.',
-          'If a field shows a validation error, that input did not actually take effect yet.',
+          '调整前先确认当前查看的是哪一个策略，因为固定节奏策略和策略 5 使用的参数并不完全一样。',
+          '一次只改一类参数，不要把策略、阈值和下注规模同时一起改。',
+          '保存后优先看页面展示的生效值和字段提示，不要只看自己输入了什么。',
+          '如果字段出现校验错误，说明这次输入其实还没有真正生效。',
         ],
       },
       {
-        title: 'How to tell whether the runtime is healthy',
+        title: '怎么判断当前能不能跑',
         bullets: [
-          'should_trade=true means the current round, price, risk checks, and WS guard all allow execution.',
-          'should_trade=false should be read together with skip_reason before assuming something is broken.',
-          'Price limits, weak signals, and stake caps are expected skip reasons.',
-          'WS staleness, daily loss limits, and stop-loss resets deserve immediate review.',
+          'should_trade=true 说明当前轮次、价格、风控检查和 WS 防护都允许执行。',
+          'should_trade=false 时先结合 skip_reason 字段一起看，不要先默认程序坏了。',
+          '价格超过阈值、弱信号、超过下注上限，这些都属于正常的跳过原因。',
+          '如果是 WS 陈旧、当日亏损限制或止损重置，则应立即复核。',
         ],
       },
     ],
@@ -2614,7 +2614,7 @@ const HELP_SECTIONS = {
       {
         title: '实时连接状态',
         bullets: [
-          '用于判断 websocket 行情是否可信。',
+          '用于判断 WS(WebSocket) 行情是否可信。',
           '重点关注最近消息延迟、重连次数、最近错误和是否触发陈旧保护。',
         ],
       },
@@ -2637,16 +2637,16 @@ const HELP_SECTIONS = {
 };
 
 const HELP_FAQ = [
-  ['Why did I save parameters but nothing changed?', 'Check the field messages and effective values first. Invalid input falls back to the last valid configuration instead of running with bad values.'],
-  ['Why is the runtime not trading right now?', 'Read the skip reason in Trade Plan and Risk first, then decide whether price, risk, signal, or WS protection is blocking execution.'],
-  ['Why does strategy 5 often have no signal?', 'Strategy 5 is not fixed cadence. It needs enough price movement to exceed the threshold, and weak signals are handled by SKIP or FALLBACK.'],
-  ['Why is the side different from what I expected?', 'Fixed cadence strategies depend on the round index. Momentum strategies depend on open price, current price, threshold, and offset.'],
-  ['Why does WS protection trigger?', 'It means WebSocket market data is too old, so the runtime blocks execution instead of trading on stale data.'],
-  ['Why did daily realized pnl reset?', 'That is the day rollover for daily stats. Cumulative pnl is still preserved in session state.'],
-  ['What does LIVE_AUTO_REDEEM_ENABLED mean?', 'It is the live auto redeem switch. When enabled, live mode starts a separate worker that scans and tries to redeem winning positions automatically.'],
-  ['Should LIVE_AUTO_REDEEM_DRY_RUN be removed?', 'No. It is a safety valve: true means dry-run rehearsal only, with no real Polygon redeem transaction. Normal live usage should keep it false, and only turn it on for first-time validation or debugging.'],
-  ['Why do trades keep skipping after max stake is hit?', 'Recovery loss and price conditions can push the required size above MAX_STAKE. Check recovery loss together with MAX_STAKE.'],
-  ['What do new users most often misconfigure?', 'Changing too many settings at once, mixing up fixed cadence with momentum logic, and treating WS protection as a strategy bug.'],
+  ['为什么保存了参数却像是没生效？', '先看字段提示和页面上的生效值。无效输入会回退到上一次有效配置，不会带着错误参数直接运行。'],
+  ['为什么现在没有下注？', '先看下注计划与风控里的 skip_reason，再判断是价格、风控、信号还是 WS 保护在阻止执行。'],
+  ['为什么策略 5 经常没有信号？', '策略 5 不是固定节奏，它需要价格波动幅度超过阈值；弱信号会按照 SKIP 或 FALLBACK 这两种规则处理。'],
+  ['为什么方向和我预期的不一样？', '固定节奏策略取决于当前轮次索引；动量策略则取决于开盘价、当前价、阈值和偏移。'],
+  ['为什么会触发 WS 保护？', '这表示 WS(WebSocket) 行情数据已经过旧，系统会选择阻止执行，而不是拿陈旧数据去下注。'],
+  ['为什么当日已实现盈亏会重置？', '这是按天统计的自然切日行为；累计盈亏仍然保留在会话状态里。'],
+  ['LIVE_AUTO_REDEEM_ENABLED 是什么意思？', '这是实盘自动赎回开关。开启后，实盘模式会启动单独的自动赎回线程，自动扫描并尝试赎回获胜仓位。'],
+  ['LIVE_AUTO_REDEEM_DRY_RUN 需要去掉吗？', '不需要。它是一个安全阀：true 表示只做演练，不会发送真实的 Polygon 赎回交易。正常实盘应保持 false，仅在首次验证或调试时开启。'],
+  ['为什么触发 max stake 后会连续跳过？', '待回补亏损和当前价格条件可能会把本轮所需金额推高到 MAX_STAKE 之上，需要结合 recovery loss 一起判断。'],
+  ['新用户最容易配错什么？', '最常见的是一次改太多参数、把固定节奏和动量逻辑混在一起看，以及把 WS 保护误当成策略故障。'],
 ];
 
 const STORAGE_KEYS = {
@@ -2659,7 +2659,7 @@ const STRATEGY_LABELS = {
   3: '三轮分组交替',
   4: '四轮分组交替',
   5: '动量信号 V2',
-  6: 'Binance OFI',
+  6: 'Binance OFI 失衡',
 };
 
 const OPTION_LABELS = {
@@ -3435,9 +3435,9 @@ function renderHelpDrawer() {
     body.innerHTML = renderHelpFaq();
   }
   footer.innerHTML =
-    '<a href="docs/dashboard_runbook.md" target="_blank" rel="noreferrer">Dashboard Runbook</a>' +
-    '<a href="docs/operations_runbook.md" target="_blank" rel="noreferrer">Operations Runbook</a>' +
-    '<a href="docs/daily_ops_checklist.md" target="_blank" rel="noreferrer">Daily Checklist</a>';
+    '<a href="docs/dashboard_runbook.md" target="_blank" rel="noreferrer">Dashboard 操作说明</a>' +
+    '<a href="docs/operations_runbook.md" target="_blank" rel="noreferrer">运行操作手册</a>' +
+    '<a href="docs/daily_ops_checklist.md" target="_blank" rel="noreferrer">日常检查清单</a>';
 
   tabs.querySelectorAll('[data-help-tab]').forEach((node) => {
     node.addEventListener('click', () => {
@@ -3498,12 +3498,12 @@ function expandLiveToggleValues(values) {
 function renderRuntimeStatus(payload) {
   el('runtimeSavedMode').textContent = formatModeLabel(payload.saved_mode || 'paper');
   el('runtimeRunningMode').textContent = formatModeLabel(payload.running_mode || 'paper');
-  el('runtimeRestartRequired').textContent = payload.restart_required ? 'Yes' : 'No';
-  el('runtimeLiveReady').textContent = payload.live_ready ? 'Ready' : 'Blocked';
+  el('runtimeRestartRequired').textContent = payload.restart_required ? '需要' : '不需要';
+  el('runtimeLiveReady').textContent = payload.live_ready ? '已就绪' : '未就绪';
   el('runtimeLiveError').textContent = payload.live_validation_error || '--';
   const redeemVisible = !!(payload.redeem_visible || payload.redeem_enabled || ((payload.running_mode || payload.active_mode || 'paper') === 'live'));
   el('runtimeRedeemRows').style.display = redeemVisible ? '' : 'none';
-  el('runtimeRedeemEnabled').textContent = payload.redeem_enabled ? 'Enabled' : 'Disabled';
+  el('runtimeRedeemEnabled').textContent = payload.redeem_enabled ? '已开启' : '未开启';
   el('runtimeRedeemPending').textContent = String(payload.redeem_pending_count ?? 0);
   el('runtimeRedeemResult').textContent = payload.redeem_last_result || '--';
   el('runtimeRedeemAttempt').textContent = payload.redeem_last_attempt_at ? fmtIso(payload.redeem_last_attempt_at) : '--';
