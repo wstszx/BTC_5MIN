@@ -15,3 +15,6 @@ tmp_main_stderr.log
 _served_dashboard.js
 _served_index.html
 _tmp_dashboard_check.js
+
+codex.patch
+tmp_apply.patch

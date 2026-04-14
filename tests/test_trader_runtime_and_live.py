@@ -91,6 +91,8 @@ class _NoTradeLiveMarketClient(_LiveMarketClient):
 def test_create_live_clob_client_prefers_explicit_api_credentials(monkeypatch):
     captured: dict[str, object] = {}
 
+    from py_clob_client.clob_types import ApiCreds
+
     class _FakeClobClient:
         def __init__(self, host, chain_id, key, signature_type, funder):
             captured['host'] = host
@@ -127,11 +129,11 @@ def test_create_live_clob_client_prefers_explicit_api_credentials(monkeypatch):
 
     assert client is not None
     assert captured['key'] == 'pk-live'
-    assert captured['creds'] == {
-        'api_key': 'builder-key',
-        'secret': 'builder-secret',
-        'passphrase': 'builder-passphrase',
-    }
+    assert captured['creds'] == ApiCreds(
+        api_key='builder-key',
+        api_secret='builder-secret',
+        api_passphrase='builder-passphrase',
+    )
     assert 'derived' not in captured
 
 

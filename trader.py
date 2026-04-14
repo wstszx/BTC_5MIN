@@ -1281,6 +1281,7 @@ def _create_live_clob_client(cfg: AppConfig):
         raise RuntimeError("Missing PRIVATE_KEY/POLYMARKET_PRIVATE_KEY for live trading.")
 
     from py_clob_client.client import ClobClient
+    from py_clob_client.clob_types import ApiCreds
 
     clob_client = ClobClient(
         cfg.clob_api_base,
@@ -1289,6 +1290,15 @@ def _create_live_clob_client(cfg: AppConfig):
         signature_type=cfg.live_signature_type,
         funder=cfg.live_funder,
     )
+    if cfg.live_api_key and cfg.live_api_secret and cfg.live_api_passphrase:
+        clob_client.set_api_creds(
+            ApiCreds(
+                api_key=cfg.live_api_key,
+                api_secret=cfg.live_api_secret,
+                api_passphrase=cfg.live_api_passphrase,
+            )
+        )
+        return clob_client
     if cfg.live_api_key and cfg.live_api_secret and cfg.live_api_passphrase:
         clob_client.set_api_creds(
             {

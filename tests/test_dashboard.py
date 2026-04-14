@@ -837,6 +837,14 @@ def test_dashboard_assets_switch_recent_endpoint_by_running_mode():
     assert "const recentEndpoint = runningMode === 'live' ? '/api/live/recent?limit=80' : '/api/paper/recent?limit=80&strategy=' + strategy;" in js
 
 
+def test_dashboard_assets_localize_recent_panel_by_running_mode():
+    js = _dashboard_js()
+
+    assert "const runningMode = String((((state.config || {}).runtime_status || {}).active_mode || (((state.config || {}).runtime_status || {}).running_mode) || 'paper')).toLowerCase();" in js
+    assert "tbody.innerHTML = '<tr><td colspan=13 class=empty>' + (runningMode === 'live' ? '最近没有实盘交易记录' : '最近没有纸面交易记录') + '</td></tr>';" in js
+    assert "setChip('recentStatus', rows.length + ' 行' + (runningMode === 'live' ? ' · 实盘' : ''), pendingCount > 0 ? 'warn' : 'ok');" in js
+
+
 
 
 def test_dashboard_assets_use_unified_strategy_selector_for_config_and_views():

@@ -2639,7 +2639,7 @@ const HELP_SECTIONS = {
         ],
       },
       {
-        title: '最近纸面交易明细',
+        title: '最近交易明细',
         bullets: [
           '用于排查最近交易到底发生了什么。',
           '重点关注时间、方向、结果、跳过原因和信号偏移。',
@@ -3985,6 +3985,12 @@ function renderRecent(payload) {
   state.recent = payload;
   const rows = payload.rows || [];
   const tbody = el('recentTbody');
+  const runningMode = String((((state.config || {}).runtime_status || {}).active_mode || (((state.config || {}).runtime_status || {}).running_mode) || 'paper')).toLowerCase();
+  if (rows.length === 0) {
+    tbody.innerHTML = '<tr><td colspan=13 class=empty>' + (runningMode === 'live' ? '最近没有实盘交易记录' : '最近没有纸面交易记录') + '</td></tr>';
+    setChip('recentStatus', '0 行', 'warn');
+    return;
+  }
 
   if (rows.length === 0) {
     tbody.innerHTML = '<tr><td colspan="13" class="empty">最近没有纸面交易记录</td></tr>';
@@ -4024,6 +4030,9 @@ function renderRecent(payload) {
 
   tbody.innerHTML = html;
   setChip('recentStatus', pendingCount > 0 ? (rows.length + ' 行 · ' + pendingCount + ' 待结算') : (rows.length + ' 行'), pendingCount > 0 ? 'warn' : 'ok');
+  if (pendingCount === 0) {
+    setChip('recentStatus', rows.length + ' 行' + (runningMode === 'live' ? ' · 实盘' : ''), pendingCount > 0 ? 'warn' : 'ok');
+  }
 }
 
 async function refreshMarket() {
