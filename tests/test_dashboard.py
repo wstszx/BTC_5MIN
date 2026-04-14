@@ -565,10 +565,13 @@ def test_dashboard_config_payload_masks_live_private_key_and_exposes_mode_fields
         assert 'TRADE_MODE' in payload['editable_keys']
         assert 'LIVE_TRADING_ENABLED' in payload['editable_keys']
         assert 'POLYMARKET_PRIVATE_KEY' in payload['editable_keys']
+        assert 'POLYMARKET_FUNDER' in payload['editable_keys']
         assert payload['env_values']['TRADE_MODE'] == 'live'
         assert payload['env_values']['LIVE_TRADING_ENABLED'] == 'true'
         assert payload['env_values']['POLYMARKET_PRIVATE_KEY'] != 'super-secret-private-key'
         assert payload['env_values']['POLYMARKET_PRIVATE_KEY']
+        assert payload['env_values']['POLYMARKET_FUNDER'] != '0xfunder'
+        assert payload['env_values']['POLYMARKET_FUNDER']
         assert payload['runtime_status']['saved_mode'] == 'live'
         assert payload['runtime_status']['running_mode'] == 'paper'
         assert payload['runtime_status']['restart_required'] is True
@@ -594,9 +597,10 @@ def test_dashboard_config_payload_exposes_official_api_credential_fields(tmp_pat
         assert 'POLYMARKET_API_KEY' in payload['editable_keys']
         assert 'POLYMARKET_API_SECRET' in payload['editable_keys']
         assert 'POLYMARKET_API_PASSPHRASE' in payload['editable_keys']
-        assert payload['env_values']['POLYMARKET_API_KEY'] == 'builder-key'
+        assert payload['env_values']['POLYMARKET_API_KEY'] != 'builder-key'
         assert payload['env_values']['POLYMARKET_API_SECRET'] != 'builder-secret'
         assert payload['env_values']['POLYMARKET_API_PASSPHRASE'] != 'builder-passphrase'
+        assert payload['env_values']['POLYMARKET_API_KEY']
         assert payload['env_values']['POLYMARKET_API_SECRET']
         assert payload['env_values']['POLYMARKET_API_PASSPHRASE']
     finally:

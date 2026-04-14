@@ -472,7 +472,13 @@ class DashboardState:
 
     BOOL_CONFIG_KEYS: tuple[str, ...] = ("LIVE_TRADING_ENABLED", "WS_ENABLED", "LIVE_AUTO_REDEEM_ENABLED", "LIVE_AUTO_REDEEM_DRY_RUN")
     STRING_CONFIG_KEYS: tuple[str, ...] = ("POLYMARKET_PRIVATE_KEY", "POLYMARKET_FUNDER", "POLYMARKET_API_KEY", "POLYMARKET_API_SECRET", "POLYMARKET_API_PASSPHRASE")
-    SECRET_CONFIG_KEYS: tuple[str, ...] = ("POLYMARKET_PRIVATE_KEY", "POLYMARKET_API_SECRET", "POLYMARKET_API_PASSPHRASE")
+    SECRET_CONFIG_KEYS: tuple[str, ...] = (
+        "POLYMARKET_PRIVATE_KEY",
+        "POLYMARKET_FUNDER",
+        "POLYMARKET_API_KEY",
+        "POLYMARKET_API_SECRET",
+        "POLYMARKET_API_PASSPHRASE",
+    )
     MASKED_SECRET_VALUE = "********"
 
     STRATEGY_CATALOG: dict[str, dict[str, Any]] = _strategy_catalog()
@@ -764,13 +770,19 @@ class DashboardState:
         normalized_updates: dict[str, str] = {}
         field_errors: dict[str, str] = {}
         with self._lock:
-            preserved_private_key = self._env_values.get("POLYMARKET_PRIVATE_KEY") or self._cfg.live_private_key or ""
-            preserved_private_key_mask = self._mask_secret(preserved_private_key)
+            preserved_masked_values = {
+                key: self._env_values.get(key) or self._effective_config_value(key)
+                for key in self.SECRET_CONFIG_KEYS
+            }
+            preserved_masks = {
+                key: self._mask_secret(value)
+                for key, value in preserved_masked_values.items()
+            }
 
         for key, value in values.items():
             normalized = "" if value is None else str(value).strip()
-            if key == "POLYMARKET_PRIVATE_KEY" and normalized == preserved_private_key_mask and preserved_private_key:
-                normalized_updates[key] = preserved_private_key
+            if key in self.SECRET_CONFIG_KEYS and normalized == preserved_masks.get(key) and preserved_masked_values.get(key):
+                normalized_updates[key] = preserved_masked_values[key]
                 continue
             if normalized == "":
                 normalized_updates[key] = ""
