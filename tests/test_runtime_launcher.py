@@ -321,6 +321,8 @@ def test_run_single_command_runtime_starts_live_redeem_worker_in_live_mode(monke
         live_private_key="pk",
         live_funder="0xfunder",
         live_auto_redeem_enabled=True,
+        live_redeem_relayer_api_key="relayer-key",
+        live_redeem_relayer_api_key_address="0xrelayer",
     )
     load_calls: list[Path] = []
 

@@ -172,6 +172,78 @@ def test_create_live_clob_client_derives_api_credentials_when_explicit_values_mi
     assert captured['derived'] is True
     assert captured['creds'] == {'api_key': 'derived-key'}
 
+
+def test_live_redeem_auth_mode_prefers_builder_then_relayer():
+    builder_cfg = AppConfig(
+        live_redeem_builder_api_key='builder-key',
+        live_redeem_builder_secret='builder-secret',
+        live_redeem_builder_passphrase='builder-passphrase',
+    )
+    relayer_cfg = AppConfig(
+        live_redeem_relayer_api_key='relayer-key',
+        live_redeem_relayer_api_key_address='0xrelayer',
+    )
+    empty_cfg = AppConfig()
+
+    assert builder_cfg.live_redeem_auth_mode == 'builder'
+    assert relayer_cfg.live_redeem_auth_mode == 'relayer'
+    assert empty_cfg.live_redeem_auth_mode == 'unconfigured'
+
+
+def test_create_live_clob_client_falls_back_when_explicit_api_credentials_are_invalid(monkeypatch):
+    captured: dict[str, object] = {"creds": []}
+
+    from py_clob_client.clob_types import ApiCreds
+
+    class _FakeClobClient:
+        def __init__(self, host, chain_id, key, signature_type, funder):
+            captured['key'] = key
+            captured['funder'] = funder
+
+        def set_api_creds(self, creds):
+            captured['creds'].append(creds)
+
+        def get_api_keys(self):
+            if len(captured['creds']) == 1:
+                raise Exception("PolyApiException[status_code=401, error_message={'error': 'Unauthorized/Invalid api key'}]")
+            captured['validated_after_fallback'] = True
+            return {'apiKeys': ['derived-key']}
+
+        def create_or_derive_api_creds(self):
+            captured['derived'] = True
+            return {'api_key': 'derived-key'}
+
+    import sys
+    import types
+
+    fake_module = types.ModuleType('py_clob_client.client')
+    fake_module.ClobClient = _FakeClobClient
+    monkeypatch.setitem(sys.modules, 'py_clob_client.client', fake_module)
+
+    client = _create_live_clob_client(
+        AppConfig(
+            trade_mode='live',
+            live_trading_enabled=True,
+            live_private_key='pk-live',
+            live_funder='0xfunder',
+            live_api_key='builder-key',
+            live_api_secret='builder-secret',
+            live_api_passphrase='builder-passphrase',
+        )
+    )
+
+    assert client is not None
+    assert captured['derived'] is True
+    assert captured['validated_after_fallback'] is True
+    assert captured['creds'] == [
+        ApiCreds(
+            api_key='builder-key',
+            api_secret='builder-secret',
+            api_passphrase='builder-passphrase',
+        ),
+        {'api_key': 'derived-key'},
+    ]
+
 def test_redeemable_positions_filters_live_user_and_required_fields():
     class _RedeemablePositionsClient:
         def __init__(self):
@@ -250,6 +322,8 @@ def test_redeem_state_defaults_when_file_missing(tmp_path):
             "last_attempt_at": None,
             "last_result": None,
             "last_tx_hash": None,
+            "last_submission_id": None,
+            "last_submission_status": None,
             "pending_redeem_count": 0,
         },
     }
@@ -265,6 +339,8 @@ def test_redeem_state_roundtrip_preserves_retry_fields(tmp_path):
                 "last_attempt_at": "2026-04-12T08:00:00+00:00",
                 "next_attempt_at": "2026-04-12T08:05:00+00:00",
                 "last_tx_hash": "0xabc",
+                "last_submission_id": None,
+                "last_submission_status": None,
                 "event_slug": "btc-updown-5m-1",
                 "outcome": "Yes",
                 "size": 12.5,
@@ -280,6 +356,8 @@ def test_redeem_state_roundtrip_preserves_retry_fields(tmp_path):
             "last_attempt_at": "2026-04-12T08:00:00+00:00",
             "last_result": "retry_wait",
             "last_tx_hash": "0xabc",
+            "last_submission_id": None,
+            "last_submission_status": None,
             "pending_redeem_count": 1,
         },
     }
@@ -290,6 +368,37 @@ def test_redeem_state_roundtrip_preserves_retry_fields(tmp_path):
     assert loaded == original
 
 
+def test_redeem_state_roundtrip_preserves_submission_metadata(tmp_path):
+    state_path = tmp_path / "live_redeem_state.json"
+    original = {
+        "conditions": {
+            "cond-1": {
+                "status": "submitted",
+                "attempt_count": 1,
+                "last_submission_id": "sub-1",
+                "last_submission_status": "pending",
+                "last_tx_hash": None,
+                "redeemable": True,
+            }
+        },
+        "runtime": {
+            "enabled": True,
+            "last_result": "submitted",
+            "last_submission_id": "sub-1",
+            "last_submission_status": "pending",
+            "pending_redeem_count": 1,
+        },
+    }
+
+    save_live_redeem_state(state_path, original)
+    loaded = load_live_redeem_state(state_path)
+
+    assert loaded["conditions"]["cond-1"]["last_submission_id"] == "sub-1"
+    assert loaded["conditions"]["cond-1"]["last_submission_status"] == "pending"
+    assert loaded["runtime"]["last_submission_id"] == "sub-1"
+    assert loaded["runtime"]["last_submission_status"] == "pending"
+
+
 def test_validate_live_runtime_config_requires_private_key_and_funder():
     cfg = AppConfig(trade_mode='live', live_trading_enabled=True)
 
@@ -297,11 +406,25 @@ def test_validate_live_runtime_config_requires_private_key_and_funder():
         validate_live_runtime_config(cfg)
 
 
+def test_validate_live_runtime_config_requires_redeem_auth_when_auto_redeem_enabled():
+    cfg = AppConfig(
+        trade_mode='live',
+        live_trading_enabled=True,
+        live_private_key='pk',
+        live_funder='0xfunder',
+        live_auto_redeem_enabled=True,
+    )
+
+    with pytest.raises(RuntimeError, match='redeem'):
+        validate_live_runtime_config(cfg)
+
+
 def test_redeem_executor_uses_binary_index_sets_and_supports_dry_run():
     calls: list[dict[str, object]] = []
 
-    def fake_executor(*, condition_id, event_slug, index_sets, dry_run):
+    def fake_executor(*, cfg, condition_id, event_slug, index_sets, dry_run):
         calls.append({
+            "auth_mode": cfg.live_redeem_auth_mode,
             "condition_id": condition_id,
             "event_slug": event_slug,
             "index_sets": list(index_sets),
@@ -329,6 +452,7 @@ def test_redeem_executor_uses_binary_index_sets_and_supports_dry_run():
     assert live_result == "0xtxhash"
     assert calls == [
         {
+            "auth_mode": "unconfigured",
             "condition_id": "cond-1",
             "event_slug": "btc-updown-5m-1",
             "index_sets": [1, 2],
@@ -336,155 +460,63 @@ def test_redeem_executor_uses_binary_index_sets_and_supports_dry_run():
         }
     ]
 
-
-
-
-def test_redeem_executor_uses_web3_contract_when_no_injected_executor(monkeypatch):
+def test_execute_live_redeem_uses_builder_credentials_when_available(monkeypatch):
     captured: dict[str, object] = {}
 
-    class _FakeAccount:
-        address = '0xabc1230000000000000000000000000000000000'
-
-        def sign_transaction(self, tx, private_key):
-            captured['signed_tx'] = dict(tx)
-            captured['private_key'] = private_key
-            return type('SignedTx', (), {'raw_transaction': b'rawtx'})()
-
-    class _FakeAccountModule:
-        def from_key(self, private_key):
-            captured['from_key'] = private_key
-            return _FakeAccount()
-
-    class _FakeFunctionCall:
-        def build_transaction(self, tx):
-            captured['build_tx'] = dict(tx)
-            return dict(tx)
-
-    class _FakeFunctions:
-        def redeemPositions(self, collateral_token, parent_collection_id, condition_id, index_sets):
-            captured['redeem_args'] = {
-                'collateral_token': collateral_token,
-                'parent_collection_id': parent_collection_id,
-                'condition_id': condition_id,
-                'index_sets': list(index_sets),
-            }
-            return _FakeFunctionCall()
-
-    class _FakeContract:
-        functions = _FakeFunctions()
-
-    class _FakeEth:
-        account = _FakeAccountModule()
-
-        def contract(self, *, address, abi):
-            captured['contract_address'] = address
-            captured['contract_abi'] = abi
-            return _FakeContract()
-
-        def get_transaction_count(self, address):
-            captured['nonce_address'] = address
-            return 7
-
-        @property
-        def gas_price(self):
-            return 123456789
-
-        def send_raw_transaction(self, raw_tx):
-            captured['raw_tx'] = raw_tx
-            return bytes.fromhex('12' * 32)
-
-        def wait_for_transaction_receipt(self, tx_hash, timeout=120):
-            captured['wait_tx_hash'] = tx_hash
-            captured['wait_timeout'] = timeout
-            return {'status': 1, 'transactionHash': tx_hash}
-
-    class _FakeWeb3:
-        def __init__(self, provider):
-            captured['provider'] = provider
-            self.eth = _FakeEth()
-
-        @staticmethod
-        def HTTPProvider(url, request_kwargs=None):
-            captured['provider_url'] = url
-            captured['provider_kwargs'] = dict(request_kwargs or {})
-            return {'url': url, 'request_kwargs': dict(request_kwargs or {})}
-
-        @staticmethod
-        def to_checksum_address(value):
-            return str(value)
-
-        @staticmethod
-        def to_bytes(hexstr=None):
-            if hexstr is None:
-                return b''
-            normalized = str(hexstr)
-            if normalized.startswith('0x'):
-                normalized = normalized[2:]
-            return bytes.fromhex(normalized)
-
-        @staticmethod
-        def to_hex(value):
-            if isinstance(value, (bytes, bytearray)):
-                return '0x' + bytes(value).hex()
-            return str(value)
+    def fake_relayer_execute(cfg, *, condition_id, event_slug, index_sets):
+        captured['auth_mode'] = cfg.live_redeem_auth_mode
+        captured['condition_id'] = condition_id
+        captured['event_slug'] = event_slug
+        captured['index_sets'] = list(index_sets)
+        return {'submission_id': 'sub-1', 'tx_hash': None}
 
     import trader as trader_module
-    monkeypatch.setattr(trader_module, '_import_live_redeem_web3', lambda: _FakeWeb3)
+    monkeypatch.setattr(trader_module, '_execute_live_redeem_via_relayer', fake_relayer_execute)
 
     cfg = AppConfig(
-        trade_mode='live',
-        live_trading_enabled=True,
-        live_private_key='pk-live',
-        live_funder='0xfunder',
-        live_chain_id=137,
+        live_redeem_builder_api_key='builder-key',
+        live_redeem_builder_secret='builder-secret',
+        live_redeem_builder_passphrase='builder-passphrase',
     )
 
-    tx_hash = execute_live_redeem(
+    result = execute_live_redeem(
         cfg,
         condition_id='0x' + ('34' * 32),
         event_slug='btc-updown-5m-live',
     )
 
-    assert tx_hash == '0x' + ('12' * 32)
-    assert captured['provider_url'] == 'https://polygon-rpc.com'
-    assert captured['provider_kwargs'] == {'timeout': 30}
-    assert captured['from_key'] == 'pk-live'
-    assert captured['contract_address'] == '0x4D97DCd97eC945f40cF65F87097ACe5EA0476045'
-    assert captured['redeem_args'] == {
-        'collateral_token': '0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174',
-        'parent_collection_id': bytes(32),
-        'condition_id': bytes.fromhex('34' * 32),
+    assert result == 'sub-1'
+    assert captured == {
+        'auth_mode': 'builder',
+        'condition_id': '0x' + ('34' * 32),
+        'event_slug': 'btc-updown-5m-live',
         'index_sets': [1, 2],
     }
-    assert captured['build_tx'] == {
-        'from': '0xabc1230000000000000000000000000000000000',
-        'chainId': 137,
-        'nonce': 7,
-        'gas': 350000,
-        'gasPrice': 123456789,
-    }
-    assert captured['private_key'] == 'pk-live'
-    assert captured['raw_tx'] == b'rawtx'
-    assert captured['wait_timeout'] == 120
 
 
-def test_redeem_executor_requires_web3_dependency_for_real_execution(monkeypatch):
+def test_execute_live_redeem_uses_relayer_key_when_builder_missing(monkeypatch):
+    captured: dict[str, object] = {}
+
+    def fake_relayer_execute(cfg, *, condition_id, event_slug, index_sets):
+        captured['auth_mode'] = cfg.live_redeem_auth_mode
+        return {'submission_id': 'sub-relayer', 'tx_hash': '0xabc'}
+
     import trader as trader_module
-    monkeypatch.setattr(trader_module, '_import_live_redeem_web3', lambda: (_ for _ in ()).throw(ModuleNotFoundError('No module named web3')))
+    monkeypatch.setattr(trader_module, '_execute_live_redeem_via_relayer', fake_relayer_execute)
 
     cfg = AppConfig(
-        trade_mode='live',
-        live_trading_enabled=True,
-        live_private_key='pk-live',
-        live_funder='0xfunder',
+        live_redeem_relayer_api_key='relayer-key',
+        live_redeem_relayer_api_key_address='0xrelayer',
     )
 
-    with pytest.raises(RuntimeError, match='web3'):
-        execute_live_redeem(
-            cfg,
-            condition_id='0x' + ('56' * 32),
-            event_slug='btc-updown-5m-live',
-        )
+    result = execute_live_redeem(
+        cfg,
+        condition_id='0x' + ('56' * 32),
+        event_slug='btc-updown-5m-live',
+    )
+
+    assert result == 'sub-relayer'
+    assert captured['auth_mode'] == 'relayer'
 
 def test_redeem_retry_marks_terminal_errors_without_reschedule():
     cfg = AppConfig(
@@ -626,6 +658,8 @@ def test_live_redeem_worker_skips_when_disabled_and_processes_due_positions(tmp_
             live_funder="0xfunder",
             live_auto_redeem_enabled=True,
             live_auto_redeem_poll_seconds=1,
+            live_redeem_relayer_api_key="relayer-key",
+            live_redeem_relayer_api_key_address="0xrelayer",
         ),
         market_client=ActiveClient(),
         state_path=state_path,
@@ -752,6 +786,13 @@ class _StubClobClient:
 
     def get_order(self, order_id):
         return self.order_payloads.get(order_id, {})
+
+
+class _StrictStubClobClient(_StubClobClient):
+    def create_market_order(self, order_args):
+        assert hasattr(order_args, "price")
+        assert hasattr(order_args, "fee_rate_bps")
+        return super().create_market_order(order_args)
 
 
 class _SettlingLiveClient(_LiveMarketClient):
@@ -1146,6 +1187,22 @@ def test_place_live_order_rejects_submission_response_without_acceptance(tmp_pat
     state = load_session_state(state_path)
     assert state.pending_live_slug is None
     assert state.round_index == 0
+
+
+def test_place_live_order_with_injected_client_provides_full_market_order_args(tmp_path):
+    cfg = AppConfig(live_trading_enabled=True)
+    stub_clob = _StrictStubClobClient()
+
+    result = place_live_order(
+        cfg=cfg,
+        market_client=_LiveMarketClient(),
+        clob_client=stub_clob,
+        state_path=tmp_path / "state.json",
+        log_path=tmp_path / "live.csv",
+    )
+
+    assert result["status"] == "submitted"
+    assert len(stub_clob.created_orders) == 1
 
 
 def test_place_live_order_resets_state_after_repeated_max_stake_skips(tmp_path):

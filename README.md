@@ -25,6 +25,14 @@ Dashboard saves write back to `.env.dashboard`, and mode changes also update the
 - `SIGNAL_WEAK_SIGNAL_MODE`
 - `TRADE_MODE`
 - `LIVE_TRADING_ENABLED`
+- `POLYMARKET_API_KEY`
+- `POLYMARKET_API_SECRET`
+- `POLYMARKET_API_PASSPHRASE`
+- `POLYMARKET_BUILDER_API_KEY`
+- `POLYMARKET_BUILDER_SECRET`
+- `POLYMARKET_BUILDER_PASSPHRASE`
+- `POLYMARKET_RELAYER_API_KEY`
+- `POLYMARKET_RELAYER_API_KEY_ADDRESS`
 
 Trading mode safety rules:
 
@@ -34,6 +42,12 @@ Trading mode safety rules:
 - `paper -> live` still requires confirmation in the dashboard before the save completes.
 - If live credentials are incomplete or a live order is still unsettled, the runtime stays pending or blocked instead of switching unsafely.
 - The dashboard shows the saved mode, current running mode, desired target mode, switch state, and live readiness so you can tell whether the switch is complete.
+
+Credential split:
+
+- `POLYMARKET_API_*` is for CLOB live trading only.
+- `POLYMARKET_BUILDER_*` and `POLYMARKET_RELAYER_*` are for official gasless live redeem only.
+- Direct Polygon `web3` redeem is not a supported runtime path.
 
 ## 3. Run the supported runtime
 

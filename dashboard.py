@@ -255,6 +255,11 @@ def _field_groups() -> list[dict[str, Any]]:
                 "POLYMARKET_API_KEY",
                 "POLYMARKET_API_SECRET",
                 "POLYMARKET_API_PASSPHRASE",
+                "POLYMARKET_BUILDER_API_KEY",
+                "POLYMARKET_BUILDER_SECRET",
+                "POLYMARKET_BUILDER_PASSPHRASE",
+                "POLYMARKET_RELAYER_API_KEY",
+                "POLYMARKET_RELAYER_API_KEY_ADDRESS",
                 "LIVE_AUTO_REDEEM_ENABLED",
                 "LIVE_AUTO_REDEEM_DRY_RUN",
                 "LIVE_AUTO_REDEEM_POLL_SECONDS",
@@ -325,6 +330,11 @@ class DashboardState:
         "POLYMARKET_API_KEY",
         "POLYMARKET_API_SECRET",
         "POLYMARKET_API_PASSPHRASE",
+        "POLYMARKET_BUILDER_API_KEY",
+        "POLYMARKET_BUILDER_SECRET",
+        "POLYMARKET_BUILDER_PASSPHRASE",
+        "POLYMARKET_RELAYER_API_KEY",
+        "POLYMARKET_RELAYER_API_KEY_ADDRESS",
         "LIVE_AUTO_REDEEM_ENABLED",
         "LIVE_AUTO_REDEEM_DRY_RUN",
         "LIVE_AUTO_REDEEM_POLL_SECONDS",
@@ -363,6 +373,11 @@ class DashboardState:
         "POLYMARKET_API_KEY": "官方 API 访问密钥",
         "POLYMARKET_API_SECRET": "官方 API 签名密钥",
         "POLYMARKET_API_PASSPHRASE": "官方 API 通行口令",
+        "POLYMARKET_BUILDER_API_KEY": "Builder Redeem API Key",
+        "POLYMARKET_BUILDER_SECRET": "Builder Redeem Secret",
+        "POLYMARKET_BUILDER_PASSPHRASE": "Builder Redeem Passphrase",
+        "POLYMARKET_RELAYER_API_KEY": "Relayer API Key",
+        "POLYMARKET_RELAYER_API_KEY_ADDRESS": "Relayer Key Address",
         "LIVE_AUTO_REDEEM_ENABLED": "实盘自动赎回",
         "LIVE_AUTO_REDEEM_DRY_RUN": "自动赎回演练模式",
         "LIVE_AUTO_REDEEM_POLL_SECONDS": "自动赎回轮询秒数",
@@ -414,6 +429,11 @@ class DashboardState:
         "POLYMARKET_API_KEY": "live_api_key",
         "POLYMARKET_API_SECRET": "live_api_secret",
         "POLYMARKET_API_PASSPHRASE": "live_api_passphrase",
+        "POLYMARKET_BUILDER_API_KEY": "live_redeem_builder_api_key",
+        "POLYMARKET_BUILDER_SECRET": "live_redeem_builder_secret",
+        "POLYMARKET_BUILDER_PASSPHRASE": "live_redeem_builder_passphrase",
+        "POLYMARKET_RELAYER_API_KEY": "live_redeem_relayer_api_key",
+        "POLYMARKET_RELAYER_API_KEY_ADDRESS": "live_redeem_relayer_api_key_address",
         "LIVE_AUTO_REDEEM_ENABLED": "live_auto_redeem_enabled",
         "LIVE_AUTO_REDEEM_DRY_RUN": "live_auto_redeem_dry_run",
         "LIVE_AUTO_REDEEM_POLL_SECONDS": "live_auto_redeem_poll_seconds",
@@ -471,13 +491,29 @@ class DashboardState:
     )
 
     BOOL_CONFIG_KEYS: tuple[str, ...] = ("LIVE_TRADING_ENABLED", "WS_ENABLED", "LIVE_AUTO_REDEEM_ENABLED", "LIVE_AUTO_REDEEM_DRY_RUN")
-    STRING_CONFIG_KEYS: tuple[str, ...] = ("POLYMARKET_PRIVATE_KEY", "POLYMARKET_FUNDER", "POLYMARKET_API_KEY", "POLYMARKET_API_SECRET", "POLYMARKET_API_PASSPHRASE")
+    STRING_CONFIG_KEYS: tuple[str, ...] = (
+        "POLYMARKET_PRIVATE_KEY",
+        "POLYMARKET_FUNDER",
+        "POLYMARKET_API_KEY",
+        "POLYMARKET_API_SECRET",
+        "POLYMARKET_API_PASSPHRASE",
+        "POLYMARKET_BUILDER_API_KEY",
+        "POLYMARKET_BUILDER_SECRET",
+        "POLYMARKET_BUILDER_PASSPHRASE",
+        "POLYMARKET_RELAYER_API_KEY",
+        "POLYMARKET_RELAYER_API_KEY_ADDRESS",
+    )
     SECRET_CONFIG_KEYS: tuple[str, ...] = (
         "POLYMARKET_PRIVATE_KEY",
         "POLYMARKET_FUNDER",
         "POLYMARKET_API_KEY",
         "POLYMARKET_API_SECRET",
         "POLYMARKET_API_PASSPHRASE",
+        "POLYMARKET_BUILDER_API_KEY",
+        "POLYMARKET_BUILDER_SECRET",
+        "POLYMARKET_BUILDER_PASSPHRASE",
+        "POLYMARKET_RELAYER_API_KEY",
+        "POLYMARKET_RELAYER_API_KEY_ADDRESS",
     )
     MASKED_SECRET_VALUE = "********"
 
@@ -501,9 +537,14 @@ class DashboardState:
         "ENABLE_LIVE_TRADING": "关闭时仅运行纸面测试；开启后，运行时可以切换到实盘配置并允许真实下单。",
         "POLYMARKET_PRIVATE_KEY": "实盘钱包私钥，仅在实盘模式下需要。",
         "POLYMARKET_FUNDER": "与私钥对应的实盘钱包地址（0x...），并且需要实际承担实盘订单资金。",
-        "POLYMARKET_API_KEY": "官方 Builder API 的访问密钥。若整套官方 API 凭证齐全，实盘下单会优先使用它。",
-        "POLYMARKET_API_SECRET": "官方 Builder API 的签名密钥，通常只展示一次，请妥善保存。",
-        "POLYMARKET_API_PASSPHRASE": "官方 Builder API 的通行口令，通常只展示一次，请妥善保存。",
+        "POLYMARKET_API_KEY": "CLOB 实盘下单凭证，仅用于 live order 私有接口。",
+        "POLYMARKET_API_SECRET": "CLOB 实盘下单签名密钥，仅用于 live order 私有接口。",
+        "POLYMARKET_API_PASSPHRASE": "CLOB 实盘下单通行口令，仅用于 live order 私有接口。",
+        "POLYMARKET_BUILDER_API_KEY": "官方 gasless redeem 的 Builder API key，仅用于自动赎回。",
+        "POLYMARKET_BUILDER_SECRET": "官方 gasless redeem 的 Builder secret，仅用于自动赎回。",
+        "POLYMARKET_BUILDER_PASSPHRASE": "官方 gasless redeem 的 Builder passphrase，仅用于自动赎回。",
+        "POLYMARKET_RELAYER_API_KEY": "官方 gasless redeem 的 Relayer API key，仅用于自动赎回。",
+        "POLYMARKET_RELAYER_API_KEY_ADDRESS": "与 Relayer API key 配套的地址，仅用于自动赎回认证。",
         "LIVE_AUTO_REDEEM_ENABLED": "仅实盘模式使用。开启后会启动独立的自动赎回线程，扫描可赎回的获胜仓位并自动尝试赎回。",
         "LIVE_AUTO_REDEEM_DRY_RUN": "仅在开启自动赎回后才有意义。设为 true 时，自动赎回线程仍会检测仓位、写入状态并更新监控页面，但不会发送真实的 Polygon 链上赎回交易。正常实盘请保持 false，只在首次验证或调试时临时开启。",
         "LIVE_AUTO_REDEEM_POLL_SECONDS": "检查可赎回实盘仓位的轮询间隔，单位秒。",
@@ -538,7 +579,6 @@ class DashboardState:
             return "false"
         raise ValueError(f"Invalid value for {key}: expected true/false, got {value!r}")
 
-    @classmethod
     @classmethod
     def _normalize_config_value(cls, key: str, value: str) -> str:
         normalized = value.strip()
@@ -696,9 +736,12 @@ class DashboardState:
             "pending_live_order": runtime_snapshot.pending_live_order if runtime_snapshot is not None else False,
             "redeem_visible": redeem_visible,
             "redeem_enabled": redeem_enabled,
+            "redeem_auth_mode": getattr(redeem_cfg, "live_redeem_auth_mode", "unconfigured"),
             "redeem_pending_count": redeem_pending_count,
             "redeem_last_result": redeem_runtime.get("last_result") or None,
             "redeem_last_attempt_at": redeem_runtime.get("last_attempt_at") or None,
+            "redeem_last_submission_id": redeem_runtime.get("last_submission_id") or None,
+            "redeem_last_submission_status": redeem_runtime.get("last_submission_status") or None,
             "redeem_last_tx_hash": redeem_runtime.get("last_tx_hash") or None,
         }
 

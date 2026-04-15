@@ -606,6 +606,47 @@ def test_dashboard_config_payload_exposes_official_api_credential_fields(tmp_pat
     finally:
         state.close()
 
+
+def test_dashboard_config_payload_exposes_relayer_redeem_credentials(tmp_path: Path):
+    state = DashboardState(env_file=tmp_path / '.env.dashboard')
+    try:
+        payload = state.get_config_payload()
+
+        assert 'POLYMARKET_BUILDER_API_KEY' in payload['editable_keys']
+        assert 'POLYMARKET_BUILDER_SECRET' in payload['editable_keys']
+        assert 'POLYMARKET_BUILDER_PASSPHRASE' in payload['editable_keys']
+        assert 'POLYMARKET_RELAYER_API_KEY' in payload['editable_keys']
+        assert 'POLYMARKET_RELAYER_API_KEY_ADDRESS' in payload['editable_keys']
+    finally:
+        state.close()
+
+
+def test_dashboard_runtime_payload_includes_redeem_auth_mode(tmp_path: Path):
+    env_file = tmp_path / '.env.dashboard'
+    env_file.write_text(
+        'TRADE_MODE=live\n'
+        'LIVE_TRADING_ENABLED=true\n'
+        'POLYMARKET_PRIVATE_KEY=private-key\n'
+        'POLYMARKET_FUNDER=0xfunder\n'
+        'LIVE_AUTO_REDEEM_ENABLED=true\n'
+        'POLYMARKET_RELAYER_API_KEY=relayer-key\n'
+        'POLYMARKET_RELAYER_API_KEY_ADDRESS=0xrelayer\n',
+        encoding='utf-8',
+    )
+    state = DashboardState(env_file=env_file)
+    try:
+        payload = state.get_config_payload()
+        runtime = payload['runtime_status']
+        assert 'redeem_auth_mode' in runtime
+        assert runtime['redeem_auth_mode'] == 'relayer'
+    finally:
+        state.close()
+
+
+def test_dashboard_help_text_distinguishes_trading_and_redeem_credentials():
+    assert 'live order' in DashboardState.FIELD_HELP['POLYMARKET_API_KEY'].lower()
+    assert 'redeem' in DashboardState.FIELD_HELP['POLYMARKET_BUILDER_API_KEY'].lower()
+
 def test_dashboard_update_config_preserves_masked_private_key_on_unrelated_save(tmp_path: Path):
     env_file = tmp_path / '.env.dashboard'
     env_file.write_text(
@@ -825,7 +866,7 @@ def test_dashboard_runtime_mode_labels_are_localized(tmp_path: Path):
         assert payload['field_help']['ENABLE_LIVE_TRADING'].startswith('关闭时仅运行纸面测试')
         assert payload['field_help']['POLYMARKET_PRIVATE_KEY'].startswith('实盘钱包私钥')
         assert payload['field_help']['POLYMARKET_FUNDER'].startswith('与私钥对应的实盘钱包地址')
-        assert payload['field_help']['POLYMARKET_API_KEY'].startswith('官方 Builder API 的访问密钥')
+        assert payload['field_help']['POLYMARKET_API_KEY'].startswith('CLOB 实盘下单凭证')
     finally:
         state.close()
 

@@ -150,6 +150,8 @@ _LIVE_REDEEM_RUNTIME_FIELDS = (
     "last_attempt_at",
     "last_result",
     "last_tx_hash",
+    "last_submission_id",
+    "last_submission_status",
     "pending_redeem_count",
 )
 _LIVE_REDEEM_ENTRY_FIELDS = (
@@ -158,6 +160,8 @@ _LIVE_REDEEM_ENTRY_FIELDS = (
     "last_attempt_at",
     "next_attempt_at",
     "last_tx_hash",
+    "last_submission_id",
+    "last_submission_status",
     "event_slug",
     "outcome",
     "size",
@@ -174,6 +178,8 @@ def _default_live_redeem_runtime() -> dict[str, Any]:
         "last_attempt_at": None,
         "last_result": None,
         "last_tx_hash": None,
+        "last_submission_id": None,
+        "last_submission_status": None,
         "pending_redeem_count": 0,
     }
 
@@ -203,6 +209,8 @@ def _normalize_live_redeem_entry(payload: Any) -> dict[str, Any]:
         "last_attempt_at": None,
         "next_attempt_at": None,
         "last_tx_hash": None,
+        "last_submission_id": None,
+        "last_submission_status": None,
         "event_slug": None,
         "outcome": None,
         "size": None,
@@ -262,6 +270,7 @@ def save_live_redeem_state(path: Path, state: dict[str, Any]) -> None:
 _LIVE_REDEEM_CTF_CONTRACT = os.getenv("POLYMARKET_CTF_CONTRACT") or "0x4D97DCd97eC945f40cF65F87097ACe5EA0476045"
 _LIVE_REDEEM_COLLATERAL_TOKEN = os.getenv("POLYMARKET_COLLATERAL_TOKEN") or "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174"
 _LIVE_REDEEM_PARENT_COLLECTION_ID = "0x" + ("00" * 32)
+_LIVE_REDEEM_RELAYER_URL = os.getenv("POLYMARKET_RELAYER_URL") or "https://relayer-v2.polymarket.com"
 _LIVE_REDEEM_INDEX_SETS = [1, 2]
 _LIVE_REDEEM_TERMINAL_STATUSES = {"completed", "submitted", "terminal_error", "dry_run"}
 
@@ -281,59 +290,140 @@ _LIVE_REDEEM_CTF_ABI = [
 ]
 
 
-def _import_live_redeem_web3():
-    try:
-        from web3 import Web3
-    except ModuleNotFoundError as exc:
-        raise RuntimeError("Live redeem requires the `web3` package for real execution.") from exc
-    return Web3
+def _build_live_redeem_builder_config(cfg: AppConfig):
+    from py_builder_signing_sdk.config import BuilderConfig
+    from py_builder_signing_sdk.sdk_types import BuilderApiKeyCreds
+
+    return BuilderConfig(
+        local_builder_creds=BuilderApiKeyCreds(
+            key=str(cfg.live_redeem_builder_api_key or ""),
+            secret=str(cfg.live_redeem_builder_secret or ""),
+            passphrase=str(cfg.live_redeem_builder_passphrase or ""),
+        )
+    )
 
 
-def _build_live_redeem_web3(cfg: AppConfig):
-    try:
-        Web3 = _import_live_redeem_web3()
-    except ModuleNotFoundError as exc:
-        raise RuntimeError("Live redeem requires the `web3` package for real execution.") from exc
-    rpc_url = os.getenv("POLYGON_RPC_URL") or "https://polygon-rpc.com"
-    provider = Web3.HTTPProvider(rpc_url, request_kwargs={"timeout": 30})
-    return Web3(provider)
-
-
-def _execute_live_redeem_onchain(
-    cfg: AppConfig,
-    *,
-    condition_id: str,
-    index_sets: list[int],
-) -> str:
+def _build_live_redeem_relayer_client(cfg: AppConfig):
     if not cfg.live_private_key:
         raise RuntimeError("Missing PRIVATE_KEY/POLYMARKET_PRIVATE_KEY for live redeem.")
 
-    web3 = _build_live_redeem_web3(cfg)
-    account = web3.eth.account.from_key(cfg.live_private_key)
-    contract = web3.eth.contract(
-        address=web3.to_checksum_address(_LIVE_REDEEM_CTF_CONTRACT),
-        abi=_LIVE_REDEEM_CTF_ABI,
+    from py_builder_relayer_client.client import RelayClient
+
+    builder_config = None
+    if getattr(cfg, "live_redeem_auth_mode", "unconfigured") == "builder":
+        builder_config = _build_live_redeem_builder_config(cfg)
+
+    return RelayClient(
+        _LIVE_REDEEM_RELAYER_URL,
+        chain_id=int(cfg.live_chain_id),
+        private_key=cfg.live_private_key,
+        builder_config=builder_config,
     )
-    transaction = contract.functions.redeemPositions(
-        web3.to_checksum_address(_LIVE_REDEEM_COLLATERAL_TOKEN),
-        web3.to_bytes(hexstr=_LIVE_REDEEM_PARENT_COLLECTION_ID),
-        web3.to_bytes(hexstr=condition_id),
-        list(index_sets),
-    ).build_transaction(
-        {
-            "from": account.address,
-            "chainId": int(cfg.live_chain_id),
-            "nonce": web3.eth.get_transaction_count(account.address),
-            "gas": 350000,
-            "gasPrice": web3.eth.gas_price,
+
+
+def _build_live_redeem_safe_transaction(*, condition_id: str, index_sets: list[int]):
+    from eth_abi import encode
+    from eth_utils import keccak, to_checksum_address
+    from py_builder_relayer_client.models import OperationType, SafeTransaction
+
+    normalized_condition_id = str(condition_id or "").strip()
+    if normalized_condition_id.startswith("0x"):
+        normalized_condition_id = normalized_condition_id[2:]
+    if len(normalized_condition_id) != 64:
+        raise RuntimeError("Live redeem condition id must be a 32-byte hex string.")
+
+    selector = keccak(text="redeemPositions(address,bytes32,bytes32,uint256[])")[:4]
+    calldata = selector + encode(
+        ["address", "bytes32", "bytes32", "uint256[]"],
+        [
+            to_checksum_address(_LIVE_REDEEM_COLLATERAL_TOKEN),
+            bytes.fromhex(_LIVE_REDEEM_PARENT_COLLECTION_ID[2:]),
+            bytes.fromhex(normalized_condition_id),
+            list(index_sets),
+        ],
+    )
+    return SafeTransaction(
+        to=to_checksum_address(_LIVE_REDEEM_CTF_CONTRACT),
+        operation=OperationType.Call,
+        data="0x" + calldata.hex(),
+        value="0",
+    )
+
+
+def _submit_live_redeem_via_relayer_api_key(
+    cfg: AppConfig,
+    *,
+    condition_id: str,
+    event_slug: str,
+    index_sets: list[int],
+) -> dict[str, Any]:
+    from py_builder_relayer_client.builder.safe import build_safe_transaction_request
+    from py_builder_relayer_client.endpoints import SUBMIT_TRANSACTION
+    from py_builder_relayer_client.http_helpers.helpers import post
+    from py_builder_relayer_client.models import SafeTransactionArgs, TransactionType
+
+    client = _build_live_redeem_relayer_client(cfg)
+    safe_address = client.get_expected_safe()
+    if not client.get_deployed(safe_address):
+        raise RuntimeError(f"expected safe {safe_address} is not deployed")
+
+    from_address = client.signer.address()
+    nonce_payload = client.get_nonce(from_address, TransactionType.SAFE.value)
+    if nonce_payload is None or nonce_payload.get("nonce") is None:
+        raise RuntimeError("invalid nonce payload received")
+
+    request_body = build_safe_transaction_request(
+        signer=client.signer,
+        args=SafeTransactionArgs(
+            from_address=from_address,
+            nonce=nonce_payload.get("nonce"),
+            chain_id=int(cfg.live_chain_id),
+            transactions=[_build_live_redeem_safe_transaction(condition_id=condition_id, index_sets=index_sets)],
+        ),
+        config=client.contract_config,
+        metadata=f"Redeem positions for {event_slug}",
+    ).to_dict()
+
+    response = post(
+        f"{client.relayer_url}{SUBMIT_TRANSACTION}",
+        headers={
+            "RELAYER_API_KEY": str(cfg.live_redeem_relayer_api_key or ""),
+            "RELAYER_API_KEY_ADDRESS": str(cfg.live_redeem_relayer_api_key_address or ""),
+        },
+        data=request_body,
+    )
+    return {
+        "submission_id": response.get("transactionID"),
+        "tx_hash": response.get("transactionHash"),
+    }
+
+
+def _execute_live_redeem_via_relayer(
+    cfg: AppConfig,
+    *,
+    condition_id: str,
+    event_slug: str,
+    index_sets: list[int],
+) -> dict[str, Any]:
+    auth_mode = getattr(cfg, "live_redeem_auth_mode", "unconfigured")
+    if auth_mode == "builder":
+        client = _build_live_redeem_relayer_client(cfg)
+        response = client.execute(
+            [_build_live_redeem_safe_transaction(condition_id=condition_id, index_sets=index_sets)],
+            metadata=f"Redeem positions for {event_slug}",
+        )
+        return {
+            "submission_id": getattr(response, "transaction_id", None),
+            "tx_hash": getattr(response, "transaction_hash", None),
         }
-    )
-    signed = account.sign_transaction(transaction, cfg.live_private_key)
-    tx_hash = web3.eth.send_raw_transaction(signed.raw_transaction)
-    receipt = web3.eth.wait_for_transaction_receipt(tx_hash, timeout=120)
-    if int(receipt.get("status", 0) or 0) != 1:
-        raise RuntimeError("Live redeem transaction reverted.")
-    return web3.to_hex(tx_hash)
+    if auth_mode == "relayer":
+        return _submit_live_redeem_via_relayer_api_key(
+            cfg,
+            condition_id=condition_id,
+            event_slug=event_slug,
+            index_sets=index_sets,
+        )
+    raise RuntimeError("Missing official relayer credentials for live redeem.")
 
 def execute_live_redeem(
     cfg: AppConfig,
@@ -348,19 +438,28 @@ def execute_live_redeem(
     if dry_run:
         return f"dry-run:{condition_id}"
     if executor is not None:
-        return str(
-            executor(
-                condition_id=condition_id,
-                event_slug=event_slug,
-                index_sets=resolved_index_sets,
-                dry_run=False,
-            )
+        result = executor(
+            cfg=cfg,
+            condition_id=condition_id,
+            event_slug=event_slug,
+            index_sets=resolved_index_sets,
+            dry_run=False,
         )
-    return _execute_live_redeem_onchain(
-        cfg,
-        condition_id=condition_id,
-        index_sets=resolved_index_sets,
-    )
+    else:
+        result = _execute_live_redeem_via_relayer(
+            cfg,
+            condition_id=condition_id,
+            event_slug=event_slug,
+            index_sets=resolved_index_sets,
+        )
+    if isinstance(result, dict):
+        submission_id = result.get("submission_id") or result.get("transactionID") or result.get("transaction_id")
+        if submission_id:
+            return str(submission_id)
+        tx_hash = result.get("tx_hash") or result.get("transactionHash") or result.get("transaction_hash")
+        if tx_hash:
+            return str(tx_hash)
+    return str(result)
 
 
 def _live_redeem_backoff_seconds(cfg: AppConfig, attempt_count: int) -> int:
@@ -428,7 +527,7 @@ def attempt_live_redeem(
         return {"status": "skipped", "reason": "not_due", "condition_id": condition_id}
 
     try:
-        tx_hash = execute_live_redeem(
+        submission_ref = execute_live_redeem(
             cfg,
             condition_id=condition_id,
             event_slug=event_slug,
@@ -461,13 +560,31 @@ def attempt_live_redeem(
     entry["last_attempt_at"] = now.isoformat()
     entry["next_attempt_at"] = None
     entry["last_error"] = None
+    tx_hash = None
+    submission_id = None
+    if str(submission_ref).startswith("dry-run:"):
+        entry["status"] = "dry_run"
+    else:
+        entry["status"] = "submitted"
+        if str(submission_ref).startswith("0x") and len(str(submission_ref)) == 66:
+            tx_hash = str(submission_ref)
+        else:
+            submission_id = str(submission_ref)
     entry["last_tx_hash"] = tx_hash
-    entry["status"] = "dry_run" if str(tx_hash).startswith("dry-run:") else "submitted"
+    entry["last_submission_id"] = submission_id
+    entry["last_submission_status"] = entry["status"]
     runtime["last_attempt_at"] = entry["last_attempt_at"]
     runtime["last_result"] = entry["status"]
     runtime["last_tx_hash"] = tx_hash
+    runtime["last_submission_id"] = submission_id
+    runtime["last_submission_status"] = entry["status"]
     state["conditions"][condition_id] = entry
-    return {"status": entry["status"], "condition_id": condition_id, "tx_hash": tx_hash}
+    return {
+        "status": entry["status"],
+        "condition_id": condition_id,
+        "tx_hash": tx_hash,
+        "submission_id": submission_id,
+    }
 
 
 def _reconcile_live_redeem_state(
@@ -1044,6 +1161,8 @@ def validate_live_runtime_config(cfg: AppConfig) -> None:
         raise RuntimeError('Missing POLYMARKET_FUNDER for live trading.')
     if (cfg.live_order_type or 'FOK').upper() != 'FOK':
         _resolve_live_order_type(cfg.live_order_type)
+    if cfg.live_auto_redeem_enabled and getattr(cfg, 'live_redeem_auth_mode', 'unconfigured') == 'unconfigured':
+        raise RuntimeError('Missing official relayer credentials for live redeem.')
 
 def _session_day_key(now: datetime) -> str:
     return now.astimezone(SESSION_DAY_TZ).date().isoformat()
@@ -1283,6 +1402,13 @@ def _create_live_clob_client(cfg: AppConfig):
     from py_clob_client.client import ClobClient
     from py_clob_client.clob_types import ApiCreds
 
+    def _apply_derived_api_creds(client: Any):
+        client.set_api_creds(client.create_or_derive_api_creds())
+
+    def _is_invalid_api_key_error(exc: Exception) -> bool:
+        message = str(exc).lower()
+        return "invalid api key" in message or "unauthorized" in message or "status_code=401" in message
+
     clob_client = ClobClient(
         cfg.clob_api_base,
         chain_id=cfg.live_chain_id,
@@ -1298,17 +1424,18 @@ def _create_live_clob_client(cfg: AppConfig):
                 api_passphrase=cfg.live_api_passphrase,
             )
         )
+        get_api_keys = getattr(clob_client, "get_api_keys", None)
+        if callable(get_api_keys):
+            try:
+                get_api_keys()
+            except Exception as exc:
+                if not _is_invalid_api_key_error(exc):
+                    raise
+                print("[live] explicit API credentials rejected; falling back to derived credentials.", flush=True)
+                _apply_derived_api_creds(clob_client)
+                get_api_keys()
         return clob_client
-    if cfg.live_api_key and cfg.live_api_secret and cfg.live_api_passphrase:
-        clob_client.set_api_creds(
-            {
-                "api_key": cfg.live_api_key,
-                "secret": cfg.live_api_secret,
-                "passphrase": cfg.live_api_passphrase,
-            }
-        )
-    else:
-        clob_client.set_api_creds(clob_client.create_or_derive_api_creds())
+    _apply_derived_api_creds(clob_client)
     return clob_client
 
 def place_live_order(
@@ -1704,6 +1831,8 @@ def place_live_order(
                 'amount': plan.order_cost,
                 'side': 'BUY',
                 'order_type': order_type,
+                'price': None,
+                'fee_rate_bps': None,
             },
         )()
     signed_order = live_client.create_market_order(order_args)
