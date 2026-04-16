@@ -15,6 +15,7 @@ from typing import Any
 from config import AppConfig
 from binance_signal import BinanceDepth5SignalService
 from models import MarketQuote, MarketWindow, PaperStrategyState, PendingPaperTrade, SessionState, TradePlan, TradeRecord
+from optimizer import load_optimizer_state, save_optimizer_state
 from polymarket_api import PolymarketClient, extract_token_ids, parse_iso_datetime
 from risk_and_sizing import apply_round_outcome, build_trade_plan, reset_after_stop_loss
 from strategy import get_side_for_round
@@ -2108,6 +2109,51 @@ def _paper_experiment_id(strategy_id: int, strategy_state: PaperStrategyState) -
     return experiment_id
 
 
+def _candidate_cfg_with_params(base_cfg: AppConfig, base_strategy_id: int, params: dict[str, Any] | None) -> AppConfig:
+    params = params or {}
+    kwargs: dict[str, Any] = {"strategy_id": int(base_strategy_id)}
+    if "TARGET_PROFIT" in params:
+        kwargs["target_profit"] = float(params["TARGET_PROFIT"])
+    if "MAX_PRICE_THRESHOLD" in params:
+        kwargs["max_price_threshold"] = float(params["MAX_PRICE_THRESHOLD"])
+    if "SIGNAL_MOMENTUM_THRESHOLD" in params:
+        kwargs["signal_momentum_threshold"] = float(params["SIGNAL_MOMENTUM_THRESHOLD"])
+    if "OFI_THRESHOLD" in params:
+        kwargs["ofi_threshold"] = float(params["OFI_THRESHOLD"])
+    if "MAX_ENTRY_PRICE" in params:
+        kwargs["max_entry_price"] = float(params["MAX_ENTRY_PRICE"])
+    return replace(base_cfg, **kwargs)
+
+
+def _load_active_optimizer_challengers(path: Path) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    payload = load_optimizer_state(path)
+    active = payload.get("active_challengers")
+    challengers = active if isinstance(active, list) else []
+    for challenger in challengers:
+        if not isinstance(challenger, dict):
+            continue
+        raw_state = challenger.get("paper_state")
+        if isinstance(raw_state, dict):
+            paper_state = _hydrate_paper_strategy_state(raw_state)
+        else:
+            paper_state = PaperStrategyState()
+        paper_state.experiment_id = str(challenger.get("candidate_id") or paper_state.experiment_id or "").strip() or None
+        challenger["_paper_state"] = paper_state
+    return payload, [item for item in challengers if isinstance(item, dict)]
+
+
+def _save_active_optimizer_challengers(path: Path, payload: dict[str, Any], challengers: list[dict[str, Any]]) -> None:
+    serialized = dict(payload)
+    serialized["active_challengers"] = []
+    for challenger in challengers:
+        item = {key: value for key, value in challenger.items() if key != "_paper_state"}
+        paper_state = challenger.get("_paper_state")
+        if isinstance(paper_state, PaperStrategyState):
+            item["paper_state"] = asdict(paper_state)
+        serialized["active_challengers"].append(item)
+    save_optimizer_state(path, serialized)
+
+
 def _build_frozen_pending_paper_plan(item: PendingPaperTrade) -> TradePlan:
     return TradePlan(
         True,
@@ -2344,7 +2390,9 @@ def run_paper_trading(
     client = client or PolymarketClient(cfg)
     state_path = state_path or cfg.logs_dir / "session_state.json"
     log_path = log_path or cfg.logs_dir / "paper_trades.csv"
+    optimizer_state_path = cfg.logs_dir / "optimizer_state.json"
     strategy_ids = _paper_strategy_ids_for_runtime(cfg)
+    optimizer_state_payload, active_challengers = _load_active_optimizer_challengers(optimizer_state_path)
     if binance_signal_service is None and 6 in strategy_ids:
         binance_signal_service = BinanceDepth5SignalService(
             ws_url=cfg.binance_ws_url,
@@ -2385,12 +2433,15 @@ def run_paper_trading(
                         state_path = cfg.logs_dir / "session_state.json"
                     if not log_path_provided:
                         log_path = cfg.logs_dir / "paper_trades.csv"
+                    optimizer_state_path = cfg.logs_dir / "optimizer_state.json"
+                    optimizer_state_payload, active_challengers = _load_active_optimizer_challengers(optimizer_state_path)
                     _ensure_paper_strategy_state_map(state, strategy_ids)
                     _sync_legacy_paper_state_fields(state, strategy_ids)
             now = datetime.now(timezone.utc)
             pending_strategy_ids: list[int] = []
             settled_any_pending = False
             state_changed = False
+            challenger_state_changed = False
             for strategy_id in strategy_ids:
                 strategy_state = state.paper_strategies.setdefault(strategy_id, PaperStrategyState())
                 strategy_session = _paper_strategy_state_to_session_state(strategy_state, state)
@@ -2407,11 +2458,29 @@ def run_paper_trading(
                 state.paper_strategies[strategy_id] = _session_state_to_paper_strategy_state(strategy_session)
                 if state.paper_strategies[strategy_id].pending_paper_trades:
                     pending_strategy_ids.append(strategy_id)
+            for challenger in active_challengers:
+                strategy_state = challenger.get("_paper_state")
+                if not isinstance(strategy_state, PaperStrategyState):
+                    continue
+                strategy_session = _paper_strategy_state_to_session_state(strategy_state, state)
+                strategy_session, settled_changed = _settle_pending_paper_trades(
+                    client=client,
+                    state=strategy_session,
+                    log_path=log_path,
+                )
+                next_state = _session_state_to_paper_strategy_state(strategy_session)
+                next_state.experiment_id = str(challenger.get("candidate_id") or next_state.experiment_id or "").strip() or None
+                challenger["_paper_state"] = next_state
+                if settled_changed:
+                    settled_any_pending = True
+                    challenger_state_changed = True
             if state_changed or settled_any_pending:
                 _sync_legacy_paper_state_fields(state, strategy_ids)
                 round_completed = True
                 _copy_session_state_into(loaded_state, state)
                 save_session_state(state_path, state)
+            if challenger_state_changed:
+                _save_active_optimizer_challengers(optimizer_state_path, optimizer_state_payload, active_challengers)
             if pending_strategy_ids:
                 _update_runtime_control(
                     runtime_control,
@@ -2757,6 +2826,100 @@ def run_paper_trading(
                 round_completed = True
                 _copy_session_state_into(loaded_state, state)
                 save_session_state(state_path, state)
+
+            for challenger in active_challengers:
+                strategy_state = challenger.get("_paper_state")
+                if not isinstance(strategy_state, PaperStrategyState):
+                    continue
+                if strategy_state.pending_paper_trades:
+                    continue
+                experiment_id = str(challenger.get("candidate_id") or "").strip() or _paper_experiment_id(
+                    int(challenger.get("base_strategy_id") or 0),
+                    strategy_state,
+                )
+                base_strategy_id = int(challenger.get("base_strategy_id") or 0)
+                if base_strategy_id < 1:
+                    continue
+                strategy_cfg = _candidate_cfg_with_params(cfg, base_strategy_id, challenger.get("params"))
+                strategy_session = _paper_strategy_state_to_session_state(strategy_state, state)
+                strategy_quote = replace(quote)
+                _apply_strategy6_signal_to_quote(
+                    cfg=strategy_cfg,
+                    quote=strategy_quote,
+                    binance_signal_service=binance_signal_service,
+                )
+                side_decision = _resolve_side_from_strategy(
+                    cfg=strategy_cfg,
+                    state=strategy_session,
+                    slug=target_round.slug,
+                    quote=strategy_quote,
+                    market_client=client,
+                    window=target_round,
+                    now=now,
+                    entry_time=entry_time,
+                )
+                if side_decision.side is None:
+                    next_state = _session_state_to_paper_strategy_state(strategy_session)
+                    next_state.experiment_id = experiment_id
+                    challenger["_paper_state"] = next_state
+                    continue
+
+                side = side_decision.side
+                price = resolve_quote_price(side, strategy_quote)
+                if _ws_is_stale_for_trade(client, strategy_cfg):
+                    next_state = _session_state_to_paper_strategy_state(strategy_session)
+                    next_state.experiment_id = experiment_id
+                    challenger["_paper_state"] = next_state
+                    continue
+
+                if _entry_window_missed(now, entry_time, grace_seconds=strategy_cfg.entry_grace_seconds):
+                    next_state = _session_state_to_paper_strategy_state(strategy_session)
+                    next_state.experiment_id = experiment_id
+                    challenger["_paper_state"] = next_state
+                    continue
+
+                plan = build_trade_plan(
+                    state=strategy_session,
+                    side=side,
+                    price=price,
+                    target_profit=strategy_cfg.target_profit,
+                    min_price_threshold=getattr(strategy_cfg, 'min_price_threshold', None),
+                    max_price_threshold=strategy_cfg.max_price_threshold,
+                    max_stake=strategy_cfg.max_stake,
+                    max_consecutive_losses=strategy_cfg.max_consecutive_losses,
+                    bet_sizing_mode=strategy_cfg.bet_sizing_mode,
+                    base_order_cost=strategy_cfg.base_order_cost,
+                )
+                if not plan.should_trade:
+                    next_state = _session_state_to_paper_strategy_state(strategy_session)
+                    next_state.experiment_id = experiment_id
+                    challenger["_paper_state"] = next_state
+                    continue
+
+                if (entry_time - now).total_seconds() > 1:
+                    next_state = _session_state_to_paper_strategy_state(strategy_session)
+                    next_state.experiment_id = experiment_id
+                    challenger["_paper_state"] = next_state
+                    continue
+
+                queued = _queue_pending_paper_trade(
+                    state=strategy_session,
+                    window=target_round,
+                    plan=plan,
+                    side=side,
+                    cfg=strategy_cfg,
+                    side_decision=side_decision,
+                    experiment_id=experiment_id,
+                )
+                if queued:
+                    strategy_session.round_index += 1
+                next_state = _session_state_to_paper_strategy_state(strategy_session)
+                next_state.experiment_id = experiment_id
+                challenger["_paper_state"] = next_state
+                challenger_state_changed = True
+
+            if challenger_state_changed:
+                _save_active_optimizer_challengers(optimizer_state_path, optimizer_state_payload, active_challengers)
 
             consecutive_errors = 0
             if round_completed:

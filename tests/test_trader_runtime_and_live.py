@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import threading
 from pathlib import Path
 from dataclasses import asdict
@@ -2325,3 +2326,58 @@ def test_run_paper_trading_multi_strategy_settles_ready_strategy_without_blockin
     assert len(rows) == 2
     assert "btc-updown-5m-paper-s6" in rows[1]
     assert ",6,OPEN,btc-updown-5m-paper-s6," in rows[1]
+
+
+def test_run_paper_trading_persists_active_challenger_pending_state(tmp_path, monkeypatch):
+    old_cwd = Path.cwd()
+    os.chdir(tmp_path)
+    stop_event = threading.Event()
+
+    logs_dir = tmp_path / "logs"
+    logs_dir.mkdir(parents=True, exist_ok=True)
+    (logs_dir / "optimizer_state.json").write_text(
+        json.dumps(
+            {
+                "enabled": True,
+                "last_run_at": "2026-04-16T10:00:00+00:00",
+                "champion_id": "strategy-2",
+                "active_challengers": [
+                    {
+                        "candidate_id": "challenger-s2-a",
+                        "base_strategy_id": 2,
+                        "params": {
+                            "TARGET_PROFIT": 1.0,
+                            "MAX_PRICE_THRESHOLD": 0.65,
+                        },
+                        "validation_score": 0.9,
+                    }
+                ],
+                "promotable_candidates": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    def fake_sleep(_seconds):
+        stop_event.set()
+
+    monkeypatch.setattr("trader.time.sleep", fake_sleep)
+
+    try:
+        result = run_paper_trading(
+            AppConfig(strategy_id=2, paper_strategy_ids=[2], poll_interval_seconds=1),
+            client=_ImmediatePaperRoundClient(),
+            state_path=tmp_path / "state.json",
+            log_path=tmp_path / "paper.csv",
+            stop_event=stop_event,
+        )
+
+        optimizer_state = json.loads((logs_dir / "optimizer_state.json").read_text(encoding="utf-8"))
+        challenger = optimizer_state["active_challengers"][0]
+
+        assert result["status"] == "stopped"
+        assert challenger["paper_state"]["experiment_id"] == "challenger-s2-a"
+        assert len(challenger["paper_state"]["pending_paper_trades"]) == 1
+        assert challenger["paper_state"]["pending_paper_trades"][0]["experiment_id"] == "challenger-s2-a"
+    finally:
+        os.chdir(old_cwd)
