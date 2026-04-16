@@ -196,6 +196,33 @@ def _localize_runtime_message(message: str | None) -> str | None:
     }
     return mapping.get(message, message)
 
+
+def _default_optimizer_runtime() -> dict[str, Any]:
+    return {
+        "enabled": False,
+        "last_run_at": None,
+        "champion_id": None,
+        "active_challengers": [],
+        "promotable_count": 0,
+    }
+
+
+def _load_optimizer_runtime(path: Path) -> dict[str, Any]:
+    runtime = _default_optimizer_runtime()
+    if not path.exists():
+        return runtime
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        return runtime
+    runtime["enabled"] = bool(payload.get("enabled", False))
+    runtime["last_run_at"] = payload.get("last_run_at")
+    runtime["champion_id"] = payload.get("champion_id")
+    active_challengers = payload.get("active_challengers")
+    runtime["active_challengers"] = active_challengers if isinstance(active_challengers, list) else []
+    promotable_candidates = payload.get("promotable_candidates")
+    runtime["promotable_count"] = len(promotable_candidates) if isinstance(promotable_candidates, list) else 0
+    return runtime
+
 def _json_default(value: Any) -> Any:
     if isinstance(value, datetime):
         return _iso(value)
@@ -727,6 +754,7 @@ class DashboardState:
             redeem_pending_count = 0
         redeem_enabled = bool(getattr(redeem_cfg, "live_auto_redeem_enabled", False) or redeem_runtime.get("enabled"))
         redeem_visible = bool(redeem_enabled or active_mode == "live" or saved_mode == "live")
+        optimizer_runtime = _load_optimizer_runtime(redeem_cfg.logs_dir / "optimizer_state.json")
 
         return {
             "saved_mode": saved_mode,
@@ -751,6 +779,11 @@ class DashboardState:
             "redeem_last_submission_id": redeem_runtime.get("last_submission_id") or None,
             "redeem_last_submission_status": redeem_runtime.get("last_submission_status") or None,
             "redeem_last_tx_hash": redeem_runtime.get("last_tx_hash") or None,
+            "optimizer_enabled": optimizer_runtime["enabled"],
+            "optimizer_last_run_at": optimizer_runtime["last_run_at"],
+            "optimizer_champion_id": optimizer_runtime["champion_id"],
+            "optimizer_active_challengers": optimizer_runtime["active_challengers"],
+            "optimizer_promotable_count": optimizer_runtime["promotable_count"],
         }
 
     def _refresh_runtime(self) -> None:

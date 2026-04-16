@@ -967,6 +967,18 @@ def test_dashboard_runtime_payload_uses_manager_snapshot(tmp_path: Path):
         state.close()
 
 
+def test_dashboard_runtime_payload_includes_optimizer_status(tmp_path: Path):
+    state = DashboardState(env_file=tmp_path / ".env.dashboard")
+    try:
+        payload = state.get_config_payload()
+        runtime = payload["runtime_status"]
+        assert "optimizer_enabled" in runtime
+        assert "optimizer_last_run_at" in runtime
+        assert "optimizer_promotable_count" in runtime
+    finally:
+        state.close()
+
+
 
 def test_dashboard_update_config_notifies_runtime_manager(tmp_path: Path):
     calls: list[str] = []
