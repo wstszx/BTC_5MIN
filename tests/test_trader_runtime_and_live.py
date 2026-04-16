@@ -956,6 +956,39 @@ def test_load_session_state_preserves_multi_strategy_payload(tmp_path):
     assert state.paper_strategies[6].strategy6_last_ofi_score == 0.75
 
 
+def test_load_session_state_preserves_paper_experiment_ids(tmp_path):
+    state_path = tmp_path / "session_state.json"
+    state_path.write_text(
+        json.dumps(
+            {
+                "paper_strategies": {
+                    "5": {
+                        "round_index": 10,
+                        "cash_pnl": 2.0,
+                        "recovery_loss": 0.0,
+                        "consecutive_losses": 0,
+                        "consecutive_max_stake_skips": 0,
+                        "signal_round_slug": None,
+                        "signal_round_open_up_price": None,
+                        "signal_round_locked_side": None,
+                        "strategy6_last_ofi_score": None,
+                        "stop_loss_count": 0,
+                        "daily_realized_pnl": 2.0,
+                        "current_day": "2026-04-16",
+                        "pending_paper_trades": [],
+                        "experiment_id": "challenger-s5-a",
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    state = load_session_state(state_path, effective_paper_strategy_ids=[5])
+
+    assert state.paper_strategies[5].experiment_id == "challenger-s5-a"
+
+
 
 
 

@@ -716,6 +716,7 @@ def _session_state_to_paper_strategy_state(state: SessionState) -> PaperStrategy
         daily_realized_pnl=state.daily_realized_pnl,
         current_day=state.current_day,
         pending_paper_trades=list(state.pending_paper_trades),
+        experiment_id=getattr(state, "experiment_id", None),
     )
 
 

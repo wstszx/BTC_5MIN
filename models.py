@@ -130,6 +130,7 @@ class PaperStrategyState:
     daily_realized_pnl: float = 0.0
     current_day: str | None = None
     pending_paper_trades: list[PendingPaperTrade] = field(default_factory=list)
+    experiment_id: str | None = None
 
 
 @dataclass(slots=True)
