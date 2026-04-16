@@ -1506,6 +1506,13 @@ def _dashboard_html() -> str:
               <div class="row"><span class="label">最近尝试</span><span id="runtimeRedeemAttempt" class="value">--</span></div>
               <div class="row"><span class="label">最近交易哈希</span><span id="runtimeRedeemTxHash" class="value">--</span></div>
             </div>
+            <div id="runtimeOptimizerRows">
+              <div class="row"><span class="label">优化器</span><span id="runtimeOptimizerEnabled" class="value">--</span></div>
+              <div class="row"><span class="label">当前冠军</span><span id="runtimeOptimizerChampion" class="value">--</span></div>
+              <div class="row"><span class="label">活动挑战者</span><span id="runtimeOptimizerChallengers" class="value">--</span></div>
+              <div class="row"><span class="label">可晋级数量</span><span id="runtimeOptimizerPromotable" class="value">--</span></div>
+              <div class="row"><span class="label">最近运行</span><span id="runtimeOptimizerLastRun" class="value">--</span></div>
+            </div>
           </div>
         </div>
 
@@ -3689,6 +3696,11 @@ function renderRuntimeStatus(payload) {
   el('runtimeRedeemResult').textContent = payload.redeem_last_result || '--';
   el('runtimeRedeemAttempt').textContent = payload.redeem_last_attempt_at ? fmtIso(payload.redeem_last_attempt_at) : '--';
   el('runtimeRedeemTxHash').textContent = payload.redeem_last_tx_hash || '--';
+  el('runtimeOptimizerEnabled').textContent = payload.optimizer_enabled ? '已开启' : '未开启';
+  el('runtimeOptimizerChampion').textContent = payload.optimizer_champion_id || '--';
+  el('runtimeOptimizerChallengers').textContent = String((payload.optimizer_active_challengers || []).length);
+  el('runtimeOptimizerPromotable').textContent = String(payload.optimizer_promotable_count ?? 0);
+  el('runtimeOptimizerLastRun').textContent = payload.optimizer_last_run_at ? fmtIso(payload.optimizer_last_run_at) : '--';
 }
 
 function timeframeMeta(payload) {

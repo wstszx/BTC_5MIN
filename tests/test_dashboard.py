@@ -859,6 +859,23 @@ def test_dashboard_assets_include_live_redeem_runtime_rows():
     assert "el('runtimeRedeemEnabled').textContent = payload.redeem_enabled ? '已开启' : '未开启';" in js
     assert "el('runtimeRedeemPending').textContent = String(payload.redeem_pending_count ?? 0);" in js
     assert "el('runtimeRedeemResult').textContent = payload.redeem_last_result || '--';" in js
+
+
+def test_dashboard_assets_include_optimizer_runtime_rows():
+    html = _dashboard_html()
+    js = _dashboard_js()
+
+    assert 'id="runtimeOptimizerRows"' in html
+    assert 'id="runtimeOptimizerEnabled"' in html
+    assert 'id="runtimeOptimizerChampion"' in html
+    assert 'id="runtimeOptimizerChallengers"' in html
+    assert 'id="runtimeOptimizerPromotable"' in html
+    assert 'id="runtimeOptimizerLastRun"' in html
+    assert "el('runtimeOptimizerEnabled').textContent = payload.optimizer_enabled ? '已开启' : '未开启';" in js
+    assert "el('runtimeOptimizerChampion').textContent = payload.optimizer_champion_id || '--';" in js
+    assert "el('runtimeOptimizerChallengers').textContent = String((payload.optimizer_active_challengers || []).length);" in js
+    assert "el('runtimeOptimizerPromotable').textContent = String(payload.optimizer_promotable_count ?? 0);" in js
+    assert "el('runtimeOptimizerLastRun').textContent = payload.optimizer_last_run_at ? fmtIso(payload.optimizer_last_run_at) : '--';" in js
     assert "el('runtimeRedeemAttempt').textContent = payload.redeem_last_attempt_at ? fmtIso(payload.redeem_last_attempt_at) : '--';" in js
     assert "el('runtimeRedeemTxHash').textContent = payload.redeem_last_tx_hash || '--';" in js
 
