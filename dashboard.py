@@ -1512,6 +1512,8 @@ def _dashboard_html() -> str:
               <div class="row"><span class="label">活动挑战者</span><span id="runtimeOptimizerChallengers" class="value">--</span></div>
               <div class="row"><span class="label">可晋级数量</span><span id="runtimeOptimizerPromotable" class="value">--</span></div>
               <div class="row"><span class="label">最近运行</span><span id="runtimeOptimizerLastRun" class="value">--</span></div>
+              <div class="row"><span class="label">挑战者明细</span><span id="runtimeOptimizerChallengerList" class="value">--</span></div>
+              <div class="row"><span class="label">可晋级明细</span><span id="runtimeOptimizerPromotableList" class="value">--</span></div>
             </div>
           </div>
         </div>
@@ -3701,6 +3703,21 @@ function renderRuntimeStatus(payload) {
   el('runtimeOptimizerChallengers').textContent = String((payload.optimizer_active_challengers || []).length);
   el('runtimeOptimizerPromotable').textContent = String(payload.optimizer_promotable_count ?? 0);
   el('runtimeOptimizerLastRun').textContent = payload.optimizer_last_run_at ? fmtIso(payload.optimizer_last_run_at) : '--';
+  el('runtimeOptimizerChallengerList').innerHTML = renderOptimizerCandidateList(payload.optimizer_active_challengers || []);
+  el('runtimeOptimizerPromotableList').innerHTML = renderOptimizerCandidateList(payload.optimizer_promotable_candidates || []);
+}
+
+function renderOptimizerCandidateList(items) {
+  if (!Array.isArray(items) || items.length === 0) {
+    return '--';
+  }
+  return items.map((item) => {
+    const candidateId = String((item || {}).candidate_id || '--');
+    const strategyId = String((item || {}).base_strategy_id || '--');
+    const score = (item || {}).validation_score;
+    const scoreText = (score === null || score === undefined || score === '') ? '--' : String(score);
+    return esc(candidateId) + ' / S' + esc(strategyId) + ' / score=' + esc(scoreText);
+  }).join('<br>');
 }
 
 function timeframeMeta(payload) {

@@ -876,6 +876,11 @@ def test_dashboard_assets_include_optimizer_runtime_rows():
     assert "el('runtimeOptimizerChallengers').textContent = String((payload.optimizer_active_challengers || []).length);" in js
     assert "el('runtimeOptimizerPromotable').textContent = String(payload.optimizer_promotable_count ?? 0);" in js
     assert "el('runtimeOptimizerLastRun').textContent = payload.optimizer_last_run_at ? fmtIso(payload.optimizer_last_run_at) : '--';" in js
+    assert 'id="runtimeOptimizerChallengerList"' in html
+    assert 'id="runtimeOptimizerPromotableList"' in html
+    assert "function renderOptimizerCandidateList(" in js
+    assert "el('runtimeOptimizerChallengerList').innerHTML" in js
+    assert "el('runtimeOptimizerPromotableList').innerHTML" in js
     assert "el('runtimeRedeemAttempt').textContent = payload.redeem_last_attempt_at ? fmtIso(payload.redeem_last_attempt_at) : '--';" in js
     assert "el('runtimeRedeemTxHash').textContent = payload.redeem_last_tx_hash || '--';" in js
 
@@ -1021,6 +1026,7 @@ def test_dashboard_runtime_payload_reads_optimizer_state_file(tmp_path: Path):
         assert runtime["optimizer_last_run_at"] == "2026-04-16T10:00:00+00:00"
         assert runtime["optimizer_champion_id"] == "champion-1"
         assert runtime["optimizer_promotable_count"] == 1
+        assert runtime["optimizer_active_challengers"][0]["candidate_id"] == "cand-a"
     finally:
         state.close()
         os.chdir(old_cwd)
