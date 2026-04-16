@@ -1611,13 +1611,16 @@ def _dashboard_html() -> str:
       </div>
 
       <div class=\"panel\">
-        <div class=\"panel-head\">
-          <div>
-            <div class=\"head-title\">纸面交易汇总</div>
-            <div class=\"head-desc\">按北京时间聚合的纸面成绩</div>
-          </div>
+      <div class=\"panel-head\">
+        <div>
+          <div class=\"head-title\">纸面交易汇总</div>
+          <div class=\"head-desc\">按北京时间聚合的纸面成绩</div>
+        </div>
+        <div class="top-actions">
+          <select id="paperSummaryStrategy" class="btn btn-ghost"></select>
           <div id=\"paperStatus\" class=\"chip\">待刷新</div>
         </div>
+      </div>
         <div class=\"panel-body\">
           <div class=\"kv-grid\" style=\"margin-bottom: 10px;\">
             <div class=\"kv\"><div class=\"k\">日期</div><div id=\"sumDate\" class=\"v\">--</div></div>
@@ -1652,7 +1655,10 @@ def _dashboard_html() -> str:
           <div class="head-title">最近交易明细</div>
           <div class="head-desc">按时间倒序显示最近 80 条记录</div>
         </div>
-        <div id="recentStatus" class="chip">待刷新</div>
+        <div class="top-actions">
+          <select id="recentTradesStrategy" class="btn btn-ghost"></select>
+          <div id="recentStatus" class="chip">待刷新</div>
+        </div>
       </div>
       <div class=\"table-wrap\">
         <table>
@@ -2585,6 +2591,7 @@ const state = {
   summary: null,
   recent: null,
   paperStrategyFilter: 'all',
+  paperReportStrategyFilter: 'all',
   countdownSnapshotAtMs: null,
   countdownBaseSeconds: null,
   showInternalKeys: false,
@@ -3167,6 +3174,38 @@ function selectAllPaperStrategies() {
   renderUnifiedStrategyToolbar(state.config, liveValues);
   renderStrategyGuide(state.config, liveValues);
   applyConfigFieldVisibility(liveValues);
+}
+
+function paperReportStrategyOptions() {
+  const strategyView = ((state.market || {}).strategy_view) || {};
+  const available = Array.isArray(strategyView.available) ? strategyView.available.map((item) => String(item)) : [];
+  return ['all', ...available.filter((item, index, arr) => item && arr.indexOf(item) === index)];
+}
+
+function renderPaperReportStrategySelectors() {
+  const selectIds = ['paperSummaryStrategy', 'recentTradesStrategy'];
+  const options = paperReportStrategyOptions();
+  const current = String(state.paperReportStrategyFilter || state.paperStrategyFilter || 'all');
+
+  selectIds.forEach((id) => {
+    const node = el(id);
+    if (!node) {
+      return;
+    }
+    node.innerHTML = '';
+    options.forEach((value) => {
+      const option = document.createElement('option');
+      option.value = value;
+      option.textContent = value === 'all' ? '查看全部策略' : ('查看策略 ' + value);
+      option.selected = value === current;
+      node.appendChild(option);
+    });
+    node.onchange = async () => {
+      state.paperReportStrategyFilter = node.value || 'all';
+      renderPaperReportStrategySelectors();
+      await Promise.allSettled([refreshSummary(), refreshRecent()]);
+    };
+  });
 }
 
 function renderStrategyGuide(payload, values) {
@@ -3966,6 +4005,10 @@ function renderMarket(payload) {
   state.market = payload;
   const strategyView = payload.strategy_view || {};
   state.paperStrategyFilter = String(strategyView.selected || state.paperStrategyFilter || 'all');
+  if (!state.paperReportStrategyFilter || state.paperReportStrategyFilter === 'all') {
+    state.paperReportStrategyFilter = String(strategyView.selected || state.paperStrategyFilter || 'all');
+  }
+  renderPaperReportStrategySelectors();
   const round = payload.round || null;
   const quote = payload.quote || {};
   const signal = payload.signal || {};
@@ -4176,7 +4219,7 @@ async function refreshMarket() {
 
 async function refreshSummary() {
   try {
-    const strategy = encodeURIComponent(String(state.paperStrategyFilter || 'all'));
+    const strategy = encodeURIComponent(String(state.paperReportStrategyFilter || 'all'));
     const summaryEndpoint = '/api/paper/summary?strategy=' + strategy;
     const data = await apiGet(summaryEndpoint);
     renderSummary(data);
@@ -4189,7 +4232,7 @@ async function refreshSummary() {
 async function refreshRecent() {
   try {
     const runningMode = String((((state.config || {}).runtime_status || {}).active_mode || (((state.config || {}).runtime_status || {}).running_mode) || 'paper')).toLowerCase();
-    const strategy = encodeURIComponent(String(state.paperStrategyFilter || 'all'));
+    const strategy = encodeURIComponent(String(state.paperReportStrategyFilter || 'all'));
     const recentEndpoint = runningMode === 'live' ? '/api/live/recent?limit=80' : '/api/paper/recent?limit=80&strategy=' + strategy;
     const data = await apiGet(recentEndpoint);
     renderRecent(data);

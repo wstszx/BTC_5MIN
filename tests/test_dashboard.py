@@ -918,6 +918,16 @@ def test_dashboard_assets_use_unified_strategy_selector_for_config_and_views():
     assert 'id="strategyGuideCard"' in html
 
 
+def test_dashboard_assets_include_independent_paper_report_strategy_switcher():
+    html = _dashboard_html()
+    js = _dashboard_js()
+
+    assert 'id="paperSummaryStrategy"' in html
+    assert 'id="recentTradesStrategy"' in html
+    assert 'function renderPaperReportStrategySelectors(' in js
+    assert 'paperReportStrategyFilter' in js
+    assert "state.paperReportStrategyFilter || 'all'" in js
+
 
 def test_dashboard_assets_render_compact_inputs_for_short_numeric_fields():
     js = _dashboard_js()
