@@ -5,7 +5,7 @@ import json
 import csv
 import tempfile
 from dataclasses import dataclass, replace
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from itertools import product
 from statistics import mean
@@ -352,19 +352,94 @@ def run_optimizer_from_history_csv(
     )
 
 
+def run_optimizer_scheduler(
+    *,
+    csv_path: Path,
+    paper_log_path: Path,
+    base_cfg: AppConfig,
+    output_path: Path,
+    champion_id: str | None,
+    optimize_interval_seconds: int,
+    refresh_interval_seconds: int,
+    poll_interval_seconds: int,
+    max_loops: int | None = None,
+    now_fn: Callable[[], datetime] | None = None,
+    sleep_fn: Callable[[float], None] | None = None,
+    optimize_runner: Callable[..., dict[str, Any]] = run_optimizer_from_history_csv,
+    refresh_runner: Callable[..., dict[str, Any]] = refresh_optimizer_state_from_paper_results,
+) -> None:
+    now_fn = now_fn or (lambda: datetime.now(timezone.utc))
+    sleep_fn = sleep_fn or (lambda seconds: __import__("time").sleep(seconds))
+    next_optimize_at: datetime | None = None
+    next_refresh_at: datetime | None = None
+    loop_count = 0
+
+    while max_loops is None or loop_count < max_loops:
+        optimize_now = now_fn()
+        if next_optimize_at is None or optimize_now >= next_optimize_at:
+            optimize_runner(
+                csv_path=csv_path,
+                base_cfg=base_cfg,
+                output_path=output_path,
+                strategy_ids=[5, 6],
+                target_profits=[0.8, 1.0, 1.2],
+                max_price_thresholds=[0.55, 0.60, 0.65],
+                strategy5_thresholds=[0.012, 0.015, 0.018],
+                train_size=3,
+                validation_size=3,
+                step_size=3,
+                top_n=3,
+                champion_id=champion_id,
+                last_run_at=optimize_now.isoformat(),
+            )
+            next_optimize_at = optimize_now + timedelta(seconds=optimize_interval_seconds)
+        refresh_now = now_fn()
+        if next_refresh_at is None or refresh_now >= next_refresh_at:
+            refresh_runner(
+                state_path=output_path,
+                paper_log_path=paper_log_path,
+                min_trade_count=2,
+                required_pnl_edge=1.0,
+                max_drawdown_multiplier=1.25,
+            )
+            next_refresh_at = refresh_now + timedelta(seconds=refresh_interval_seconds)
+        loop_count += 1
+        if max_loops is None or loop_count < max_loops:
+            sleep_fn(float(poll_interval_seconds))
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Run offline paper strategy optimization from historical CSV.")
     parser.add_argument("--csv", required=True, dest="csv_path")
+    parser.add_argument("--paper-log", default="logs/paper_trades.csv", dest="paper_log_path")
     parser.add_argument("--env-file", default=".env.dashboard", dest="env_file")
     parser.add_argument("--output", default="logs/optimizer_state.json", dest="output_path")
     parser.add_argument("--champion-id", default="champion-paper", dest="champion_id")
+    parser.add_argument("--watch", action="store_true")
+    parser.add_argument("--optimize-interval-seconds", type=int, default=3600)
+    parser.add_argument("--refresh-interval-seconds", type=int, default=900)
+    parser.add_argument("--poll-interval-seconds", type=int, default=30)
     args = parser.parse_args(list(argv) if argv is not None else None)
 
     env_path = Path(args.env_file)
     csv_path = Path(args.csv_path)
+    paper_log_path = Path(args.paper_log_path)
     output_path = Path(args.output_path)
     cfg = build_config_from_env_values(load_env_file_values(env_path))
     last_run_at = datetime.now(timezone.utc).isoformat()
+
+    if args.watch:
+        run_optimizer_scheduler(
+            csv_path=csv_path,
+            paper_log_path=paper_log_path,
+            base_cfg=cfg,
+            output_path=output_path,
+            champion_id=args.champion_id,
+            optimize_interval_seconds=int(args.optimize_interval_seconds),
+            refresh_interval_seconds=int(args.refresh_interval_seconds),
+            poll_interval_seconds=int(args.poll_interval_seconds),
+        )
+        return 0
 
     payload = run_optimizer_from_history_csv(
         csv_path=csv_path,

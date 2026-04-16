@@ -1,5 +1,6 @@
 import csv
 from pathlib import Path
+from datetime import datetime, timedelta, timezone
 
 from config import AppConfig
 from optimizer import (
@@ -11,6 +12,7 @@ from optimizer import (
     main,
     rank_optimizer_candidates,
     run_optimizer_cycle,
+    run_optimizer_scheduler,
     run_optimizer_from_history_csv,
     score_candidate_with_backtest_rows,
     save_optimizer_state,
@@ -277,6 +279,54 @@ def test_optimizer_main_rejects_missing_csv_argument():
         raise AssertionError("Expected SystemExit")
 
 
+def test_optimizer_main_runs_scheduler_in_watch_mode(monkeypatch, tmp_path):
+    captured: dict[str, object] = {}
+
+    def fake_scheduler(**kwargs):
+        captured.update(kwargs)
+
+    monkeypatch.setattr("optimizer.run_optimizer_scheduler", fake_scheduler)
+
+    csv_path = tmp_path / "history.csv"
+    csv_path.write_text("h\n", encoding="utf-8")
+    paper_log_path = tmp_path / "paper.csv"
+    paper_log_path.write_text("h\n", encoding="utf-8")
+    env_file = tmp_path / ".env.dashboard"
+    env_file.write_text("STRATEGY_ID=5\n", encoding="utf-8")
+    output_path = tmp_path / "optimizer_state.json"
+
+    exit_code = main(
+        [
+            "--csv",
+            str(csv_path),
+            "--paper-log",
+            str(paper_log_path),
+            "--env-file",
+            str(env_file),
+            "--output",
+            str(output_path),
+            "--champion-id",
+            "champion-1",
+            "--watch",
+            "--optimize-interval-seconds",
+            "3600",
+            "--refresh-interval-seconds",
+            "900",
+            "--poll-interval-seconds",
+            "30",
+        ]
+    )
+
+    assert exit_code == 0
+    assert captured["csv_path"] == csv_path
+    assert captured["paper_log_path"] == paper_log_path
+    assert captured["output_path"] == output_path
+    assert captured["champion_id"] == "champion-1"
+    assert captured["optimize_interval_seconds"] == 3600
+    assert captured["refresh_interval_seconds"] == 900
+    assert captured["poll_interval_seconds"] == 30
+
+
 def test_refresh_optimizer_state_from_paper_results_updates_challenger_decisions(tmp_path):
     state_path = tmp_path / "optimizer_state.json"
     paper_log_path = tmp_path / "paper_trades.csv"
@@ -319,3 +369,65 @@ def test_refresh_optimizer_state_from_paper_results_updates_challenger_decisions
     assert challenger["paper_metrics"]["challenger_advantage"] == 2.0
     assert challenger["promotion_decision"]["state"] == "promotable"
     assert payload["promotable_candidates"][0]["candidate_id"] == "challenger-a"
+
+
+def test_run_optimizer_scheduler_triggers_optimize_and_refresh_when_due(tmp_path):
+    calls: list[tuple[str, Path]] = []
+    output_path = tmp_path / "optimizer_state.json"
+    csv_path = tmp_path / "history.csv"
+    paper_log_path = tmp_path / "paper.csv"
+    csv_path.write_text("h\n", encoding="utf-8")
+    paper_log_path.write_text("h\n", encoding="utf-8")
+
+    times = iter(
+        [
+            datetime(2026, 4, 16, 10, 0, tzinfo=timezone.utc),
+            datetime(2026, 4, 16, 10, 0, tzinfo=timezone.utc),
+            datetime(2026, 4, 16, 10, 5, tzinfo=timezone.utc),
+            datetime(2026, 4, 16, 10, 5, tzinfo=timezone.utc),
+        ]
+    )
+
+    def fake_now():
+        return next(times)
+
+    def fake_optimize(**kwargs):
+        calls.append(("optimize", kwargs["output_path"]))
+        save_optimizer_state(
+            kwargs["output_path"],
+            {
+                "enabled": True,
+                "last_run_at": kwargs["last_run_at"],
+                "champion_id": kwargs["champion_id"],
+                "active_challengers": [],
+                "promotable_candidates": [],
+            },
+        )
+        return load_optimizer_state(kwargs["output_path"])
+
+    def fake_refresh(**kwargs):
+        calls.append(("refresh", kwargs["state_path"]))
+        return load_optimizer_state(kwargs["state_path"])
+
+    run_optimizer_scheduler(
+        csv_path=csv_path,
+        paper_log_path=paper_log_path,
+        base_cfg=AppConfig(strategy_id=2),
+        output_path=output_path,
+        champion_id="champion-1",
+        optimize_interval_seconds=60,
+        refresh_interval_seconds=60,
+        poll_interval_seconds=1,
+        max_loops=2,
+        now_fn=fake_now,
+        sleep_fn=lambda _seconds: None,
+        optimize_runner=fake_optimize,
+        refresh_runner=fake_refresh,
+    )
+
+    assert calls == [
+        ("optimize", output_path),
+        ("refresh", output_path),
+        ("optimize", output_path),
+        ("refresh", output_path),
+    ]
