@@ -7,6 +7,7 @@ from strategy import compute_ofi_score, get_side_for_round
 
 def test_default_config_targets_btc_5m_series():
     cfg = AppConfig()
+    assert cfg.market_timeframe == '5m'
     assert cfg.series_id == 10684
     assert cfg.series_slug == 'btc-up-or-down-5m'
     assert cfg.trade_mode == 'paper'

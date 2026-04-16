@@ -43,3 +43,19 @@ def test_build_config_ignores_invalid_paper_strategy_entries():
     cfg = build_config_from_env_values({'STRATEGY_ID': '3', 'PAPER_STRATEGY_IDS': '6,x,9,2,6'})
 
     assert cfg.paper_strategy_ids == [6, 2]
+
+
+def test_build_config_supports_btc_15m_market_timeframe():
+    cfg = build_config_from_env_values({'MARKET_TIMEFRAME': '15m'})
+
+    assert cfg.market_timeframe == '15m'
+    assert cfg.series_id == 10192
+    assert cfg.series_slug == 'btc-up-or-down-15m'
+
+
+def test_build_config_defaults_invalid_market_timeframe_to_btc_5m():
+    cfg = build_config_from_env_values({'MARKET_TIMEFRAME': '7m'})
+
+    assert cfg.market_timeframe == '5m'
+    assert cfg.series_id == 10684
+    assert cfg.series_slug == 'btc-up-or-down-5m'
