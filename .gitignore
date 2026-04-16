@@ -1,13 +1,27 @@
 __pycache__/
 *.py[cod]
 .pytest_cache/
+.mypy_cache/
+.ruff_cache/
 .worktrees/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+.venv/
+venv/
+env/
+ENV/
+_tmp_*.md
 
 data/*.csv
 !data/.gitkeep
 
 logs/*.csv
 logs/*.json
+logs/*.out
+logs/*.err
+logs/*.log
 logs/live_runtime_check_*.out
 logs/live_runtime_check_*.err
 !logs/.gitkeep
