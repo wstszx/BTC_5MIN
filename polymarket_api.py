@@ -474,6 +474,15 @@ class PolymarketClient:
             raise RuntimeError("Request failed without an exception.")
         raise RuntimeError(f"Unable to fetch {base_url}{path} after {retries} attempts: {last_error}") from last_error
 
+    def _matches_configured_series(self, event: dict[str, Any]) -> bool:
+        slug = str(event.get("slug") or "")
+        series_slug = str(event.get("seriesSlug") or "")
+
+        if series_slug == self.config.series_slug:
+            return True
+
+        return any(slug.startswith(prefix) for prefix in self.config.series_slug_prefixes)
+
     def list_series_events(
         self,
         *,
@@ -503,13 +512,7 @@ class PolymarketClient:
 
         payload = self._get_json("/events", base_url=self.config.gamma_api_base, params=params)
         events = payload.get("value", payload) if isinstance(payload, dict) else payload
-        filtered: list[dict[str, Any]] = []
-        for event in events or []:
-            slug = str(event.get("slug", ""))
-            series_slug = str(event.get("seriesSlug") or "")
-            if series_slug == self.config.series_slug or slug.startswith("btc-updown-5m-"):
-                filtered.append(event)
-        return filtered
+        return [event for event in events or [] if self._matches_configured_series(event)]
 
     def get_event_by_slug(self, slug: str) -> dict[str, Any]:
         return self._get_json(f"/events/slug/{slug}", base_url=self.config.gamma_api_base)
