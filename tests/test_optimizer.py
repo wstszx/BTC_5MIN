@@ -1,12 +1,19 @@
+import csv
+from pathlib import Path
+
 from config import AppConfig
 from optimizer import (
     build_candidate_configs,
     build_optimizer_state,
+    evaluate_candidates_with_walk_forward,
     load_optimizer_state,
     rank_optimizer_candidates,
     run_optimizer_cycle,
+    run_optimizer_from_history_csv,
+    score_candidate_with_backtest_rows,
     save_optimizer_state,
 )
+from walk_forward import WalkForwardWindow
 
 
 def test_build_candidate_configs_creates_strategy_specific_parameter_bundles():
@@ -120,3 +127,95 @@ def test_run_optimizer_cycle_writes_optimizer_state_file(tmp_path):
     assert payload["enabled"] is True
     assert output_path.exists()
     assert load_optimizer_state(output_path)["active_challengers"][0]["candidate_id"] == "cand-a"
+
+
+def test_evaluate_candidates_with_walk_forward_aggregates_validation_scores():
+    candidates = [
+        {
+            "candidate_id": "cand-a",
+            "base_strategy_id": 5,
+            "params": {"TARGET_PROFIT": 1.2},
+        },
+        {
+            "candidate_id": "cand-b",
+            "base_strategy_id": 6,
+            "params": {"OFI_THRESHOLD": 0.7},
+        },
+    ]
+    rows = [{"index": idx} for idx in range(12)]
+    windows = [
+        WalkForwardWindow(train_start=0, train_end=6, validation_start=6, validation_end=9),
+        WalkForwardWindow(train_start=3, train_end=9, validation_start=9, validation_end=12),
+    ]
+
+    def fake_scorer(candidate, train_rows, validation_rows):
+        return {
+            "total_pnl": float(len(validation_rows)) + (1.0 if candidate["candidate_id"] == "cand-a" else 0.0),
+            "max_drawdown": 1.0 if candidate["candidate_id"] == "cand-a" else 2.0,
+            "validation_score": 0.9 if candidate["candidate_id"] == "cand-a" else 0.4,
+        }
+
+    ranked = evaluate_candidates_with_walk_forward(
+        candidates,
+        rows=rows,
+        windows=windows,
+        scorer=fake_scorer,
+    )
+
+    assert [item["candidate_id"] for item in ranked] == ["cand-a", "cand-b"]
+    assert ranked[0]["window_count"] == 2
+    assert ranked[0]["validation_score"] == 0.9
+    assert ranked[1]["validation_score"] == 0.4
+
+
+def test_score_candidate_with_backtest_rows_returns_backtest_metrics():
+    fixture_path = Path("tests/fixtures/sample_history.csv")
+    with fixture_path.open("r", newline="", encoding="utf-8") as handle:
+        rows = list(csv.DictReader(handle))
+
+    metrics = score_candidate_with_backtest_rows(
+        {
+            "candidate_id": "cand-s2",
+            "base_strategy_id": 2,
+            "params": {
+                "TARGET_PROFIT": 1.0,
+                "MAX_PRICE_THRESHOLD": 0.65,
+            },
+        },
+        rows=rows,
+        base_cfg=AppConfig(strategy_id=2),
+    )
+
+    assert "total_pnl" in metrics
+    assert "max_drawdown" in metrics
+    assert "validation_score" in metrics
+    assert metrics["trade_count"] >= 0
+    assert metrics["validation_score"] == metrics["total_pnl"] - metrics["max_drawdown"]
+
+
+def test_run_optimizer_from_history_csv_writes_optimizer_state_from_real_history(tmp_path):
+    csv_path = Path("tests/fixtures/sample_history.csv")
+    output_path = tmp_path / "optimizer_state.json"
+
+    payload = run_optimizer_from_history_csv(
+        csv_path=csv_path,
+        base_cfg=AppConfig(strategy_id=2),
+        output_path=output_path,
+        strategy_ids=[2],
+        target_profits=[1.0],
+        max_price_thresholds=[0.65],
+        strategy5_thresholds=[0.015],
+        train_size=3,
+        validation_size=3,
+        step_size=3,
+        top_n=1,
+        champion_id="champion-1",
+        last_run_at="2026-04-16T10:00:00+00:00",
+    )
+
+    assert payload["enabled"] is True
+    assert output_path.exists()
+    loaded = load_optimizer_state(output_path)
+    assert loaded["champion_id"] == "champion-1"
+    assert len(loaded["active_challengers"]) == 1
+    assert loaded["active_challengers"][0]["candidate_id"].startswith("s2-")

@@ -1,12 +1,17 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+import csv
+import tempfile
+from dataclasses import dataclass, replace
 from pathlib import Path
 from itertools import product
-from typing import Any, Iterable
+from statistics import mean
+from typing import Any, Callable, Iterable, Sequence
 
 from config import AppConfig
+from backtest import run_backtest
+from walk_forward import WalkForwardWindow, build_walk_forward_windows
 
 
 @dataclass(frozen=True, slots=True)
@@ -65,6 +70,48 @@ def rank_optimizer_candidates(rows: list[dict[str, Any]]) -> list[dict[str, Any]
         ),
         reverse=True,
     )
+
+
+def evaluate_candidates_with_walk_forward(
+    candidates: Sequence[dict[str, Any] | OptimizerCandidate],
+    *,
+    rows: Sequence[dict[str, Any]],
+    windows: Sequence[WalkForwardWindow],
+    scorer: Callable[[dict[str, Any], Sequence[dict[str, Any]], Sequence[dict[str, Any]]], dict[str, float]],
+) -> list[dict[str, Any]]:
+    evaluated: list[dict[str, Any]] = []
+    for raw_candidate in candidates:
+        candidate = raw_candidate if isinstance(raw_candidate, dict) else {
+            "candidate_id": raw_candidate.candidate_id,
+            "base_strategy_id": raw_candidate.base_strategy_id,
+            "params": dict(raw_candidate.params),
+        }
+        scores: list[dict[str, float]] = []
+        for window in windows:
+            train_rows = rows[window.train_start:window.train_end]
+            validation_rows = rows[window.validation_start:window.validation_end]
+            scores.append(scorer(candidate, train_rows, validation_rows))
+        if scores:
+            evaluated.append(
+                {
+                    **candidate,
+                    "window_count": len(scores),
+                    "total_pnl": mean(item.get("total_pnl", 0.0) for item in scores),
+                    "max_drawdown": mean(item.get("max_drawdown", 0.0) for item in scores),
+                    "validation_score": mean(item.get("validation_score", 0.0) for item in scores),
+                }
+            )
+        else:
+            evaluated.append(
+                {
+                    **candidate,
+                    "window_count": 0,
+                    "total_pnl": 0.0,
+                    "max_drawdown": 0.0,
+                    "validation_score": 0.0,
+                }
+            )
+    return rank_optimizer_candidates(evaluated)
 
 
 def build_optimizer_state(
@@ -138,3 +185,100 @@ def run_optimizer_cycle(
     )
     save_optimizer_state(output_path, payload)
     return payload
+
+
+_CANDIDATE_PARAM_ATTR_MAP: dict[str, str] = {
+    "TARGET_PROFIT": "target_profit",
+    "MAX_PRICE_THRESHOLD": "max_price_threshold",
+    "SIGNAL_MOMENTUM_THRESHOLD": "signal_momentum_threshold",
+    "OFI_THRESHOLD": "ofi_threshold",
+    "MAX_ENTRY_PRICE": "max_entry_price",
+}
+
+
+def _candidate_to_config(base_cfg: AppConfig, candidate: dict[str, Any]) -> AppConfig:
+    kwargs: dict[str, Any] = {"strategy_id": int(candidate["base_strategy_id"])}
+    for key, value in (candidate.get("params") or {}).items():
+        attr = _CANDIDATE_PARAM_ATTR_MAP.get(str(key))
+        if attr:
+            kwargs[attr] = value
+    return replace(base_cfg, **kwargs)
+
+
+def score_candidate_with_backtest_rows(
+    candidate: dict[str, Any],
+    *,
+    rows: Sequence[dict[str, Any]],
+    base_cfg: AppConfig,
+) -> dict[str, float]:
+    if not rows:
+        return {"total_pnl": 0.0, "max_drawdown": 0.0, "validation_score": 0.0, "trade_count": 0.0}
+
+    cfg = _candidate_to_config(base_cfg, candidate)
+    with tempfile.NamedTemporaryFile("w", newline="", encoding="utf-8", suffix=".csv", delete=False) as handle:
+        fieldnames = list(rows[0].keys())
+        writer = csv.DictWriter(handle, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(rows)
+        temp_path = Path(handle.name)
+    try:
+        result = run_backtest(temp_path, cfg)
+    finally:
+        if temp_path.exists():
+            temp_path.unlink()
+    return {
+        "total_pnl": float(result.total_pnl),
+        "max_drawdown": float(result.max_drawdown),
+        "validation_score": float(result.total_pnl - result.max_drawdown),
+        "trade_count": float(result.trade_count),
+    }
+
+
+def run_optimizer_from_history_csv(
+    *,
+    csv_path: Path,
+    base_cfg: AppConfig,
+    output_path: Path,
+    strategy_ids: Iterable[int],
+    target_profits: Iterable[float],
+    max_price_thresholds: Iterable[float],
+    strategy5_thresholds: Iterable[float],
+    train_size: int,
+    validation_size: int,
+    step_size: int,
+    top_n: int,
+    champion_id: str | None,
+    last_run_at: str,
+) -> dict[str, Any]:
+    with csv_path.open("r", newline="", encoding="utf-8") as handle:
+        rows = list(csv.DictReader(handle))
+    windows = build_walk_forward_windows(
+        rows,
+        train_size=train_size,
+        validation_size=validation_size,
+        step_size=step_size,
+    )
+    candidates = build_candidate_configs(
+        base_cfg,
+        strategy_ids=strategy_ids,
+        target_profits=target_profits,
+        max_price_thresholds=max_price_thresholds,
+        strategy5_thresholds=strategy5_thresholds,
+    )
+    ranked_candidates = evaluate_candidates_with_walk_forward(
+        candidates,
+        rows=rows,
+        windows=windows,
+        scorer=lambda candidate, _train_rows, validation_rows: score_candidate_with_backtest_rows(
+            candidate,
+            rows=validation_rows,
+            base_cfg=base_cfg,
+        ),
+    )
+    return run_optimizer_cycle(
+        ranked_candidates=ranked_candidates,
+        champion_id=champion_id,
+        output_path=output_path,
+        top_n=top_n,
+        last_run_at=last_run_at,
+    )
