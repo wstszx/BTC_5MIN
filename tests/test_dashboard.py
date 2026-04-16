@@ -525,9 +525,20 @@ def test_dashboard_market_header_prioritizes_human_time_over_slug():
 def test_dashboard_reason_fallback_is_human_friendly():
     js = _dashboard_js()
 
-    assert "\u5f53\u524d\u72b6\u6001\u6682\u672a\u8bc6\u522b" in js
-    assert "\u8bf7\u5237\u65b0\u9875\u9762" in js
-    assert "\u8054\u7cfb\u7ef4\u62a4\u8005" in js
+    assert "invalid_price" in js
+    assert "price_below_threshold" in js
+    assert "invalid_base_order_cost" in js
+    assert "invalid_bet_sizing_mode" in js
+    assert "signal_too_weak_fallback" in js
+    assert "signal_price_unavailable" in js
+    assert "signal_price_unavailable_fallback" in js
+    assert "ofi_unavailable" in js
+    assert "ofi_stale" in js
+    assert "ofi_too_weak" in js
+    assert "awaiting_fill_confirmation" in js
+    assert "market_timeframe" in js
+    assert "INVALID OPERATION" in js
+    assert "return String(reason);" in js
 
 
 

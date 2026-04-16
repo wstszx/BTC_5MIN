@@ -2779,12 +2779,25 @@ const REASON_LABELS = {
   signal_unavailable: '信号不可用',
   signal_too_weak_skip: '信号太弱，按规则跳过',
   signal_too_weak: '信号太弱',
+  signal_too_weak_fallback: '信号太弱，回退到基础策略',
+  signal_price_unavailable: '信号价格不可用',
+  signal_price_unavailable_fallback: '信号价格不可用，回退到基础策略',
   price_above_threshold: '价格超过上限阈值',
+  price_below_threshold: '价格低于下限阈值',
+  invalid_price: '价格无效',
+  invalid_base_order_cost: '固定起始下注金额无效',
+  invalid_bet_sizing_mode: '下注模式无效',
   order_cost_above_max_stake: '下单金额超过单笔上限',
   order_size_not_positive: '下单份额无效',
   max_consecutive_losses_reached: '达到连续亏损重置阈值',
   stop_loss_triggered: '触发止损重置',
   manual_skip: '人工跳过',
+  ofi_unavailable: 'OFI 信号不可用',
+  ofi_stale: 'OFI 信号已过期',
+  ofi_too_weak: 'OFI 信号过弱',
+  awaiting_fill_confirmation: '等待成交确认',
+  market_timeframe: '市场频次切换待生效',
+  'INVALID OPERATION': 'WebSocket 订阅请求无效',
 };
 
 const CONFIG_KEY_NAMES = {
@@ -2822,7 +2835,7 @@ function reasonText(reason) {
   if (REASON_LABELS[reason]) {
     return REASON_LABELS[reason];
   }
-  return '当前状态暂未识别，请刷新页面；若持续出现，请联系维护者。';
+  return String(reason);
 }
 
 function formatConfigLabel(key, labels) {
