@@ -61,6 +61,18 @@ class RuntimeControl:
 
             return self._apply_updates(snapshot, updates)
 
+    def mark_pending(self, reason: str | None = None) -> RuntimeSnapshot:
+        with self._lock:
+            snapshot = self._snapshot
+            updates: dict[str, object | None] = {}
+            if snapshot.switch_state != "pending":
+                updates["switch_state"] = "pending"
+            if snapshot.switch_reason != reason:
+                updates["switch_reason"] = reason
+            if updates:
+                return self._apply_updates(snapshot, updates)
+            return replace(snapshot)
+
     def update_worker_state(self, **changes) -> RuntimeSnapshot:
         allowed = {
             "current_round_slug",

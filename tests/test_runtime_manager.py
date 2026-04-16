@@ -106,3 +106,23 @@ def test_runtime_manager_latest_desired_mode_wins(tmp_path):
     assert snapshot.active_mode == 'paper'
     assert snapshot.desired_mode == 'paper'
     assert snapshot.switch_state == 'idle'
+
+
+def test_runtime_manager_waits_for_safe_boundary_before_reloading_config(tmp_path):
+    cfg = AppConfig(trade_mode='paper')
+    manager = main.RuntimeManager(
+        env_file=tmp_path / '.env.dashboard',
+        host='127.0.0.1',
+        port=8787,
+        startup_cfg=cfg,
+        dashboard_runtime_factory=lambda **kwargs: None,
+        validate_live_config=lambda cfg: None,
+    )
+    manager.request_runtime_reload('market_timeframe')
+    manager.runtime_control.update_worker_state(round_in_progress=True, safe_to_switch=False)
+
+    manager.poll_once()
+
+    snapshot = manager.snapshot()
+    assert snapshot.active_mode == 'paper'
+    assert snapshot.switch_state == 'pending'

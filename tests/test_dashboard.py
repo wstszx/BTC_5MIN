@@ -955,6 +955,19 @@ def test_dashboard_update_config_notifies_runtime_manager(tmp_path: Path):
     finally:
         state.close()
 
+
+def test_dashboard_update_config_notifies_runtime_reload_for_market_timeframe(tmp_path: Path):
+    calls: list[str] = []
+    state = DashboardState(
+        env_file=tmp_path / '.env.dashboard',
+        notify_runtime_reload=lambda reason: calls.append(reason),
+    )
+    try:
+        state.update_config({'MARKET_TIMEFRAME': '15m'})
+        assert calls == ['market_timeframe']
+    finally:
+        state.close()
+
 def test_dashboard_assets_format_recent_trade_round_slug_as_datetime():
     js = _dashboard_js()
 

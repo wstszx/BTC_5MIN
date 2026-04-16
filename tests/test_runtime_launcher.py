@@ -509,6 +509,49 @@ def test_run_single_command_runtime_switches_to_live_after_safe_point(monkeypatc
     assert calls[1] == ('live', 'live')
 
 
+def test_run_single_command_runtime_restarts_worker_after_timeframe_reload_request(monkeypatch, tmp_path: Path):
+    startup_cfg = AppConfig(trade_mode='paper', market_timeframe='5m')
+    reloaded_cfg = AppConfig(trade_mode='paper', market_timeframe='15m')
+    states = {'count': 0}
+    calls: list[tuple[str, str]] = []
+    runtime_reload = {'callback': None}
+
+    def fake_load_shared_config(_path: Path):
+        states['count'] += 1
+        return startup_cfg if states['count'] == 1 else reloaded_cfg
+
+    def fake_create_dashboard_runtime(**kwargs):
+        runtime_reload['callback'] = kwargs.get('notify_runtime_reload')
+
+        class FakeDashboardRuntime:
+            def serve_forever(self):
+                return
+            def shutdown(self):
+                return
+            def close(self):
+                return
+
+        return FakeDashboardRuntime()
+
+    def fake_run_paper_trading(cfg, *, stop_event, config_provider, runtime_control=None, stop_when_safe=None):
+        calls.append(('paper', cfg.market_timeframe))
+        runtime_control.update_worker_state(round_in_progress=False, safe_to_switch=True, pending_live_order=False, current_round_slug=None)
+        if len(calls) == 1:
+            runtime_reload['callback']('market_timeframe')
+            return {'status': 'stopped'}
+        stop_event.set()
+        return {'status': 'stopped'}
+
+    monkeypatch.setattr(main, '_load_shared_config', fake_load_shared_config)
+    monkeypatch.setattr(main, 'create_dashboard_runtime', fake_create_dashboard_runtime)
+    monkeypatch.setattr(main, 'run_paper_trading', fake_run_paper_trading)
+
+    exit_code = main.run_single_command_runtime(env_file=tmp_path / '.env.dashboard')
+
+    assert exit_code == 0
+    assert calls == [('paper', '5m'), ('paper', '15m')]
+
+
 
 def test_runtime_manager_keeps_dashboard_online_while_switch_pending(tmp_path):
     cfg = AppConfig(trade_mode='paper')

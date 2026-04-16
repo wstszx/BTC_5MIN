@@ -324,6 +324,7 @@ class ConfigValidationError(ValueError):
 class DashboardState:
     EDITABLE_CONFIG_KEYS: tuple[str, ...] = (
         "TRADE_MODE",
+        "MARKET_TIMEFRAME",
         "LIVE_TRADING_ENABLED",
         "POLYMARKET_PRIVATE_KEY",
         "POLYMARKET_FUNDER",
@@ -367,6 +368,7 @@ class DashboardState:
     CONFIG_LABELS: dict[str, str] = {
         "ENABLE_LIVE_TRADING": "启用实盘",
         "TRADE_MODE": "交易模式",
+        "MARKET_TIMEFRAME": "市场频次",
         "LIVE_TRADING_ENABLED": "实盘交易开关",
         "POLYMARKET_PRIVATE_KEY": "实盘私钥",
         "POLYMARKET_FUNDER": "\u5b9e\u76d8\u94b1\u5305\u5730\u5740",
@@ -410,6 +412,7 @@ class DashboardState:
     SELECT_OPTIONS: dict[str, list[str]] = {
         "ENABLE_LIVE_TRADING": ["false", "true"],
         "TRADE_MODE": ["paper", "live"],
+        "MARKET_TIMEFRAME": ["5m", "15m"],
         "LIVE_TRADING_ENABLED": ["true", "false"],
         "LIVE_AUTO_REDEEM_ENABLED": ["false", "true"],
         "LIVE_AUTO_REDEEM_DRY_RUN": ["false", "true"],
@@ -423,6 +426,7 @@ class DashboardState:
 
     CONFIG_ATTR_MAP: dict[str, str] = {
         "TRADE_MODE": "trade_mode",
+        "MARKET_TIMEFRAME": "market_timeframe",
         "LIVE_TRADING_ENABLED": "live_trading_enabled",
         "POLYMARKET_PRIVATE_KEY": "live_private_key",
         "POLYMARKET_FUNDER": "live_funder",
@@ -535,6 +539,7 @@ class DashboardState:
         "TARGET_PROFIT": "在目标收益模式下，这里表示每轮期望净利；在固定金额模式下，它更多用于观察研究，不直接决定首笔下注金额。",
         "BET_SIZING_MODE": "固定金额模式会使用固定首笔下注额；目标收益模式会根据目标净利反推下注金额。",
         "ENABLE_LIVE_TRADING": "关闭时仅运行纸面测试；开启后，运行时可以切换到实盘配置并允许真实下单。",
+        "MARKET_TIMEFRAME": "选择当前要玩的 Polymarket BTC 预测频次，仅支持 5 分钟和 15 分钟。",
         "POLYMARKET_PRIVATE_KEY": "实盘钱包私钥，仅在实盘模式下需要。",
         "POLYMARKET_FUNDER": "与私钥对应的实盘钱包地址（0x...），并且需要实际承担实盘订单资金。",
         "POLYMARKET_API_KEY": "CLOB 实盘下单凭证，仅用于 live order 私有接口。",
@@ -627,11 +632,13 @@ class DashboardState:
         running_trade_mode: str = "paper",
         runtime_control: RuntimeControl | None = None,
         notify_mode_change: Any | None = None,
+        notify_runtime_reload: Any | None = None,
     ) -> None:
         self.env_file = Path(env_file)
         self.running_trade_mode = str(running_trade_mode or "paper").strip().lower() or "paper"
         self.runtime_control = runtime_control
         self.notify_mode_change = notify_mode_change
+        self.notify_runtime_reload = notify_runtime_reload
         self._lock = threading.RLock()
         self._env_values = load_env_file_values(self.env_file)
         self._cfg = self._build_config(self._env_values)
@@ -848,10 +855,15 @@ class DashboardState:
 
         previous_mode = None
         next_mode = None
+        previous_timeframe = None
         with self._lock:
             previous_mode = str(self._cfg.trade_mode or 'paper').strip().lower() or 'paper'
+            previous_timeframe = getattr(self._cfg, 'market_timeframe', '5m')
             next_mode = str(self._env_values.get('TRADE_MODE') or self._cfg.trade_mode or 'paper').strip().lower() or 'paper'
         self._refresh_runtime()
+        next_timeframe = getattr(self._cfg, 'market_timeframe', '5m')
+        if self.notify_runtime_reload is not None and previous_timeframe != next_timeframe:
+            self.notify_runtime_reload('market_timeframe')
         if self.notify_mode_change is not None and previous_mode != next_mode:
             self.notify_mode_change(next_mode)
         return self.get_config_payload()
@@ -1329,6 +1341,7 @@ def create_dashboard_runtime(
     running_trade_mode: str = "paper",
     runtime_control: RuntimeControl | None = None,
     notify_mode_change: Any | None = None,
+    notify_runtime_reload: Any | None = None,
 ) -> DashboardRuntime:
     env_path = Path(env_file)
     state = DashboardState(
@@ -1336,6 +1349,7 @@ def create_dashboard_runtime(
         running_trade_mode=running_trade_mode,
         runtime_control=runtime_control,
         notify_mode_change=notify_mode_change,
+        notify_runtime_reload=notify_runtime_reload,
     )
 
     class Handler(_DashboardRequestHandler):

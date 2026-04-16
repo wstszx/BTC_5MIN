@@ -105,6 +105,8 @@ class RuntimeManager:
         self.validate_live_config = validate_live_config
         self.startup_cfg = startup_cfg or _load_shared_config(self.env_file)
         self.runtime_control = RuntimeControl(initial_mode=getattr(self.startup_cfg, 'trade_mode', 'paper'))
+        self._reload_requested = False
+        self._reload_reason: str | None = None
 
     def snapshot(self):
         return self.runtime_control.snapshot()
@@ -112,9 +114,22 @@ class RuntimeManager:
     def request_mode_change(self, mode: str) -> None:
         self.runtime_control.set_desired_mode(mode)
 
+    def request_runtime_reload(self, reason: str = 'config_reload') -> None:
+        self._reload_requested = True
+        self._reload_reason = reason
+        self.runtime_control.mark_pending(reason)
+
+    def restart_requested(self) -> bool:
+        snapshot = self.runtime_control.snapshot()
+        return self._reload_requested or snapshot.desired_mode != snapshot.active_mode
+
+    def complete_runtime_reload(self) -> None:
+        self._reload_requested = False
+        self._reload_reason = None
+
     def poll_once(self) -> None:
         snapshot = self.runtime_control.snapshot()
-        if snapshot.active_mode == snapshot.desired_mode:
+        if snapshot.active_mode == snapshot.desired_mode and not self._reload_requested:
             if snapshot.switch_state != 'idle' or snapshot.switch_reason is not None:
                 self.runtime_control.mark_active_mode(snapshot.active_mode)
             return
@@ -127,7 +142,7 @@ class RuntimeManager:
             except BaseException as exc:
                 self.runtime_control.mark_blocked(str(exc))
                 return
-        self.runtime_control.mark_switching()
+        self.runtime_control.mark_switching(self._reload_reason if self._reload_requested else None)
 
     def shutdown(self) -> None:
         return
@@ -178,6 +193,7 @@ def run_single_command_runtime(
             running_trade_mode=initial_mode,
             runtime_control=manager.runtime_control,
             notify_mode_change=manager.request_mode_change,
+            notify_runtime_reload=manager.request_runtime_reload,
         )
         dashboard_thread = _spawn_runtime_worker(
             name='dashboard-worker',
@@ -209,7 +225,7 @@ def run_single_command_runtime(
                 stop_event=stop_event,
                 config_provider=_config_provider,
                 runtime_control=manager.runtime_control,
-                stop_when_safe=lambda: manager.snapshot().desired_mode != manager.snapshot().active_mode,
+                stop_when_safe=manager.restart_requested,
             )
             worker_targets: list[tuple[str, object]] = []
             trader_target = lambda worker=worker, cfg=current_cfg, worker_kwargs=worker_kwargs: worker(cfg, **worker_kwargs)
@@ -220,7 +236,7 @@ def run_single_command_runtime(
                     stop_event=stop_event,
                     config_provider=_config_provider,
                     runtime_control=manager.runtime_control,
-                    stop_when_safe=lambda: manager.snapshot().desired_mode != manager.snapshot().active_mode,
+                    stop_when_safe=manager.restart_requested,
                 )
                 redeem_target = lambda cfg=current_cfg, redeem_kwargs=redeem_kwargs: run_live_redeem_worker(cfg, **redeem_kwargs)
                 worker_targets.append(('live-redeem-worker', redeem_target))
@@ -261,6 +277,7 @@ def run_single_command_runtime(
 
                 snapshot = manager.snapshot()
                 if snapshot.switch_state == 'switching':
+                    manager.complete_runtime_reload()
                     manager.runtime_control.mark_active_mode(snapshot.desired_mode)
                     continue
             if not dashboard_thread.is_alive():
