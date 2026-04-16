@@ -1,15 +1,17 @@
 from __future__ import annotations
 
+import argparse
 import json
 import csv
 import tempfile
 from dataclasses import dataclass, replace
+from datetime import datetime, timezone
 from pathlib import Path
 from itertools import product
 from statistics import mean
 from typing import Any, Callable, Iterable, Sequence
 
-from config import AppConfig
+from config import AppConfig, build_config_from_env_values, load_env_file_values
 from backtest import run_backtest
 from walk_forward import WalkForwardWindow, build_walk_forward_windows
 
@@ -282,3 +284,43 @@ def run_optimizer_from_history_csv(
         top_n=top_n,
         last_run_at=last_run_at,
     )
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="Run offline paper strategy optimization from historical CSV.")
+    parser.add_argument("--csv", required=True, dest="csv_path")
+    parser.add_argument("--env-file", default=".env.dashboard", dest="env_file")
+    parser.add_argument("--output", default="logs/optimizer_state.json", dest="output_path")
+    parser.add_argument("--champion-id", default="champion-paper", dest="champion_id")
+    args = parser.parse_args(list(argv) if argv is not None else None)
+
+    env_path = Path(args.env_file)
+    csv_path = Path(args.csv_path)
+    output_path = Path(args.output_path)
+    cfg = build_config_from_env_values(load_env_file_values(env_path))
+    last_run_at = datetime.now(timezone.utc).isoformat()
+
+    payload = run_optimizer_from_history_csv(
+        csv_path=csv_path,
+        base_cfg=cfg,
+        output_path=output_path,
+        strategy_ids=[5, 6],
+        target_profits=[0.8, 1.0, 1.2],
+        max_price_thresholds=[0.55, 0.60, 0.65],
+        strategy5_thresholds=[0.012, 0.015, 0.018],
+        train_size=3,
+        validation_size=3,
+        step_size=3,
+        top_n=3,
+        champion_id=args.champion_id,
+        last_run_at=last_run_at,
+    )
+    print(f"Optimizer state written to {output_path}")
+    print(f"Champion: {payload.get('champion_id')}")
+    print(f"Active challengers: {len(payload.get('active_challengers') or [])}")
+    print(f"Promotable candidates: {len(payload.get('promotable_candidates') or [])}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

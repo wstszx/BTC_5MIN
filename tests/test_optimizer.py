@@ -7,6 +7,7 @@ from optimizer import (
     build_optimizer_state,
     evaluate_candidates_with_walk_forward,
     load_optimizer_state,
+    main,
     rank_optimizer_candidates,
     run_optimizer_cycle,
     run_optimizer_from_history_csv,
@@ -219,3 +220,57 @@ def test_run_optimizer_from_history_csv_writes_optimizer_state_from_real_history
     assert loaded["champion_id"] == "champion-1"
     assert len(loaded["active_challengers"]) == 1
     assert loaded["active_challengers"][0]["candidate_id"].startswith("s2-")
+
+
+def test_optimizer_main_runs_history_optimization_command(monkeypatch, tmp_path):
+    captured: dict[str, object] = {}
+
+    def fake_run_optimizer_from_history_csv(**kwargs):
+        captured.update(kwargs)
+        return {
+            "enabled": True,
+            "champion_id": kwargs["champion_id"],
+            "active_challengers": [{"candidate_id": "cand-a"}],
+            "promotable_candidates": [],
+            "last_run_at": kwargs["last_run_at"],
+        }
+
+    monkeypatch.setattr("optimizer.run_optimizer_from_history_csv", fake_run_optimizer_from_history_csv)
+
+    csv_path = tmp_path / "history.csv"
+    csv_path.write_text(
+        "event_id,market_id,slug,title,series_id,start_time,end_time,price_to_beat,final_price,result,up_token_id,down_token_id,up_last_price,down_last_price,up_best_bid,up_best_ask,down_best_bid,down_best_ask,entry_price_open_up,entry_price_open_down,entry_price_preclose_up,entry_price_preclose_down\n",
+        encoding="utf-8",
+    )
+    env_file = tmp_path / ".env.dashboard"
+    env_file.write_text("STRATEGY_ID=5\n", encoding="utf-8")
+    output_path = tmp_path / "optimizer_state.json"
+
+    exit_code = main(
+        [
+            "--csv",
+            str(csv_path),
+            "--env-file",
+            str(env_file),
+            "--output",
+            str(output_path),
+            "--champion-id",
+            "champion-1",
+        ]
+    )
+
+    assert exit_code == 0
+    assert captured["csv_path"] == csv_path
+    assert captured["output_path"] == output_path
+    assert captured["champion_id"] == "champion-1"
+    assert captured["strategy_ids"] == [5, 6]
+    assert captured["top_n"] == 3
+
+
+def test_optimizer_main_rejects_missing_csv_argument():
+    try:
+        main([])
+    except SystemExit as exc:
+        assert exc.code == 2
+    else:
+        raise AssertionError("Expected SystemExit")
