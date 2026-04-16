@@ -950,8 +950,46 @@ def test_dashboard_assets_include_independent_paper_report_strategy_switcher():
     assert 'id="paperSummaryStrategy"' in html
     assert 'id="recentTradesStrategy"' in html
     assert 'function renderPaperReportStrategySelectors(' in js
-    assert 'paperReportStrategyFilter' in js
-    assert "state.paperReportStrategyFilter || 'all'" in js
+    assert 'paperSummaryStrategyFilter' in js
+    assert 'paperRecentStrategyFilter' in js
+
+
+def test_dashboard_assets_keep_summary_and_recent_filters_independent():
+    js = _dashboard_js()
+
+    assert "paperSummaryStrategyFilter: null" in js
+    assert "paperRecentStrategyFilter: null" in js
+    assert 'function effectivePaperSummaryStrategyFilter()' in js
+    assert 'function effectivePaperRecentStrategyFilter()' in js
+    assert "const summaryCurrent = effectivePaperSummaryStrategyFilter();" in js
+    assert "const recentCurrent = effectivePaperRecentStrategyFilter();" in js
+    assert "state.paperSummaryStrategyFilter = summaryNode.value || 'all';" in js
+    assert "await refreshSummary();" in js
+    assert "state.paperRecentStrategyFilter = recentNode.value || 'all';" in js
+    assert "await refreshRecent();" in js
+
+
+def test_dashboard_assets_market_refresh_does_not_reset_report_filters():
+    js = _dashboard_js()
+
+    assert "state.paperStrategyFilter = String(strategyView.selected || state.paperStrategyFilter || 'all');" in js
+    assert "state.paperSummaryStrategyFilter = String(strategyView.selected || state.paperStrategyFilter || 'all');" not in js
+    assert "state.paperRecentStrategyFilter = String(strategyView.selected || state.paperStrategyFilter || 'all');" not in js
+
+
+def test_dashboard_assets_summary_and_recent_use_their_own_filters():
+    js = _dashboard_js()
+
+    assert "const strategy = encodeURIComponent(effectivePaperSummaryStrategyFilter());" in js
+    assert "const strategy = encodeURIComponent(effectivePaperRecentStrategyFilter());" in js
+
+
+def test_dashboard_assets_refresh_all_loads_market_before_report_panels():
+    js = _dashboard_js()
+
+    assert "await refreshConfig();" in js
+    assert "await refreshMarket();" in js
+    assert "await Promise.allSettled([refreshSummary(), refreshRecent()]);" in js
 
 
 def test_dashboard_assets_render_compact_inputs_for_short_numeric_fields():
@@ -1347,6 +1385,101 @@ def test_dashboard_market_payload_can_switch_strategy_view(tmp_path: Path):
         assert base_payload['strategy6']['enabled'] is False
         assert strategy_six_payload['strategy_view']['selected'] == '6'
         assert strategy_six_payload['strategy6']['enabled'] is True
+    finally:
+        state.close()
+        os.chdir(old_cwd)
+
+
+def test_dashboard_starts_binance_signal_service_when_paper_strategies_include_6(tmp_path: Path):
+    env_file = tmp_path / '.env.dashboard'
+    env_file.write_text('STRATEGY_ID=1\nPAPER_STRATEGY_IDS=1,6\n', encoding='utf-8')
+    old_cwd = Path.cwd()
+    os.chdir(tmp_path)
+    state = DashboardState(env_file=env_file)
+    try:
+        assert state._binance_signal_service is not None
+    finally:
+        state.close()
+        os.chdir(old_cwd)
+
+
+def test_dashboard_paper_payloads_switch_per_strategy(tmp_path: Path):
+    env_file = tmp_path / '.env.dashboard'
+    env_file.write_text('STRATEGY_ID=2\nPAPER_STRATEGY_IDS=1,2,3,4,5,6\n', encoding='utf-8')
+    old_cwd = Path.cwd()
+    os.chdir(tmp_path)
+    state = DashboardState(env_file=env_file)
+    try:
+        logs_dir = tmp_path / 'logs'
+        logs_dir.mkdir(parents=True, exist_ok=True)
+        csv_lines = [
+            'timestamp,mode,round_index,strategy,entry_timing,event_slug,start_time,end_time,side,price,order_size,order_cost,expected_profit,result,trade_pnl,cash_pnl,recovery_loss,consecutive_losses,stop_loss_triggered,skip_reason,signal_open_up_price,signal_current_up_price,signal_threshold,signal_delta,signal_locked,signal_reason'
+        ]
+        for strategy_id in range(1, 7):
+            csv_lines.append(
+                f'2026-04-06T08:0{strategy_id}:00+00:00,paper,{strategy_id},{strategy_id},OPEN,settled-{strategy_id},2026-04-06T08:00:00+00:00,2026-04-06T08:05:00+00:00,UP,0.50,2.0,1.0,1.0,UP,{float(strategy_id):.1f},{float(strategy_id):.1f},0.0,0,False,,,,,,False,'
+            )
+        (logs_dir / 'paper_trades.csv').write_text('\n'.join(csv_lines) + '\n', encoding='utf-8')
+
+        paper_strategies: dict[str, dict[str, object]] = {}
+        for strategy_id in range(1, 7):
+            paper_strategies[str(strategy_id)] = {
+                'round_index': strategy_id + 10,
+                'cash_pnl': float(strategy_id),
+                'recovery_loss': 0.0,
+                'consecutive_losses': 0,
+                'consecutive_max_stake_skips': 0,
+                'signal_round_slug': None,
+                'signal_round_open_up_price': None,
+                'signal_round_locked_side': None,
+                'strategy6_last_ofi_score': 0.8 if strategy_id == 6 else None,
+                'stop_loss_count': 0,
+                'daily_realized_pnl': float(strategy_id),
+                'current_day': '2026-04-06',
+                'pending_paper_trades': [
+                    {
+                        'round_index': strategy_id + 20,
+                        'event_slug': f'pending-{strategy_id}',
+                        'start_time': '2026-04-06T08:10:00+00:00',
+                        'end_time': '2026-04-06T08:15:00+00:00',
+                        'side': 'UP',
+                        'price': 0.45,
+                        'order_size': 2.0,
+                        'order_cost': 0.9,
+                        'expected_profit': 1.1,
+                        'strategy': strategy_id,
+                        'entry_timing': 'OPEN',
+                        'signal_open_up_price': None,
+                        'signal_current_up_price': None,
+                        'signal_threshold': 0.2 if strategy_id in {5, 6} else None,
+                        'signal_delta': 0.4 if strategy_id in {5, 6} else None,
+                        'signal_locked': False,
+                        'signal_reason': None,
+                        'queued_at': f'2026-04-06T08:2{strategy_id}:05+00:00',
+                    }
+                ],
+            }
+        (logs_dir / 'session_state.json').write_text(
+            json.dumps({'paper_strategies': paper_strategies}),
+            encoding='utf-8',
+        )
+
+        summary_all = state.get_paper_summary_payload()
+
+        assert summary_all['strategy'] == 'all'
+        assert summary_all['latest']['trade_rows'] == 6
+
+        for strategy_id in range(1, 7):
+            summary = state.get_paper_summary_payload(strategy=strategy_id)
+            recent = state.get_recent_trades_payload(limit=10, strategy=strategy_id)
+
+            assert summary['strategy'] == str(strategy_id)
+            assert summary['latest']['trade_rows'] == 1
+            assert summary['latest']['total_pnl'] == float(strategy_id)
+            assert recent['strategy'] == str(strategy_id)
+            assert recent['count'] == 2
+            assert recent['rows'][0]['event_slug'] == f'pending-{strategy_id}'
+            assert all(row['strategy'] == str(strategy_id) for row in recent['rows'])
     finally:
         state.close()
         os.chdir(old_cwd)

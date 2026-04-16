@@ -667,6 +667,36 @@ def _paper_strategy_ids_for_runtime(cfg: AppConfig) -> list[int]:
         return strategy_ids
     return [cfg.strategy_id]
 
+
+def _binance_signal_service_url(cfg: AppConfig) -> str:
+    return cfg.binance_ws_url.rstrip("/") + "/" + cfg.binance_depth_stream.lstrip("/")
+
+
+def _sync_paper_binance_signal_service(
+    *,
+    cfg: AppConfig,
+    strategy_ids: list[int],
+    service: BinanceDepth5SignalService | None,
+) -> BinanceDepth5SignalService | None:
+    needs_service = 6 in strategy_ids
+    expected_url = _binance_signal_service_url(cfg)
+
+    if not needs_service:
+        if service is not None:
+            service.close()
+        return None
+
+    if service is not None and getattr(service, "ws_url", None) == expected_url:
+        return service
+
+    if service is not None:
+        service.close()
+
+    service = BinanceDepth5SignalService(ws_url=cfg.binance_ws_url, stream=cfg.binance_depth_stream)
+    service.start()
+    return service
+
+
 def _load_session_state_for_paper_runtime(path: Path, strategy_ids: list[int]) -> SessionState:
     try:
         return load_session_state(path, effective_paper_strategy_ids=strategy_ids)
@@ -2393,12 +2423,11 @@ def run_paper_trading(
     optimizer_state_path = cfg.logs_dir / "optimizer_state.json"
     strategy_ids = _paper_strategy_ids_for_runtime(cfg)
     optimizer_state_payload, active_challengers = _load_active_optimizer_challengers(optimizer_state_path)
-    if binance_signal_service is None and 6 in strategy_ids:
-        binance_signal_service = BinanceDepth5SignalService(
-            ws_url=cfg.binance_ws_url,
-            stream=cfg.binance_depth_stream,
-        )
-        binance_signal_service.start()
+    binance_signal_service = _sync_paper_binance_signal_service(
+        cfg=cfg,
+        strategy_ids=strategy_ids,
+        service=binance_signal_service,
+    )
     loaded_state = _load_session_state_for_paper_runtime(state_path, strategy_ids)
     state = _clone_session_state(loaded_state)
     _ensure_paper_strategy_state_map(state, strategy_ids)
@@ -2427,6 +2456,11 @@ def run_paper_trading(
                 if candidate_cfg is not None:
                     cfg = candidate_cfg
                     strategy_ids = _paper_strategy_ids_for_runtime(cfg)
+                    binance_signal_service = _sync_paper_binance_signal_service(
+                        cfg=cfg,
+                        strategy_ids=strategy_ids,
+                        service=binance_signal_service,
+                    )
                     if not client_provided:
                         client.config = cfg
                     if not state_path_provided:

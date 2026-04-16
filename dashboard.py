@@ -690,7 +690,8 @@ class DashboardState:
         return build_config_from_env_values(env_values)
 
     def _build_binance_signal_service(self, cfg: AppConfig) -> BinanceDepth5SignalService | None:
-        if cfg.strategy_id != 6:
+        strategy_ids = list(getattr(cfg, "paper_strategy_ids", []) or [])
+        if cfg.strategy_id != 6 and 6 not in strategy_ids:
             return None
         service = BinanceDepth5SignalService(ws_url=cfg.binance_ws_url, stream=cfg.binance_depth_stream)
         service.start()
@@ -2634,7 +2635,8 @@ const state = {
   summary: null,
   recent: null,
   paperStrategyFilter: 'all',
-  paperReportStrategyFilter: 'all',
+  paperSummaryStrategyFilter: null,
+  paperRecentStrategyFilter: null,
   countdownSnapshotAtMs: null,
   countdownBaseSeconds: null,
   showInternalKeys: false,
@@ -3225,30 +3227,58 @@ function paperReportStrategyOptions() {
   return ['all', ...available.filter((item, index, arr) => item && arr.indexOf(item) === index)];
 }
 
-function renderPaperReportStrategySelectors() {
-  const selectIds = ['paperSummaryStrategy', 'recentTradesStrategy'];
-  const options = paperReportStrategyOptions();
-  const current = String(state.paperReportStrategyFilter || state.paperStrategyFilter || 'all');
+function effectivePaperSummaryStrategyFilter() {
+  if (state.paperSummaryStrategyFilter !== null && state.paperSummaryStrategyFilter !== undefined && state.paperSummaryStrategyFilter !== '') {
+    return String(state.paperSummaryStrategyFilter);
+  }
+  return String(state.paperStrategyFilter || 'all');
+}
 
-  selectIds.forEach((id) => {
-    const node = el(id);
-    if (!node) {
-      return;
-    }
-    node.innerHTML = '';
+function effectivePaperRecentStrategyFilter() {
+  if (state.paperRecentStrategyFilter !== null && state.paperRecentStrategyFilter !== undefined && state.paperRecentStrategyFilter !== '') {
+    return String(state.paperRecentStrategyFilter);
+  }
+  return String(state.paperStrategyFilter || 'all');
+}
+
+function renderPaperReportStrategySelectors() {
+  const options = paperReportStrategyOptions();
+  const summaryCurrent = effectivePaperSummaryStrategyFilter();
+  const recentCurrent = effectivePaperRecentStrategyFilter();
+
+  const summaryNode = el('paperSummaryStrategy');
+  if (summaryNode) {
+    summaryNode.innerHTML = '';
     options.forEach((value) => {
       const option = document.createElement('option');
       option.value = value;
       option.textContent = value === 'all' ? '查看全部策略' : ('查看策略 ' + value);
-      option.selected = value === current;
-      node.appendChild(option);
+      option.selected = value === summaryCurrent;
+      summaryNode.appendChild(option);
     });
-    node.onchange = async () => {
-      state.paperReportStrategyFilter = node.value || 'all';
+    summaryNode.onchange = async () => {
+      state.paperSummaryStrategyFilter = summaryNode.value || 'all';
       renderPaperReportStrategySelectors();
-      await Promise.allSettled([refreshSummary(), refreshRecent()]);
+      await refreshSummary();
     };
-  });
+  }
+
+  const recentNode = el('recentTradesStrategy');
+  if (recentNode) {
+    recentNode.innerHTML = '';
+    options.forEach((value) => {
+      const option = document.createElement('option');
+      option.value = value;
+      option.textContent = value === 'all' ? '查看全部策略' : ('查看策略 ' + value);
+      option.selected = value === recentCurrent;
+      recentNode.appendChild(option);
+    });
+    recentNode.onchange = async () => {
+      state.paperRecentStrategyFilter = recentNode.value || 'all';
+      renderPaperReportStrategySelectors();
+      await refreshRecent();
+    };
+  }
 }
 
 function renderStrategyGuide(payload, values) {
@@ -4071,9 +4101,6 @@ function renderMarket(payload) {
   state.market = payload;
   const strategyView = payload.strategy_view || {};
   state.paperStrategyFilter = String(strategyView.selected || state.paperStrategyFilter || 'all');
-  if (!state.paperReportStrategyFilter || state.paperReportStrategyFilter === 'all') {
-    state.paperReportStrategyFilter = String(strategyView.selected || state.paperStrategyFilter || 'all');
-  }
   renderPaperReportStrategySelectors();
   const round = payload.round || null;
   const quote = payload.quote || {};
@@ -4285,7 +4312,7 @@ async function refreshMarket() {
 
 async function refreshSummary() {
   try {
-    const strategy = encodeURIComponent(String(state.paperReportStrategyFilter || 'all'));
+    const strategy = encodeURIComponent(effectivePaperSummaryStrategyFilter());
     const summaryEndpoint = '/api/paper/summary?strategy=' + strategy;
     const data = await apiGet(summaryEndpoint);
     renderSummary(data);
@@ -4298,7 +4325,7 @@ async function refreshSummary() {
 async function refreshRecent() {
   try {
     const runningMode = String((((state.config || {}).runtime_status || {}).active_mode || (((state.config || {}).runtime_status || {}).running_mode) || 'paper')).toLowerCase();
-    const strategy = encodeURIComponent(String(state.paperReportStrategyFilter || 'all'));
+    const strategy = encodeURIComponent(effectivePaperRecentStrategyFilter());
     const recentEndpoint = runningMode === 'live' ? '/api/live/recent?limit=80' : '/api/paper/recent?limit=80&strategy=' + strategy;
     const data = await apiGet(recentEndpoint);
     renderRecent(data);
@@ -4309,12 +4336,9 @@ async function refreshRecent() {
 }
 
 async function refreshAll() {
-  await Promise.allSettled([
-    refreshConfig(),
-    refreshMarket(),
-    refreshSummary(),
-    refreshRecent(),
-  ]);
+  await refreshConfig();
+  await refreshMarket();
+  await Promise.allSettled([refreshSummary(), refreshRecent()]);
 }
 
 function tickClock() {

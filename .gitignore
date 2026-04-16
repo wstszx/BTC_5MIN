@@ -35,3 +35,5 @@ docs/superpowers/plans/2026-04-15-live-redeem-relayer-migration.md
 
 codex.patch
 tmp_apply.patch
+.playwright-cli/
+output/playwright/

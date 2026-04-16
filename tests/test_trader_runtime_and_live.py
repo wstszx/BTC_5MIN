@@ -10,6 +10,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 import requests
 
+from binance_signal import BinanceDepth5SignalService
 from config import AppConfig
 from models import MarketQuote, MarketWindow, PaperStrategyState, SessionState, TradePlan, TradeRecord
 from runtime_control import RuntimeControl
@@ -1972,6 +1973,117 @@ def test_run_paper_trading_config_provider_refreshes_default_client(tmp_path, mo
     assert sleep_calls == [99]
     assert len(client_instances) == 1
     assert client_instances[0].config.poll_interval_seconds == 99
+
+
+def test_run_paper_trading_starts_binance_service_when_strategy6_is_enabled_by_config_reload(tmp_path, monkeypatch):
+    class RecordingBinanceSignalService:
+        instances: list["RecordingBinanceSignalService"] = []
+
+        def __init__(self, *, ws_url: str, stream: str):
+            self.ws_url = ws_url.rstrip("/") + "/" + stream.lstrip("/")
+            self.started = 0
+            self.closed = 0
+            RecordingBinanceSignalService.instances.append(self)
+
+        def start(self):
+            self.started += 1
+
+        def close(self):
+            self.closed += 1
+
+        def latest(self):
+            return None
+
+    stop_event = threading.Event()
+    sleep_calls: list[float] = []
+    configs = [
+        AppConfig(strategy_id=2, paper_strategy_ids=[2], poll_interval_seconds=1),
+        AppConfig(strategy_id=2, paper_strategy_ids=[2, 6], poll_interval_seconds=1),
+    ]
+
+    def fake_sleep(seconds):
+        sleep_calls.append(seconds)
+        if len(sleep_calls) >= 2:
+            stop_event.set()
+
+    def config_provider():
+        if configs:
+            return configs.pop(0)
+        return AppConfig(strategy_id=2, paper_strategy_ids=[2, 6], poll_interval_seconds=1)
+
+    monkeypatch.setattr("trader.BinanceDepth5SignalService", RecordingBinanceSignalService)
+    monkeypatch.setattr("trader.time.sleep", fake_sleep)
+
+    result = run_paper_trading(
+        AppConfig(strategy_id=2, paper_strategy_ids=[2], poll_interval_seconds=1),
+        client=_NoMarketClient(),
+        state_path=tmp_path / "state.json",
+        log_path=tmp_path / "paper.csv",
+        stop_event=stop_event,
+        config_provider=config_provider,
+    )
+
+    assert result["status"] == "stopped"
+    assert sleep_calls == [1, 1]
+    assert len(RecordingBinanceSignalService.instances) == 1
+    assert RecordingBinanceSignalService.instances[0].started == 1
+
+
+def test_run_paper_trading_processes_all_selected_strategies(tmp_path, monkeypatch):
+    monkeypatch.setattr("trader._sleep_until_round_end", lambda cfg, window, stop_event=None: False)
+
+    class _AllStrategiesPaperClient(_LiveMarketClient):
+        def find_current_and_next_rounds(self, *, now):
+            window = MarketWindow(
+                event_id="evt-all",
+                market_id="mkt-all",
+                slug="btc-updown-5m-all",
+                title="BTC 5m All Strategies",
+                start_time=now - timedelta(seconds=7),
+                end_time=now + timedelta(minutes=4, seconds=53),
+                up_token_id="up-token",
+                down_token_id="down-token",
+            )
+            return window, None
+
+        def get_nearest_history_point(self, token_id, *, target_ts, start_ts, end_ts, fidelity, max_offset_seconds):
+            return {"price": 0.50}
+
+    signal_service = BinanceDepth5SignalService(
+        ws_url="wss://stream.binance.com:9443/ws",
+        stream="btcusdt@depth5",
+    )
+    signal = signal_service.push_payload(
+        {"b": [["100000", "5"]], "a": [["100001", "1"]]},
+        now=datetime.now(timezone.utc),
+    )
+    strategy_ids = [1, 2, 3, 4, 5, 6]
+
+    result = run_paper_trading(
+        AppConfig(
+            strategy_id=2,
+            paper_strategy_ids=strategy_ids,
+            poll_interval_seconds=1,
+            signal_momentum_threshold=0.02,
+            ofi_threshold=0.65,
+        ),
+        client=_AllStrategiesPaperClient(),
+        state_path=tmp_path / "state.json",
+        log_path=tmp_path / "paper.csv",
+        binance_signal_service=signal_service,
+    )
+
+    state = load_session_state(tmp_path / "state.json", effective_paper_strategy_ids=strategy_ids)
+
+    assert result["status"] == "stopped"
+    assert sorted(state.paper_strategies.keys()) == strategy_ids
+    for strategy_id in strategy_ids:
+        pending = state.paper_strategies[strategy_id].pending_paper_trades
+        assert len(pending) == 1
+        assert pending[0].strategy == strategy_id
+        assert pending[0].event_slug == "btc-updown-5m-all"
+    assert state.paper_strategies[5].pending_paper_trades[0].signal_delta == pytest.approx(0.05)
+    assert state.paper_strategies[6].strategy6_last_ofi_score == pytest.approx(signal.ofi_score)
 
 
 def test_settled_pending_paper_trade_writes_single_final_csv_row(tmp_path):
