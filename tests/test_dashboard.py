@@ -906,6 +906,10 @@ def test_dashboard_assets_use_unified_strategy_selector_for_config_and_views():
     assert '统一策略' in js
     assert "'STRATEGY_ID', 'PAPER_STRATEGY_IDS'" in js
     assert 'multiple = true' in js
+    assert 'cfgPaperStrategiesSelectAll' in js
+    assert '全选全部策略' in js
+    assert 'function selectAllPaperStrategies()' in js
+    assert "Array.from(multiNode.options || []).forEach((option) => { option.selected = true; });" in js
     assert "state.paperStrategyFilter = focusStrategy;" in js
     assert "const summaryEndpoint = '/api/paper/summary?strategy=' + strategy;" in js
     assert 'function resolveUnifiedStrategySelection(' in js

@@ -3157,6 +3157,18 @@ function renderUnifiedStrategyToolbar(payload, values) {
   state.paperStrategyFilter = focusStrategy;
 }
 
+function selectAllPaperStrategies() {
+  const multiNode = el('cfg_PAPER_STRATEGY_IDS');
+  if (!multiNode) {
+    return;
+  }
+  Array.from(multiNode.options || []).forEach((option) => { option.selected = true; });
+  const liveValues = expandLiveToggleValues(collectConfigValues());
+  renderUnifiedStrategyToolbar(state.config, liveValues);
+  renderStrategyGuide(state.config, liveValues);
+  applyConfigFieldVisibility(liveValues);
+}
+
 function renderStrategyGuide(payload, values) {
   const node = el('strategyGuideCard');
   if (!node) {
@@ -3713,6 +3725,19 @@ function renderConfig(payload) {
         multiLabel.className = 'field-help';
         multiLabel.textContent = '\u7eb8\u9762\u8fd0\u884c\u7b56\u7565\uff1a\u53ef\u591a\u9009\uff0c\u7ed3\u679c\u6c47\u603b\u548c\u6700\u8fd1\u4ea4\u6613\u4f1a\u8ddf\u968f\u5f53\u524d\u67e5\u770b\u7b56\u7565\u5207\u6362\u3002';
         unifiedWrap.appendChild(multiLabel);
+
+        const multiActions = document.createElement('div');
+        multiActions.className = 'actions';
+
+        const selectAllButton = document.createElement('button');
+        selectAllButton.id = 'cfgPaperStrategiesSelectAll';
+        selectAllButton.type = 'button';
+        selectAllButton.className = 'btn btn-ghost';
+        selectAllButton.textContent = '\u5168\u9009\u5168\u90e8\u7b56\u7565';
+        selectAllButton.addEventListener('click', selectAllPaperStrategies);
+        multiActions.appendChild(selectAllButton);
+
+        unifiedWrap.appendChild(multiActions);
 
         const multiSelect = document.createElement('select');
         multiSelect.id = 'cfg_PAPER_STRATEGY_IDS';
