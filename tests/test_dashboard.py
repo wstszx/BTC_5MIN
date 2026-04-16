@@ -1075,6 +1075,40 @@ def test_dashboard_config_payload_includes_paper_strategy_ids(tmp_path: Path):
         state.close()
 
 
+def test_dashboard_config_payload_includes_market_timeframe_selector(tmp_path: Path):
+    state = DashboardState(env_file=tmp_path / '.env.dashboard')
+    try:
+        payload = state.get_config_payload()
+        assert 'MARKET_TIMEFRAME' in payload['editable_keys']
+        assert payload['select_options']['MARKET_TIMEFRAME'] == ['5m', '15m']
+        assert payload['labels']['MARKET_TIMEFRAME'] == '市场频次'
+        assert 'MARKET_TIMEFRAME' in payload['field_groups'][0]['keys']
+    finally:
+        state.close()
+
+
+def test_dashboard_rejects_invalid_market_timeframe(tmp_path: Path):
+    state = DashboardState(env_file=tmp_path / '.env.dashboard')
+    try:
+        with pytest.raises(ConfigValidationError) as excinfo:
+            state.update_config({'MARKET_TIMEFRAME': '10m'})
+        assert 'MARKET_TIMEFRAME' in excinfo.value.field_errors
+    finally:
+        state.close()
+
+
+def test_dashboard_assets_include_timeframe_copy_hooks():
+    html = _dashboard_html()
+    js = _dashboard_js()
+
+    assert 'id="brandTitle"' in html
+    assert 'id="marketPanelDesc"' in html
+    assert "const TIMEFRAME_META = {" in js
+    assert "function applyTimeframeCopy(payload)" in js
+    assert '"15m": {' in js
+    assert '"10m"' not in js
+
+
 def test_dashboard_update_config_normalizes_paper_strategy_ids(tmp_path: Path):
     env_file = tmp_path / '.env.dashboard'
     state = DashboardState(env_file=env_file)

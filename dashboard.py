@@ -249,6 +249,7 @@ def _field_groups() -> list[dict[str, Any]]:
             "description": "控制是否启用实盘，并配置实盘所需的钱包凭证。",
             "keys": [
                 "TRADE_MODE",
+                "MARKET_TIMEFRAME",
                 "LIVE_TRADING_ENABLED",
                 "POLYMARKET_PRIVATE_KEY",
                 "POLYMARKET_FUNDER",
@@ -1383,7 +1384,7 @@ def _dashboard_html() -> str:
 <head>
   <meta charset=\"utf-8\">
   <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">
-  <title>BTC 5分钟量化控制台</title>
+  <title>BTC 预测控制台</title>
   <link rel=\"icon\" type=\"image/svg+xml\" href='data:image/svg+xml;utf8,<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 64 64\"><rect width=\"64\" height=\"64\" rx=\"14\" fill=\"%230b1220\"/><text x=\"50%\" y=\"54%\" text-anchor=\"middle\" dominant-baseline=\"middle\" font-family=\"Arial,sans-serif\" font-size=\"24\" font-weight=\"700\" fill=\"%23f59e0b\">BTC</text></svg>'>
   <link rel=\"stylesheet\" href=\"/dashboard.css\">
 </head>
@@ -1391,7 +1392,7 @@ def _dashboard_html() -> str:
   <!-- 计划入场 -->
   <header class=\"topbar\">
     <div class=\"brand-wrap\">
-      <div class=\"brand\">QUANT_CMD · BTC_5M</div>
+      <div id=\"brandTitle\" class=\"brand\">QUANT_CMD · BTC_5M</div>
       <div class=\"subtitle\">策略参数、实时盘口、信号决策、纸面收益一屏联动</div>
     </div>
     <div class=\"top-actions\">
@@ -1489,7 +1490,7 @@ def _dashboard_html() -> str:
       <div class=\"panel-head\">
         <div>
           <div class=\"head-title\">行情与信号</div>
-          <div class=\"head-desc\">5分钟轮次行情 / 方向信号 / 下注计划</div>
+          <div id=\"marketPanelDesc\" class=\"head-desc\">5分钟轮次行情 / 方向信号 / 下注计划</div>
         </div>
         <div id=\"marketHealth\" class=\"chip\">待刷新</div>
       </div>
@@ -2599,6 +2600,19 @@ const POLL_MS = {
   clock: 1000,
 };
 
+const TIMEFRAME_META = {
+  "5m": {
+    label: "5分钟",
+    brand: "QUANT_CMD · BTC_5M",
+    marketDesc: "5分钟轮次行情 / 方向信号 / 下注计划",
+  },
+  "15m": {
+    label: "15分钟",
+    brand: "QUANT_CMD · BTC_15M",
+    marketDesc: "15分钟轮次行情 / 方向信号 / 下注计划",
+  },
+};
+
 const HELP_TABS = [
   { id: 'quickstart', label: '快速上手' },
   { id: 'pageguide', label: '页面说明' },
@@ -3580,6 +3594,24 @@ function renderRuntimeStatus(payload) {
   el('runtimeRedeemTxHash').textContent = payload.redeem_last_tx_hash || '--';
 }
 
+function timeframeMeta(payload) {
+  const raw = String((((payload || {}).env_values || {}).MARKET_TIMEFRAME || '5m')).toLowerCase();
+  return TIMEFRAME_META[raw] || TIMEFRAME_META['5m'];
+}
+
+function applyTimeframeCopy(payload) {
+  const meta = timeframeMeta(payload);
+  document.title = 'BTC ' + meta.label + '预测控制台';
+  const brand = el('brandTitle');
+  if (brand) {
+    brand.textContent = meta.brand;
+  }
+  const panel = el('marketPanelDesc');
+  if (panel) {
+    panel.textContent = meta.marketDesc;
+  }
+}
+
 
 function shouldConfirmLiveModeSwitch(previousMode, nextMode) {
   previousMode = String(previousMode || 'paper').toLowerCase();
@@ -3589,6 +3621,7 @@ function shouldConfirmLiveModeSwitch(previousMode, nextMode) {
 
 function renderConfig(payload) {
   state.config = payload;
+  applyTimeframeCopy(payload);
   el('cfgEnvFile').textContent = payload.env_file || '--';
   el('cfgSavedAt').textContent = payload.saved_at ? fmtIso(payload.saved_at) : '--';
   renderRuntimeStatus(payload.runtime_status || {});
