@@ -979,6 +979,36 @@ def test_dashboard_runtime_payload_includes_optimizer_status(tmp_path: Path):
         state.close()
 
 
+def test_dashboard_runtime_payload_reads_optimizer_state_file(tmp_path: Path):
+    old_cwd = Path.cwd()
+    os.chdir(tmp_path)
+    logs_dir = tmp_path / "logs"
+    logs_dir.mkdir(parents=True, exist_ok=True)
+    (logs_dir / "optimizer_state.json").write_text(
+        json.dumps(
+            {
+                "enabled": True,
+                "last_run_at": "2026-04-16T10:00:00+00:00",
+                "champion_id": "champion-1",
+                "active_challengers": [{"candidate_id": "cand-a"}],
+                "promotable_candidates": [{"candidate_id": "cand-a"}],
+            }
+        ),
+        encoding="utf-8",
+    )
+    state = DashboardState(env_file=tmp_path / ".env.dashboard")
+    try:
+        payload = state.get_config_payload()
+        runtime = payload["runtime_status"]
+        assert runtime["optimizer_enabled"] is True
+        assert runtime["optimizer_last_run_at"] == "2026-04-16T10:00:00+00:00"
+        assert runtime["optimizer_champion_id"] == "champion-1"
+        assert runtime["optimizer_promotable_count"] == 1
+    finally:
+        state.close()
+        os.chdir(old_cwd)
+
+
 
 def test_dashboard_update_config_notifies_runtime_manager(tmp_path: Path):
     calls: list[str] = []

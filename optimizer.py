@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
+from pathlib import Path
 from itertools import product
 from typing import Any, Iterable
 
@@ -63,3 +65,76 @@ def rank_optimizer_candidates(rows: list[dict[str, Any]]) -> list[dict[str, Any]
         ),
         reverse=True,
     )
+
+
+def build_optimizer_state(
+    *,
+    ranked_candidates: list[dict[str, Any]],
+    champion_id: str | None,
+    top_n: int,
+    last_run_at: str,
+) -> dict[str, Any]:
+    active_challengers = [
+        {
+            "candidate_id": item.get("candidate_id"),
+            "base_strategy_id": item.get("base_strategy_id"),
+            "params": item.get("params") or {},
+            "validation_score": item.get("validation_score"),
+        }
+        for item in ranked_candidates[: max(0, top_n)]
+    ]
+    promotable_candidates = [
+        {
+            "candidate_id": item.get("candidate_id"),
+            "base_strategy_id": item.get("base_strategy_id"),
+            "params": item.get("params") or {},
+            "validation_score": item.get("validation_score"),
+        }
+        for item in ranked_candidates
+        if bool(item.get("promotable"))
+    ]
+    return {
+        "enabled": True,
+        "last_run_at": last_run_at,
+        "champion_id": champion_id,
+        "active_challengers": active_challengers,
+        "promotable_candidates": promotable_candidates,
+    }
+
+
+def save_optimizer_state(path: Path, payload: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+
+
+def load_optimizer_state(path: Path) -> dict[str, Any]:
+    if not path.exists():
+        return {
+            "enabled": False,
+            "last_run_at": None,
+            "champion_id": None,
+            "active_challengers": [],
+            "promotable_candidates": [],
+        }
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        raise ValueError(f"Invalid optimizer state payload in {path}")
+    return payload
+
+
+def run_optimizer_cycle(
+    *,
+    ranked_candidates: list[dict[str, Any]],
+    champion_id: str | None,
+    output_path: Path,
+    top_n: int,
+    last_run_at: str,
+) -> dict[str, Any]:
+    payload = build_optimizer_state(
+        ranked_candidates=ranked_candidates,
+        champion_id=champion_id,
+        top_n=top_n,
+        last_run_at=last_run_at,
+    )
+    save_optimizer_state(output_path, payload)
+    return payload
