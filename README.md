@@ -72,7 +72,58 @@ The dashboard runtime panel shows whether live trading is ready, whether a switc
 
 Press `Ctrl+C` in the terminal where `python main.py` is running. The runtime asks both services to stop cleanly and leaves run data in `logs/` for later review.
 
+## 6. Run The Strategy Optimizer
+
+The repository now includes an offline paper-strategy optimization pipeline in [optimizer.py](./optimizer.py). It is separate from `python main.py` and is meant to help you:
+
+- generate challenger candidates from historical CSV
+- persist optimizer state into `logs/optimizer_state.json`
+- refresh challenger promotion decisions from real paper-trading logs
+
+### One-Shot Optimization
+
+Run a single offline optimization pass from historical CSV:
+
+```powershell
+py optimizer.py ^
+  --csv tests/fixtures/sample_history.csv ^
+  --paper-log logs/paper_trades.csv ^
+  --env-file .env.dashboard ^
+  --output logs/optimizer_state.json ^
+  --champion-id champion-paper
+```
+
+Expected terminal output:
+
+- `Optimizer state written to ...`
+- `Champion: ...`
+- `Active challengers: ...`
+- `Promotable candidates: ...`
+
+### Watch Mode
+
+Run the optimizer as a low-frequency loop that periodically:
+
+- regenerates offline challengers
+- refreshes promotion decisions from real paper results
+
+```powershell
+py optimizer.py ^
+  --csv tests/fixtures/sample_history.csv ^
+  --paper-log logs/paper_trades.csv ^
+  --env-file .env.dashboard ^
+  --output logs/optimizer_state.json ^
+  --champion-id champion-paper ^
+  --watch ^
+  --optimize-interval-seconds 3600 ^
+  --refresh-interval-seconds 900 ^
+  --poll-interval-seconds 30
+```
+
+This mode does not touch live trading. It only updates optimizer/challenger state for paper evaluation.
+
 ## Additional resources
 
 - [docs/operations_runbook.md](./docs/operations_runbook.md)
 - [docs/dashboard_runbook.md](./docs/dashboard_runbook.md)
+- [docs/optimizer_runbook.md](./docs/optimizer_runbook.md)
