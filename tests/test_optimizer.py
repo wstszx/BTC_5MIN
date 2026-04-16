@@ -6,6 +6,7 @@ from optimizer import (
     build_candidate_configs,
     build_optimizer_state,
     evaluate_candidates_with_walk_forward,
+    refresh_optimizer_state_from_paper_results,
     load_optimizer_state,
     main,
     rank_optimizer_candidates,
@@ -274,3 +275,47 @@ def test_optimizer_main_rejects_missing_csv_argument():
         assert exc.code == 2
     else:
         raise AssertionError("Expected SystemExit")
+
+
+def test_refresh_optimizer_state_from_paper_results_updates_challenger_decisions(tmp_path):
+    state_path = tmp_path / "optimizer_state.json"
+    paper_log_path = tmp_path / "paper_trades.csv"
+
+    save_optimizer_state(
+        state_path,
+        {
+            "enabled": True,
+            "last_run_at": "2026-04-16T10:00:00+00:00",
+            "champion_id": "champion-paper",
+            "active_challengers": [
+                {
+                    "candidate_id": "challenger-a",
+                    "base_strategy_id": 5,
+                    "params": {"TARGET_PROFIT": 1.2},
+                    "validation_score": 0.9,
+                }
+            ],
+            "promotable_candidates": [],
+        },
+    )
+    paper_log_path.write_text(
+        "timestamp,mode,round_index,strategy,entry_timing,event_slug,start_time,end_time,side,price,order_size,order_cost,expected_profit,result,trade_pnl,cash_pnl,recovery_loss,consecutive_losses,stop_loss_triggered,skip_reason,signal_open_up_price,signal_current_up_price,signal_threshold,signal_delta,signal_locked,signal_reason,experiment_id\n"
+        "2026-04-16T10:00:00+00:00,paper,1,2,OPEN,slug-a,2026-04-16T09:55:00+00:00,2026-04-16T10:00:00+00:00,UP,0.50,2.0,1.0,1.0,UP,1.0,1.0,0.0,0,False,,,,,,False,,champion-paper\n"
+        "2026-04-16T10:05:00+00:00,paper,2,2,OPEN,slug-b,2026-04-16T10:00:00+00:00,2026-04-16T10:05:00+00:00,UP,0.50,2.0,1.0,1.0,UP,1.0,2.0,0.0,0,False,,,,,,False,,champion-paper\n"
+        "2026-04-16T10:00:00+00:00,paper,1,5,OPEN,slug-c,2026-04-16T09:55:00+00:00,2026-04-16T10:00:00+00:00,UP,0.50,2.0,1.0,1.0,UP,2.0,2.0,0.0,0,False,,,,,,False,,challenger-a\n"
+        "2026-04-16T10:05:00+00:00,paper,2,5,OPEN,slug-d,2026-04-16T10:00:00+00:00,2026-04-16T10:05:00+00:00,UP,0.50,2.0,1.0,1.0,UP,2.0,4.0,0.0,0,False,,,,,,False,,challenger-a\n",
+        encoding="utf-8",
+    )
+
+    payload = refresh_optimizer_state_from_paper_results(
+        state_path=state_path,
+        paper_log_path=paper_log_path,
+        min_trade_count=2,
+        required_pnl_edge=1.0,
+        max_drawdown_multiplier=1.25,
+    )
+
+    challenger = payload["active_challengers"][0]
+    assert challenger["paper_metrics"]["challenger_advantage"] == 2.0
+    assert challenger["promotion_decision"]["state"] == "promotable"
+    assert payload["promotable_candidates"][0]["candidate_id"] == "challenger-a"

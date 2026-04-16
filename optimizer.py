@@ -13,6 +13,8 @@ from typing import Any, Callable, Iterable, Sequence
 
 from config import AppConfig, build_config_from_env_values, load_env_file_values
 from backtest import run_backtest
+from paper_evaluator import compare_paper_candidates_from_csv
+from promotion_policy import evaluate_promotion
 from walk_forward import WalkForwardWindow, build_walk_forward_windows
 
 
@@ -186,6 +188,70 @@ def run_optimizer_cycle(
         last_run_at=last_run_at,
     )
     save_optimizer_state(output_path, payload)
+    return payload
+
+
+def refresh_optimizer_state_from_paper_results(
+    *,
+    state_path: Path,
+    paper_log_path: Path,
+    min_trade_count: int,
+    required_pnl_edge: float,
+    max_drawdown_multiplier: float,
+) -> dict[str, Any]:
+    payload = load_optimizer_state(state_path)
+    champion_id = payload.get("champion_id")
+    active_challengers = payload.get("active_challengers")
+    if not isinstance(active_challengers, list):
+        active_challengers = []
+
+    promotable_candidates: list[dict[str, Any]] = []
+    refreshed_challengers: list[dict[str, Any]] = []
+    for challenger in active_challengers:
+        if not isinstance(challenger, dict):
+            continue
+        candidate_id = str(challenger.get("candidate_id") or "").strip()
+        if not candidate_id or not champion_id:
+            refreshed_challengers.append(challenger)
+            continue
+        metrics = compare_paper_candidates_from_csv(
+            paper_log_path,
+            champion_id=str(champion_id),
+            challenger_id=candidate_id,
+        )
+        decision = evaluate_promotion(
+            champion_trade_count=metrics.champion_trade_count,
+            challenger_trade_count=metrics.challenger_trade_count,
+            champion_total_pnl=metrics.champion_total_pnl,
+            challenger_total_pnl=metrics.challenger_total_pnl,
+            champion_max_drawdown=metrics.champion_max_drawdown,
+            challenger_max_drawdown=metrics.challenger_max_drawdown,
+            min_trade_count=min_trade_count,
+            required_pnl_edge=required_pnl_edge,
+            max_drawdown_multiplier=max_drawdown_multiplier,
+        )
+        updated = dict(challenger)
+        updated["paper_metrics"] = {
+            "champion_trade_count": metrics.champion_trade_count,
+            "challenger_trade_count": metrics.challenger_trade_count,
+            "champion_total_pnl": metrics.champion_total_pnl,
+            "challenger_total_pnl": metrics.challenger_total_pnl,
+            "champion_max_drawdown": metrics.champion_max_drawdown,
+            "challenger_max_drawdown": metrics.challenger_max_drawdown,
+            "challenger_advantage": metrics.challenger_advantage,
+        }
+        updated["promotion_decision"] = {
+            "state": decision.state,
+            "reason": decision.reason,
+            "promotable": decision.promotable,
+        }
+        refreshed_challengers.append(updated)
+        if decision.promotable:
+            promotable_candidates.append(updated)
+
+    payload["active_challengers"] = refreshed_challengers
+    payload["promotable_candidates"] = promotable_candidates
+    save_optimizer_state(state_path, payload)
     return payload
 
 

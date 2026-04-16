@@ -881,6 +881,9 @@ def test_dashboard_assets_include_optimizer_runtime_rows():
     assert "function renderOptimizerCandidateList(" in js
     assert "el('runtimeOptimizerChallengerList').innerHTML" in js
     assert "el('runtimeOptimizerPromotableList').innerHTML" in js
+    assert "const decision = (item || {}).promotion_decision || {};" in js
+    assert "const decisionState = String(decision.state || '--');" in js
+    assert "const decisionReason = String(decision.reason || '--');" in js
     assert "el('runtimeRedeemAttempt').textContent = payload.redeem_last_attempt_at ? fmtIso(payload.redeem_last_attempt_at) : '--';" in js
     assert "el('runtimeRedeemTxHash').textContent = payload.redeem_last_tx_hash || '--';" in js
 

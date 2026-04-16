@@ -3717,7 +3717,10 @@ function renderOptimizerCandidateList(items) {
     const strategyId = String((item || {}).base_strategy_id || '--');
     const score = (item || {}).validation_score;
     const scoreText = (score === null || score === undefined || score === '') ? '--' : String(score);
-    return esc(candidateId) + ' / S' + esc(strategyId) + ' / score=' + esc(scoreText);
+    const decision = (item || {}).promotion_decision || {};
+    const decisionState = String(decision.state || '--');
+    const decisionReason = String(decision.reason || '--');
+    return esc(candidateId) + ' / S' + esc(strategyId) + ' / score=' + esc(scoreText) + ' / state=' + esc(decisionState) + ' / reason=' + esc(decisionReason);
   }).join('<br>');
 }
 
