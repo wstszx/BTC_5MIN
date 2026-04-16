@@ -10,7 +10,7 @@ import pytest
 import requests
 
 from config import AppConfig
-from models import MarketQuote, MarketWindow, SessionState, TradePlan, TradeRecord
+from models import MarketQuote, MarketWindow, PaperStrategyState, SessionState, TradePlan, TradeRecord
 from runtime_control import RuntimeControl
 from trader import (
     SideDecision,
@@ -29,6 +29,7 @@ from trader import (
     run_paper_trading,
     _create_live_clob_client,
     validate_live_runtime_config,
+    _paper_experiment_id,
 )
 
 
@@ -1545,6 +1546,48 @@ def test_append_trade_log_rotates_legacy_schema_file(tmp_path):
     assert "signal_reason" in header
 
 
+def test_append_trade_log_writes_experiment_id_column(tmp_path):
+    log_path = tmp_path / "paper_trades.csv"
+
+    append_trade_log(
+        log_path,
+        TradeRecord(
+            timestamp=datetime.now(timezone.utc),
+            mode="paper",
+            round_index=1,
+            strategy=5,
+            entry_timing="OPEN",
+            event_slug="s1",
+            start_time=datetime.now(timezone.utc) - timedelta(minutes=5),
+            end_time=datetime.now(timezone.utc),
+            side="UP",
+            price=0.5,
+            order_size=2.0,
+            order_cost=1.0,
+            expected_profit=1.0,
+            result="UP",
+            trade_pnl=1.0,
+            cash_pnl=1.0,
+            recovery_loss=0.0,
+            consecutive_losses=0,
+            experiment_id="challenger-s5-a",
+        ),
+    )
+
+    lines = log_path.read_text(encoding="utf-8").splitlines()
+    assert "experiment_id" in lines[0]
+    assert "challenger-s5-a" in lines[1]
+
+
+def test_paper_experiment_id_defaults_to_strategy_prefix():
+    state = PaperStrategyState()
+
+    experiment_id = _paper_experiment_id(5, state)
+
+    assert experiment_id == "strategy-5"
+    assert state.experiment_id == "strategy-5"
+
+
 def test_place_live_order_skips_when_ws_stale_guard_triggered(tmp_path):
     cfg = AppConfig(ws_trade_guard_stale_seconds=0.0)
 
@@ -1975,6 +2018,7 @@ def test_settled_pending_paper_trade_writes_single_final_csv_row(tmp_path):
                         'signal_locked': False,
                         'signal_reason': None,
                         'queued_at': '2026-04-06T06:00:05+00:00',
+                        'experiment_id': 'challenger-s5-a',
                     }
                 ],
             }
@@ -1999,6 +2043,7 @@ def test_settled_pending_paper_trade_writes_single_final_csv_row(tmp_path):
     assert result['status'] == 'stopped'
     assert len(rows) == 2
     assert 'btc-updown-5m-paper-prev' in rows[1]
+    assert 'challenger-s5-a' in rows[1]
     assert ',UP,0.5,2.0,1.0,1.0,UP,1.0,1.0,0.0,0,' in rows[1]
 
 

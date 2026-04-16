@@ -91,6 +91,7 @@ class TradeRecord:
     signal_delta: float | None = None
     signal_locked: bool = False
     signal_reason: str | None = None
+    experiment_id: str | None = None
 
 
 @dataclass(slots=True)
@@ -113,6 +114,7 @@ class PendingPaperTrade:
     signal_locked: bool = False
     signal_reason: str | None = None
     queued_at: str | None = None
+    experiment_id: str | None = None
 
 
 @dataclass(slots=True)

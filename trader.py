@@ -2049,6 +2049,7 @@ def _build_pending_paper_trade(
     side: str,
     cfg: AppConfig,
     side_decision: SideDecision,
+    experiment_id: str | None,
 ) -> PendingPaperTrade:
     return PendingPaperTrade(
         round_index=state.round_index,
@@ -2069,6 +2070,7 @@ def _build_pending_paper_trade(
         signal_locked=side_decision.signal_locked,
         signal_reason=side_decision.reason,
         queued_at=datetime.now(timezone.utc).isoformat(),
+        experiment_id=experiment_id,
     )
 
 
@@ -2080,6 +2082,7 @@ def _queue_pending_paper_trade(
     side: str,
     cfg: AppConfig,
     side_decision: SideDecision,
+    experiment_id: str | None,
 ) -> bool:
     if _pending_paper_trade_exists(state, window.slug):
         return False
@@ -2091,9 +2094,18 @@ def _queue_pending_paper_trade(
             side=side,
             cfg=cfg,
             side_decision=side_decision,
+            experiment_id=experiment_id,
         )
     )
     return True
+
+
+def _paper_experiment_id(strategy_id: int, strategy_state: PaperStrategyState) -> str:
+    experiment_id = str(strategy_state.experiment_id or '').strip()
+    if not experiment_id:
+        experiment_id = f"strategy-{strategy_id}"
+        strategy_state.experiment_id = experiment_id
+    return experiment_id
 
 
 def _build_frozen_pending_paper_plan(item: PendingPaperTrade) -> TradePlan:
@@ -2157,6 +2169,7 @@ def _settle_pending_paper_trades(
             TradeRecord(
                 timestamp=datetime.now(timezone.utc),
                 mode='paper',
+                experiment_id=item.experiment_id,
                 round_index=item.round_index,
                 strategy=item.strategy,
                 entry_timing=item.entry_timing,
@@ -2436,6 +2449,7 @@ def run_paper_trading(
             round_completed = False
             for strategy_id in strategy_ids:
                 strategy_state = state.paper_strategies.setdefault(strategy_id, PaperStrategyState())
+                experiment_id = _paper_experiment_id(strategy_id, strategy_state)
                 if strategy_state.pending_paper_trades:
                     continue
                 strategy_cfg = replace(cfg, strategy_id=strategy_id)
@@ -2497,6 +2511,7 @@ def run_paper_trading(
                         TradeRecord(
                             timestamp=datetime.now(timezone.utc),
                             mode="paper",
+                            experiment_id=experiment_id,
                             round_index=strategy_session.round_index,
                             strategy=strategy_id,
                             entry_timing=strategy_cfg.entry_timing,
@@ -2551,6 +2566,7 @@ def run_paper_trading(
                         TradeRecord(
                             timestamp=datetime.now(timezone.utc),
                             mode="paper",
+                            experiment_id=experiment_id,
                             round_index=strategy_session.round_index,
                             strategy=strategy_id,
                             entry_timing=strategy_cfg.entry_timing,
@@ -2601,6 +2617,7 @@ def run_paper_trading(
                         TradeRecord(
                             timestamp=datetime.now(timezone.utc),
                             mode="paper",
+                            experiment_id=experiment_id,
                             round_index=strategy_session.round_index,
                             strategy=strategy_id,
                             entry_timing=strategy_cfg.entry_timing,
@@ -2676,6 +2693,7 @@ def run_paper_trading(
                         TradeRecord(
                             timestamp=datetime.now(timezone.utc),
                             mode="paper",
+                            experiment_id=experiment_id,
                             round_index=strategy_session.round_index,
                             strategy=strategy_id,
                             entry_timing=strategy_cfg.entry_timing,
@@ -2730,6 +2748,7 @@ def run_paper_trading(
                     side=side,
                     cfg=strategy_cfg,
                     side_decision=side_decision,
+                    experiment_id=experiment_id,
                 )
                 if queued:
                     strategy_session.round_index += 1

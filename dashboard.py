@@ -116,6 +116,7 @@ def _pending_paper_trade_to_recent_row(item: PendingPaperTrade) -> dict[str, str
         'timestamp': item.queued_at or item.end_time,
         'mode': 'paper',
         'round_index': str(item.round_index),
+        'experiment_id': item.experiment_id or '',
         'strategy': str(item.strategy),
         'entry_timing': item.entry_timing,
         'event_slug': item.event_slug,

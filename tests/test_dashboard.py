@@ -1309,6 +1309,27 @@ def test_dashboard_paper_payloads_filter_by_strategy(tmp_path: Path):
         state.close()
         os.chdir(old_cwd)
 
+
+def test_dashboard_recent_payload_preserves_experiment_id(tmp_path: Path):
+    old_cwd = Path.cwd()
+    os.chdir(tmp_path)
+    state = DashboardState(env_file=tmp_path / '.env.dashboard')
+    try:
+        logs_dir = tmp_path / 'logs'
+        logs_dir.mkdir(parents=True, exist_ok=True)
+        (logs_dir / 'paper_trades.csv').write_text(
+            'timestamp,mode,round_index,strategy,entry_timing,event_slug,start_time,end_time,side,price,order_size,order_cost,expected_profit,result,trade_pnl,cash_pnl,recovery_loss,consecutive_losses,stop_loss_triggered,skip_reason,signal_open_up_price,signal_current_up_price,signal_threshold,signal_delta,signal_locked,signal_reason,experiment_id\n'
+            '2026-04-06T08:00:00+00:00,paper,10,5,OPEN,slug-one,2026-04-06T07:55:00+00:00,2026-04-06T08:00:00+00:00,UP,0.50,2.0,1.0,1.0,UP,1.0,1.0,0.0,0,False,,,,,,False,,challenger-s5-a\n',
+            encoding='utf-8',
+        )
+
+        payload = state.get_recent_trades_payload(limit=10)
+
+        assert payload['rows'][0]['experiment_id'] == 'challenger-s5-a'
+    finally:
+        state.close()
+        os.chdir(old_cwd)
+
 def test_dashboard_market_payload_can_switch_strategy_view(tmp_path: Path):
     env_file = tmp_path / '.env.dashboard'
     env_file.write_text('STRATEGY_ID=1\nPAPER_STRATEGY_IDS=1,6\n', encoding='utf-8')

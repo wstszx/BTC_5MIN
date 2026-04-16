@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import csv
 from dataclasses import dataclass
+from pathlib import Path
 
 
 @dataclass(frozen=True, slots=True)
@@ -46,3 +48,14 @@ def compare_paper_candidates(
         challenger_max_drawdown=_max_drawdown(challenger_cash),
         challenger_advantage=challenger_total - champion_total,
     )
+
+
+def compare_paper_candidates_from_csv(
+    csv_path: Path,
+    *,
+    champion_id: str,
+    challenger_id: str,
+) -> PaperComparisonMetrics:
+    with csv_path.open("r", newline="", encoding="utf-8") as handle:
+        rows = list(csv.DictReader(handle))
+    return compare_paper_candidates(rows, champion_id=champion_id, challenger_id=challenger_id)
