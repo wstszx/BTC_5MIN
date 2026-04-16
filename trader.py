@@ -969,10 +969,19 @@ def _apply_strategy6_signal_to_quote(
     cfg: AppConfig,
     quote: MarketQuote,
     binance_signal_service: BinanceDepth5SignalService | None,
+    now: datetime | None = None,
 ) -> None:
     if cfg.strategy_id != 6 or binance_signal_service is None:
         return
+    now = now or datetime.now(timezone.utc)
     latest = binance_signal_service.latest()
+    if latest is None or (now - latest.signal_at).total_seconds() > max(0.0, cfg.binance_signal_stale_seconds):
+        try:
+            refreshed = binance_signal_service.refresh_from_rest(now=now)
+        except Exception:
+            refreshed = None
+        if refreshed is not None:
+            latest = refreshed
     if latest is None:
         return
     quote.strategy6_ofi_score = latest.ofi_score

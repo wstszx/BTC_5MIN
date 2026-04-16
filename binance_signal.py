@@ -6,6 +6,8 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
+import requests
+
 try:
     import websocket
 except ModuleNotFoundError:  # pragma: no cover
@@ -25,12 +27,23 @@ class BinanceTopOfBookSignal:
 
 
 class BinanceDepth5SignalService:
-    def __init__(self, *, ws_url: str, stream: str) -> None:
+    def __init__(
+        self,
+        *,
+        ws_url: str,
+        stream: str,
+        rest_url: str | None = None,
+        rest_timeout_seconds: float = 3.0,
+    ) -> None:
         self.ws_url = ws_url.rstrip('/') + '/' + stream.lstrip('/')
+        self.stream = stream
+        self.rest_url = rest_url or _default_rest_url_for_stream(stream)
+        self.rest_timeout_seconds = max(0.1, float(rest_timeout_seconds))
         self._lock = threading.Lock()
         self._latest: BinanceTopOfBookSignal | None = None
         self._app: websocket.WebSocketApp | None = None if websocket is not None else None
         self._thread: threading.Thread | None = None
+        self._rest_session: Any = requests
 
     def close(self) -> None:
         with self._lock:
@@ -55,6 +68,22 @@ class BinanceDepth5SignalService:
         with self._lock:
             self._latest = signal
         return signal
+
+    def refresh_from_rest(
+        self,
+        *,
+        session: Any | None = None,
+        now: datetime | None = None,
+    ) -> BinanceTopOfBookSignal | None:
+        if not self.rest_url:
+            return None
+        client = session or self._rest_session
+        response = client.get(self.rest_url, timeout=self.rest_timeout_seconds)
+        response.raise_for_status()
+        payload = response.json()
+        if not isinstance(payload, dict):
+            return None
+        return self.push_payload(payload, now=now)
 
     def start(self) -> None:
         if websocket is None:
@@ -81,6 +110,16 @@ class BinanceDepth5SignalService:
 
             self._thread = threading.Thread(target=run, daemon=True)
             self._thread.start()
+
+
+def _default_rest_url_for_stream(stream: str) -> str | None:
+    raw = str(stream or '').strip().lower()
+    if not raw:
+        return None
+    symbol = raw.split('@', 1)[0].strip()
+    if not symbol:
+        return None
+    return 'https://api.binance.com/api/v3/depth?symbol=' + symbol.upper() + '&limit=5'
 
 
 def _as_float(value: Any) -> float | None:

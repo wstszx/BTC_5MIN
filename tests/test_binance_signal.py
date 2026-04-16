@@ -39,3 +39,36 @@ def test_signal_service_stores_latest_signal_from_payload():
     assert latest is not None
     assert latest.ofi_score is not None
     assert latest.ofi_score > 0
+
+
+def test_signal_service_can_refresh_latest_signal_from_rest_snapshot():
+    class StubResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {
+                'bids': [['100000', '5']],
+                'asks': [['100001', '1']],
+            }
+
+    class StubSession:
+        def get(self, url, *, timeout):
+            assert url == 'https://api.binance.com/api/v3/depth?symbol=BTCUSDT&limit=5'
+            assert timeout == 3.0
+            return StubResponse()
+
+    service = BinanceDepth5SignalService(
+        ws_url='wss://stream.binance.com:9443/ws',
+        stream='btcusdt@depth5',
+        rest_url='https://api.binance.com/api/v3/depth?symbol=BTCUSDT&limit=5',
+        rest_timeout_seconds=3.0,
+    )
+
+    latest = service.refresh_from_rest(session=StubSession(), now=datetime(2026, 4, 16, 12, 0, tzinfo=timezone.utc))
+
+    assert latest is not None
+    assert latest.signal_at == datetime(2026, 4, 16, 12, 0, tzinfo=timezone.utc)
+    assert latest.ofi_score is not None
+    assert latest.ofi_score > 0
+    assert service.latest() == latest
