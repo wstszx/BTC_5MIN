@@ -445,7 +445,7 @@ class DashboardState:
         "LIVE_TRADING_ENABLED": ["true", "false"],
         "LIVE_AUTO_REDEEM_ENABLED": ["false", "true"],
         "LIVE_AUTO_REDEEM_DRY_RUN": ["false", "true"],
-        "STRATEGY_ID": ["1", "2", "3", "4", "5"],
+        "STRATEGY_ID": ["1", "2", "3", "4", "5", "6"],
         "PAPER_STRATEGY_IDS": ["1", "2", "3", "4", "5", "6"],
         "BET_SIZING_MODE": ["FIXED_BASE_COST", "TARGET_PROFIT"],
         "SIGNAL_WEAK_SIGNAL_MODE": ["SKIP", "FALLBACK"],
@@ -2486,6 +2486,78 @@ body::before {
 .v.cyan { color: var(--cyan); }
 
 .rows { display: grid; gap: 8px; }
+.strategy-panel-host {
+  display: grid;
+  gap: 10px;
+}
+
+.strategy-panel-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.strategy-panel {
+  display: grid;
+  gap: 8px;
+}
+
+.strategy-panel-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid rgba(35, 64, 97, 0.72);
+  border-radius: 12px;
+  background: rgba(8, 15, 27, 0.82);
+}
+
+.strategy-panel-row-primary {
+  border-color: rgba(63, 205, 255, 0.4);
+  box-shadow: inset 0 0 0 1px rgba(63, 205, 255, 0.08);
+}
+
+.strategy-panel-toggle,
+.strategy-panel-primary {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.strategy-panel-toggle input,
+.strategy-panel-primary input {
+  margin: 0;
+}
+
+.strategy-panel-meta {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.strategy-panel-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  font-weight: 700;
+  color: #eff6ff;
+}
+
+.strategy-panel-subtitle {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.strategy-panel-hidden-input {
+  display: none;
+}
+
 .row {
   display: flex;
   justify-content: space-between;
@@ -3180,6 +3252,150 @@ function collectUnifiedStrategyValues(payload, currentValues) {
   };
 }
 
+function currentUnifiedStrategyDraftValues() {
+  const focusNode = el('cfg_STRATEGY_ID');
+  const multiNode = el('cfg_PAPER_STRATEGY_IDS');
+  return {
+    STRATEGY_ID: focusNode ? focusNode.value : '',
+    PAPER_STRATEGY_IDS: multiNode
+      ? Array.from(multiNode.options || []).filter((option) => option.selected).map((option) => option.value).join(',')
+      : '',
+  };
+}
+
+function refreshStrategyPanelDependentUi() {
+  const liveValues = expandLiveToggleValues(collectConfigValues());
+  renderStrategyGuide(state.config, liveValues);
+  applyConfigFieldVisibility(liveValues);
+}
+
+function renderStrategyPanel(payload, values) {
+  const panelNode = el('cfgStrategyPanel');
+  if (!panelNode) {
+    return;
+  }
+  const unified = resolveUnifiedStrategySelection(payload, values);
+  panelNode.innerHTML = '';
+
+  const actions = document.createElement('div');
+  actions.className = 'strategy-panel-actions';
+
+  const selectAllButton = document.createElement('button');
+  selectAllButton.type = 'button';
+  selectAllButton.className = 'btn btn-ghost';
+  selectAllButton.textContent = '全选';
+  selectAllButton.addEventListener('click', selectAllPaperStrategiesInPanel);
+  actions.appendChild(selectAllButton);
+
+  const clearButton = document.createElement('button');
+  clearButton.type = 'button';
+  clearButton.className = 'btn btn-ghost';
+  clearButton.textContent = '清空';
+  clearButton.addEventListener('click', clearPaperStrategies);
+  actions.appendChild(clearButton);
+
+  panelNode.appendChild(actions);
+
+  const list = document.createElement('div');
+  list.className = 'strategy-panel';
+
+  unified.options.forEach((opt) => {
+    const meta = strategyMeta(payload, opt) || {};
+    const isPrimary = String(unified.focus) === String(opt);
+    const isSelected = unified.selected.indexOf(String(opt)) >= 0;
+
+    const row = document.createElement('div');
+    row.className = 'strategy-panel-row' + (isPrimary ? ' strategy-panel-row-primary' : '');
+
+    const paperToggle = document.createElement('label');
+    paperToggle.className = 'strategy-panel-toggle';
+    const checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox.checked = isSelected;
+    checkbox.disabled = isPrimary;
+    checkbox.addEventListener('change', () => {
+      togglePaperStrategySelection(opt, checkbox.checked);
+    });
+    paperToggle.appendChild(checkbox);
+    paperToggle.appendChild(document.createTextNode('运行'));
+    row.appendChild(paperToggle);
+
+    const metaWrap = document.createElement('div');
+    metaWrap.className = 'strategy-panel-meta';
+    const title = document.createElement('div');
+    title.className = 'strategy-panel-title';
+    title.innerHTML = '<span>' + esc(String(opt) + ' | ' + (meta.label || strategyShortLabel(payload, opt))) + '</span>' +
+      (isPrimary ? '<span class="chip ok">主策略</span>' : '');
+    metaWrap.appendChild(title);
+    const subtitle = document.createElement('div');
+    subtitle.className = 'strategy-panel-subtitle';
+    subtitle.textContent = meta.summary || '纸面运行可多选，主策略用于当前页面查看与策略说明。';
+    metaWrap.appendChild(subtitle);
+    row.appendChild(metaWrap);
+
+    const primaryToggle = document.createElement('label');
+    primaryToggle.className = 'strategy-panel-primary';
+    const radio = document.createElement('input');
+    radio.type = 'radio';
+    radio.name = 'cfgPrimaryStrategy';
+    radio.checked = isPrimary;
+    radio.addEventListener('change', () => {
+      if (radio.checked) {
+        setPrimaryStrategy(opt);
+      }
+    });
+    primaryToggle.appendChild(radio);
+    primaryToggle.appendChild(document.createTextNode('设为主策略'));
+    row.appendChild(primaryToggle);
+
+    list.appendChild(row);
+  });
+
+  panelNode.appendChild(list);
+}
+
+function selectAllPaperStrategiesInPanel() {
+  const draft = currentUnifiedStrategyDraftValues();
+  const options = resolveUnifiedStrategySelection(state.config || {}, draft).options;
+  renderUnifiedStrategyToolbar(state.config || {}, {
+    ...draft,
+    PAPER_STRATEGY_IDS: options.join(','),
+  });
+  refreshStrategyPanelDependentUi();
+}
+
+function clearPaperStrategies() {
+  const draft = currentUnifiedStrategyDraftValues();
+  renderUnifiedStrategyToolbar(state.config || {}, {
+    ...draft,
+    PAPER_STRATEGY_IDS: '',
+  });
+  refreshStrategyPanelDependentUi();
+}
+
+function togglePaperStrategySelection(strategyId, selected) {
+  const draft = currentUnifiedStrategyDraftValues();
+  const values = parseStrategyIdList(draft.PAPER_STRATEGY_IDS);
+  const target = String(strategyId);
+  const nextSelected = selected
+    ? [...values, target]
+    : values.filter((item) => String(item) !== target);
+  renderUnifiedStrategyToolbar(state.config || {}, {
+    ...draft,
+    PAPER_STRATEGY_IDS: nextSelected.join(','),
+  });
+  refreshStrategyPanelDependentUi();
+}
+
+function setPrimaryStrategy(strategyId) {
+  const draft = currentUnifiedStrategyDraftValues();
+  renderUnifiedStrategyToolbar(state.config || {}, {
+    ...draft,
+    STRATEGY_ID: String(strategyId || ''),
+  });
+  refreshStrategyPanelDependentUi();
+}
+
 function renderUnifiedStrategyToolbar(payload, values) {
   const focusNode = el('cfg_STRATEGY_ID');
   const multiNode = el('cfg_PAPER_STRATEGY_IDS');
@@ -3206,19 +3422,8 @@ function renderUnifiedStrategyToolbar(payload, values) {
     option.selected = unified.selected.indexOf(String(opt)) >= 0;
     multiNode.appendChild(option);
   });
+  renderStrategyPanel(payload, values);
   state.paperStrategyFilter = focusStrategy;
-}
-
-function selectAllPaperStrategies() {
-  const multiNode = el('cfg_PAPER_STRATEGY_IDS');
-  if (!multiNode) {
-    return;
-  }
-  Array.from(multiNode.options || []).forEach((option) => { option.selected = true; });
-  const liveValues = expandLiveToggleValues(collectConfigValues());
-  renderUnifiedStrategyToolbar(state.config, liveValues);
-  renderStrategyGuide(state.config, liveValues);
-  applyConfigFieldVisibility(liveValues);
 }
 
 function paperReportStrategyOptions() {
@@ -3844,39 +4049,35 @@ function renderConfig(payload) {
       wrap.appendChild(label);
 
       if (key === 'STRATEGY_ID') {
+        label.setAttribute('for', 'cfgStrategyPanel');
+        label.textContent = '策略面板';
         const unifiedWrap = document.createElement('div');
         unifiedWrap.className = 'rows';
 
         const focusLabel = document.createElement('div');
         focusLabel.className = 'field-help';
-        focusLabel.textContent = '\u7edf\u4e00\u7b56\u7565\uff1a\u5f53\u524d\u9875\u9762\u6309\u8fd9\u91cc\u5207\u6362\u67e5\u770b\u548c\u89e3\u8bfb\u3002';
+        focusLabel.textContent = '策略面板：勾选要加入模拟盘的策略，并单独指定一个主策略用于当前页面查看和策略说明。';
         unifiedWrap.appendChild(focusLabel);
+
+        const panel = document.createElement('div');
+        panel.id = 'cfgStrategyPanel';
+        panel.className = 'strategy-panel-host';
+        unifiedWrap.appendChild(panel);
 
         const focusSelect = document.createElement('select');
         focusSelect.id = 'cfg_STRATEGY_ID';
+        focusSelect.className = 'strategy-panel-hidden-input';
         unifiedWrap.appendChild(focusSelect);
 
         const multiLabel = document.createElement('div');
         multiLabel.className = 'field-help';
-        multiLabel.textContent = '\u7eb8\u9762\u8fd0\u884c\u7b56\u7565\uff1a\u53ef\u591a\u9009\uff0c\u7ed3\u679c\u6c47\u603b\u548c\u6700\u8fd1\u4ea4\u6613\u4f1a\u8ddf\u968f\u5f53\u524d\u67e5\u770b\u7b56\u7565\u5207\u6362\u3002';
+        multiLabel.textContent = '主策略可与模拟盘集合不同；保存时会自动确保主策略包含在模拟盘策略里。';
         unifiedWrap.appendChild(multiLabel);
-
-        const multiActions = document.createElement('div');
-        multiActions.className = 'actions';
-
-        const selectAllButton = document.createElement('button');
-        selectAllButton.id = 'cfgPaperStrategiesSelectAll';
-        selectAllButton.type = 'button';
-        selectAllButton.className = 'btn btn-ghost';
-        selectAllButton.textContent = '\u5168\u9009\u5168\u90e8\u7b56\u7565';
-        selectAllButton.addEventListener('click', selectAllPaperStrategies);
-        multiActions.appendChild(selectAllButton);
-
-        unifiedWrap.appendChild(multiActions);
 
         const multiSelect = document.createElement('select');
         multiSelect.id = 'cfg_PAPER_STRATEGY_IDS';
         multiSelect.multiple = true;
+        multiSelect.className = 'strategy-panel-hidden-input';
         unifiedWrap.appendChild(multiSelect);
         wrap.appendChild(unifiedWrap);
       } else if (Array.isArray(options[key]) && options[key].length > 0) {

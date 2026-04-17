@@ -924,17 +924,21 @@ def test_dashboard_assets_localize_recent_panel_by_running_mode():
 
 
 
-def test_dashboard_assets_use_unified_strategy_selector_for_config_and_views():
+def test_dashboard_assets_use_strategy_panel_for_unified_strategy_selection():
     html = _dashboard_html()
     js = _dashboard_js()
 
-    assert '统一策略' in js
+    assert '策略面板' in js
+    assert 'cfgStrategyPanel' in js
+    assert 'strategy-panel' in js
     assert "'STRATEGY_ID', 'PAPER_STRATEGY_IDS'" in js
-    assert 'multiple = true' in js
-    assert 'cfgPaperStrategiesSelectAll' in js
-    assert '全选全部策略' in js
-    assert 'function selectAllPaperStrategies()' in js
-    assert "Array.from(multiNode.options || []).forEach((option) => { option.selected = true; });" in js
+    assert 'cfgPaperStrategiesSelectAll' not in js
+    assert '全选全部策略' not in js
+    assert 'function renderStrategyPanel(' in js
+    assert 'function selectAllPaperStrategiesInPanel()' in js
+    assert 'function clearPaperStrategies()' in js
+    assert 'function togglePaperStrategySelection(' in js
+    assert 'function setPrimaryStrategy(' in js
     assert "state.paperStrategyFilter = focusStrategy;" in js
     assert "const summaryEndpoint = '/api/paper/summary?strategy=' + strategy;" in js
     assert 'function resolveUnifiedStrategySelection(' in js
@@ -1201,6 +1205,7 @@ def test_dashboard_config_payload_includes_paper_strategy_ids(tmp_path: Path):
     try:
         payload = state.get_config_payload()
         assert 'PAPER_STRATEGY_IDS' in payload['editable_keys']
+        assert payload['select_options']['STRATEGY_ID'] == ['1', '2', '3', '4', '5', '6']
         assert payload['select_options']['PAPER_STRATEGY_IDS'] == ['1', '2', '3', '4', '5', '6']
     finally:
         state.close()
@@ -1248,6 +1253,19 @@ def test_dashboard_update_config_normalizes_paper_strategy_ids(tmp_path: Path):
         assert payload['env_values']['PAPER_STRATEGY_IDS'] == '6,2,1'
         text = env_file.read_text(encoding='utf-8')
         assert 'PAPER_STRATEGY_IDS=6,2,1' in text
+    finally:
+        state.close()
+
+
+def test_dashboard_update_config_accepts_strategy_6_as_primary(tmp_path: Path):
+    env_file = tmp_path / '.env.dashboard'
+    state = DashboardState(env_file=env_file)
+    try:
+        payload = state.update_config({'STRATEGY_ID': '6', 'PAPER_STRATEGY_IDS': '1,6'})
+        assert payload['env_values']['STRATEGY_ID'] == '6'
+        assert payload['env_values']['PAPER_STRATEGY_IDS'] == '1,6'
+        text = env_file.read_text(encoding='utf-8')
+        assert 'STRATEGY_ID=6' in text
     finally:
         state.close()
 
