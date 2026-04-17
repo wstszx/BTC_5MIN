@@ -51,6 +51,7 @@ def get_side_for_round(
     signal_fallback_strategy_id: int = 2,
     ofi_score: float | None = None,
     ofi_threshold: float = 0.65,
+    signal_min_gap: float = 0.0,
 ) -> str:
     if strategy_id in (1, 2, 3, 4):
         return _pattern_side_for_round(strategy_id, round_index)
@@ -74,5 +75,26 @@ def get_side_for_round(
         if ofi_score <= -threshold:
             return 'DOWN'
         raise ValueError('strategy_id=6 requires strong ofi_score')
+
+    if strategy_id == 7:
+        if ofi_score is None:
+            raise ValueError('strategy_id=7 requires ofi_score')
+        if not (_is_valid_price(signal_open_up_price) and _is_valid_price(signal_current_up_price)):
+            raise ValueError('strategy_id=7 requires momentum prices')
+
+        threshold = max(0.0, ofi_threshold)
+        momentum_threshold = max(0.0, signal_threshold)
+        min_gap = max(0.0, signal_min_gap)
+        momentum_delta = signal_current_up_price - signal_open_up_price
+
+        if abs(ofi_score) < threshold:
+            raise ValueError('strategy_id=7 requires strong ofi_score')
+        if abs(momentum_delta) < momentum_threshold:
+            raise ValueError('strategy_id=7 requires strong momentum signal')
+        if ofi_score * momentum_delta <= 0:
+            raise ValueError('strategy_id=7 requires agreeing OFI and momentum signals')
+        if abs(ofi_score) < threshold + min_gap or abs(momentum_delta) < momentum_threshold + min_gap:
+            raise ValueError('strategy_id=7 requires signal gap above threshold')
+        return 'UP' if momentum_delta > 0 else 'DOWN'
 
     raise ValueError(f'Unsupported strategy_id: {strategy_id}')

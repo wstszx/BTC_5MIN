@@ -32,6 +32,10 @@ def _select_signal_current_up_price(row: dict[str, str], entry_timing: str) -> f
     return _optional_float(row.get("entry_price_open_up"))
 
 
+def _select_ofi_score(row: dict[str, str]) -> float | None:
+    return _optional_float(row.get("strategy6_ofi_score") or row.get("ofi_score"))
+
+
 def _signal_snapshot_overlap_ratio(rows: list[dict[str, str]], entry_timing: str) -> float:
     comparable = 0
     overlap = 0
@@ -124,15 +128,59 @@ def run_backtest(csv_path: Path, cfg: AppConfig | None = None) -> BacktestResult
             )
 
     for row in rows:
-        side = get_side_for_round(
-            cfg.strategy_id,
-            state.round_index,
-            signal_open_up_price=_optional_float(row.get("entry_price_open_up")),
-            signal_current_up_price=_select_signal_current_up_price(row, cfg.entry_timing),
-            signal_threshold=cfg.signal_momentum_threshold,
-            signal_fallback_strategy_id=cfg.signal_fallback_strategy_id,
-        )
+        try:
+            side = get_side_for_round(
+                cfg.strategy_id,
+                state.round_index,
+                signal_open_up_price=_optional_float(row.get("entry_price_open_up")),
+                signal_current_up_price=_select_signal_current_up_price(row, cfg.entry_timing),
+                signal_threshold=cfg.strategy7_momentum_threshold if cfg.strategy_id == 7 else cfg.signal_momentum_threshold,
+                signal_fallback_strategy_id=cfg.signal_fallback_strategy_id,
+                ofi_score=_select_ofi_score(row),
+                ofi_threshold=cfg.strategy7_ofi_threshold if cfg.strategy_id == 7 else cfg.ofi_threshold,
+                signal_min_gap=cfg.strategy7_min_signal_gap if cfg.strategy_id == 7 else 0.0,
+            )
+        except ValueError:
+            if cfg.strategy_id != 7:
+                raise
+            records.append(
+                _build_record(
+                    cfg=cfg,
+                    state=state,
+                    row=row,
+                    side="SKIP",
+                    price=None,
+                    order_size=0.0,
+                    order_cost=0.0,
+                    expected_profit=0.0,
+                    result=None,
+                    trade_pnl=0.0,
+                    skip_reason="strategy7_signal_unavailable",
+                )
+            )
+            skipped_round_count += 1
+            state.round_index += 1
+            continue
         price = _select_entry_price(row, side, cfg.entry_timing)
+        if cfg.strategy_id == 7 and price is not None and price > cfg.strategy7_max_entry_price:
+            records.append(
+                _build_record(
+                    cfg=cfg,
+                    state=state,
+                    row=row,
+                    side=side,
+                    price=price,
+                    order_size=0.0,
+                    order_cost=0.0,
+                    expected_profit=0.0,
+                    result=None,
+                    trade_pnl=0.0,
+                    skip_reason="strategy7_price_too_high",
+                )
+            )
+            skipped_round_count += 1
+            state.round_index += 1
+            continue
 
         plan = build_trade_plan(
             state=state,

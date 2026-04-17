@@ -82,6 +82,10 @@ def _select_signal_current_up_price(row: dict[str, str], entry_timing: str) -> f
     return _optional_float(row.get("entry_price_open_up"))
 
 
+def _select_ofi_score(row: dict[str, str]) -> float | None:
+    return _optional_float(row.get("strategy6_ofi_score") or row.get("ofi_score"))
+
+
 def _signal_snapshot_overlap_ratio(rows: list[dict[str, str]], entry_timing: str) -> float:
     comparable = 0
     overlap = 0
@@ -163,18 +167,31 @@ def _simulate_segment(
             recovery_loss = 0.0
             consecutive_losses = 0
 
-        side = get_side_for_round(
-            strategy_id,
-            round_index,
-            signal_open_up_price=_optional_float(row.get("entry_price_open_up")),
-            signal_current_up_price=_select_signal_current_up_price(row, entry_timing),
-            signal_threshold=cfg.signal_momentum_threshold,
-            signal_fallback_strategy_id=cfg.signal_fallback_strategy_id,
-        )
+        try:
+            side = get_side_for_round(
+                strategy_id,
+                round_index,
+                signal_open_up_price=_optional_float(row.get("entry_price_open_up")),
+                signal_current_up_price=_select_signal_current_up_price(row, entry_timing),
+                signal_threshold=cfg.strategy7_momentum_threshold if strategy_id == 7 else cfg.signal_momentum_threshold,
+                signal_fallback_strategy_id=cfg.signal_fallback_strategy_id,
+                ofi_score=_select_ofi_score(row),
+                ofi_threshold=cfg.strategy7_ofi_threshold if strategy_id == 7 else cfg.ofi_threshold,
+                signal_min_gap=cfg.strategy7_min_signal_gap if strategy_id == 7 else 0.0,
+            )
+        except ValueError:
+            if strategy_id != 7:
+                raise
+            skipped += 1
+            round_index += 1
+            continue
         round_index += 1
 
         price = _select_entry_price(row, side, entry_timing)
         if price is None or price <= 0 or price >= 1:
+            skipped += 1
+            continue
+        if strategy_id == 7 and price > cfg.strategy7_max_entry_price:
             skipped += 1
             continue
         if price > cfg.max_price_threshold:
