@@ -49,6 +49,25 @@ def build_candidate_configs(
                         params=params,
                     )
                 )
+        elif strategy_id == 7:
+            for ofi_threshold, momentum_threshold, max_entry_price in product(
+                [0.65, 0.7, 0.75],
+                [0.02, 0.025, 0.03],
+                [0.53, 0.54, 0.55],
+            ):
+                params = {
+                    "TARGET_PROFIT": float(target_profit),
+                    "STRATEGY7_OFI_THRESHOLD": float(ofi_threshold),
+                    "STRATEGY7_MOMENTUM_THRESHOLD": float(momentum_threshold),
+                    "STRATEGY7_MAX_ENTRY_PRICE": float(max_entry_price),
+                }
+                candidates.append(
+                    OptimizerCandidate(
+                        candidate_id=f"s{strategy_id}-tp{target_profit}-ofi{ofi_threshold}-sm{momentum_threshold}-me{max_entry_price}",
+                        base_strategy_id=strategy_id,
+                        params=params,
+                    )
+                )
         else:
             params = {
                 "TARGET_PROFIT": float(target_profit),

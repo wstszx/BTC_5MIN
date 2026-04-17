@@ -678,7 +678,7 @@ def _sync_paper_binance_signal_service(
     strategy_ids: list[int],
     service: BinanceDepth5SignalService | None,
 ) -> BinanceDepth5SignalService | None:
-    needs_service = 6 in strategy_ids
+    needs_service = any(strategy_id in {6, 7} for strategy_id in strategy_ids)
     expected_url = _binance_signal_service_url(cfg)
 
     if not needs_service:
@@ -971,7 +971,7 @@ def _apply_strategy6_signal_to_quote(
     binance_signal_service: BinanceDepth5SignalService | None,
     now: datetime | None = None,
 ) -> None:
-    if cfg.strategy_id != 6 or binance_signal_service is None:
+    if cfg.strategy_id not in {6, 7} or binance_signal_service is None:
         return
     now = now or datetime.now(timezone.utc)
     latest = binance_signal_service.latest()
@@ -986,6 +986,13 @@ def _apply_strategy6_signal_to_quote(
         return
     quote.strategy6_ofi_score = latest.ofi_score
     quote.strategy6_signal_at = latest.signal_at
+
+
+def _strategy7_signal_gap_ok(*, ofi_score: float, momentum_delta: float, cfg: AppConfig) -> bool:
+    return (
+        abs(ofi_score) >= cfg.strategy7_ofi_threshold + cfg.strategy7_min_signal_gap
+        and abs(momentum_delta) >= cfg.strategy7_momentum_threshold + cfg.strategy7_min_signal_gap
+    )
 
 
 def _resolve_side_from_strategy(
@@ -1013,7 +1020,7 @@ def _resolve_side_from_strategy(
             return SideDecision(side='DOWN', signal_threshold=cfg.ofi_threshold, signal_delta=ofi_score)
         return SideDecision(side=None, reason='ofi_too_weak', signal_threshold=cfg.ofi_threshold, signal_delta=ofi_score)
 
-    if cfg.strategy_id != 5:
+    if cfg.strategy_id not in {5, 7}:
         return SideDecision(side=get_side_for_round(cfg.strategy_id, state.round_index))
 
     if state.signal_round_slug != slug:
@@ -1050,6 +1057,100 @@ def _resolve_side_from_strategy(
         window=window,
         now=now,
     )
+
+    if cfg.strategy_id == 7:
+        ofi_score = _resolve_strategy6_ofi_score(quote)
+        state.strategy6_last_ofi_score = ofi_score
+        if ofi_score is None:
+            return SideDecision(
+                side=None,
+                reason='strategy7_ofi_unavailable',
+                signal_open_up_price=signal_open_up_price,
+                signal_current_up_price=signal_current_up_price,
+            )
+        if _is_strategy6_signal_stale(quote=quote, now=now, stale_seconds=cfg.binance_signal_stale_seconds):
+            return SideDecision(
+                side=None,
+                reason='strategy7_ofi_stale',
+                signal_open_up_price=signal_open_up_price,
+                signal_current_up_price=signal_current_up_price,
+                signal_threshold=cfg.strategy7_ofi_threshold,
+                signal_delta=ofi_score,
+            )
+        if abs(ofi_score) < cfg.strategy7_ofi_threshold:
+            return SideDecision(
+                side=None,
+                reason='strategy7_ofi_too_weak',
+                signal_open_up_price=signal_open_up_price,
+                signal_current_up_price=signal_current_up_price,
+                signal_threshold=cfg.strategy7_ofi_threshold,
+                signal_delta=ofi_score,
+            )
+        if not (_is_valid_signal_price(signal_open_up_price) and _is_valid_signal_price(signal_current_up_price)):
+            return SideDecision(
+                side=None,
+                reason='strategy7_momentum_unavailable',
+                signal_open_up_price=signal_open_up_price,
+                signal_current_up_price=signal_current_up_price,
+                signal_threshold=cfg.strategy7_momentum_threshold,
+            )
+
+        momentum_delta = signal_current_up_price - signal_open_up_price
+        if abs(momentum_delta) < cfg.strategy7_momentum_threshold:
+            return SideDecision(
+                side=None,
+                reason='strategy7_momentum_too_weak',
+                signal_open_up_price=signal_open_up_price,
+                signal_current_up_price=signal_current_up_price,
+                signal_threshold=cfg.strategy7_momentum_threshold,
+                signal_delta=momentum_delta,
+            )
+        if ofi_score * momentum_delta <= 0:
+            return SideDecision(
+                side=None,
+                reason='strategy7_signal_conflict',
+                signal_open_up_price=signal_open_up_price,
+                signal_current_up_price=signal_current_up_price,
+                signal_threshold=cfg.strategy7_momentum_threshold,
+                signal_delta=momentum_delta,
+            )
+        if entry_time is not None and (entry_time - now).total_seconds() < cfg.strategy7_confirm_before_entry_seconds:
+            return SideDecision(
+                side=None,
+                reason='strategy7_entry_too_late',
+                signal_open_up_price=signal_open_up_price,
+                signal_current_up_price=signal_current_up_price,
+                signal_threshold=cfg.strategy7_momentum_threshold,
+                signal_delta=momentum_delta,
+            )
+
+        resolved_side = 'UP' if momentum_delta > 0 else 'DOWN'
+        candidate_price = resolve_quote_price(resolved_side, quote)
+        if candidate_price is not None and candidate_price > cfg.strategy7_max_entry_price:
+            return SideDecision(
+                side=None,
+                reason='strategy7_price_too_high',
+                signal_open_up_price=signal_open_up_price,
+                signal_current_up_price=signal_current_up_price,
+                signal_threshold=cfg.strategy7_momentum_threshold,
+                signal_delta=momentum_delta,
+            )
+        if not _strategy7_signal_gap_ok(ofi_score=ofi_score, momentum_delta=momentum_delta, cfg=cfg):
+            return SideDecision(
+                side=None,
+                reason='strategy7_confidence_too_low',
+                signal_open_up_price=signal_open_up_price,
+                signal_current_up_price=signal_current_up_price,
+                signal_threshold=cfg.strategy7_momentum_threshold,
+                signal_delta=momentum_delta,
+            )
+        return SideDecision(
+            side=resolved_side,
+            signal_open_up_price=signal_open_up_price,
+            signal_current_up_price=signal_current_up_price,
+            signal_threshold=cfg.strategy7_momentum_threshold,
+            signal_delta=momentum_delta,
+        )
 
     weak_mode = cfg.signal_weak_signal_mode.upper()
     if weak_mode == 'FALLBACK':
@@ -2343,7 +2444,7 @@ def run_live_trading(
     market_client = market_client or PolymarketClient(cfg)
     binance_signal_service = (
         BinanceDepth5SignalService(ws_url=cfg.binance_ws_url, stream=cfg.binance_depth_stream)
-        if cfg.strategy_id == 6
+        if cfg.strategy_id in {6, 7}
         else None
     )
     if binance_signal_service is not None:

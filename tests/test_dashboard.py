@@ -1216,8 +1216,8 @@ def test_dashboard_config_payload_includes_paper_strategy_ids(tmp_path: Path):
     try:
         payload = state.get_config_payload()
         assert 'PAPER_STRATEGY_IDS' in payload['editable_keys']
-        assert payload['select_options']['STRATEGY_ID'] == ['1', '2', '3', '4', '5', '6']
-        assert payload['select_options']['PAPER_STRATEGY_IDS'] == ['1', '2', '3', '4', '5', '6']
+        assert payload['select_options']['STRATEGY_ID'] == ['1', '2', '3', '4', '5', '6', '7']
+        assert payload['select_options']['PAPER_STRATEGY_IDS'] == ['1', '2', '3', '4', '5', '6', '7']
     finally:
         state.close()
 
@@ -1277,6 +1277,39 @@ def test_dashboard_update_config_accepts_strategy_6_as_primary(tmp_path: Path):
         assert payload['env_values']['PAPER_STRATEGY_IDS'] == '1,6'
         text = env_file.read_text(encoding='utf-8')
         assert 'STRATEGY_ID=6' in text
+    finally:
+        state.close()
+
+
+def test_dashboard_config_payload_includes_strategy7_fields(tmp_path: Path):
+    state = DashboardState(env_file=tmp_path / '.env.dashboard')
+    try:
+        payload = state.get_config_payload()
+        assert payload['select_options']['STRATEGY_ID'] == ['1', '2', '3', '4', '5', '6', '7']
+        assert payload['labels']['STRATEGY7_OFI_THRESHOLD'] == '策略7 OFI阈值'
+        assert payload['labels']['STRATEGY7_MOMENTUM_THRESHOLD'] == '策略7 动量阈值'
+        assert payload['field_scope']['STRATEGY7_OFI_THRESHOLD'] == 'strategy_7_only'
+        assert 'STRATEGY7_MAX_ENTRY_PRICE' in payload['editable_keys']
+    finally:
+        state.close()
+
+
+def test_dashboard_update_config_accepts_strategy7_values(tmp_path: Path):
+    env_file = tmp_path / '.env.dashboard'
+    state = DashboardState(env_file=env_file)
+    try:
+        payload = state.update_config({
+            'STRATEGY_ID': '7',
+            'PAPER_STRATEGY_IDS': '7',
+            'STRATEGY7_OFI_THRESHOLD': '0.7',
+            'STRATEGY7_MOMENTUM_THRESHOLD': '0.025',
+            'STRATEGY7_MAX_ENTRY_PRICE': '0.54',
+            'STRATEGY7_MIN_SIGNAL_GAP': '0.03',
+            'STRATEGY7_CONFIRM_BEFORE_ENTRY_SECONDS': '12',
+        })
+        assert payload['env_values']['STRATEGY_ID'] == '7'
+        assert payload['env_values']['STRATEGY7_OFI_THRESHOLD'] == '0.7'
+        assert payload['env_values']['STRATEGY7_CONFIRM_BEFORE_ENTRY_SECONDS'] == '12'
     finally:
         state.close()
 
@@ -1414,6 +1447,43 @@ def test_dashboard_market_payload_can_switch_strategy_view(tmp_path: Path):
         assert base_payload['strategy6']['enabled'] is False
         assert strategy_six_payload['strategy_view']['selected'] == '6'
         assert strategy_six_payload['strategy6']['enabled'] is True
+    finally:
+        state.close()
+        os.chdir(old_cwd)
+
+
+def test_dashboard_assets_include_strategy7_copy_and_reasons(tmp_path: Path):
+    html = _dashboard_html()
+    js = _dashboard_js()
+    state = DashboardState(env_file=tmp_path / '.env.dashboard')
+    try:
+        payload = state.get_config_payload()
+    finally:
+        state.close()
+
+    assert payload['strategy_catalog']['7']['label'] == 'OFI+动量共识'
+    assert payload['strategy_catalog']['7']['summary'] == '只有 Binance OFI 和 Polymarket 动量同向时才允许交易。'
+    assert 'strategy7_signal_conflict' in js
+    assert 'strategy7_confidence_too_low' in js
+    assert 'OFI+动量需同向确认' in js
+    assert '策略7 OFI阈值' in js
+    assert 'id=strategy7Panel' in html
+    assert 'strategy7Agreement' in html
+    assert 'strategy7QualityGate' in html
+    assert 'strategy7FinalReason' in html
+
+
+def test_dashboard_market_payload_can_show_strategy7_view(tmp_path: Path):
+    env_file = tmp_path / '.env.dashboard'
+    env_file.write_text('STRATEGY_ID=7\nPAPER_STRATEGY_IDS=7\n', encoding='utf-8')
+    old_cwd = Path.cwd()
+    os.chdir(tmp_path)
+    state = DashboardState(env_file=env_file)
+    try:
+        payload = state.get_market_payload(strategy='7')
+
+        assert payload['strategy_view']['selected'] == '7'
+        assert payload['strategy7']['enabled'] is True
     finally:
         state.close()
         os.chdir(old_cwd)

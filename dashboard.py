@@ -65,12 +65,12 @@ def _normalize_strategy_id_list_value(value: str) -> str:
     cfg = build_config_from_env_values({PAPER_STRATEGY_IDS: value})
     raw = [item.strip() for item in str(value).split(',') if item.strip()]
     if raw and len(cfg.paper_strategy_ids) == 1 and cfg.paper_strategy_ids[0] == cfg.strategy_id:
-        has_valid = any(item in {"1", "2", "3", "4", "5", "6"} for item in raw)
+        has_valid = any(item in {"1", "2", "3", "4", "5", "6", "7"} for item in raw)
         if not has_valid:
-            raise ValueError(f"Invalid value for PAPER_STRATEGY_IDS: expected comma-separated strategy ids 1-6, got {value!r}")
+            raise ValueError(f"Invalid value for PAPER_STRATEGY_IDS: expected comma-separated strategy ids 1-7, got {value!r}")
     normalized = [str(item) for item in cfg.paper_strategy_ids]
     if not normalized:
-        raise ValueError(f"Invalid value for PAPER_STRATEGY_IDS: expected comma-separated strategy ids 1-6, got {value!r}")
+        raise ValueError(f"Invalid value for PAPER_STRATEGY_IDS: expected comma-separated strategy ids 1-7, got {value!r}")
     return ",".join(normalized)
 
 def _tail_csv_rows(path: Path, *, limit: int) -> list[dict[str, str]]:
@@ -92,7 +92,7 @@ def _normalize_strategy_filter(strategy: int | str | None) -> str | None:
     raw = str(strategy).strip().lower()
     if raw in {"", "all"}:
         return None
-    if raw in {"1", "2", "3", "4", "5", "6"}:
+    if raw in {"1", "2", "3", "4", "5", "6", "7"}:
         return raw
     raise ValueError(f"Invalid strategy filter: {strategy!r}")
 
@@ -267,6 +267,18 @@ def _strategy_catalog() -> dict[str, dict[str, Any]]:
             "preview": ["MOMENTUM", "THRESHOLD", "FALLBACK"],
             "detail": "弱信号时按 SIGNAL_WEAK_SIGNAL_MODE 决定跳过还是回退到基础策略。",
         },
+        "6": {
+            "label": "Binance OFI 失衡",
+            "summary": "根据 Binance 深度盘口的 OFI 强弱决定方向。",
+            "preview": ["OFI", "THRESHOLD", "SKIP"],
+            "detail": "仅在 OFI 信号足够强且未过期时给出方向，否则按规则跳过。",
+        },
+        "7": {
+            "label": "OFI+动量共识",
+            "summary": "只有 Binance OFI 和 Polymarket 动量同向时才允许交易。",
+            "preview": ["OFI", "MOMENTUM", "THRESHOLD", "SKIP"],
+            "detail": "更偏向少做、做高质量信号。",
+        },
     }
 
 
@@ -309,6 +321,7 @@ def _field_groups() -> list[dict[str, Any]]:
                 "MAX_CONSECUTIVE_LOSSES",
                 "MAX_STAKE",
                 "MAX_PRICE_THRESHOLD",
+                "STRATEGY7_MAX_ENTRY_PRICE",
             ],
         },
         {
@@ -324,6 +337,10 @@ def _field_groups() -> list[dict[str, Any]]:
                 "SIGNAL_DYNAMIC_THRESHOLD_K",
                 "SIGNAL_DYNAMIC_THRESHOLD_MIN_POINTS",
                 "SIGNAL_LOCK_BEFORE_ENTRY_SECONDS",
+                "STRATEGY7_OFI_THRESHOLD",
+                "STRATEGY7_MOMENTUM_THRESHOLD",
+                "STRATEGY7_MIN_SIGNAL_GAP",
+                "STRATEGY7_CONFIRM_BEFORE_ENTRY_SECONDS",
             ],
         },
         {
@@ -379,6 +396,11 @@ class DashboardState:
         "MAX_CONSECUTIVE_LOSSES",
         "MAX_STAKE",
         "MAX_PRICE_THRESHOLD",
+        "STRATEGY7_OFI_THRESHOLD",
+        "STRATEGY7_MOMENTUM_THRESHOLD",
+        "STRATEGY7_MAX_ENTRY_PRICE",
+        "STRATEGY7_MIN_SIGNAL_GAP",
+        "STRATEGY7_CONFIRM_BEFORE_ENTRY_SECONDS",
         "SIGNAL_MOMENTUM_THRESHOLD",
         "SIGNAL_WEAK_SIGNAL_MODE",
         "SIGNAL_FALLBACK_STRATEGY_ID",
@@ -423,6 +445,11 @@ class DashboardState:
         "MAX_CONSECUTIVE_LOSSES": "连亏重置轮数",
         "MAX_STAKE": "单笔最大下注金额",
         "MAX_PRICE_THRESHOLD": "最高买入价格阈值",
+        "STRATEGY7_OFI_THRESHOLD": "策略7 OFI阈值",
+        "STRATEGY7_MOMENTUM_THRESHOLD": "策略7 动量阈值",
+        "STRATEGY7_MAX_ENTRY_PRICE": "策略7 最高入场价",
+        "STRATEGY7_MIN_SIGNAL_GAP": "策略7 最小信号优势",
+        "STRATEGY7_CONFIRM_BEFORE_ENTRY_SECONDS": "策略7 最晚确认秒数",
         "SIGNAL_MOMENTUM_THRESHOLD": "动量阈值",
         "SIGNAL_WEAK_SIGNAL_MODE": "弱信号处理",
         "SIGNAL_FALLBACK_STRATEGY_ID": "弱信号回退基础策略",
@@ -445,8 +472,8 @@ class DashboardState:
         "LIVE_TRADING_ENABLED": ["true", "false"],
         "LIVE_AUTO_REDEEM_ENABLED": ["false", "true"],
         "LIVE_AUTO_REDEEM_DRY_RUN": ["false", "true"],
-        "STRATEGY_ID": ["1", "2", "3", "4", "5", "6"],
-        "PAPER_STRATEGY_IDS": ["1", "2", "3", "4", "5", "6"],
+        "STRATEGY_ID": ["1", "2", "3", "4", "5", "6", "7"],
+        "PAPER_STRATEGY_IDS": ["1", "2", "3", "4", "5", "6", "7"],
         "BET_SIZING_MODE": ["FIXED_BASE_COST", "TARGET_PROFIT"],
         "SIGNAL_WEAK_SIGNAL_MODE": ["SKIP", "FALLBACK"],
         "SIGNAL_FALLBACK_STRATEGY_ID": ["1", "2", "3", "4"],
@@ -481,6 +508,11 @@ class DashboardState:
         "MAX_CONSECUTIVE_LOSSES": "max_consecutive_losses",
         "MAX_STAKE": "max_stake",
         "MAX_PRICE_THRESHOLD": "max_price_threshold",
+        "STRATEGY7_OFI_THRESHOLD": "strategy7_ofi_threshold",
+        "STRATEGY7_MOMENTUM_THRESHOLD": "strategy7_momentum_threshold",
+        "STRATEGY7_MAX_ENTRY_PRICE": "strategy7_max_entry_price",
+        "STRATEGY7_MIN_SIGNAL_GAP": "strategy7_min_signal_gap",
+        "STRATEGY7_CONFIRM_BEFORE_ENTRY_SECONDS": "strategy7_confirm_before_entry_seconds",
         "SIGNAL_MOMENTUM_THRESHOLD": "signal_momentum_threshold",
         "SIGNAL_WEAK_SIGNAL_MODE": "signal_weak_signal_mode",
         "SIGNAL_FALLBACK_STRATEGY_ID": "signal_fallback_strategy_id",
@@ -499,6 +531,7 @@ class DashboardState:
     INT_CONFIG_KEYS: tuple[str, ...] = (
         "STRATEGY_ID",
         "MAX_CONSECUTIVE_LOSSES",
+        "STRATEGY7_CONFIRM_BEFORE_ENTRY_SECONDS",
         "SIGNAL_FALLBACK_STRATEGY_ID",
         "SIGNAL_HISTORY_FIDELITY_SECONDS",
         "SIGNAL_ANCHOR_MAX_OFFSET_SECONDS",
@@ -518,6 +551,10 @@ class DashboardState:
         "BASE_ORDER_COST",
         "MAX_STAKE",
         "MAX_PRICE_THRESHOLD",
+        "STRATEGY7_OFI_THRESHOLD",
+        "STRATEGY7_MOMENTUM_THRESHOLD",
+        "STRATEGY7_MAX_ENTRY_PRICE",
+        "STRATEGY7_MIN_SIGNAL_GAP",
         "SIGNAL_MOMENTUM_THRESHOLD",
         "SIGNAL_DYNAMIC_THRESHOLD_K",
         "WS_TRADE_GUARD_STALE_SECONDS",
@@ -561,6 +598,11 @@ class DashboardState:
         "SIGNAL_DYNAMIC_THRESHOLD_K": "strategy_5_only",
         "SIGNAL_DYNAMIC_THRESHOLD_MIN_POINTS": "strategy_5_only",
         "SIGNAL_LOCK_BEFORE_ENTRY_SECONDS": "strategy_5_only",
+        "STRATEGY7_OFI_THRESHOLD": "strategy_7_only",
+        "STRATEGY7_MOMENTUM_THRESHOLD": "strategy_7_only",
+        "STRATEGY7_MAX_ENTRY_PRICE": "strategy_7_only",
+        "STRATEGY7_MIN_SIGNAL_GAP": "strategy_7_only",
+        "STRATEGY7_CONFIRM_BEFORE_ENTRY_SECONDS": "strategy_7_only",
     }
     FIELD_HELP: dict[str, str] = {
         "STRATEGY_ID": "策略 1-4 是固定节奏策略，策略 5 是动量策略，策略 6 是 Binance OFI 盘口失衡策略。",
@@ -589,6 +631,11 @@ class DashboardState:
         "MAX_CONSECUTIVE_LOSSES": "连续亏损达到这个次数后，策略会执行一次止损重置。",
         "MAX_STAKE": "单笔订单允许投入的最大 USDC；超过后会直接跳过本轮。",
         "MAX_PRICE_THRESHOLD": "目标方向价格高于该阈值时不入场。",
+        "STRATEGY7_OFI_THRESHOLD": "策略 7 对 Binance OFI 的最小强度要求，低于该阈值直接跳过。",
+        "STRATEGY7_MOMENTUM_THRESHOLD": "策略 7 对 Polymarket 轮内动量确认的最小要求。",
+        "STRATEGY7_MAX_ENTRY_PRICE": "策略 7 的更严格入场价格上限，高于该价格不入场。",
+        "STRATEGY7_MIN_SIGNAL_GAP": "策略 7 要求 OFI 和动量超过阈值的最小额外优势，避免擦线交易。",
+        "STRATEGY7_CONFIRM_BEFORE_ENTRY_SECONDS": "策略 7 需要在计划入场前至少提前这么多秒完成双信号确认。",
         "SIGNAL_MOMENTUM_THRESHOLD": "策略 5 的基础动量阈值，比较 abs(current_up - open_up)。",
         "SIGNAL_WEAK_SIGNAL_MODE": "弱动量信号的处理方式：直接跳过，或回退到固定节奏策略。",
         "SIGNAL_FALLBACK_STRATEGY_ID": "仅当策略 5 在弱信号下回退时使用。",
@@ -691,7 +738,7 @@ class DashboardState:
 
     def _build_binance_signal_service(self, cfg: AppConfig) -> BinanceDepth5SignalService | None:
         strategy_ids = list(getattr(cfg, "paper_strategy_ids", []) or [])
-        if cfg.strategy_id != 6 and 6 not in strategy_ids:
+        if cfg.strategy_id not in {6, 7} and not any(strategy_id in {6, 7} for strategy_id in strategy_ids):
             return None
         service = BinanceDepth5SignalService(ws_url=cfg.binance_ws_url, stream=cfg.binance_depth_stream)
         service.start()
@@ -820,17 +867,11 @@ class DashboardState:
             env_values, validation_errors = self._merged_env_values()
             runtime_status = self._build_runtime_status(env_values)
             strategy_catalog = json.loads(json.dumps(self.STRATEGY_CATALOG))
-            strategy_catalog.setdefault("6", {
-                "label": "Binance OFI 失衡",
-                "summary": "根据 Binance 深度盘口的 OFI 强弱决定方向。",
-                "preview": ["OFI", "THRESHOLD", "SKIP"],
-                "detail": "仅在 OFI 信号足够强且未过期时给出方向，否则按规则跳过。",
-            })
             field_groups = json.loads(json.dumps(self.FIELD_GROUPS))
             if field_groups:
                 field_groups[0]["title"] = "运行模式"
             select_options = json.loads(json.dumps(self.SELECT_OPTIONS))
-            select_options["STRATEGY_ID"] = ["1", "2", "3", "4", "5", "6"]
+            select_options["STRATEGY_ID"] = ["1", "2", "3", "4", "5", "6", "7"]
             return {
                 "env_file": str(self.env_file),
                 "env_values": self._masked_env_values(env_values),
@@ -959,6 +1000,14 @@ class DashboardState:
                     "ask_price": None,
                     "ask_qty": None,
                 },
+                "strategy7": {
+                    "enabled": selected_strategy == 7,
+                    "ofi_score": None,
+                    "momentum_delta": None,
+                    "agreement": None,
+                    "quality_gate": None,
+                    "final_reason": None,
+                },
             }
 
         market = client.get_market_by_slug(target_round.slug)
@@ -1046,6 +1095,23 @@ class DashboardState:
                 "stop_loss_triggered": False,
             }
 
+        strategy7_payload = {
+            "enabled": selected_strategy == 7,
+            "ofi_score": quote.strategy6_ofi_score,
+            "momentum_delta": side_decision.signal_delta,
+            "agreement": (
+                "agree"
+                if selected_strategy == 7 and side_decision.side in {"UP", "DOWN"}
+                else ("conflict" if side_decision.reason == "strategy7_signal_conflict" else None)
+            ),
+            "quality_gate": (
+                "passed"
+                if selected_strategy == 7 and side_decision.side in {"UP", "DOWN"}
+                else (side_decision.reason if selected_strategy == 7 else None)
+            ),
+            "final_reason": side_decision.reason,
+        }
+
         return {
             "ok": True,
             "timestamp": _iso(now),
@@ -1084,6 +1150,7 @@ class DashboardState:
             "ws_runtime": ws_runtime,
             "ws_stale_guard_triggered": ws_stale,
             "strategy6": strategy6_payload,
+            "strategy7": strategy7_payload,
             "strategy_view": strategy_view,
         }
     def get_paper_summary_payload(self, *, strategy: int | str | None = None) -> dict[str, Any]:
@@ -1481,6 +1548,30 @@ def _dashboard_html() -> str:
               <div class=kv><div class=k>买一量</div><div id=strategy6BidQty class=v>--</div></div>
               <div class=kv><div class=k>卖一价</div><div id=strategy6AskPrice class=v>--</div></div>
               <div class=kv><div class=k>卖一量</div><div id=strategy6AskQty class=v>--</div></div>
+            </div>
+          </div>
+
+          <div id=strategy7Panel class=box>
+            <div class=box-title>策略 7 共识诊断</div>
+            <div class=row>
+              <span class=label>OFI 分数</span>
+              <span id=strategy7OfiScore class=value>--</span>
+            </div>
+            <div class=row>
+              <span class=label>动量偏移</span>
+              <span id=strategy7MomentumDelta class=value>--</span>
+            </div>
+            <div class=row>
+              <span class=label>是否同向</span>
+              <span id=strategy7Agreement class=value>--</span>
+            </div>
+            <div class=row>
+              <span class=label>质量过滤</span>
+              <span id=strategy7QualityGate class=value>--</span>
+            </div>
+            <div class=row>
+              <span class=label>最终原因</span>
+              <span id=strategy7FinalReason class=value>--</span>
             </div>
           </div>
         </div>
@@ -2885,6 +2976,7 @@ const STRATEGY_LABELS = {
   4: '四轮分组交替',
   5: '动量信号 V2',
   6: 'Binance OFI 失衡',
+  7: 'OFI+动量共识',
 };
 
 const OPTION_LABELS = {
@@ -2936,6 +3028,15 @@ const REASON_LABELS = {
   ofi_unavailable: 'OFI 信号不可用',
   ofi_stale: 'OFI 信号已过期',
   ofi_too_weak: 'OFI 信号过弱',
+  strategy7_ofi_unavailable: '策略7 OFI 信号不可用',
+  strategy7_ofi_stale: '策略7 OFI 信号已过期',
+  strategy7_ofi_too_weak: '策略7 OFI 信号过弱',
+  strategy7_momentum_unavailable: '策略7 动量信号不可用',
+  strategy7_momentum_too_weak: '策略7 动量信号过弱',
+  strategy7_signal_conflict: 'OFI+动量需同向确认',
+  strategy7_entry_too_late: '策略7 确认出现过晚',
+  strategy7_price_too_high: '策略7 入场价格过高',
+  strategy7_confidence_too_low: '策略7 信号优势不足',
   awaiting_fill_confirmation: '等待成交确认',
   market_timeframe: '市场频次切换待生效',
   'INVALID OPERATION': 'WebSocket 订阅请求无效',
@@ -2954,6 +3055,11 @@ const CONFIG_KEY_NAMES = {
   MAX_CONSECUTIVE_LOSSES: '连亏重置轮数',
   MAX_STAKE: '单笔最大下注金额',
   MAX_PRICE_THRESHOLD: '最高买入价格阈值',
+  STRATEGY7_OFI_THRESHOLD: '策略7 OFI阈值',
+  STRATEGY7_MOMENTUM_THRESHOLD: '策略7 动量阈值',
+  STRATEGY7_MAX_ENTRY_PRICE: '策略7 最高入场价',
+  STRATEGY7_MIN_SIGNAL_GAP: '策略7 最小信号优势',
+  STRATEGY7_CONFIRM_BEFORE_ENTRY_SECONDS: '策略7 最晚确认秒数',
   SIGNAL_MOMENTUM_THRESHOLD: '动量阈值',
   SIGNAL_WEAK_SIGNAL_MODE: '弱信号处理',
   SIGNAL_FALLBACK_STRATEGY_ID: '弱信号回退基础策略',
@@ -4330,6 +4436,7 @@ function renderMarket(payload) {
   const quote = payload.quote || {};
   const signal = payload.signal || {};
   const strategy6 = payload.strategy6 || {};
+   const strategy7 = payload.strategy7 || {};
   const plan = payload.plan || {};
   const ss = payload.session_state || {};
 
@@ -4382,6 +4489,21 @@ function renderMarket(payload) {
   el('strategy6BidQty').textContent = strategy6Enabled ? fmtNum(strategy6.bid_qty, 4) : '--';
   el('strategy6AskPrice').textContent = strategy6Enabled ? fmtNum(strategy6.ask_price, 2) : '--';
   el('strategy6AskQty').textContent = strategy6Enabled ? fmtNum(strategy6.ask_qty, 4) : '--';
+
+  const strategy7Enabled = !!strategy7.enabled;
+  const strategy7Panel = el('strategy7Panel');
+  if (strategy7Panel) {
+    strategy7Panel.style.display = strategy7Enabled ? '' : 'none';
+  }
+  el('strategy7OfiScore').textContent = strategy7Enabled ? fmtNum(strategy7.ofi_score, 4) : '--';
+  el('strategy7MomentumDelta').textContent = strategy7Enabled ? fmtPnl(strategy7.momentum_delta, 4) : '--';
+  el('strategy7Agreement').textContent = strategy7Enabled
+    ? (strategy7.agreement === 'agree' ? '一致' : (strategy7.agreement === 'conflict' ? '冲突' : '--'))
+    : '--';
+  el('strategy7QualityGate').textContent = strategy7Enabled
+    ? (strategy7.quality_gate === 'passed' ? '通过' : reasonText(strategy7.quality_gate))
+    : '--';
+  el('strategy7FinalReason').textContent = strategy7Enabled ? reasonText(strategy7.final_reason) : '--';
 
   el('planShouldTrade').textContent = plan.should_trade ? '执行' : '跳过';
   el('planSide').textContent = sideText(plan.side || signalSide);

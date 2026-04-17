@@ -140,7 +140,7 @@ def _parse_strategy_id_list(raw: str | None, *, fallback: int) -> list[int]:
             strategy_id = int(candidate)
         except ValueError:
             continue
-        if strategy_id < 1 or strategy_id > 6 or strategy_id in seen:
+        if strategy_id < 1 or strategy_id > 7 or strategy_id in seen:
             continue
         seen.add(strategy_id)
         strategy_ids.append(strategy_id)
@@ -206,6 +206,11 @@ class AppConfig:
     min_price_threshold: float | None = field(default_factory=lambda: _env_optional_float('MIN_PRICE_THRESHOLD'))
     ofi_threshold: float = field(default_factory=lambda: _env_float('OFI_THRESHOLD', 0.65))
     max_entry_price: float = field(default_factory=lambda: _env_float('MAX_ENTRY_PRICE', 0.56))
+    strategy7_ofi_threshold: float = field(default_factory=lambda: _env_float("STRATEGY7_OFI_THRESHOLD", 0.7))
+    strategy7_momentum_threshold: float = field(default_factory=lambda: _env_float("STRATEGY7_MOMENTUM_THRESHOLD", 0.025))
+    strategy7_max_entry_price: float = field(default_factory=lambda: _env_float("STRATEGY7_MAX_ENTRY_PRICE", 0.54))
+    strategy7_min_signal_gap: float = field(default_factory=lambda: _env_float("STRATEGY7_MIN_SIGNAL_GAP", 0.03))
+    strategy7_confirm_before_entry_seconds: int = field(default_factory=lambda: _env_int("STRATEGY7_CONFIRM_BEFORE_ENTRY_SECONDS", 12))
     binance_ws_url: str = field(default_factory=lambda: os.getenv('BINANCE_WS_URL') or 'wss://stream.binance.com:9443/ws')
     binance_depth_stream: str = field(default_factory=lambda: os.getenv('BINANCE_DEPTH_STREAM') or 'btcusdt@depth5')
     binance_signal_stale_seconds: float = field(default_factory=lambda: _env_float('BINANCE_SIGNAL_STALE_SECONDS', 2.0))

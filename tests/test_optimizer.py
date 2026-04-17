@@ -37,6 +37,24 @@ def test_build_candidate_configs_creates_strategy_specific_parameter_bundles():
     assert {candidate.params["SIGNAL_MOMENTUM_THRESHOLD"] for candidate in candidates} == {0.012, 0.018}
 
 
+def test_build_candidate_configs_creates_strategy7_parameter_bundles():
+    cfg = AppConfig()
+
+    candidates = build_candidate_configs(
+        cfg,
+        strategy_ids=[7],
+        target_profits=[1.0],
+        max_price_thresholds=[0.55],
+        strategy5_thresholds=[0.012],
+    )
+
+    assert len(candidates) > 0
+    assert all(candidate.base_strategy_id == 7 for candidate in candidates)
+    assert all('STRATEGY7_OFI_THRESHOLD' in candidate.params for candidate in candidates)
+    assert all('STRATEGY7_MOMENTUM_THRESHOLD' in candidate.params for candidate in candidates)
+    assert all('STRATEGY7_MAX_ENTRY_PRICE' in candidate.params for candidate in candidates)
+
+
 def test_rank_optimizer_candidates_prefers_higher_validation_score_then_lower_drawdown():
     ranked = rank_optimizer_candidates(
         [

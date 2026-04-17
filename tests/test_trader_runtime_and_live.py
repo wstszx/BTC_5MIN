@@ -1514,6 +1514,95 @@ def test_resolve_side_from_strategy_locks_side_near_entry():
     assert second.signal_locked is True
 
 
+def test_strategy7_returns_up_when_ofi_and_momentum_agree():
+    now = datetime.now(timezone.utc)
+    cfg = AppConfig(
+        strategy_id=7,
+        strategy7_ofi_threshold=0.65,
+        strategy7_momentum_threshold=0.02,
+        strategy7_max_entry_price=0.56,
+        strategy7_min_signal_gap=0.01,
+        strategy7_confirm_before_entry_seconds=12,
+        binance_signal_stale_seconds=2.0,
+    )
+    state = SessionState(round_index=0, signal_round_slug="s1", signal_round_open_up_price=0.50)
+    quote = MarketQuote(
+        slug="s1",
+        up_price=0.54,
+        up_best_ask=0.54,
+        strategy6_ofi_score=0.8,
+        fetched_at=now,
+        strategy6_signal_at=now,
+    )
+
+    decision = _resolve_side_from_strategy(
+        cfg=cfg,
+        state=state,
+        slug="s1",
+        quote=quote,
+        now=now,
+        entry_time=now + timedelta(seconds=20),
+    )
+
+    assert decision.side == "UP"
+    assert decision.reason is None
+    assert decision.signal_delta == pytest.approx(0.04)
+
+
+def test_strategy7_skips_when_signals_conflict():
+    now = datetime.now(timezone.utc)
+    cfg = AppConfig(
+        strategy_id=7,
+        strategy7_ofi_threshold=0.65,
+        strategy7_momentum_threshold=0.02,
+    )
+    state = SessionState(round_index=0, signal_round_slug="s1", signal_round_open_up_price=0.50)
+    quote = MarketQuote(
+        slug="s1",
+        up_price=0.47,
+        up_best_ask=0.47,
+        strategy6_ofi_score=0.8,
+        fetched_at=now,
+        strategy6_signal_at=now,
+    )
+
+    decision = _resolve_side_from_strategy(cfg=cfg, state=state, slug="s1", quote=quote, now=now)
+
+    assert decision.side is None
+    assert decision.reason == "strategy7_signal_conflict"
+
+
+def test_strategy7_skips_when_confirmation_is_too_late():
+    now = datetime.now(timezone.utc)
+    cfg = AppConfig(
+        strategy_id=7,
+        strategy7_ofi_threshold=0.65,
+        strategy7_momentum_threshold=0.02,
+        strategy7_confirm_before_entry_seconds=15,
+    )
+    state = SessionState(round_index=0, signal_round_slug="s1", signal_round_open_up_price=0.50)
+    quote = MarketQuote(
+        slug="s1",
+        up_price=0.54,
+        up_best_ask=0.54,
+        strategy6_ofi_score=0.8,
+        fetched_at=now,
+        strategy6_signal_at=now,
+    )
+
+    decision = _resolve_side_from_strategy(
+        cfg=cfg,
+        state=state,
+        slug="s1",
+        quote=quote,
+        now=now,
+        entry_time=now + timedelta(seconds=10),
+    )
+
+    assert decision.side is None
+    assert decision.reason == "strategy7_entry_too_late"
+
+
 def test_append_trade_log_rotates_legacy_schema_file(tmp_path):
     log_path = tmp_path / "paper_trades.csv"
     log_path.write_text("timestamp,mode\n2026-03-31T00:00:00+00:00,paper\n", encoding="utf-8")
