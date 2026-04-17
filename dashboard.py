@@ -1499,7 +1499,6 @@ def _dashboard_html() -> str:
     </div>
     <div class=\"top-actions\">
       <div id=\"clockLocal\" class=\"clock\">本地时间 --</div>
-      <div id=\"clockUtc\" class=\"clock\">UTC --</div>
       <button id=\"btnHelp\" class=\"btn btn-ghost\" type=\"button\">帮助</button>
       <button id=\"btnRefreshNow\" class=\"btn btn-ghost\" type=\"button\">立即刷新</button>
     </div>
@@ -1521,14 +1520,69 @@ def _dashboard_html() -> str:
         </div>
         <div class=\"meta\">
           <div class=\"meta-item\">
-            <span class=\"meta-label\">配置文件</span>
-            <span id=\"cfgEnvFile\" class=\"meta-value\">--</span>
-          </div>
-          <div class=\"meta-item\">
             <span class=\"meta-label\">最近保存</span>
             <span id=\"cfgSavedAt\" class=\"meta-value\">--</span>
           </div>
+        </div>
 
+        <div id=\"strategyGuideCard\" class=\"strategy-guide-card\"></div>
+
+        <div id="runtimeSummaryBar" class="strategy-guide-card fold-summary">
+          <div class="strategy-guide-head">
+            <div>
+              <div class="strategy-guide-title">系统状态</div>
+              <div id="runtimeSummaryText" class="strategy-guide-subtitle">当前模式 -- / 目标模式 -- / 是否待切换 -- / 实盘就绪 --</div>
+            </div>
+            <button id="runtimeDetailsToggle" class="btn btn-ghost" type="button" aria-expanded="false" aria-controls="runtimeDetailsPanel">展开运行详情</button>
+          </div>
+        </div>
+
+        <div id="runtimeDetailsPanel" hidden>
+          <div id="runtimeModeCard" class="strategy-guide-card">
+            <div class="strategy-guide-head">
+              <div>
+                <div class="strategy-guide-title">运行模式</div>
+                <div class="strategy-guide-subtitle">显示配置目标、当前实际状态、切换进度和实盘条件。</div>
+              </div>
+              <span class="chip warn">热切换受控</span>
+            </div>
+            <div class="rows">
+              <div class="row"><span class="label">目标模式</span><span id="runtimeSavedMode" class="value">--</span></div>
+              <div class="row"><span class="label">当前模式</span><span id="runtimeRunningMode" class="value">--</span></div>
+              <div class="row"><span class="label">是否待切换</span><span id="runtimeRestartRequired" class="value">--</span></div>
+              <div class="row"><span class="label">实盘就绪</span><span id="runtimeLiveReady" class="value">--</span></div>
+              <div class="row"><span class="label">校验结果</span><span id="runtimeLiveError" class="value">--</span></div>
+              <div id="runtimeRedeemRows">
+                <div class="row"><span class="label">自动赎回</span><span id="runtimeRedeemEnabled" class="value">--</span></div>
+                <div class="row"><span class="label">待赎回数量</span><span id="runtimeRedeemPending" class="value">--</span></div>
+                <div class="row"><span class="label">最近结果</span><span id="runtimeRedeemResult" class="value">--</span></div>
+                <div class="row"><span class="label">最近尝试</span><span id="runtimeRedeemAttempt" class="value">--</span></div>
+                <div class="row"><span class="label">最近交易哈希</span><span id="runtimeRedeemTxHash" class="value">--</span></div>
+              </div>
+              <div id="runtimeOptimizerRows">
+                <div class="row"><span class="label">优化器</span><span id="runtimeOptimizerEnabled" class="value">--</span></div>
+                <div class="row"><span class="label">当前冠军</span><span id="runtimeOptimizerChampion" class="value">--</span></div>
+                <div class="row"><span class="label">活动挑战者</span><span id="runtimeOptimizerChallengers" class="value">--</span></div>
+                <div class="row"><span class="label">可晋级数量</span><span id="runtimeOptimizerPromotable" class="value">--</span></div>
+                <div class="row"><span class="label">最近运行</span><span id="runtimeOptimizerLastRun" class="value">--</span></div>
+                <div class="row"><span class="label">挑战者明细</span><span id="runtimeOptimizerChallengerList" class="value">--</span></div>
+                <div class="row"><span class="label">可晋级明细</span><span id="runtimeOptimizerPromotableList" class="value">--</span></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="strategy-guide-card fold-summary">
+          <div class="strategy-guide-head">
+            <div>
+              <div class="strategy-guide-title">诊断区</div>
+              <div class="strategy-guide-subtitle">策略 6/7 解释型信号与其他辅助诊断默认折叠。</div>
+            </div>
+            <button id="diagnosticsToggle" class="btn btn-ghost" type="button" aria-expanded="false" aria-controls="diagnosticsPanel">展开诊断区</button>
+          </div>
+        </div>
+
+        <div id="diagnosticsPanel" hidden>
           <div id=strategy6Panel class=box>
             <div class=box-title>策略 6 OFI</div>
             <div class=row>
@@ -1576,46 +1630,9 @@ def _dashboard_html() -> str:
           </div>
         </div>
 
-        <div id=\"strategyGuideCard\" class=\"strategy-guide-card\"></div>
-
-        <div id="runtimeModeCard" class="strategy-guide-card">
-          <div class="strategy-guide-head">
-            <div>
-              <div class="strategy-guide-title">运行模式</div>
-              <div class="strategy-guide-subtitle">显示配置目标、当前实际状态、切换进度和实盘条件。</div>
-            </div>
-            <span class="chip warn">热切换受控</span>
-          </div>
-          <div class="rows">
-            <div class="row"><span class="label">目标模式</span><span id="runtimeSavedMode" class="value">--</span></div>
-            <div class="row"><span class="label">当前模式</span><span id="runtimeRunningMode" class="value">--</span></div>
-            <div class="row"><span class="label">是否待切换</span><span id="runtimeRestartRequired" class="value">--</span></div>
-            <div class="row"><span class="label">实盘就绪</span><span id="runtimeLiveReady" class="value">--</span></div>
-            <div class="row"><span class="label">校验结果</span><span id="runtimeLiveError" class="value">--</span></div>
-            <div id="runtimeRedeemRows">
-              <div class="row"><span class="label">自动赎回</span><span id="runtimeRedeemEnabled" class="value">--</span></div>
-              <div class="row"><span class="label">待赎回数量</span><span id="runtimeRedeemPending" class="value">--</span></div>
-              <div class="row"><span class="label">最近结果</span><span id="runtimeRedeemResult" class="value">--</span></div>
-              <div class="row"><span class="label">最近尝试</span><span id="runtimeRedeemAttempt" class="value">--</span></div>
-              <div class="row"><span class="label">最近交易哈希</span><span id="runtimeRedeemTxHash" class="value">--</span></div>
-            </div>
-            <div id="runtimeOptimizerRows">
-              <div class="row"><span class="label">优化器</span><span id="runtimeOptimizerEnabled" class="value">--</span></div>
-              <div class="row"><span class="label">当前冠军</span><span id="runtimeOptimizerChampion" class="value">--</span></div>
-              <div class="row"><span class="label">活动挑战者</span><span id="runtimeOptimizerChallengers" class="value">--</span></div>
-              <div class="row"><span class="label">可晋级数量</span><span id="runtimeOptimizerPromotable" class="value">--</span></div>
-              <div class="row"><span class="label">最近运行</span><span id="runtimeOptimizerLastRun" class="value">--</span></div>
-              <div class="row"><span class="label">挑战者明细</span><span id="runtimeOptimizerChallengerList" class="value">--</span></div>
-              <div class="row"><span class="label">可晋级明细</span><span id="runtimeOptimizerPromotableList" class="value">--</span></div>
-            </div>
-          </div>
-        </div>
-
         <form id=\"configForm\" class=\"form-grid\"></form>
 
         <div class=\"actions\">
-          <button id=\"btnToggleKeys\" class=\"btn btn-ghost\" type=\"button\">显示内部键名：关</button>
-          <button id=\"btnReloadConfig\" class=\"btn btn-ghost\" type=\"button\">重新读取参数</button>
           <button id=\"btnSaveConfig\" class=\"btn btn-primary\" type=\"button\">保存参数</button>
         </div>
       </div>
@@ -1666,32 +1683,8 @@ def _dashboard_html() -> str:
             </div>
           </div>
 
-          <div class=\"box\">
-            <div class=\"box-title\">信号判断</div>
-            <div class=\"row\">
-              <span class=\"label\">方向</span>
-              <span id=\"signalSide\" class=\"value\">--</span>
-            </div>
-            <div class=\"row\">
-              <span class=\"label\">原因</span>
-              <span id=\"signalReason\" class=\"value\">--</span>
-            </div>
-            <div class=\"kv-grid\">
-              <div class=\"kv\"><div class=\"k\">开盘看涨价</div><div id=\"signalOpenUp\" class=\"v\">--</div></div>
-              <div class=\"kv\"><div class=\"k\">当前看涨价</div><div id=\"signalCurrentUp\" class=\"v\">--</div></div>
-              <div class=\"kv\"><div class=\"k\">信号阈值</div><div id=\"signalThreshold\" class=\"v\">--</div></div>
-              <div class=\"kv\"><div class=\"k\">信号偏移</div><div id=\"signalDelta\" class=\"v\">--</div></div>
-            </div>
-            <div class=\"row\">
-              <span class=\"label\">已锁边</span>
-              <span id=\"signalLocked\" class=\"value\">--</span>
-            </div>
-          </div>
-        </div>
-
-        <div class=\"split\">
-          <div class=\"box\">
-            <div class=\"box-title\">下注计划与风控</div>
+          <div id=\"decisionCard\" class=\"box\">
+            <div class=\"box-title\">最终决策</div>
             <div class=\"rows\">
               <div class=\"row\"><span class=\"label\">是否下单</span><span id=\"planShouldTrade\" class=\"value\">--</span></div>
               <div class=\"row\"><span class=\"label\">方向</span><span id=\"planSide\" class=\"value\">--</span></div>
@@ -1702,8 +1695,33 @@ def _dashboard_html() -> str:
               <div class=\"row\"><span class=\"label\">跳过原因</span><span id=\"planSkipReason\" class=\"value\">--</span></div>
               <div class=\"row\"><span class=\"label\">触发止损重置</span><span id=\"planStopLoss\" class=\"value\">--</span></div>
             </div>
+            <div class=\"actions\">
+              <button id=\"signalDetailsToggle\" class=\"btn btn-ghost\" type=\"button\" aria-expanded=\"false\" aria-controls=\"signalDetailsPanel\">展开信号详情</button>
+            </div>
+            <div id=\"signalDetailsPanel\" hidden>
+              <div class=\"kv-grid\">
+                <div class=\"kv\"><div class=\"k\">开盘看涨价</div><div id=\"signalOpenUp\" class=\"v\">--</div></div>
+                <div class=\"kv\"><div class=\"k\">当前看涨价</div><div id=\"signalCurrentUp\" class=\"v\">--</div></div>
+                <div class=\"kv\"><div class=\"k\">信号阈值</div><div id=\"signalThreshold\" class=\"v\">--</div></div>
+                <div class=\"kv\"><div class=\"k\">信号偏移</div><div id=\"signalDelta\" class=\"v\">--</div></div>
+              </div>
+              <div class=\"row\">
+                <span class=\"label\">原始方向</span>
+                <span id=\"signalSide\" class=\"value\">--</span>
+              </div>
+              <div class=\"row\">
+                <span class=\"label\">原始原因</span>
+                <span id=\"signalReason\" class=\"value\">--</span>
+              </div>
+              <div class=\"row\">
+                <span class=\"label\">已锁边</span>
+                <span id=\"signalLocked\" class=\"value\">--</span>
+              </div>
+            </div>
           </div>
+        </div>
 
+        <div class=\"split\">
           <div class=\"box\">
             <div class=\"box-title\">会话状态</div>
             <div id=\"paperSerialHint\" class=\"serial-hint\">当前没有待结算轮次</div>
@@ -2820,6 +2838,9 @@ const state = {
   countdownSnapshotAtMs: null,
   countdownBaseSeconds: null,
   showInternalKeys: false,
+  runtimeDetailsOpen: false,
+  diagnosticsOpen: false,
+  signalDetailsOpen: false,
   helpOpen: false,
   helpTab: 'quickstart',
   helpReturnFocusId: 'btnHelp',
@@ -3115,7 +3136,21 @@ function saveUiPrefs() {
 }
 
 function syncToggleButtonText() {
-  el('btnToggleKeys').textContent = '显示内部键名：' + (state.showInternalKeys ? '开' : '关');
+  return;
+}
+
+function toggleFoldSection(sectionId, expanded) {
+  const panel = el(sectionId + 'Panel');
+  const toggle = el(sectionId + 'Toggle');
+  if (!panel || !toggle) {
+    return;
+  }
+  const nextExpanded = typeof expanded === 'boolean' ? expanded : panel.hidden;
+  panel.hidden = !nextExpanded;
+  toggle.setAttribute('aria-expanded', nextExpanded ? 'true' : 'false');
+  toggle.textContent = nextExpanded
+    ? (sectionId === 'runtimeDetails' ? '收起运行详情' : (sectionId === 'diagnostics' ? '收起诊断区' : '收起信号详情'))
+    : (sectionId === 'runtimeDetails' ? '展开运行详情' : (sectionId === 'diagnostics' ? '展开诊断区' : '展开信号详情'));
 }
 
 function openHelpDrawer(tab = 'quickstart') {
@@ -4055,6 +4090,11 @@ function renderRuntimeStatus(payload) {
   el('runtimeRestartRequired').textContent = payload.restart_required ? '需要' : '不需要';
   el('runtimeLiveReady').textContent = payload.live_ready ? '已就绪' : '未就绪';
   el('runtimeLiveError').textContent = payload.live_validation_error || '--';
+  el('runtimeSummaryText').textContent =
+    '当前模式 ' + formatModeLabel(payload.running_mode || 'paper') +
+    ' / 目标模式 ' + formatModeLabel(payload.saved_mode || 'paper') +
+    ' / 是否待切换 ' + (payload.restart_required ? '需要' : '不需要') +
+    ' / 实盘就绪 ' + (payload.live_ready ? '已就绪' : '未就绪');
   const redeemVisible = !!(payload.redeem_visible || payload.redeem_enabled || ((payload.running_mode || payload.active_mode || 'paper') === 'live'));
   el('runtimeRedeemRows').style.display = redeemVisible ? '' : 'none';
   el('runtimeRedeemEnabled').textContent = payload.redeem_enabled ? '已开启' : '未开启';
@@ -4115,7 +4155,6 @@ function shouldConfirmLiveModeSwitch(previousMode, nextMode) {
 function renderConfig(payload) {
   state.config = payload;
   applyTimeframeCopy(payload);
-  el('cfgEnvFile').textContent = payload.env_file || '--';
   el('cfgSavedAt').textContent = payload.saved_at ? fmtIso(payload.saved_at) : '--';
   renderRuntimeStatus(payload.runtime_status || {});
 
@@ -4427,6 +4466,34 @@ function renderWsRuntime(ws, staleGuard) {
   }
 }
 
+function renderDecisionCard(payload) {
+  const signal = payload.signal || {};
+  const plan = payload.plan || {};
+  const signalSide = signal.side || 'SKIP';
+
+  el('planShouldTrade').textContent = plan.should_trade ? '执行' : '跳过';
+  el('planSide').textContent = sideText(plan.side || signalSide);
+  el('planPrice').textContent = fmtNum(plan.price, 4);
+  el('planOrderCost').textContent = fmtNum(plan.order_cost, 4);
+  el('planOrderSize').textContent = fmtNum(plan.order_size, 6);
+  el('planExpectedProfit').textContent = fmtPnl(plan.expected_profit, 4);
+  el('planSkipReason').textContent = reasonText(plan.skip_reason);
+  el('planStopLoss').textContent = plan.stop_loss_triggered ? '是' : '否';
+
+  const signalNode = el('signalSide');
+  signalNode.textContent = sideText(signalSide);
+  signalNode.className = 'value ' + sideClass(signalSide);
+  el('signalReason').textContent = reasonText(signal.reason);
+  el('signalOpenUp').textContent = fmtNum(signal.open_up, 4);
+  el('signalCurrentUp').textContent = fmtNum(signal.current_up, 4);
+  el('signalThreshold').textContent = fmtNum(signal.threshold, 4);
+  const deltaNode = el('signalDelta');
+  deltaNode.textContent = fmtPnl(signal.delta, 4);
+  const dn = toNum(signal.delta);
+  deltaNode.className = 'v ' + (dn > 0 ? 'pos' : (dn < 0 ? 'neg' : ''));
+  el('signalLocked').textContent = signal.locked ? '是' : '否';
+}
+
 function renderMarket(payload) {
   state.market = payload;
   const strategyView = payload.strategy_view || {};
@@ -4434,10 +4501,8 @@ function renderMarket(payload) {
   renderPaperReportStrategySelectors();
   const round = payload.round || null;
   const quote = payload.quote || {};
-  const signal = payload.signal || {};
   const strategy6 = payload.strategy6 || {};
    const strategy7 = payload.strategy7 || {};
-  const plan = payload.plan || {};
   const ss = payload.session_state || {};
 
   if (!round) {
@@ -4461,21 +4526,6 @@ function renderMarket(payload) {
   el('quoteSource').textContent = sourceText(quote.source);
   el('quoteAccepting').textContent = quote.accepting_orders ? '是' : '否';
   el('quoteFetchedAt').textContent = fmtIso(quote.fetched_at);
-
-  const signalSide = signal.side || 'SKIP';
-  const signalNode = el('signalSide');
-  signalNode.textContent = sideText(signalSide);
-  signalNode.className = 'value ' + sideClass(signalSide);
-
-  el('signalReason').textContent = reasonText(signal.reason);
-  el('signalOpenUp').textContent = fmtNum(signal.open_up, 4);
-  el('signalCurrentUp').textContent = fmtNum(signal.current_up, 4);
-  el('signalThreshold').textContent = fmtNum(signal.threshold, 4);
-  const deltaNode = el('signalDelta');
-  deltaNode.textContent = fmtPnl(signal.delta, 4);
-  const dn = toNum(signal.delta);
-  deltaNode.className = 'v ' + (dn > 0 ? 'pos' : (dn < 0 ? 'neg' : ''));
-  el('signalLocked').textContent = signal.locked ? '是' : '否';
 
   const strategy6Enabled = !!strategy6.enabled;
   const strategy6Panel = el('strategy6Panel');
@@ -4504,15 +4554,7 @@ function renderMarket(payload) {
     ? (strategy7.quality_gate === 'passed' ? '通过' : reasonText(strategy7.quality_gate))
     : '--';
   el('strategy7FinalReason').textContent = strategy7Enabled ? reasonText(strategy7.final_reason) : '--';
-
-  el('planShouldTrade').textContent = plan.should_trade ? '执行' : '跳过';
-  el('planSide').textContent = sideText(plan.side || signalSide);
-  el('planPrice').textContent = fmtNum(plan.price, 4);
-  el('planOrderCost').textContent = fmtNum(plan.order_cost, 4);
-  el('planOrderSize').textContent = fmtNum(plan.order_size, 6);
-  el('planExpectedProfit').textContent = fmtPnl(plan.expected_profit, 4);
-  el('planSkipReason').textContent = reasonText(plan.skip_reason);
-  el('planStopLoss').textContent = plan.stop_loss_triggered ? '是' : '否';
+  renderDecisionCard(payload);
 
   el('ssRoundIndex').textContent = String(ss.round_index ?? '--');
 
@@ -4690,31 +4732,34 @@ async function refreshAll() {
 function tickClock() {
   const now = new Date();
   el('clockLocal').textContent = '本地 ' + now.toLocaleString('zh-CN', { hour12: false });
-  el('clockUtc').textContent = 'UTC ' + now.toISOString().replace('T', ' ').slice(0, 19);
   tickEntryCountdown();
 }
 
 function bindActions() {
   syncToggleButtonText();
+  toggleFoldSection('runtimeDetails', state.runtimeDetailsOpen);
+  toggleFoldSection('diagnostics', state.diagnosticsOpen);
+  toggleFoldSection('signalDetails', state.signalDetailsOpen);
   el('btnHelp').addEventListener('click', () => {
     state.helpReturnFocusId = 'btnHelp';
     openHelpDrawer('quickstart');
   });
   el('btnHelpClose').addEventListener('click', closeHelpDrawer);
   el('helpBackdrop').addEventListener('click', closeHelpDrawer);
-  el('btnToggleKeys').addEventListener('click', () => {
-    state.showInternalKeys = !state.showInternalKeys;
-    saveUiPrefs();
-    syncToggleButtonText();
-    if (state.config) {
-      renderConfig(state.config);
-    }
+  el('runtimeDetailsToggle').addEventListener('click', () => {
+    state.runtimeDetailsOpen = !state.runtimeDetailsOpen;
+    toggleFoldSection('runtimeDetails', state.runtimeDetailsOpen);
+  });
+  el('diagnosticsToggle').addEventListener('click', () => {
+    state.diagnosticsOpen = !state.diagnosticsOpen;
+    toggleFoldSection('diagnostics', state.diagnosticsOpen);
+  });
+  el('signalDetailsToggle').addEventListener('click', () => {
+    state.signalDetailsOpen = !state.signalDetailsOpen;
+    toggleFoldSection('signalDetails', state.signalDetailsOpen);
   });
   el('btnRefreshNow').addEventListener('click', () => {
     refreshAll();
-  });
-  el('btnReloadConfig').addEventListener('click', () => {
-    refreshConfig();
   });
   el('btnSaveConfig').addEventListener('click', () => {
     saveConfig();

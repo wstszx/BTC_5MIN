@@ -924,6 +924,48 @@ def test_dashboard_assets_localize_recent_panel_by_running_mode():
 
 
 
+def test_dashboard_assets_remove_low_value_operator_clutter():
+    html = _dashboard_html()
+    js = _dashboard_js()
+
+    assert 'id="clockUtc"' not in html
+    assert 'id="cfgEnvFile"' not in html
+    assert 'id="btnToggleKeys"' not in html
+    assert 'id="btnReloadConfig"' not in html
+    assert "el('clockUtc')" not in js
+    assert "el('cfgEnvFile')" not in js
+    assert "el('btnToggleKeys')" not in js
+    assert "el('btnReloadConfig')" not in js
+
+
+def test_dashboard_assets_fold_runtime_and_strategy_diagnostics():
+    html = _dashboard_html()
+    js = _dashboard_js()
+
+    assert 'id="runtimeSummaryBar"' in html
+    assert 'id="runtimeDetailsToggle"' in html
+    assert 'id="runtimeDetailsPanel"' in html
+    assert 'id="diagnosticsToggle"' in html
+    assert 'id="diagnosticsPanel"' in html
+    assert 'strategy6Panel' in html
+    assert 'strategy7Panel' in html
+    assert 'function toggleFoldSection(' in js
+
+
+def test_dashboard_assets_use_primary_decision_card_with_folded_signal_details():
+    html = _dashboard_html()
+    js = _dashboard_js()
+
+    assert 'id="decisionCard"' in html
+    assert 'id="signalDetailsToggle"' in html
+    assert 'id="signalDetailsPanel"' in html
+    assert '盘口价格' in html
+    assert '最终决策' in html
+    assert '开盘看涨价' in html
+    assert '当前看涨价' in html
+    assert 'function renderDecisionCard(' in js
+
+
 def test_dashboard_assets_use_strategy_panel_for_unified_strategy_selection():
     html = _dashboard_html()
     js = _dashboard_js()
