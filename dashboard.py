@@ -2300,6 +2300,10 @@ body::before {
   min-width: 0;
 }
 
+.field.field-wide {
+  grid-column: 1 / -1;
+}
+
 .field label {
   font-size: 11px;
   color: var(--muted);
@@ -2499,17 +2503,17 @@ body::before {
 
 .strategy-panel {
   display: grid;
-  gap: 8px;
+  gap: 6px;
 }
 
 .strategy-panel-row {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
-  gap: 10px;
-  padding: 10px 12px;
+  gap: 8px;
+  padding: 7px 10px;
   border: 1px solid rgba(35, 64, 97, 0.72);
-  border-radius: 12px;
+  border-radius: 10px;
   background: rgba(8, 15, 27, 0.82);
 }
 
@@ -2518,39 +2522,52 @@ body::before {
   box-shadow: inset 0 0 0 1px rgba(63, 205, 255, 0.08);
 }
 
+.strategy-panel-row-main {
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+
 .strategy-panel-toggle,
 .strategy-panel-primary {
   display: inline-flex;
   align-items: center;
   gap: 6px;
   color: var(--muted);
-  font-size: 12px;
+  font-size: 11px;
   white-space: nowrap;
 }
 
 .strategy-panel-toggle input,
 .strategy-panel-primary input {
   margin: 0;
+  width: 14px;
+  min-width: 14px;
+  height: 14px;
+  min-height: 14px;
+  padding: 0;
 }
 
 .strategy-panel-meta {
   min-width: 0;
-  display: grid;
-  gap: 4px;
+  display: flex;
+  align-items: center;
 }
 
 .strategy-panel-title {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   font-weight: 700;
   color: #eff6ff;
+  font-size: 12px;
 }
 
-.strategy-panel-subtitle {
+.strategy-panel-summary {
   color: var(--muted);
-  font-size: 12px;
+  font-size: 11px;
   line-height: 1.45;
 }
 
@@ -3296,6 +3313,11 @@ function renderStrategyPanel(payload, values) {
 
   panelNode.appendChild(actions);
 
+  const summary = document.createElement('div');
+  summary.className = 'strategy-panel-summary';
+  summary.textContent = '勾选纸面运行策略，并指定一个主策略用于当前页面查看与策略说明。';
+  panelNode.appendChild(summary);
+
   const list = document.createElement('div');
   list.className = 'strategy-panel';
 
@@ -3306,6 +3328,9 @@ function renderStrategyPanel(payload, values) {
 
     const row = document.createElement('div');
     row.className = 'strategy-panel-row' + (isPrimary ? ' strategy-panel-row-primary' : '');
+
+    const rowMain = document.createElement('div');
+    rowMain.className = 'strategy-panel-row-main';
 
     const paperToggle = document.createElement('label');
     paperToggle.className = 'strategy-panel-toggle';
@@ -3318,7 +3343,7 @@ function renderStrategyPanel(payload, values) {
     });
     paperToggle.appendChild(checkbox);
     paperToggle.appendChild(document.createTextNode('运行'));
-    row.appendChild(paperToggle);
+    rowMain.appendChild(paperToggle);
 
     const metaWrap = document.createElement('div');
     metaWrap.className = 'strategy-panel-meta';
@@ -3327,11 +3352,8 @@ function renderStrategyPanel(payload, values) {
     title.innerHTML = '<span>' + esc(String(opt) + ' | ' + (meta.label || strategyShortLabel(payload, opt))) + '</span>' +
       (isPrimary ? '<span class="chip ok">主策略</span>' : '');
     metaWrap.appendChild(title);
-    const subtitle = document.createElement('div');
-    subtitle.className = 'strategy-panel-subtitle';
-    subtitle.textContent = meta.summary || '纸面运行可多选，主策略用于当前页面查看与策略说明。';
-    metaWrap.appendChild(subtitle);
-    row.appendChild(metaWrap);
+    rowMain.appendChild(metaWrap);
+    row.appendChild(rowMain);
 
     const primaryToggle = document.createElement('label');
     primaryToggle.className = 'strategy-panel-primary';
@@ -4049,6 +4071,7 @@ function renderConfig(payload) {
       wrap.appendChild(label);
 
       if (key === 'STRATEGY_ID') {
+        wrap.classList.add('field-wide');
         label.setAttribute('for', 'cfgStrategyPanel');
         label.textContent = '策略面板';
         const unifiedWrap = document.createElement('div');
@@ -4056,7 +4079,7 @@ function renderConfig(payload) {
 
         const focusLabel = document.createElement('div');
         focusLabel.className = 'field-help';
-        focusLabel.textContent = '策略面板：勾选要加入模拟盘的策略，并单独指定一个主策略用于当前页面查看和策略说明。';
+        focusLabel.textContent = '策略面板：勾选模拟盘策略，并单独指定一个当前主策略。';
         unifiedWrap.appendChild(focusLabel);
 
         const panel = document.createElement('div');
@@ -4071,7 +4094,7 @@ function renderConfig(payload) {
 
         const multiLabel = document.createElement('div');
         multiLabel.className = 'field-help';
-        multiLabel.textContent = '主策略可与模拟盘集合不同；保存时会自动确保主策略包含在模拟盘策略里。';
+        multiLabel.textContent = '保存时会自动确保主策略包含在模拟盘策略里。';
         unifiedWrap.appendChild(multiLabel);
 
         const multiSelect = document.createElement('select');

@@ -927,6 +927,7 @@ def test_dashboard_assets_localize_recent_panel_by_running_mode():
 def test_dashboard_assets_use_strategy_panel_for_unified_strategy_selection():
     html = _dashboard_html()
     js = _dashboard_js()
+    css = dashboard._dashboard_css()
 
     assert '策略面板' in js
     assert 'cfgStrategyPanel' in js
@@ -944,6 +945,16 @@ def test_dashboard_assets_use_strategy_panel_for_unified_strategy_selection():
     assert 'function resolveUnifiedStrategySelection(' in js
     assert 'function renderUnifiedStrategyToolbar(' in js
     assert 'function collectUnifiedStrategyValues(' in js
+    assert 'strategy-panel-row-main' in js
+    assert 'strategy-panel-summary' in js
+    assert 'strategy-panel-subtitle' not in js
+    assert 'field-wide' in js
+    assert '.strategy-panel-row-main {' in css
+    assert '.strategy-panel-summary {' in css
+    assert '.field.field-wide {' in css
+    assert '.strategy-panel-primary input {' in css
+    assert 'width: 14px;' in css
+    assert 'min-height: 14px;' in css
     assert 'id="strategyGuideCard"' in html
 
 
