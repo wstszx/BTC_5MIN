@@ -59,3 +59,9 @@ def test_build_config_defaults_invalid_market_timeframe_to_btc_5m():
     assert cfg.market_timeframe == '5m'
     assert cfg.series_id == 10684
     assert cfg.series_slug == 'btc-up-or-down-5m'
+
+
+def test_build_config_supports_open_delay_override():
+    cfg = build_config_from_env_values({'OPEN_DELAY_SECONDS': '15'})
+
+    assert cfg.open_delay_seconds == 15

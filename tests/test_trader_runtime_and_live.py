@@ -1549,6 +1549,59 @@ def test_strategy7_returns_up_when_ofi_and_momentum_agree():
     assert decision.signal_delta == pytest.approx(0.04)
 
 
+def test_strategy7_locks_confirmed_side_for_round():
+    now = datetime.now(timezone.utc)
+    cfg = AppConfig(
+        strategy_id=7,
+        strategy7_ofi_threshold=0.65,
+        strategy7_momentum_threshold=0.02,
+        strategy7_max_entry_price=0.56,
+        strategy7_min_signal_gap=0.01,
+        strategy7_confirm_before_entry_seconds=3,
+        signal_lock_before_entry_seconds=20,
+        binance_signal_stale_seconds=2.0,
+    )
+    state = SessionState(round_index=0, signal_round_slug="s1", signal_round_open_up_price=0.50)
+
+    first = _resolve_side_from_strategy(
+        cfg=cfg,
+        state=state,
+        slug="s1",
+        quote=MarketQuote(
+            slug="s1",
+            up_price=0.54,
+            up_best_ask=0.54,
+            strategy6_ofi_score=0.8,
+            fetched_at=now,
+            strategy6_signal_at=now,
+        ),
+        now=now,
+        entry_time=now + timedelta(seconds=10),
+    )
+
+    assert first.side == "UP"
+    assert state.signal_round_locked_side == "UP"
+
+    second = _resolve_side_from_strategy(
+        cfg=cfg,
+        state=state,
+        slug="s1",
+        quote=MarketQuote(
+            slug="s1",
+            up_price=0.45,
+            up_best_ask=0.45,
+            strategy6_ofi_score=-0.9,
+            fetched_at=now + timedelta(seconds=2),
+            strategy6_signal_at=now + timedelta(seconds=2),
+        ),
+        now=now + timedelta(seconds=2),
+        entry_time=now + timedelta(seconds=10),
+    )
+
+    assert second.side == "UP"
+    assert second.signal_locked is True
+
+
 def test_strategy7_skips_when_signals_conflict():
     now = datetime.now(timezone.utc)
     cfg = AppConfig(

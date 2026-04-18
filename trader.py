@@ -1144,12 +1144,14 @@ def _resolve_side_from_strategy(
                 signal_threshold=cfg.strategy7_momentum_threshold,
                 signal_delta=momentum_delta,
             )
+        state.signal_round_locked_side = resolved_side
         return SideDecision(
             side=resolved_side,
             signal_open_up_price=signal_open_up_price,
             signal_current_up_price=signal_current_up_price,
             signal_threshold=cfg.strategy7_momentum_threshold,
             signal_delta=momentum_delta,
+            signal_locked=state.signal_round_locked_side in {"UP", "DOWN"},
         )
 
     weak_mode = cfg.signal_weak_signal_mode.upper()
