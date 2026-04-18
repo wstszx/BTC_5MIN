@@ -1630,7 +1630,18 @@ def _dashboard_html() -> str:
           </div>
         </div>
 
+        <div class=\"strategy-guide-card fold-summary\">
+          <div class=\"strategy-guide-head\">
+            <div>
+              <div class=\"strategy-guide-title\">高级参数</div>
+              <div class=\"strategy-guide-subtitle\">策略5/7、WS 和实盘相关参数默认折叠。</div>
+            </div>
+            <button id=\"advancedConfigToggle\" class=\"btn btn-ghost\" type=\"button\" aria-expanded=\"false\" aria-controls=\"advancedConfigPanel\">展开高级参数</button>
+          </div>
+        </div>
+
         <form id=\"configForm\" class=\"form-grid\"></form>
+        <div id=\"advancedConfigPanel\" hidden></div>
 
         <div class=\"actions\">
           <button id=\"btnSaveConfig\" class=\"btn btn-primary\" type=\"button\">保存参数</button>
@@ -1764,16 +1775,27 @@ def _dashboard_html() -> str:
       </div>
 
       <div class=\"panel\">
-      <div class=\"panel-head\">
-        <div>
-          <div class=\"head-title\">纸面交易汇总</div>
-          <div class=\"head-desc\">按北京时间聚合的纸面成绩</div>
-        </div>
-        <div class="top-actions">
-          <select id="paperSummaryStrategy" class="btn btn-ghost"></select>
-          <div id=\"paperStatus\" class=\"chip\">待刷新</div>
+        <div class=\"panel-head\">
+          <div>
+            <div class=\"head-title\">报告视图</div>
+            <div class=\"head-desc\">汇总与明细共用一个策略筛选器</div>
+          </div>
+          <div class="top-actions">
+            <select id="paperReportStrategy" class="btn btn-ghost"></select>
+          </div>
         </div>
       </div>
+
+      <div class=\"panel\">
+        <div class=\"panel-head\">
+          <div>
+            <div class=\"head-title\">纸面交易汇总</div>
+            <div class=\"head-desc\">按北京时间聚合的纸面成绩</div>
+          </div>
+          <div class="top-actions">
+            <div id=\"paperStatus\" class=\"chip\">待刷新</div>
+          </div>
+        </div>
         <div class=\"panel-body\">
           <div class=\"kv-grid\" style=\"margin-bottom: 10px;\">
             <div class=\"kv\"><div class=\"k\">日期</div><div id=\"sumDate\" class=\"v\">--</div></div>
@@ -1809,7 +1831,6 @@ def _dashboard_html() -> str:
           <div class="head-desc">按时间倒序显示最近 80 条记录</div>
         </div>
         <div class="top-actions">
-          <select id="recentTradesStrategy" class="btn btn-ghost"></select>
           <div id="recentStatus" class="chip">待刷新</div>
         </div>
       </div>
@@ -2833,6 +2854,7 @@ const state = {
   summary: null,
   recent: null,
   paperStrategyFilter: 'all',
+  paperReportStrategyFilter: 'all',
   paperSummaryStrategyFilter: null,
   paperRecentStrategyFilter: null,
   countdownSnapshotAtMs: null,
@@ -2841,6 +2863,7 @@ const state = {
   runtimeDetailsOpen: false,
   diagnosticsOpen: false,
   signalDetailsOpen: false,
+  advancedConfigOpen: false,
   helpOpen: false,
   helpTab: 'quickstart',
   helpReturnFocusId: 'btnHelp',
@@ -3149,8 +3172,16 @@ function toggleFoldSection(sectionId, expanded) {
   panel.hidden = !nextExpanded;
   toggle.setAttribute('aria-expanded', nextExpanded ? 'true' : 'false');
   toggle.textContent = nextExpanded
-    ? (sectionId === 'runtimeDetails' ? '收起运行详情' : (sectionId === 'diagnostics' ? '收起诊断区' : '收起信号详情'))
-    : (sectionId === 'runtimeDetails' ? '展开运行详情' : (sectionId === 'diagnostics' ? '展开诊断区' : '展开信号详情'));
+    ? (sectionId === 'runtimeDetails'
+        ? '收起运行详情'
+        : (sectionId === 'diagnostics'
+            ? '收起诊断区'
+            : (sectionId === 'advancedConfig' ? '收起高级参数' : '收起信号详情')))
+    : (sectionId === 'runtimeDetails'
+        ? '展开运行详情'
+        : (sectionId === 'diagnostics'
+            ? '展开诊断区'
+            : (sectionId === 'advancedConfig' ? '展开高级参数' : '展开信号详情')));
 }
 
 function openHelpDrawer(tab = 'quickstart') {
@@ -3595,55 +3626,63 @@ function paperReportStrategyOptions() {
   return ['all', ...available.filter((item, index, arr) => item && arr.indexOf(item) === index)];
 }
 
+function effectivePaperReportStrategyFilter() {
+  return String(state.paperReportStrategyFilter || state.paperStrategyFilter || 'all');
+}
+
 function effectivePaperSummaryStrategyFilter() {
   if (state.paperSummaryStrategyFilter !== null && state.paperSummaryStrategyFilter !== undefined && state.paperSummaryStrategyFilter !== '') {
     return String(state.paperSummaryStrategyFilter);
   }
-  return String(state.paperStrategyFilter || 'all');
+  return effectivePaperReportStrategyFilter();
 }
 
 function effectivePaperRecentStrategyFilter() {
   if (state.paperRecentStrategyFilter !== null && state.paperRecentStrategyFilter !== undefined && state.paperRecentStrategyFilter !== '') {
     return String(state.paperRecentStrategyFilter);
   }
-  return String(state.paperStrategyFilter || 'all');
+  return effectivePaperReportStrategyFilter();
 }
 
-function renderPaperReportStrategySelectors() {
+function renderSharedPaperReportStrategySelector() {
   const options = paperReportStrategyOptions();
+  const current = effectivePaperReportStrategyFilter();
   const summaryCurrent = effectivePaperSummaryStrategyFilter();
   const recentCurrent = effectivePaperRecentStrategyFilter();
+  const node = el('paperReportStrategy');
+  if (!node) {
+    return;
+  }
+  node.innerHTML = '';
+  options.forEach((value) => {
+    const option = document.createElement('option');
+    option.value = value;
+    option.textContent = value === 'all' ? '查看全部策略' : ('查看策略 ' + value);
+    option.selected = value === current;
+    node.appendChild(option);
+  });
+  node.onchange = async () => {
+    state.paperReportStrategyFilter = node.value || 'all';
+    state.paperSummaryStrategyFilter = '';
+    state.paperRecentStrategyFilter = '';
+    renderSharedPaperReportStrategySelector();
+    await Promise.allSettled([refreshSummary(), refreshRecent()]);
+  };
 
   const summaryNode = el('paperSummaryStrategy');
   if (summaryNode) {
-    summaryNode.innerHTML = '';
-    options.forEach((value) => {
-      const option = document.createElement('option');
-      option.value = value;
-      option.textContent = value === 'all' ? '查看全部策略' : ('查看策略 ' + value);
-      option.selected = value === summaryCurrent;
-      summaryNode.appendChild(option);
-    });
+    summaryNode.value = summaryCurrent;
     summaryNode.onchange = async () => {
       state.paperSummaryStrategyFilter = summaryNode.value || 'all';
-      renderPaperReportStrategySelectors();
       await refreshSummary();
     };
   }
 
   const recentNode = el('recentTradesStrategy');
   if (recentNode) {
-    recentNode.innerHTML = '';
-    options.forEach((value) => {
-      const option = document.createElement('option');
-      option.value = value;
-      option.textContent = value === 'all' ? '查看全部策略' : ('查看策略 ' + value);
-      option.selected = value === recentCurrent;
-      recentNode.appendChild(option);
-    });
+    recentNode.value = recentCurrent;
     recentNode.onchange = async () => {
       state.paperRecentStrategyFilter = recentNode.value || 'all';
-      renderPaperReportStrategySelectors();
       await refreshRecent();
     };
   }
@@ -3704,6 +3743,40 @@ function applyConfigFieldVisibility(values) {
     const scope = node.getAttribute('data-group-scope') || 'all';
     const shouldMute = scope === 'strategy_5_only' && !isStrategyFive;
     node.classList.toggle('config-group-muted', shouldMute);
+  });
+}
+
+function isAdvancedConfigGroup(group) {
+  const title = String((group || {}).title || '');
+  return title === '运行模式' || title === '动量信号' || title === '实时连接保护';
+}
+
+function isAdvancedConfigKey(key) {
+  const normalized = String(key || '');
+  return normalized.startsWith('STRATEGY7_');
+}
+
+function applyAdvancedConfigVisibility(values) {
+  const panel = el('advancedConfigPanel');
+  if (!panel) {
+    return;
+  }
+  const strategyId = String(resolveUnifiedStrategySelection(state.config || {}, values || {}).focus || '');
+  const isStrategyFive = strategyId === '5';
+  const isStrategySeven = strategyId === '7';
+
+  panel.querySelectorAll('.config-group').forEach((section) => {
+    const advancedGroup = section.dataset.advancedGroup === 'true';
+    section.style.display = advancedGroup && panel.hidden ? 'none' : '';
+  });
+
+  panel.querySelectorAll('.field[data-advanced-field]').forEach((field) => {
+    const scope = field.dataset.fieldScope || 'all';
+    const shouldShow =
+      scope === 'strategy_5_only' ? isStrategyFive
+      : scope === 'strategy_7_only' ? isStrategySeven
+      : true;
+    field.style.display = panel.hidden ? 'none' : (shouldShow ? '' : 'none');
   });
 }
 function sourceText(source) {
@@ -4173,6 +4246,10 @@ function renderConfig(payload) {
     : [{ title: '\u5168\u90e8\u53c2\u6570', description: '', keys }];
   const editableKeySet = new Set(['ENABLE_LIVE_TRADING', ...keys.filter((key) => !isSingleLiveToggleKey(key))]);
   const hiddenKeys = new Set(['PAPER_STRATEGY_IDS']);
+  const advancedPanel = el('advancedConfigPanel');
+  if (advancedPanel) {
+    advancedPanel.innerHTML = '';
+  }
   const displayFieldGroups = fieldGroups.map((group) => {
     return {
       ...group,
@@ -4194,6 +4271,8 @@ function renderConfig(payload) {
     if (group.scope) {
       section.dataset.groupScope = group.scope;
     }
+    const advancedGroup = isAdvancedConfigGroup(group);
+    section.dataset.advancedGroup = advancedGroup ? 'true' : 'false';
 
     const head = document.createElement('div');
     head.className = 'config-group-head';
@@ -4209,6 +4288,9 @@ function renderConfig(payload) {
       const wrap = document.createElement('div');
       wrap.className = 'field';
       wrap.dataset.fieldScope = fieldScope[key] || 'all';
+      if (isAdvancedConfigKey(key)) {
+        wrap.dataset.advancedField = 'true';
+      }
 
       const label = document.createElement('label');
       label.setAttribute('for', 'cfg_' + key);
@@ -4303,7 +4385,11 @@ function renderConfig(payload) {
     }
 
     section.appendChild(grid);
-    form.appendChild(section);
+    if (advancedGroup && advancedPanel) {
+      advancedPanel.appendChild(section);
+    } else {
+      form.appendChild(section);
+    }
   }
 
   renderUnifiedStrategyToolbar(payload, displayValues);
@@ -4312,11 +4398,13 @@ function renderConfig(payload) {
     renderUnifiedStrategyToolbar(state.config, liveValues);
     renderStrategyGuide(state.config, liveValues);
     applyConfigFieldVisibility(liveValues);
+    applyAdvancedConfigVisibility(liveValues);
   };
   form.onchange = form.oninput;
 
   renderStrategyGuide(payload, displayValues);
   applyConfigFieldVisibility(expandLiveToggleValues(displayValues));
+  applyAdvancedConfigVisibility(expandLiveToggleValues(displayValues));
   setConfigError('--');
   setChip('cfgStatus', '\u5df2\u52a0\u8f7d', 'ok');
   setSaveButtonState('idle');
@@ -4498,7 +4586,7 @@ function renderMarket(payload) {
   state.market = payload;
   const strategyView = payload.strategy_view || {};
   state.paperStrategyFilter = String(strategyView.selected || state.paperStrategyFilter || 'all');
-  renderPaperReportStrategySelectors();
+  renderSharedPaperReportStrategySelector();
   const round = payload.round || null;
   const quote = payload.quote || {};
   const strategy6 = payload.strategy6 || {};
@@ -4740,6 +4828,7 @@ function bindActions() {
   toggleFoldSection('runtimeDetails', state.runtimeDetailsOpen);
   toggleFoldSection('diagnostics', state.diagnosticsOpen);
   toggleFoldSection('signalDetails', state.signalDetailsOpen);
+  toggleFoldSection('advancedConfig', state.advancedConfigOpen);
   el('btnHelp').addEventListener('click', () => {
     state.helpReturnFocusId = 'btnHelp';
     openHelpDrawer('quickstart');
@@ -4757,6 +4846,11 @@ function bindActions() {
   el('signalDetailsToggle').addEventListener('click', () => {
     state.signalDetailsOpen = !state.signalDetailsOpen;
     toggleFoldSection('signalDetails', state.signalDetailsOpen);
+  });
+  el('advancedConfigToggle').addEventListener('click', () => {
+    state.advancedConfigOpen = !state.advancedConfigOpen;
+    toggleFoldSection('advancedConfig', state.advancedConfigOpen);
+    applyAdvancedConfigVisibility(expandLiveToggleValues(collectConfigValues()));
   });
   el('btnRefreshNow').addEventListener('click', () => {
     refreshAll();

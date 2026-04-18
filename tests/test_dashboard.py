@@ -966,6 +966,17 @@ def test_dashboard_assets_use_primary_decision_card_with_folded_signal_details()
     assert 'function renderDecisionCard(' in js
 
 
+def test_dashboard_assets_use_shared_paper_report_strategy_filter():
+    html = _dashboard_html()
+    js = _dashboard_js()
+
+    assert 'id="paperReportStrategy"' in html
+    assert 'id="paperSummaryStrategy"' not in html
+    assert 'id="recentTradesStrategy"' not in html
+    assert 'function renderSharedPaperReportStrategySelector(' in js
+    assert 'paperReportStrategyFilter' in js
+
+
 def test_dashboard_assets_use_strategy_panel_for_unified_strategy_selection():
     html = _dashboard_html()
     js = _dashboard_js()
@@ -1000,15 +1011,14 @@ def test_dashboard_assets_use_strategy_panel_for_unified_strategy_selection():
     assert 'id="strategyGuideCard"' in html
 
 
-def test_dashboard_assets_include_independent_paper_report_strategy_switcher():
+def test_dashboard_assets_group_strategy7_ws_and_live_controls_under_advanced_settings():
     html = _dashboard_html()
     js = _dashboard_js()
 
-    assert 'id="paperSummaryStrategy"' in html
-    assert 'id="recentTradesStrategy"' in html
-    assert 'function renderPaperReportStrategySelectors(' in js
-    assert 'paperSummaryStrategyFilter' in js
-    assert 'paperRecentStrategyFilter' in js
+    assert 'id="advancedConfigToggle"' in html
+    assert 'id="advancedConfigPanel"' in html
+    assert '高级参数' in html
+    assert 'function applyAdvancedConfigVisibility(' in js
 
 
 def test_dashboard_assets_keep_summary_and_recent_filters_independent():
