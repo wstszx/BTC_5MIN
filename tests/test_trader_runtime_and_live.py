@@ -30,6 +30,7 @@ from trader import (
     run_live_trading,
     run_paper_trading,
     _create_live_clob_client,
+    _candidate_cfg_with_params,
     validate_live_runtime_config,
     _paper_experiment_id,
 )
@@ -1241,6 +1242,48 @@ def test_place_live_order_with_injected_client_provides_full_market_order_args(t
     assert len(stub_clob.created_orders) == 1
 
 
+def test_place_live_order_strategy7_sets_market_order_price_cap(tmp_path, monkeypatch):
+    cfg = AppConfig(
+        strategy_id=7,
+        live_trading_enabled=True,
+        strategy7_ofi_threshold=0.65,
+        strategy7_momentum_threshold=0.02,
+        strategy7_max_entry_price=0.55,
+        strategy7_min_signal_gap=0.01,
+        strategy7_confirm_before_entry_seconds=0,
+    )
+    stub_clob = _StrictStubClobClient()
+
+    class _Strategy7LiveClient(_LiveMarketClient):
+        def get_nearest_history_point(self, token_id, *, target_ts, start_ts, end_ts, fidelity, max_offset_seconds):
+            return {"price": 0.50}
+
+        def quote_from_market(self, _market):
+            return MarketQuote(
+                slug="btc-updown-5m-test",
+                up_price=0.54,
+                down_price=0.46,
+                up_best_ask=0.54,
+                strategy6_ofi_score=0.8,
+                strategy6_signal_at=datetime.now(timezone.utc),
+                fetched_at=datetime.now(timezone.utc),
+            )
+
+    monkeypatch.setattr("trader._entry_time_for_round", lambda cfg, window: datetime.now(timezone.utc))
+
+    result = place_live_order(
+        cfg=cfg,
+        market_client=_Strategy7LiveClient(),
+        clob_client=stub_clob,
+        state_path=tmp_path / "state.json",
+        log_path=tmp_path / "live.csv",
+    )
+
+    assert result["status"] == "submitted"
+    assert len(stub_clob.created_orders) == 1
+    assert stub_clob.created_orders[0].price == pytest.approx(0.55)
+
+
 def test_place_live_order_resets_state_after_repeated_max_stake_skips(tmp_path):
     cfg = AppConfig(
         live_trading_enabled=True,
@@ -1600,6 +1643,61 @@ def test_strategy7_locks_confirmed_side_for_round():
 
     assert second.side == "UP"
     assert second.signal_locked is True
+
+
+def test_strategy7_rechecks_max_entry_price_after_lock():
+    now = datetime.now(timezone.utc)
+    cfg = AppConfig(
+        strategy_id=7,
+        strategy7_ofi_threshold=0.65,
+        strategy7_momentum_threshold=0.02,
+        strategy7_max_entry_price=0.55,
+        strategy7_min_signal_gap=0.01,
+        strategy7_confirm_before_entry_seconds=3,
+        signal_lock_before_entry_seconds=20,
+        binance_signal_stale_seconds=2.0,
+    )
+    state = SessionState(round_index=0, signal_round_slug="s1", signal_round_open_up_price=0.50)
+
+    first = _resolve_side_from_strategy(
+        cfg=cfg,
+        state=state,
+        slug="s1",
+        quote=MarketQuote(
+            slug="s1",
+            up_price=0.54,
+            up_best_ask=0.54,
+            strategy6_ofi_score=0.8,
+            fetched_at=now,
+            strategy6_signal_at=now,
+        ),
+        now=now,
+        entry_time=now + timedelta(seconds=10),
+    )
+
+    assert first.side == "UP"
+    assert state.signal_round_locked_side == "UP"
+
+    second = _resolve_side_from_strategy(
+        cfg=cfg,
+        state=state,
+        slug="s1",
+        quote=MarketQuote(
+            slug="s1",
+            up_price=0.58,
+            up_best_ask=0.58,
+            strategy6_ofi_score=0.8,
+            fetched_at=now + timedelta(seconds=1),
+            strategy6_signal_at=now + timedelta(seconds=1),
+        ),
+        now=now + timedelta(seconds=1),
+        entry_time=now + timedelta(seconds=10),
+    )
+
+    assert second.side is None
+    assert second.reason == "strategy7_price_too_high"
+    assert second.signal_locked is True
+    assert state.signal_round_locked_side == "UP"
 
 
 def test_strategy7_skips_when_signals_conflict():
@@ -2635,3 +2733,29 @@ def test_run_paper_trading_persists_active_challenger_pending_state(tmp_path, mo
         assert challenger["paper_state"]["pending_paper_trades"][0]["experiment_id"] == "challenger-s2-a"
     finally:
         os.chdir(old_cwd)
+
+
+def test_candidate_cfg_with_params_applies_strategy7_optimizer_values():
+    base_cfg = AppConfig(
+        strategy_id=7,
+        strategy7_ofi_threshold=0.65,
+        strategy7_momentum_threshold=0.02,
+        strategy7_max_entry_price=0.55,
+    )
+
+    candidate_cfg = _candidate_cfg_with_params(
+        base_cfg,
+        7,
+        {
+            "TARGET_PROFIT": 1.2,
+            "STRATEGY7_OFI_THRESHOLD": 0.75,
+            "STRATEGY7_MOMENTUM_THRESHOLD": 0.03,
+            "STRATEGY7_MAX_ENTRY_PRICE": 0.53,
+        },
+    )
+
+    assert candidate_cfg.strategy_id == 7
+    assert candidate_cfg.target_profit == pytest.approx(1.2)
+    assert candidate_cfg.strategy7_ofi_threshold == pytest.approx(0.75)
+    assert candidate_cfg.strategy7_momentum_threshold == pytest.approx(0.03)
+    assert candidate_cfg.strategy7_max_entry_price == pytest.approx(0.53)

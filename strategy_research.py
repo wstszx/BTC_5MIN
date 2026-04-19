@@ -3,13 +3,14 @@ from __future__ import annotations
 import csv
 import warnings
 from dataclasses import dataclass
+from datetime import timedelta
 from itertools import product
 from pathlib import Path
 from statistics import median
 from typing import Iterable
 
 from config import AppConfig
-from polymarket_api import normalize_outcome_label
+from polymarket_api import normalize_outcome_label, parse_iso_datetime
 from strategy import get_side_for_round
 
 
@@ -84,6 +85,34 @@ def _select_signal_current_up_price(row: dict[str, str], entry_timing: str) -> f
 
 def _select_ofi_score(row: dict[str, str]) -> float | None:
     return _optional_float(row.get("strategy6_ofi_score") or row.get("ofi_score"))
+
+
+def _select_quote_fetched_at(row: dict[str, str]):
+    return (
+        parse_iso_datetime(row.get("quote_fetched_at"))
+        or parse_iso_datetime(row.get("fetched_at"))
+        or parse_iso_datetime(row.get("signal_observed_at"))
+    )
+
+
+def _select_strategy6_signal_at(row: dict[str, str]):
+    return (
+        parse_iso_datetime(row.get("strategy6_signal_at"))
+        or parse_iso_datetime(row.get("signal_at"))
+        or _select_quote_fetched_at(row)
+    )
+
+
+def _historical_entry_time(row: dict[str, str], cfg: AppConfig, entry_timing: str):
+    start_time = parse_iso_datetime(row.get("start_time"))
+    end_time = parse_iso_datetime(row.get("end_time"))
+    if entry_timing.upper() == "PRE_CLOSE":
+        if end_time is None:
+            return None
+        return end_time - timedelta(seconds=cfg.preclose_seconds)
+    if start_time is None:
+        return None
+    return start_time + timedelta(seconds=cfg.open_delay_seconds)
 
 
 def _signal_snapshot_overlap_ratio(rows: list[dict[str, str]], entry_timing: str) -> float:
@@ -185,6 +214,26 @@ def _simulate_segment(
             skipped += 1
             round_index += 1
             continue
+        if strategy_id == 7:
+            quote_fetched_at = _select_quote_fetched_at(row)
+            strategy6_signal_at = _select_strategy6_signal_at(row)
+            if (
+                quote_fetched_at is not None
+                and strategy6_signal_at is not None
+                and (quote_fetched_at - strategy6_signal_at).total_seconds() > max(0.0, cfg.binance_signal_stale_seconds)
+            ):
+                skipped += 1
+                round_index += 1
+                continue
+            entry_time = _historical_entry_time(row, cfg, entry_timing)
+            if (
+                quote_fetched_at is not None
+                and entry_time is not None
+                and (entry_time - quote_fetched_at).total_seconds() < cfg.strategy7_confirm_before_entry_seconds
+            ):
+                skipped += 1
+                round_index += 1
+                continue
         round_index += 1
 
         price = _select_entry_price(row, side, entry_timing)

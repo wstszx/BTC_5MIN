@@ -1033,6 +1033,18 @@ def _resolve_side_from_strategy(
         signal_delta = None
         if _is_valid_signal_price(state.signal_round_open_up_price) and _is_valid_signal_price(signal_current_up_price):
             signal_delta = signal_current_up_price - state.signal_round_open_up_price
+        if cfg.strategy_id == 7:
+            candidate_price = resolve_quote_price(state.signal_round_locked_side, quote)
+            if candidate_price is not None and candidate_price > cfg.strategy7_max_entry_price:
+                return SideDecision(
+                    side=None,
+                    reason='strategy7_price_too_high',
+                    signal_open_up_price=state.signal_round_open_up_price,
+                    signal_current_up_price=signal_current_up_price,
+                    signal_threshold=cfg.strategy7_momentum_threshold,
+                    signal_delta=signal_delta,
+                    signal_locked=True,
+                )
         return SideDecision(
             side=state.signal_round_locked_side,
             signal_open_up_price=state.signal_round_open_up_price,
@@ -1956,6 +1968,7 @@ def place_live_order(
 
     live_client = live_client or _create_live_clob_client(cfg)
     order_type = (cfg.live_order_type or 'FOK').upper() if clob_client is not None else _resolve_live_order_type(cfg.live_order_type)
+    market_order_price = cfg.strategy7_max_entry_price if cfg.strategy_id == 7 else None
     if clob_client is None:
         from py_clob_client.clob_types import MarketOrderArgs
         from py_clob_client.order_builder.constants import BUY
@@ -1964,6 +1977,7 @@ def place_live_order(
             token_id=token_id,
             amount=plan.order_cost,
             side=BUY,
+            price=market_order_price or 0,
             order_type=order_type,
         )
     else:
@@ -1975,7 +1989,7 @@ def place_live_order(
                 'amount': plan.order_cost,
                 'side': 'BUY',
                 'order_type': order_type,
-                'price': None,
+                'price': market_order_price,
                 'fee_rate_bps': None,
             },
         )()
@@ -2264,6 +2278,12 @@ def _candidate_cfg_with_params(base_cfg: AppConfig, base_strategy_id: int, param
         kwargs["ofi_threshold"] = float(params["OFI_THRESHOLD"])
     if "MAX_ENTRY_PRICE" in params:
         kwargs["max_entry_price"] = float(params["MAX_ENTRY_PRICE"])
+    if "STRATEGY7_OFI_THRESHOLD" in params:
+        kwargs["strategy7_ofi_threshold"] = float(params["STRATEGY7_OFI_THRESHOLD"])
+    if "STRATEGY7_MOMENTUM_THRESHOLD" in params:
+        kwargs["strategy7_momentum_threshold"] = float(params["STRATEGY7_MOMENTUM_THRESHOLD"])
+    if "STRATEGY7_MAX_ENTRY_PRICE" in params:
+        kwargs["strategy7_max_entry_price"] = float(params["STRATEGY7_MAX_ENTRY_PRICE"])
     return replace(base_cfg, **kwargs)
 
 
