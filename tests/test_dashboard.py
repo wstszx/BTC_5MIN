@@ -987,6 +987,16 @@ def test_dashboard_assets_mid_width_layout_keeps_left_and_right_balanced():
     assert 'grid-template-columns: 340px minmax(500px, 1.1fr);' in css
 
 
+def test_dashboard_assets_remove_visible_config_status_block():
+    html = _dashboard_html()
+
+    assert 'class="config-status-inline"' not in html
+    assert '<span class="meta-label">状态</span>' not in html
+    assert '<span class="meta-label">最近保存</span>' not in html
+    assert 'id="cfgError"' not in html
+    assert 'id="cfgSavedAt"' not in html
+
+
 def test_dashboard_assets_move_runtime_monitoring_into_monitor_column():
     html = _dashboard_html()
 

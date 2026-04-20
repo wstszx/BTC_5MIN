@@ -1514,17 +1514,6 @@ def _dashboard_html() -> str:
         <div id=\"cfgStatus\" class=\"chip\">未保存</div>
       </div>
       <div class=\"panel-body\">
-        <div class="config-status-inline">
-          <span class="config-status-item">
-            <span class="meta-label">状态</span>
-            <span id=\"cfgError\" class=\"meta-value\">--</span>
-          </span>
-          <span class="config-status-item">
-            <span class="meta-label">最近保存</span>
-            <span id=\"cfgSavedAt\" class=\"meta-value\">--</span>
-          </span>
-        </div>
-
         <div id=\"strategyGuideCard\" class=\"strategy-guide-card\"></div>
 
         <div class=\"strategy-guide-card fold-summary\">
