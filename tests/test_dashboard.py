@@ -971,7 +971,57 @@ def test_dashboard_assets_rebalance_main_columns_for_config_decision_monitoring(
     assert 'class="panel left-stack config-stack"' in html
     assert 'class="panel center-stack decision-stack"' in html
     assert 'class="stack right-stack monitor-stack"' in html
-    assert 'grid-template-columns: 312px minmax(620px, 1.35fr) 392px;' in css
+    assert 'grid-template-columns: 380px minmax(520px, 1.15fr) 380px;' in css
+
+
+def test_dashboard_assets_use_near_symmetric_left_and_right_columns():
+    css = dashboard._dashboard_css()
+
+    assert 'grid-template-columns: 380px minmax(520px, 1.15fr) 380px;' in css
+
+
+def test_dashboard_assets_mid_width_layout_keeps_left_and_right_balanced():
+    css = dashboard._dashboard_css()
+
+    assert '@media (max-width: 1450px) {' in css
+    assert 'grid-template-columns: 340px minmax(500px, 1.1fr);' in css
+
+
+def test_dashboard_assets_remove_visible_config_status_block():
+    html = _dashboard_html()
+
+    assert 'class="config-status-inline"' not in html
+    assert '<span class="meta-label">状态</span>' not in html
+    assert '<span class="meta-label">最近保存</span>' not in html
+    assert 'id="cfgError"' not in html
+    assert 'id="cfgSavedAt"' not in html
+
+
+def test_dashboard_assets_allow_strategy_panel_rows_to_wrap_without_overflow():
+    css = dashboard._dashboard_css()
+
+    assert '.strategy-panel-row {' in css
+    assert 'grid-template-columns: minmax(0, 1fr) auto;' in css
+    assert '.strategy-panel-row-main {' in css
+    assert 'grid-template-columns: auto minmax(0, 1fr);' in css
+    assert '.strategy-panel-primary {' in css
+    assert 'justify-self: end;' in css
+    assert '@media (max-width: 1024px) {' in css
+    assert '.strategy-panel-row { grid-template-columns: 1fr; }' in css
+    assert '.strategy-panel-primary { justify-self: start; }' in css
+
+
+def test_dashboard_assets_allow_strategy_guide_content_to_wrap_fully():
+    css = dashboard._dashboard_css()
+
+    assert '.strategy-guide-title {' in css
+    assert 'white-space: normal;' in css
+    assert 'overflow-wrap: anywhere;' in css
+    assert '.strategy-guide-subtitle {' in css
+    assert '.strategy-guide-head {' in css
+    assert 'align-items: flex-start;' in css
+    assert '.strategy-guide-head .chip {' in css
+    assert 'max-width: 100%;' in css
 
 
 def test_dashboard_assets_move_runtime_monitoring_into_monitor_column():
@@ -996,14 +1046,12 @@ def test_dashboard_assets_move_diagnostics_entry_into_decision_column():
 
 def test_dashboard_assets_compress_config_status_into_inline_summary():
     html = _dashboard_html()
-    css = dashboard._dashboard_css()
 
-    assert 'class="config-status-inline"' in html
-    assert 'id="cfgError"' in html
-    assert 'id="cfgSavedAt"' in html
+    assert 'class="config-status-inline"' not in html
     assert '<span class="meta-label">读取状态</span>' not in html
-    assert '<div class="meta">' not in html
-    assert '.config-status-inline {' in css
+    assert '<span class="meta-label">最近保存</span>' not in html
+    assert 'id="cfgError"' not in html
+    assert 'id="cfgSavedAt"' not in html
 
 
 def test_dashboard_assets_remove_redundant_market_updated_time_row():
@@ -1027,7 +1075,7 @@ def test_dashboard_assets_responsive_layout_preserves_priority_order():
     css = dashboard._dashboard_css()
 
     assert '@media (max-width: 1450px) {' in css
-    assert 'grid-template-columns: 300px minmax(540px, 1.2fr);' in css
+    assert 'grid-template-columns: 340px minmax(500px, 1.1fr);' in css
     assert '@media (max-width: 1024px) {' in css
     assert '.monitor-stack { grid-column: auto; grid-template-columns: 1fr; }' in css
 

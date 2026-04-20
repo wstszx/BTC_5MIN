@@ -1514,17 +1514,6 @@ def _dashboard_html() -> str:
         <div id=\"cfgStatus\" class=\"chip\">未保存</div>
       </div>
       <div class=\"panel-body\">
-        <div class="config-status-inline">
-          <span class="config-status-item">
-            <span class="meta-label">状态</span>
-            <span id=\"cfgError\" class=\"meta-value\">--</span>
-          </span>
-          <span class="config-status-item">
-            <span class="meta-label">最近保存</span>
-            <span id=\"cfgSavedAt\" class=\"meta-value\">--</span>
-          </span>
-        </div>
-
         <div id=\"strategyGuideCard\" class=\"strategy-guide-card\"></div>
 
         <div class=\"strategy-guide-card fold-summary\">
@@ -2196,7 +2185,7 @@ body::before {
   padding: 14px;
   display: grid;
   gap: 14px;
-  grid-template-columns: 312px minmax(620px, 1.35fr) 392px;
+  grid-template-columns: 380px minmax(520px, 1.15fr) 380px;
   align-items: start;
 }
 
@@ -2360,18 +2349,27 @@ body::before {
   justify-content: space-between;
   gap: 12px;
   align-items: flex-start;
+  flex-wrap: wrap;
 }
 
 .strategy-guide-title {
   font-size: 14px;
   font-weight: 700;
   color: var(--text);
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 .strategy-guide-subtitle {
   font-size: 12px;
   color: var(--muted);
   line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.strategy-guide-head .chip {
+  white-space: normal;
+  max-width: 100%;
 }
 
 .strategy-guide-note {
@@ -2920,7 +2918,7 @@ tr:hover td { background: rgba(50, 88, 131, 0.1); }
 
 @media (max-width: 1450px) {
   .layout {
-    grid-template-columns: 300px minmax(540px, 1.2fr);
+    grid-template-columns: 340px minmax(500px, 1.1fr);
   }
 
   .report-card-body {
