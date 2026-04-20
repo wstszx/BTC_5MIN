@@ -2770,8 +2770,59 @@ th {
 
 tr:hover td { background: rgba(50, 88, 131, 0.1); }
 
-.trades-panel {
+.unified-report-card {
   grid-column: 1 / -1;
+}
+
+.report-card-head {
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--line);
+  background: rgba(5, 12, 22, 0.72);
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.report-status-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.report-card-body {
+  display: grid;
+  grid-template-columns: minmax(320px, 0.95fr) minmax(0, 1.45fr);
+  gap: 14px;
+  padding: 14px;
+}
+
+.report-section {
+  min-width: 0;
+  display: grid;
+  gap: 10px;
+}
+
+.report-recent-table {
+  max-height: 420px;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: rgba(6, 12, 22, 0.66);
+}
+
+.section-title {
+  font-size: 11px;
+  text-transform: uppercase;
+  color: var(--muted);
+  letter-spacing: 0.08em;
+  font-weight: 700;
+  font-family: var(--mono);
+}
+
+.section-desc {
+  font-size: 11px;
+  color: var(--muted);
 }
 
 .table-wrap {
@@ -2829,6 +2880,10 @@ tr:hover td { background: rgba(50, 88, 131, 0.1); }
     grid-template-columns: 350px minmax(500px, 1fr);
   }
 
+  .report-card-body {
+    grid-template-columns: minmax(280px, 0.95fr) minmax(0, 1.25fr);
+  }
+
   .right-stack {
     grid-column: span 2;
     display: grid;
@@ -2839,6 +2894,7 @@ tr:hover td { background: rgba(50, 88, 131, 0.1); }
 
 @media (max-width: 1024px) {
   .layout { grid-template-columns: 1fr; }
+  .report-card-body { grid-template-columns: 1fr; }
   .right-stack { grid-column: auto; grid-template-columns: 1fr; }
   .split,
   .kv-grid,

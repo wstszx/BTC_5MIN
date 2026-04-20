@@ -1013,6 +1013,26 @@ def test_dashboard_assets_remove_old_report_panel_shells():
     assert '<div class=\\"head-title\\">纸面交易汇总</div>' not in html
 
 
+def test_dashboard_assets_style_unified_report_card_layout():
+    css = dashboard._dashboard_css()
+
+    assert '.unified-report-card {' in css
+    assert '.report-card-body {' in css
+    assert 'grid-template-columns: minmax(320px, 0.95fr) minmax(0, 1.45fr);' in css
+    assert '.report-status-group {' in css
+    assert '.report-section {' in css
+    assert '.report-recent-table {' in css
+
+
+def test_dashboard_assets_stack_unified_report_card_on_narrow_layouts():
+    css = dashboard._dashboard_css()
+
+    assert '@media (max-width: 1450px) {' in css
+    assert '.report-card-body {' in css
+    assert '@media (max-width: 1024px) {' in css
+    assert 'grid-template-columns: 1fr;' in css
+
+
 def test_dashboard_assets_use_strategy_panel_for_unified_strategy_selection():
     html = _dashboard_html()
     js = _dashboard_js()
