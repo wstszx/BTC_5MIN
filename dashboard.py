@@ -4038,7 +4038,11 @@ function buildApiError(data, status) {
 }
 
 function setConfigError(message) {
-  el('cfgError').textContent = message || '--';
+  const node = el('cfgError');
+  if (!node) {
+    return;
+  }
+  node.textContent = message || '--';
 }
 
 let saveButtonResetTimer = null;
@@ -4345,7 +4349,10 @@ function shouldConfirmLiveModeSwitch(previousMode, nextMode) {
 function renderConfig(payload) {
   state.config = payload;
   applyTimeframeCopy(payload);
-  el('cfgSavedAt').textContent = payload.saved_at ? fmtIso(payload.saved_at) : '--';
+  const savedAtNode = el('cfgSavedAt');
+  if (savedAtNode) {
+    savedAtNode.textContent = payload.saved_at ? fmtIso(payload.saved_at) : '--';
+  }
   renderRuntimeStatus(payload.runtime_status || {});
 
   const form = el('configForm');

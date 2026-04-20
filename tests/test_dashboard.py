@@ -1054,6 +1054,17 @@ def test_dashboard_assets_compress_config_status_into_inline_summary():
     assert 'id="cfgSavedAt"' not in html
 
 
+def test_dashboard_assets_guard_removed_config_status_nodes_in_js():
+    js = _dashboard_js()
+
+    assert "const node = el('cfgError');" in js
+    assert "if (!node) {" in js
+    assert "node.textContent = message || '--';" in js
+    assert "const savedAtNode = el('cfgSavedAt');" in js
+    assert "if (savedAtNode) {" in js
+    assert "savedAtNode.textContent = payload.saved_at ? fmtIso(payload.saved_at) : '--';" in js
+
+
 def test_dashboard_assets_remove_redundant_market_updated_time_row():
     html = _dashboard_html()
     js = _dashboard_js()
