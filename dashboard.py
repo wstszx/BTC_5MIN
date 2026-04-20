@@ -2663,7 +2663,7 @@ body::before {
 
 .strategy-panel-row {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   gap: 8px;
   padding: 7px 10px;
@@ -2679,7 +2679,8 @@ body::before {
 
 .strategy-panel-row-main {
   min-width: 0;
-  display: inline-flex;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
   align-items: center;
   gap: 10px;
 }
@@ -2691,7 +2692,7 @@ body::before {
   gap: 6px;
   color: var(--muted);
   font-size: 11px;
-  white-space: nowrap;
+  white-space: normal;
 }
 
 .strategy-panel-toggle input,
@@ -2718,12 +2719,18 @@ body::before {
   font-weight: 700;
   color: #eff6ff;
   font-size: 12px;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .strategy-panel-summary {
   color: var(--muted);
   font-size: 11px;
   line-height: 1.45;
+}
+
+.strategy-panel-primary {
+  justify-self: end;
 }
 
 .strategy-panel-hidden-input {
@@ -2932,6 +2939,8 @@ tr:hover td { background: rgba(50, 88, 131, 0.1); }
   .layout { grid-template-columns: 1fr; }
   .report-card-body { grid-template-columns: 1fr; }
   .monitor-stack { grid-column: auto; grid-template-columns: 1fr; }
+  .strategy-panel-row { grid-template-columns: 1fr; }
+  .strategy-panel-primary { justify-self: start; }
   .split,
   .kv-grid,
   .group-grid { grid-template-columns: 1fr; }

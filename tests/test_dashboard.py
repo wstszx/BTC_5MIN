@@ -1161,6 +1161,20 @@ def test_dashboard_assets_use_strategy_panel_for_unified_strategy_selection():
     assert 'id="strategyGuideCard"' in html
 
 
+def test_dashboard_assets_allow_strategy_panel_rows_to_wrap_without_overflow():
+    css = dashboard._dashboard_css()
+
+    assert '.strategy-panel-row {' in css
+    assert 'grid-template-columns: minmax(0, 1fr) auto;' in css
+    assert '.strategy-panel-row-main {' in css
+    assert 'grid-template-columns: auto minmax(0, 1fr);' in css
+    assert '.strategy-panel-primary {' in css
+    assert 'justify-self: end;' in css
+    assert '@media (max-width: 1024px) {' in css
+    assert '.strategy-panel-row { grid-template-columns: 1fr; }' in css
+    assert '.strategy-panel-primary { justify-self: start; }' in css
+
+
 def test_dashboard_assets_group_strategy7_ws_and_live_controls_under_advanced_settings():
     html = _dashboard_html()
     js = _dashboard_js()
