@@ -1145,7 +1145,7 @@ def test_dashboard_assets_style_unified_report_card_layout():
 
     assert '.unified-report-card {' in css
     assert '.report-card-body {' in css
-    assert 'grid-template-columns: minmax(320px, 0.95fr) minmax(0, 1.45fr);' in css
+    assert 'grid-template-columns: minmax(280px, 0.8fr) minmax(0, 1.6fr);' in css
     assert '.report-status-group {' in css
     assert '.report-section {' in css
     assert '.report-recent-table {' in css
@@ -1156,6 +1156,7 @@ def test_dashboard_assets_stack_unified_report_card_on_narrow_layouts():
 
     assert '@media (max-width: 1450px) {' in css
     assert '.report-card-body {' in css
+    assert 'grid-template-columns: minmax(240px, 0.72fr) minmax(0, 1.48fr);' in css
     assert '@media (max-width: 1024px) {' in css
     assert 'grid-template-columns: 1fr;' in css
 
@@ -1575,8 +1576,12 @@ def test_dashboard_config_payload_includes_strategy7_fields(tmp_path: Path):
         assert payload['select_options']['STRATEGY_ID'] == ['1', '2', '3', '4', '5', '6', '7']
         assert payload['labels']['STRATEGY7_OFI_THRESHOLD'] == '策略7 OFI阈值'
         assert payload['labels']['STRATEGY7_MOMENTUM_THRESHOLD'] == '策略7 动量阈值'
+        assert payload['labels']['STRATEGY7_LATE_CONFIRM_STRONG_SIGNAL_GAP'] == '策略7 强信号额外优势'
+        assert payload['labels']['STRATEGY7_LATE_CONFIRM_RELAX_SECONDS'] == '策略7 强信号放宽秒数'
         assert payload['field_scope']['STRATEGY7_OFI_THRESHOLD'] == 'strategy_7_only'
+        assert payload['field_scope']['STRATEGY7_LATE_CONFIRM_STRONG_SIGNAL_GAP'] == 'strategy_7_only'
         assert 'STRATEGY7_MAX_ENTRY_PRICE' in payload['editable_keys']
+        assert 'STRATEGY7_LATE_CONFIRM_RELAX_SECONDS' in payload['editable_keys']
     finally:
         state.close()
 
@@ -1593,10 +1598,14 @@ def test_dashboard_update_config_accepts_strategy7_values(tmp_path: Path):
             'STRATEGY7_MAX_ENTRY_PRICE': '0.54',
             'STRATEGY7_MIN_SIGNAL_GAP': '0.03',
             'STRATEGY7_CONFIRM_BEFORE_ENTRY_SECONDS': '12',
+            'STRATEGY7_LATE_CONFIRM_STRONG_SIGNAL_GAP': '0.02',
+            'STRATEGY7_LATE_CONFIRM_RELAX_SECONDS': '4',
         })
         assert payload['env_values']['STRATEGY_ID'] == '7'
         assert payload['env_values']['STRATEGY7_OFI_THRESHOLD'] == '0.7'
         assert payload['env_values']['STRATEGY7_CONFIRM_BEFORE_ENTRY_SECONDS'] == '12'
+        assert payload['env_values']['STRATEGY7_LATE_CONFIRM_STRONG_SIGNAL_GAP'] == '0.02'
+        assert payload['env_values']['STRATEGY7_LATE_CONFIRM_RELAX_SECONDS'] == '4.0'
     finally:
         state.close()
 

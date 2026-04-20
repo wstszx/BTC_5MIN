@@ -211,6 +211,12 @@ class AppConfig:
     strategy7_max_entry_price: float = field(default_factory=lambda: _env_float("STRATEGY7_MAX_ENTRY_PRICE", 0.54))
     strategy7_min_signal_gap: float = field(default_factory=lambda: _env_float("STRATEGY7_MIN_SIGNAL_GAP", 0.03))
     strategy7_confirm_before_entry_seconds: int = field(default_factory=lambda: _env_int("STRATEGY7_CONFIRM_BEFORE_ENTRY_SECONDS", 12))
+    strategy7_late_confirm_strong_signal_gap: float = field(
+        default_factory=lambda: _env_float("STRATEGY7_LATE_CONFIRM_STRONG_SIGNAL_GAP", 0.02)
+    )
+    strategy7_late_confirm_relax_seconds: float = field(
+        default_factory=lambda: _env_float("STRATEGY7_LATE_CONFIRM_RELAX_SECONDS", 0.0)
+    )
     binance_ws_url: str = field(default_factory=lambda: os.getenv('BINANCE_WS_URL') or 'wss://stream.binance.com:9443/ws')
     binance_depth_stream: str = field(default_factory=lambda: os.getenv('BINANCE_DEPTH_STREAM') or 'btcusdt@depth5')
     binance_signal_stale_seconds: float = field(default_factory=lambda: _env_float('BINANCE_SIGNAL_STALE_SECONDS', 2.0))

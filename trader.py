@@ -1000,6 +1000,14 @@ def _strategy7_signal_gap_ok(*, ofi_score: float, momentum_delta: float, cfg: Ap
     )
 
 
+def _strategy7_strong_signal_allows_late_confirm(*, ofi_score: float, momentum_delta: float, cfg: AppConfig) -> bool:
+    strong_gap = max(0.0, float(cfg.strategy7_late_confirm_strong_signal_gap))
+    return (
+        abs(ofi_score) >= cfg.strategy7_ofi_threshold + strong_gap
+        and abs(momentum_delta) >= cfg.strategy7_momentum_threshold + strong_gap
+    )
+
+
 def _resolve_side_from_strategy(
     *,
     cfg: AppConfig,
@@ -1136,6 +1144,15 @@ def _resolve_side_from_strategy(
             window=window,
             entry_time=entry_time,
         )
+        if _strategy7_strong_signal_allows_late_confirm(
+            ofi_score=ofi_score,
+            momentum_delta=momentum_delta,
+            cfg=cfg,
+        ):
+            effective_confirm_before_entry_seconds = max(
+                0.0,
+                effective_confirm_before_entry_seconds - max(0.0, float(cfg.strategy7_late_confirm_relax_seconds)),
+            )
         if entry_time is not None and (entry_time - now).total_seconds() < effective_confirm_before_entry_seconds:
             return SideDecision(
                 side=None,

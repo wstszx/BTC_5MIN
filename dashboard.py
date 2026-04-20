@@ -341,6 +341,8 @@ def _field_groups() -> list[dict[str, Any]]:
                 "STRATEGY7_MOMENTUM_THRESHOLD",
                 "STRATEGY7_MIN_SIGNAL_GAP",
                 "STRATEGY7_CONFIRM_BEFORE_ENTRY_SECONDS",
+                "STRATEGY7_LATE_CONFIRM_STRONG_SIGNAL_GAP",
+                "STRATEGY7_LATE_CONFIRM_RELAX_SECONDS",
             ],
         },
         {
@@ -401,6 +403,8 @@ class DashboardState:
         "STRATEGY7_MAX_ENTRY_PRICE",
         "STRATEGY7_MIN_SIGNAL_GAP",
         "STRATEGY7_CONFIRM_BEFORE_ENTRY_SECONDS",
+        "STRATEGY7_LATE_CONFIRM_STRONG_SIGNAL_GAP",
+        "STRATEGY7_LATE_CONFIRM_RELAX_SECONDS",
         "SIGNAL_MOMENTUM_THRESHOLD",
         "SIGNAL_WEAK_SIGNAL_MODE",
         "SIGNAL_FALLBACK_STRATEGY_ID",
@@ -450,6 +454,8 @@ class DashboardState:
         "STRATEGY7_MAX_ENTRY_PRICE": "策略7 最高入场价",
         "STRATEGY7_MIN_SIGNAL_GAP": "策略7 最小信号优势",
         "STRATEGY7_CONFIRM_BEFORE_ENTRY_SECONDS": "策略7 最晚确认秒数",
+        "STRATEGY7_LATE_CONFIRM_STRONG_SIGNAL_GAP": "策略7 强信号额外优势",
+        "STRATEGY7_LATE_CONFIRM_RELAX_SECONDS": "策略7 强信号放宽秒数",
         "SIGNAL_MOMENTUM_THRESHOLD": "动量阈值",
         "SIGNAL_WEAK_SIGNAL_MODE": "弱信号处理",
         "SIGNAL_FALLBACK_STRATEGY_ID": "弱信号回退基础策略",
@@ -513,6 +519,8 @@ class DashboardState:
         "STRATEGY7_MAX_ENTRY_PRICE": "strategy7_max_entry_price",
         "STRATEGY7_MIN_SIGNAL_GAP": "strategy7_min_signal_gap",
         "STRATEGY7_CONFIRM_BEFORE_ENTRY_SECONDS": "strategy7_confirm_before_entry_seconds",
+        "STRATEGY7_LATE_CONFIRM_STRONG_SIGNAL_GAP": "strategy7_late_confirm_strong_signal_gap",
+        "STRATEGY7_LATE_CONFIRM_RELAX_SECONDS": "strategy7_late_confirm_relax_seconds",
         "SIGNAL_MOMENTUM_THRESHOLD": "signal_momentum_threshold",
         "SIGNAL_WEAK_SIGNAL_MODE": "signal_weak_signal_mode",
         "SIGNAL_FALLBACK_STRATEGY_ID": "signal_fallback_strategy_id",
@@ -555,6 +563,8 @@ class DashboardState:
         "STRATEGY7_MOMENTUM_THRESHOLD",
         "STRATEGY7_MAX_ENTRY_PRICE",
         "STRATEGY7_MIN_SIGNAL_GAP",
+        "STRATEGY7_LATE_CONFIRM_STRONG_SIGNAL_GAP",
+        "STRATEGY7_LATE_CONFIRM_RELAX_SECONDS",
         "SIGNAL_MOMENTUM_THRESHOLD",
         "SIGNAL_DYNAMIC_THRESHOLD_K",
         "WS_TRADE_GUARD_STALE_SECONDS",
@@ -603,6 +613,8 @@ class DashboardState:
         "STRATEGY7_MAX_ENTRY_PRICE": "strategy_7_only",
         "STRATEGY7_MIN_SIGNAL_GAP": "strategy_7_only",
         "STRATEGY7_CONFIRM_BEFORE_ENTRY_SECONDS": "strategy_7_only",
+        "STRATEGY7_LATE_CONFIRM_STRONG_SIGNAL_GAP": "strategy_7_only",
+        "STRATEGY7_LATE_CONFIRM_RELAX_SECONDS": "strategy_7_only",
     }
     FIELD_HELP: dict[str, str] = {
         "STRATEGY_ID": "策略 1-4 是固定节奏策略，策略 5 是动量策略，策略 6 是 Binance OFI 盘口失衡策略。",
@@ -636,6 +648,8 @@ class DashboardState:
         "STRATEGY7_MAX_ENTRY_PRICE": "策略 7 的更严格入场价格上限，高于该价格不入场。",
         "STRATEGY7_MIN_SIGNAL_GAP": "策略 7 要求 OFI 和动量超过阈值的最小额外优势，避免擦线交易。",
         "STRATEGY7_CONFIRM_BEFORE_ENTRY_SECONDS": "策略 7 需要在计划入场前至少提前这么多秒完成双信号确认。",
+        "STRATEGY7_LATE_CONFIRM_STRONG_SIGNAL_GAP": "策略 7 只有在 OFI 和动量都额外强于阈值时，才允许走晚确认放宽通道。",
+        "STRATEGY7_LATE_CONFIRM_RELAX_SECONDS": "满足强信号条件后，可从策略 7 的最晚确认要求里减去的秒数。",
         "SIGNAL_MOMENTUM_THRESHOLD": "策略 5 的基础动量阈值，比较 abs(current_up - open_up)。",
         "SIGNAL_WEAK_SIGNAL_MODE": "弱动量信号的处理方式：直接跳过，或回退到固定节奏策略。",
         "SIGNAL_FALLBACK_STRATEGY_ID": "仅当策略 5 在弱信号下回退时使用。",
@@ -2833,7 +2847,7 @@ tr:hover td { background: rgba(50, 88, 131, 0.1); }
 
 .report-card-body {
   display: grid;
-  grid-template-columns: minmax(320px, 0.95fr) minmax(0, 1.45fr);
+  grid-template-columns: minmax(280px, 0.8fr) minmax(0, 1.6fr);
   gap: 14px;
   padding: 14px;
 }
@@ -2922,7 +2936,7 @@ tr:hover td { background: rgba(50, 88, 131, 0.1); }
   }
 
   .report-card-body {
-    grid-template-columns: minmax(280px, 0.95fr) minmax(0, 1.25fr);
+    grid-template-columns: minmax(240px, 0.72fr) minmax(0, 1.48fr);
   }
 
   .monitor-stack {
