@@ -989,6 +989,30 @@ def test_dashboard_assets_use_shared_paper_report_strategy_filter():
     assert 'paperReportStrategyFilter' in js
 
 
+def test_dashboard_assets_render_unified_report_card_shell():
+    html = _dashboard_html()
+
+    assert 'class="panel unified-report-card"' in html
+    assert 'class="report-card-head"' in html
+    assert '交易报告' in html
+    assert '策略筛选同时作用于纸面交易汇总与最近交易明细' in html
+    assert 'id="paperReportStrategy"' in html
+    assert 'id="paperStatus"' in html
+    assert 'id="recentStatus"' in html
+    assert 'id="reportSummarySection"' in html
+    assert 'id="reportRecentSection"' in html
+    assert '纸面交易汇总' in html
+    assert '最近交易明细' in html
+
+
+def test_dashboard_assets_remove_old_report_panel_shells():
+    html = _dashboard_html()
+
+    assert '<div class=\\"head-title\\">报告视图</div>' not in html
+    assert '<section class="panel trades-panel">' not in html
+    assert '<div class=\\"head-title\\">纸面交易汇总</div>' not in html
+
+
 def test_dashboard_assets_use_strategy_panel_for_unified_strategy_selection():
     html = _dashboard_html()
     js = _dashboard_js()

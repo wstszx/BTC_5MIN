@@ -1774,29 +1774,25 @@ def _dashboard_html() -> str:
         </div>
       </div>
 
-      <div class=\"panel\">
-        <div class=\"panel-head\">
-          <div>
-            <div class=\"head-title\">报告视图</div>
-            <div class=\"head-desc\">汇总与明细共用一个策略筛选器</div>
-          </div>
-          <div class="top-actions">
-            <select id="paperReportStrategy" class="btn btn-ghost"></select>
+    </section>
+
+    <section class="panel unified-report-card">
+      <div class="report-card-head">
+        <div>
+          <div class="head-title">交易报告</div>
+          <div class="head-desc">策略筛选同时作用于纸面交易汇总与最近交易明细</div>
+        </div>
+        <div class="top-actions report-card-actions">
+          <select id="paperReportStrategy" class="btn btn-ghost"></select>
+          <div class="report-status-group">
+            <div id="paperStatus" class="chip">待刷新</div>
+            <div id="recentStatus" class="chip">待刷新</div>
           </div>
         </div>
       </div>
-
-      <div class=\"panel\">
-        <div class=\"panel-head\">
-          <div>
-            <div class=\"head-title\">纸面交易汇总</div>
-            <div class=\"head-desc\">按北京时间聚合的纸面成绩</div>
-          </div>
-          <div class="top-actions">
-            <div id=\"paperStatus\" class=\"chip\">待刷新</div>
-          </div>
-        </div>
-        <div class=\"panel-body\">
+      <div class="report-card-body">
+        <section id="reportSummarySection" class="report-section">
+          <div class="section-title">纸面交易汇总</div>
           <div class=\"kv-grid\" style=\"margin-bottom: 10px;\">
             <div class=\"kv\"><div class=\"k\">日期</div><div id=\"sumDate\" class=\"v\">--</div></div>
             <div class=\"kv\"><div class=\"k\">交易笔数</div><div id=\"sumTrades\" class=\"v\">--</div></div>
@@ -1820,41 +1816,34 @@ def _dashboard_html() -> str:
               <tbody id=\"daysTbody\"></tbody>
             </table>
           </div>
-        </div>
-      </div>
-    </section>
+        </section>
 
-    <section class="panel trades-panel">
-      <div class="panel-head">
-        <div>
-          <div class="head-title">最近交易明细</div>
-          <div id="recentPanelDesc" class="head-desc">按时间倒序显示最近 80 条记录 · 当前策略：全部</div>
-        </div>
-        <div class="top-actions">
-          <div id="recentStatus" class="chip">待刷新</div>
-        </div>
-      </div>
-      <div class=\"table-wrap\">
-        <table>
-          <thead>
-            <tr>
-              <th>时间</th>
-              <th>轮次</th>
-              <th>方向</th>
-              <th>价格</th>
-              <th>下注金额</th>
-              <th>结果</th>
-              <th>校验</th>
-              <th>开盘价</th>
-              <th>收盘价</th>
-              <th>单笔盈亏</th>
-              <th>累计盈亏</th>
-              <th>跳过原因</th>
-              <th>信号偏移</th>
-            </tr>
-          </thead>
-          <tbody id=\"recentTbody\"></tbody>
-        </table>
+        <section id="reportRecentSection" class="report-section">
+          <div class="section-title">最近交易明细</div>
+          <div id="recentPanelDesc" class="section-desc">按时间倒序显示最近 80 条记录 · 当前策略：全部</div>
+          <div class=\"report-recent-table table-wrap\">
+            <table>
+              <thead>
+                <tr>
+                  <th>时间</th>
+                  <th>轮次</th>
+                  <th>方向</th>
+                  <th>价格</th>
+                  <th>下注金额</th>
+                  <th>结果</th>
+                  <th>校验</th>
+                  <th>开盘价</th>
+                  <th>收盘价</th>
+                  <th>单笔盈亏</th>
+                  <th>累计盈亏</th>
+                  <th>跳过原因</th>
+                  <th>信号偏移</th>
+                </tr>
+              </thead>
+              <tbody id=\"recentTbody\"></tbody>
+            </table>
+          </div>
+        </section>
       </div>
     </section>
   </main>
