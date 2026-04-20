@@ -1774,29 +1774,25 @@ def _dashboard_html() -> str:
         </div>
       </div>
 
-      <div class=\"panel\">
-        <div class=\"panel-head\">
-          <div>
-            <div class=\"head-title\">报告视图</div>
-            <div class=\"head-desc\">汇总与明细共用一个策略筛选器</div>
-          </div>
-          <div class="top-actions">
-            <select id="paperReportStrategy" class="btn btn-ghost"></select>
+    </section>
+
+    <section class="panel unified-report-card">
+      <div class="report-card-head">
+        <div>
+          <div class="head-title">交易报告</div>
+          <div class="head-desc">策略筛选同时作用于纸面交易汇总与最近交易明细</div>
+        </div>
+        <div class="top-actions report-card-actions">
+          <select id="paperReportStrategy" class="btn btn-ghost"></select>
+          <div class="report-status-group">
+            <div id="paperStatus" class="chip">待刷新</div>
+            <div id="recentStatus" class="chip">待刷新</div>
           </div>
         </div>
       </div>
-
-      <div class=\"panel\">
-        <div class=\"panel-head\">
-          <div>
-            <div class=\"head-title\">纸面交易汇总</div>
-            <div class=\"head-desc\">按北京时间聚合的纸面成绩</div>
-          </div>
-          <div class="top-actions">
-            <div id=\"paperStatus\" class=\"chip\">待刷新</div>
-          </div>
-        </div>
-        <div class=\"panel-body\">
+      <div class="report-card-body">
+        <section id="reportSummarySection" class="report-section">
+          <div class="section-title">纸面交易汇总</div>
           <div class=\"kv-grid\" style=\"margin-bottom: 10px;\">
             <div class=\"kv\"><div class=\"k\">日期</div><div id=\"sumDate\" class=\"v\">--</div></div>
             <div class=\"kv\"><div class=\"k\">交易笔数</div><div id=\"sumTrades\" class=\"v\">--</div></div>
@@ -1820,41 +1816,34 @@ def _dashboard_html() -> str:
               <tbody id=\"daysTbody\"></tbody>
             </table>
           </div>
-        </div>
-      </div>
-    </section>
+        </section>
 
-    <section class="panel trades-panel">
-      <div class="panel-head">
-        <div>
-          <div class="head-title">最近交易明细</div>
-          <div id="recentPanelDesc" class="head-desc">按时间倒序显示最近 80 条记录 · 当前策略：全部</div>
-        </div>
-        <div class="top-actions">
-          <div id="recentStatus" class="chip">待刷新</div>
-        </div>
-      </div>
-      <div class=\"table-wrap\">
-        <table>
-          <thead>
-            <tr>
-              <th>时间</th>
-              <th>轮次</th>
-              <th>方向</th>
-              <th>价格</th>
-              <th>下注金额</th>
-              <th>结果</th>
-              <th>校验</th>
-              <th>开盘价</th>
-              <th>收盘价</th>
-              <th>单笔盈亏</th>
-              <th>累计盈亏</th>
-              <th>跳过原因</th>
-              <th>信号偏移</th>
-            </tr>
-          </thead>
-          <tbody id=\"recentTbody\"></tbody>
-        </table>
+        <section id="reportRecentSection" class="report-section">
+          <div class="section-title">最近交易明细</div>
+          <div id="recentPanelDesc" class="section-desc">按时间倒序显示最近 80 条记录 · 当前策略：全部</div>
+          <div class=\"report-recent-table table-wrap\">
+            <table>
+              <thead>
+                <tr>
+                  <th>时间</th>
+                  <th>轮次</th>
+                  <th>方向</th>
+                  <th>价格</th>
+                  <th>下注金额</th>
+                  <th>结果</th>
+                  <th>校验</th>
+                  <th>开盘价</th>
+                  <th>收盘价</th>
+                  <th>单笔盈亏</th>
+                  <th>累计盈亏</th>
+                  <th>跳过原因</th>
+                  <th>信号偏移</th>
+                </tr>
+              </thead>
+              <tbody id=\"recentTbody\"></tbody>
+            </table>
+          </div>
+        </section>
       </div>
     </section>
   </main>
@@ -2781,8 +2770,59 @@ th {
 
 tr:hover td { background: rgba(50, 88, 131, 0.1); }
 
-.trades-panel {
+.unified-report-card {
   grid-column: 1 / -1;
+}
+
+.report-card-head {
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--line);
+  background: rgba(5, 12, 22, 0.72);
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.report-status-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.report-card-body {
+  display: grid;
+  grid-template-columns: minmax(320px, 0.95fr) minmax(0, 1.45fr);
+  gap: 14px;
+  padding: 14px;
+}
+
+.report-section {
+  min-width: 0;
+  display: grid;
+  gap: 10px;
+}
+
+.report-recent-table {
+  max-height: 420px;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: rgba(6, 12, 22, 0.66);
+}
+
+.section-title {
+  font-size: 11px;
+  text-transform: uppercase;
+  color: var(--muted);
+  letter-spacing: 0.08em;
+  font-weight: 700;
+  font-family: var(--mono);
+}
+
+.section-desc {
+  font-size: 11px;
+  color: var(--muted);
 }
 
 .table-wrap {
@@ -2840,6 +2880,10 @@ tr:hover td { background: rgba(50, 88, 131, 0.1); }
     grid-template-columns: 350px minmax(500px, 1fr);
   }
 
+  .report-card-body {
+    grid-template-columns: minmax(280px, 0.95fr) minmax(0, 1.25fr);
+  }
+
   .right-stack {
     grid-column: span 2;
     display: grid;
@@ -2850,6 +2894,7 @@ tr:hover td { background: rgba(50, 88, 131, 0.1); }
 
 @media (max-width: 1024px) {
   .layout { grid-template-columns: 1fr; }
+  .report-card-body { grid-template-columns: 1fr; }
   .right-stack { grid-column: auto; grid-template-columns: 1fr; }
   .split,
   .kv-grid,
@@ -3929,6 +3974,10 @@ function setChip(id, text, kind = '') {
   }
 }
 
+function setReportStatus(id, prefix, text, tone) {
+  setChip(id, prefix + ': ' + text, tone);
+}
+
 async function apiGet(path) {
   const resp = await fetch(path, { cache: 'no-store' });
   const data = await resp.json();
@@ -4712,7 +4761,7 @@ function renderSummary(payload) {
     el('sumDrawdown').textContent = '--';
     el('sumStrongRate').textContent = '--';
     el('daysTbody').innerHTML = '<tr><td colspan=\"5\" class=\"empty\">暂无纸面数据</td></tr>';
-    setChip('paperStatus', '暂无数据', 'warn');
+    setReportStatus('paperStatus', '汇总', '暂无数据', 'warn');
     return;
   }
 
@@ -4743,7 +4792,7 @@ function renderSummary(payload) {
   }).join('');
 
   el('daysTbody').innerHTML = rows || '<tr><td colspan=\"5\" class=\"empty\">暂无纸面数据</td></tr>';
-  setChip('paperStatus', '已更新', 'ok');
+  setReportStatus('paperStatus', '汇总', '已更新', 'ok');
 }
 
 function renderRecent(payload) {
@@ -4754,13 +4803,13 @@ function renderRecent(payload) {
   el('recentPanelDesc').textContent = recentStrategyHeaderText();
   if (rows.length === 0) {
     tbody.innerHTML = '<tr><td colspan=13 class=empty>' + (runningMode === 'live' ? '最近没有实盘交易记录' : '最近没有纸面交易记录') + '</td></tr>';
-    setChip('recentStatus', '0 行', 'warn');
+    setReportStatus('recentStatus', '明细', '0 行', 'warn');
     return;
   }
 
   if (rows.length === 0) {
     tbody.innerHTML = '<tr><td colspan="13" class="empty">最近没有纸面交易记录</td></tr>';
-    setChip('recentStatus', '0 行', 'warn');
+    setReportStatus('recentStatus', '明细', '0 行', 'warn');
     return;
   }
 
@@ -4799,9 +4848,9 @@ function renderRecent(payload) {
   }).join('');
 
   tbody.innerHTML = html;
-  setChip('recentStatus', pendingCount > 0 ? (rows.length + ' 行 · ' + pendingCount + ' 待结算') : (rows.length + ' 行'), pendingCount > 0 ? 'warn' : 'ok');
+  setReportStatus('recentStatus', '明细', pendingCount > 0 ? (rows.length + ' 行 · ' + pendingCount + ' 待结算') : (rows.length + ' 行'), pendingCount > 0 ? 'warn' : 'ok');
   if (pendingCount === 0) {
-    setChip('recentStatus', rows.length + ' 行' + (runningMode === 'live' ? ' · 实盘' : ''), pendingCount > 0 ? 'warn' : 'ok');
+    setReportStatus('recentStatus', '明细', rows.length + ' 行' + (runningMode === 'live' ? ' · 实盘' : ''), pendingCount > 0 ? 'warn' : 'ok');
   }
 }
 
@@ -4823,7 +4872,7 @@ async function refreshSummary() {
     const data = await apiGet(summaryEndpoint);
     renderSummary(data);
   } catch (err) {
-    setChip('paperStatus', '刷新失败', 'err');
+    setReportStatus('paperStatus', '汇总', '刷新失败', 'err');
     console.error(err);
   }
 }
@@ -4836,7 +4885,7 @@ async function refreshRecent() {
     const data = await apiGet(recentEndpoint);
     renderRecent(data);
   } catch (err) {
-    setChip('recentStatus', '刷新失败', 'err');
+    setReportStatus('recentStatus', '明细', '刷新失败', 'err');
     console.error(err);
   }
 }

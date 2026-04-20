@@ -548,7 +548,7 @@ def test_dashboard_assets_mark_pending_recent_trades_clearly():
     assert "const isPending = row.pending_status === 'pending_settlement';" in js
     assert "const resultText = isPending ? '待结算' : (row.result || '--');" in js
     assert "const rowClass = isPending ? 'recent-pending' : (isMissedEntry ? 'recent-missed-entry' : '');" in js
-    assert "setChip('recentStatus', pendingCount > 0 ? (rows.length + ' 行 · ' + pendingCount + ' 待结算') : (rows.length + ' 行'), pendingCount > 0 ? 'warn' : 'ok');" in js
+    assert "setReportStatus('recentStatus', '明细', pendingCount > 0 ? (rows.length + ' 行 · ' + pendingCount + ' 待结算') : (rows.length + ' 行'), pendingCount > 0 ? 'warn' : 'ok');" in js
 
 def test_dashboard_assets_highlight_recent_missed_entry_rows():
     js = _dashboard_js()
@@ -931,7 +931,7 @@ def test_dashboard_assets_localize_recent_panel_by_running_mode():
 
     assert "const runningMode = String((((state.config || {}).runtime_status || {}).active_mode || (((state.config || {}).runtime_status || {}).running_mode) || 'paper')).toLowerCase();" in js
     assert "tbody.innerHTML = '<tr><td colspan=13 class=empty>' + (runningMode === 'live' ? '最近没有实盘交易记录' : '最近没有纸面交易记录') + '</td></tr>';" in js
-    assert "setChip('recentStatus', rows.length + ' 行' + (runningMode === 'live' ? ' · 实盘' : ''), pendingCount > 0 ? 'warn' : 'ok');" in js
+    assert "setReportStatus('recentStatus', '明细', rows.length + ' 行' + (runningMode === 'live' ? ' · 实盘' : ''), pendingCount > 0 ? 'warn' : 'ok');" in js
 
 
 
@@ -987,6 +987,76 @@ def test_dashboard_assets_use_shared_paper_report_strategy_filter():
     assert 'id="recentTradesStrategy"' not in html
     assert 'function renderSharedPaperReportStrategySelector(' in js
     assert 'paperReportStrategyFilter' in js
+
+
+def test_dashboard_assets_render_unified_report_card_shell():
+    html = _dashboard_html()
+
+    assert 'class="panel unified-report-card"' in html
+    assert 'class="report-card-head"' in html
+    assert '交易报告' in html
+    assert '策略筛选同时作用于纸面交易汇总与最近交易明细' in html
+    assert 'id="paperReportStrategy"' in html
+    assert 'id="paperStatus"' in html
+    assert 'id="recentStatus"' in html
+    assert 'id="reportSummarySection"' in html
+    assert 'id="reportRecentSection"' in html
+    assert '纸面交易汇总' in html
+    assert '最近交易明细' in html
+
+
+def test_dashboard_assets_remove_old_report_panel_shells():
+    html = _dashboard_html()
+
+    assert '<div class=\\"head-title\\">报告视图</div>' not in html
+    assert '<section class="panel trades-panel">' not in html
+    assert '<div class=\\"head-title\\">纸面交易汇总</div>' not in html
+
+
+def test_dashboard_assets_style_unified_report_card_layout():
+    css = dashboard._dashboard_css()
+
+    assert '.unified-report-card {' in css
+    assert '.report-card-body {' in css
+    assert 'grid-template-columns: minmax(320px, 0.95fr) minmax(0, 1.45fr);' in css
+    assert '.report-status-group {' in css
+    assert '.report-section {' in css
+    assert '.report-recent-table {' in css
+
+
+def test_dashboard_assets_stack_unified_report_card_on_narrow_layouts():
+    css = dashboard._dashboard_css()
+
+    assert '@media (max-width: 1450px) {' in css
+    assert '.report-card-body {' in css
+    assert '@media (max-width: 1024px) {' in css
+    assert 'grid-template-columns: 1fr;' in css
+
+
+def test_dashboard_assets_render_unified_report_header_status_and_recent_copy():
+    html = _dashboard_html()
+    js = _dashboard_js()
+
+    assert 'id="paperStatus"' in html
+    assert 'id="recentStatus"' in html
+    assert 'class="report-status-group"' in html
+    assert 'id="recentPanelDesc"' in html
+    assert 'function recentStrategyHeaderText()' in js
+    assert 'function setReportStatus(' in js
+    assert "setReportStatus('paperStatus', '汇总', '已更新', 'ok');" in js
+    assert "setReportStatus('recentStatus', '明细', rows.length + ' 行' + (runningMode === 'live' ? ' · 实盘' : ''), pendingCount > 0 ? 'warn' : 'ok');" in js
+    assert "el('recentPanelDesc').textContent = recentStrategyHeaderText();" in js
+
+
+def test_dashboard_assets_refresh_shared_selector_still_updates_summary_and_recent():
+    js = _dashboard_js()
+
+    assert "state.paperReportStrategyFilter = node.value || 'all';" in js
+    assert "state.paperSummaryStrategyFilter = '';" in js
+    assert "state.paperRecentStrategyFilter = '';" in js
+    assert "await Promise.allSettled([refreshSummary(), refreshRecent()]);" in js
+    assert "const strategy = encodeURIComponent(effectivePaperSummaryStrategyFilter());" in js
+    assert "const strategy = encodeURIComponent(effectivePaperRecentStrategyFilter());" in js
 
 
 def test_dashboard_assets_use_strategy_panel_for_unified_strategy_selection():
