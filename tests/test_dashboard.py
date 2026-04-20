@@ -964,6 +964,74 @@ def test_dashboard_assets_fold_runtime_and_strategy_diagnostics():
     assert 'function toggleFoldSection(' in js
 
 
+def test_dashboard_assets_rebalance_main_columns_for_config_decision_monitoring():
+    html = _dashboard_html()
+    css = dashboard._dashboard_css()
+
+    assert 'class="panel left-stack config-stack"' in html
+    assert 'class="panel center-stack decision-stack"' in html
+    assert 'class="stack right-stack monitor-stack"' in html
+    assert 'grid-template-columns: 312px minmax(620px, 1.35fr) 392px;' in css
+
+
+def test_dashboard_assets_move_runtime_monitoring_into_monitor_column():
+    html = _dashboard_html()
+
+    assert 'id="monitorRuntimePanel"' in html
+    assert '运行与连接监控' in html
+    assert 'id="runtimeSummaryBar"' in html
+    assert 'id="runtimeDetailsToggle"' in html
+    assert 'id="runtimeDetailsPanel"' in html
+    assert 'id="wsRuntimeList"' in html
+
+
+def test_dashboard_assets_move_diagnostics_entry_into_decision_column():
+    html = _dashboard_html()
+
+    assert 'id="decisionDiagnosticsHost"' in html
+    assert 'id="diagnosticsToggle"' in html
+    assert 'id="diagnosticsPanel"' in html
+    assert '诊断区' in html
+
+
+def test_dashboard_assets_compress_config_status_into_inline_summary():
+    html = _dashboard_html()
+    css = dashboard._dashboard_css()
+
+    assert 'class="config-status-inline"' in html
+    assert 'id="cfgError"' in html
+    assert 'id="cfgSavedAt"' in html
+    assert '<span class="meta-label">读取状态</span>' not in html
+    assert '<div class="meta">' not in html
+    assert '.config-status-inline {' in css
+
+
+def test_dashboard_assets_remove_redundant_market_updated_time_row():
+    html = _dashboard_html()
+    js = _dashboard_js()
+
+    assert 'id="marketUpdatedAt"' not in html
+    assert "el('marketUpdatedAt')" not in js
+
+
+def test_dashboard_assets_style_monitor_and_decision_columns_for_rebalanced_roles():
+    css = dashboard._dashboard_css()
+
+    assert '.monitor-stack .panel-body {' in css
+    assert '.decision-stack {' in css
+    assert '.config-stack {' in css
+    assert '.monitor-runtime-grid {' in css
+
+
+def test_dashboard_assets_responsive_layout_preserves_priority_order():
+    css = dashboard._dashboard_css()
+
+    assert '@media (max-width: 1450px) {' in css
+    assert 'grid-template-columns: 300px minmax(540px, 1.2fr);' in css
+    assert '@media (max-width: 1024px) {' in css
+    assert '.monitor-stack { grid-column: auto; grid-template-columns: 1fr; }' in css
+
+
 def test_dashboard_assets_use_primary_decision_card_with_folded_signal_details():
     html = _dashboard_html()
     js = _dashboard_js()
