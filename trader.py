@@ -90,6 +90,7 @@ def load_session_state(path: Path, *, effective_paper_strategy_ids: list[int] | 
                 daily_realized_pnl=state.daily_realized_pnl,
                 current_day=state.current_day,
                 pending_paper_trades=list(state.pending_paper_trades),
+                last_processed_paper_event_slug=state.last_processed_paper_event_slug,
             )
             for strategy_id in selected_strategy_ids
         }
@@ -719,6 +720,7 @@ def _paper_strategy_state_to_session_state(state: PaperStrategyState, base_state
         stop_loss_count=state.stop_loss_count,
         daily_realized_pnl=state.daily_realized_pnl,
         current_day=state.current_day,
+        last_processed_paper_event_slug=state.last_processed_paper_event_slug,
         pending_live_slug=base_state.pending_live_slug,
         pending_live_side=base_state.pending_live_side,
         pending_live_price=base_state.pending_live_price,
@@ -747,6 +749,7 @@ def _session_state_to_paper_strategy_state(state: SessionState) -> PaperStrategy
         daily_realized_pnl=state.daily_realized_pnl,
         current_day=state.current_day,
         pending_paper_trades=list(state.pending_paper_trades),
+        last_processed_paper_event_slug=state.last_processed_paper_event_slug,
         experiment_id=getattr(state, "experiment_id", None),
     )
 
@@ -771,6 +774,7 @@ def _ensure_paper_strategy_state_map(state: SessionState, strategy_ids: list[int
             daily_realized_pnl=state.daily_realized_pnl,
             current_day=state.current_day,
             pending_paper_trades=list(state.pending_paper_trades),
+            last_processed_paper_event_slug=state.last_processed_paper_event_slug,
         )
         for strategy_id in strategy_ids
     }
@@ -794,6 +798,7 @@ def _sync_legacy_paper_state_fields(state: SessionState, strategy_ids: list[int]
     state.stop_loss_count = strategy_state.stop_loss_count
     state.daily_realized_pnl = strategy_state.daily_realized_pnl
     state.current_day = strategy_state.current_day
+    state.last_processed_paper_event_slug = strategy_state.last_processed_paper_event_slug
     state.pending_paper_trades = list(strategy_state.pending_paper_trades)
 
 def _clone_session_state(state: SessionState) -> SessionState:
@@ -2717,6 +2722,10 @@ def run_paper_trading(
                 experiment_id = _paper_experiment_id(strategy_id, strategy_state)
                 if strategy_state.pending_paper_trades:
                     continue
+                if strategy_state.last_processed_paper_event_slug == target_round.slug:
+                    any_processed = True
+                    round_completed = True
+                    continue
                 strategy_cfg = replace(cfg, strategy_id=strategy_id)
                 strategy_session = _paper_strategy_state_to_session_state(strategy_state, state)
                 strategy_quote = replace(quote)
@@ -2797,6 +2806,7 @@ def run_paper_trading(
                             **_signal_record_kwargs(side_decision),
                         ),
                     )
+                    strategy_session.last_processed_paper_event_slug = target_round.slug
                     strategy_session.round_index += 1
                     state.paper_strategies[strategy_id] = _session_state_to_paper_strategy_state(strategy_session)
                     _sync_legacy_paper_state_fields(state, strategy_ids)
@@ -2852,6 +2862,7 @@ def run_paper_trading(
                             **_signal_record_kwargs(side_decision),
                         ),
                     )
+                    strategy_session.last_processed_paper_event_slug = target_round.slug
                     strategy_session.round_index += 1
                     state.paper_strategies[strategy_id] = _session_state_to_paper_strategy_state(strategy_session)
                     _sync_legacy_paper_state_fields(state, strategy_ids)
@@ -2903,6 +2914,7 @@ def run_paper_trading(
                             **_signal_record_kwargs(side_decision),
                         ),
                     )
+                    strategy_session.last_processed_paper_event_slug = target_round.slug
                     strategy_session.round_index += 1
                     state.paper_strategies[strategy_id] = _session_state_to_paper_strategy_state(strategy_session)
                     _sync_legacy_paper_state_fields(state, strategy_ids)
@@ -2980,6 +2992,7 @@ def run_paper_trading(
                             **_signal_record_kwargs(side_decision),
                         ),
                     )
+                    strategy_session.last_processed_paper_event_slug = target_round.slug
                     strategy_session, should_alert, _, skip_streak = _apply_post_entry_risk_gate_skip(
                         strategy_session,
                         skip_reason=plan.skip_reason,
@@ -3016,6 +3029,7 @@ def run_paper_trading(
                     experiment_id=experiment_id,
                 )
                 if queued:
+                    strategy_session.last_processed_paper_event_slug = target_round.slug
                     strategy_session.round_index += 1
                 state.paper_strategies[strategy_id] = _session_state_to_paper_strategy_state(strategy_session)
                 _sync_legacy_paper_state_fields(state, strategy_ids)

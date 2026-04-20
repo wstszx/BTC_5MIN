@@ -132,6 +132,7 @@ class PaperStrategyState:
     daily_realized_pnl: float = 0.0
     current_day: str | None = None
     pending_paper_trades: list[PendingPaperTrade] = field(default_factory=list)
+    last_processed_paper_event_slug: str | None = None
     experiment_id: str | None = None
 
 
@@ -149,6 +150,7 @@ class SessionState:
     stop_loss_count: int = 0
     daily_realized_pnl: float = 0.0
     current_day: str | None = None
+    last_processed_paper_event_slug: str | None = None
     pending_live_slug: str | None = None
     pending_live_side: str | None = None
     pending_live_price: float | None = None

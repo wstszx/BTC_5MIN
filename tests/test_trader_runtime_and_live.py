@@ -2066,6 +2066,63 @@ def test_run_paper_trading_logs_current_round_skip_before_advancing_to_next_roun
     assert state.paper_strategies[2].round_index == 1
 
 
+def test_run_paper_trading_does_not_duplicate_missed_current_round_skip_after_restart(tmp_path, monkeypatch):
+    cfg = AppConfig(strategy_id=2, paper_strategy_ids=[2])
+    monkeypatch.setattr("trader._sleep_until_round_end", lambda cfg, window, stop_event=None: False)
+
+    class _CurrentMissedNextAvailableClient(_LiveMarketClient):
+        def find_current_and_next_rounds(self, *, now):
+            current = MarketWindow(
+                event_id="evt-current",
+                market_id="mkt-current",
+                slug="btc-updown-5m-current",
+                title="BTC 5m Current",
+                start_time=now - timedelta(minutes=1),
+                end_time=now + timedelta(minutes=4),
+                up_token_id="up-token",
+                down_token_id="down-token",
+            )
+            upcoming = MarketWindow(
+                event_id="evt-next",
+                market_id="mkt-next",
+                slug="btc-updown-5m-next",
+                title="BTC 5m Next",
+                start_time=now + timedelta(minutes=4),
+                end_time=now + timedelta(minutes=9),
+                up_token_id="up-token",
+                down_token_id="down-token",
+            )
+            return current, upcoming
+
+        def get_market_by_slug(self, slug: str):
+            market = super().get_market_by_slug(slug)
+            market["slug"] = slug
+            return market
+
+    log_path = tmp_path / "paper.csv"
+    state_path = tmp_path / "state.json"
+
+    first = run_paper_trading(
+        cfg,
+        client=_CurrentMissedNextAvailableClient(),
+        state_path=state_path,
+        log_path=log_path,
+    )
+    second = run_paper_trading(
+        cfg,
+        client=_CurrentMissedNextAvailableClient(),
+        state_path=state_path,
+        log_path=log_path,
+    )
+
+    assert first["status"] == "stopped"
+    assert second["status"] == "stopped"
+    lines = log_path.read_text(encoding="utf-8").splitlines()
+    assert len(lines) == 2
+    assert "btc-updown-5m-current" in lines[1]
+    assert "entry_window_missed" in lines[1]
+
+
 def test_run_paper_trading_dry_run_allows_trade_after_day_rollover(tmp_path):
     cfg = AppConfig(strategy_id=2)
     state_path = tmp_path / "state.json"
