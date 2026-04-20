@@ -974,6 +974,26 @@ def test_dashboard_assets_rebalance_main_columns_for_config_decision_monitoring(
     assert 'grid-template-columns: 312px minmax(620px, 1.35fr) 392px;' in css
 
 
+def test_dashboard_assets_move_runtime_monitoring_into_monitor_column():
+    html = _dashboard_html()
+
+    assert 'id="monitorRuntimePanel"' in html
+    assert '运行与连接监控' in html
+    assert 'id="runtimeSummaryBar"' in html
+    assert 'id="runtimeDetailsToggle"' in html
+    assert 'id="runtimeDetailsPanel"' in html
+    assert 'id="wsRuntimeList"' in html
+
+
+def test_dashboard_assets_move_diagnostics_entry_into_decision_column():
+    html = _dashboard_html()
+
+    assert 'id="decisionDiagnosticsHost"' in html
+    assert 'id="diagnosticsToggle"' in html
+    assert 'id="diagnosticsPanel"' in html
+    assert '诊断区' in html
+
+
 def test_dashboard_assets_use_primary_decision_card_with_folded_signal_details():
     html = _dashboard_html()
     js = _dashboard_js()

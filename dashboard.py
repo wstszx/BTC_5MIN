@@ -1527,109 +1527,6 @@ def _dashboard_html() -> str:
 
         <div id=\"strategyGuideCard\" class=\"strategy-guide-card\"></div>
 
-        <div id="runtimeSummaryBar" class="strategy-guide-card fold-summary">
-          <div class="strategy-guide-head">
-            <div>
-              <div class="strategy-guide-title">系统状态</div>
-              <div id="runtimeSummaryText" class="strategy-guide-subtitle">当前模式 -- / 目标模式 -- / 是否待切换 -- / 实盘就绪 --</div>
-            </div>
-            <button id="runtimeDetailsToggle" class="btn btn-ghost" type="button" aria-expanded="false" aria-controls="runtimeDetailsPanel">展开运行详情</button>
-          </div>
-        </div>
-
-        <div id="runtimeDetailsPanel" hidden>
-          <div id="runtimeModeCard" class="strategy-guide-card">
-            <div class="strategy-guide-head">
-              <div>
-                <div class="strategy-guide-title">运行模式</div>
-                <div class="strategy-guide-subtitle">显示配置目标、当前实际状态、切换进度和实盘条件。</div>
-              </div>
-              <span class="chip warn">热切换受控</span>
-            </div>
-            <div class="rows">
-              <div class="row"><span class="label">目标模式</span><span id="runtimeSavedMode" class="value">--</span></div>
-              <div class="row"><span class="label">当前模式</span><span id="runtimeRunningMode" class="value">--</span></div>
-              <div class="row"><span class="label">是否待切换</span><span id="runtimeRestartRequired" class="value">--</span></div>
-              <div class="row"><span class="label">实盘就绪</span><span id="runtimeLiveReady" class="value">--</span></div>
-              <div class="row"><span class="label">校验结果</span><span id="runtimeLiveError" class="value">--</span></div>
-              <div id="runtimeRedeemRows">
-                <div class="row"><span class="label">自动赎回</span><span id="runtimeRedeemEnabled" class="value">--</span></div>
-                <div class="row"><span class="label">待赎回数量</span><span id="runtimeRedeemPending" class="value">--</span></div>
-                <div class="row"><span class="label">最近结果</span><span id="runtimeRedeemResult" class="value">--</span></div>
-                <div class="row"><span class="label">最近尝试</span><span id="runtimeRedeemAttempt" class="value">--</span></div>
-                <div class="row"><span class="label">最近交易哈希</span><span id="runtimeRedeemTxHash" class="value">--</span></div>
-              </div>
-              <div id="runtimeOptimizerRows">
-                <div class="row"><span class="label">优化器</span><span id="runtimeOptimizerEnabled" class="value">--</span></div>
-                <div class="row"><span class="label">当前冠军</span><span id="runtimeOptimizerChampion" class="value">--</span></div>
-                <div class="row"><span class="label">活动挑战者</span><span id="runtimeOptimizerChallengers" class="value">--</span></div>
-                <div class="row"><span class="label">可晋级数量</span><span id="runtimeOptimizerPromotable" class="value">--</span></div>
-                <div class="row"><span class="label">最近运行</span><span id="runtimeOptimizerLastRun" class="value">--</span></div>
-                <div class="row"><span class="label">挑战者明细</span><span id="runtimeOptimizerChallengerList" class="value">--</span></div>
-                <div class="row"><span class="label">可晋级明细</span><span id="runtimeOptimizerPromotableList" class="value">--</span></div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div class="strategy-guide-card fold-summary">
-          <div class="strategy-guide-head">
-            <div>
-              <div class="strategy-guide-title">诊断区</div>
-              <div class="strategy-guide-subtitle">策略 6/7 解释型信号与其他辅助诊断默认折叠。</div>
-            </div>
-            <button id="diagnosticsToggle" class="btn btn-ghost" type="button" aria-expanded="false" aria-controls="diagnosticsPanel">展开诊断区</button>
-          </div>
-        </div>
-
-        <div id="diagnosticsPanel" hidden>
-          <div id=strategy6Panel class=box>
-            <div class=box-title>策略 6 OFI</div>
-            <div class=row>
-              <span class=label>OFI 分数</span>
-              <span id=strategy6OfiScore class=value>--</span>
-            </div>
-            <div class=row>
-              <span class=label>信号时间</span>
-              <span id=strategy6SignalAt class=value>--</span>
-            </div>
-            <div class=row>
-              <span class=label>是否陈旧</span>
-              <span id=strategy6Stale class=value>--</span>
-            </div>
-            <div class=kv-grid>
-              <div class=kv><div class=k>买一价</div><div id=strategy6BidPrice class=v>--</div></div>
-              <div class=kv><div class=k>买一量</div><div id=strategy6BidQty class=v>--</div></div>
-              <div class=kv><div class=k>卖一价</div><div id=strategy6AskPrice class=v>--</div></div>
-              <div class=kv><div class=k>卖一量</div><div id=strategy6AskQty class=v>--</div></div>
-            </div>
-          </div>
-
-          <div id=strategy7Panel class=box>
-            <div class=box-title>策略 7 共识诊断</div>
-            <div class=row>
-              <span class=label>OFI 分数</span>
-              <span id=strategy7OfiScore class=value>--</span>
-            </div>
-            <div class=row>
-              <span class=label>动量偏移</span>
-              <span id=strategy7MomentumDelta class=value>--</span>
-            </div>
-            <div class=row>
-              <span class=label>是否同向</span>
-              <span id=strategy7Agreement class=value>--</span>
-            </div>
-            <div class=row>
-              <span class=label>质量过滤</span>
-              <span id=strategy7QualityGate class=value>--</span>
-            </div>
-            <div class=row>
-              <span class=label>最终原因</span>
-              <span id=strategy7FinalReason class=value>--</span>
-            </div>
-          </div>
-        </div>
-
         <div class=\"strategy-guide-card fold-summary\">
           <div class=\"strategy-guide-head\">
             <div>
@@ -1756,19 +1653,122 @@ def _dashboard_html() -> str:
 
           </div>
         </div>
+
+        <div id="decisionDiagnosticsHost" class="strategy-guide-card fold-summary">
+          <div class="strategy-guide-head">
+            <div>
+              <div class="strategy-guide-title">诊断区</div>
+              <div class="strategy-guide-subtitle">策略 6/7 解释型信号与其他辅助诊断默认折叠。</div>
+            </div>
+            <button id="diagnosticsToggle" class="btn btn-ghost" type="button" aria-expanded="false" aria-controls="diagnosticsPanel">展开诊断区</button>
+          </div>
+        </div>
+
+        <div id="diagnosticsPanel" hidden>
+          <div id=strategy6Panel class=box>
+            <div class=box-title>策略 6 OFI</div>
+            <div class=row>
+              <span class=label>OFI 分数</span>
+              <span id=strategy6OfiScore class=value>--</span>
+            </div>
+            <div class=row>
+              <span class=label>信号时间</span>
+              <span id=strategy6SignalAt class=value>--</span>
+            </div>
+            <div class=row>
+              <span class=label>是否陈旧</span>
+              <span id=strategy6Stale class=value>--</span>
+            </div>
+            <div class=kv-grid>
+              <div class=kv><div class=k>买一价</div><div id=strategy6BidPrice class=v>--</div></div>
+              <div class=kv><div class=k>买一量</div><div id=strategy6BidQty class=v>--</div></div>
+              <div class=kv><div class=k>卖一价</div><div id=strategy6AskPrice class=v>--</div></div>
+              <div class=kv><div class=k>卖一量</div><div id=strategy6AskQty class=v>--</div></div>
+            </div>
+          </div>
+
+          <div id=strategy7Panel class=box>
+            <div class=box-title>策略 7 共识诊断</div>
+            <div class=row>
+              <span class=label>OFI 分数</span>
+              <span id=strategy7OfiScore class=value>--</span>
+            </div>
+            <div class=row>
+              <span class=label>动量偏移</span>
+              <span id=strategy7MomentumDelta class=value>--</span>
+            </div>
+            <div class=row>
+              <span class=label>是否同向</span>
+              <span id=strategy7Agreement class=value>--</span>
+            </div>
+            <div class=row>
+              <span class=label>质量过滤</span>
+              <span id=strategy7QualityGate class=value>--</span>
+            </div>
+            <div class=row>
+              <span class=label>最终原因</span>
+              <span id=strategy7FinalReason class=value>--</span>
+            </div>
+          </div>
+        </div>
       </div>
     </section>
 
     <section class="stack right-stack monitor-stack">
-      <div class=\"panel\">
+      <div id="monitorRuntimePanel" class=\"panel\">
         <div class=\"panel-head\">
           <div>
-            <div class=\"head-title\">实时连接状态</div>
-            <div class=\"head-desc\">连接质量与订阅状态</div>
+            <div class=\"head-title\">运行与连接监控</div>
+            <div class=\"head-desc\">运行模式、连接质量与后台状态</div>
           </div>
           <div id=\"wsHealth\" class=\"chip\">待刷新</div>
         </div>
         <div class=\"panel-body\">
+          <div id="runtimeSummaryBar" class="strategy-guide-card fold-summary">
+            <div class="strategy-guide-head">
+              <div>
+                <div class="strategy-guide-title">系统状态</div>
+                <div id="runtimeSummaryText" class="strategy-guide-subtitle">当前模式 -- / 目标模式 -- / 是否待切换 -- / 实盘就绪 --</div>
+              </div>
+              <button id="runtimeDetailsToggle" class="btn btn-ghost" type="button" aria-expanded="false" aria-controls="runtimeDetailsPanel">展开运行详情</button>
+            </div>
+          </div>
+
+          <div id="runtimeDetailsPanel" hidden>
+            <div id="runtimeModeCard" class="strategy-guide-card">
+              <div class="strategy-guide-head">
+                <div>
+                  <div class="strategy-guide-title">运行模式</div>
+                  <div class="strategy-guide-subtitle">显示配置目标、当前实际状态、切换进度和实盘条件。</div>
+                </div>
+                <span class="chip warn">热切换受控</span>
+              </div>
+              <div class="rows">
+                <div class="row"><span class="label">目标模式</span><span id="runtimeSavedMode" class="value">--</span></div>
+                <div class="row"><span class="label">当前模式</span><span id="runtimeRunningMode" class="value">--</span></div>
+                <div class="row"><span class="label">是否待切换</span><span id="runtimeRestartRequired" class="value">--</span></div>
+                <div class="row"><span class="label">实盘就绪</span><span id="runtimeLiveReady" class="value">--</span></div>
+                <div class="row"><span class="label">校验结果</span><span id="runtimeLiveError" class="value">--</span></div>
+                <div id="runtimeRedeemRows">
+                  <div class="row"><span class="label">自动赎回</span><span id="runtimeRedeemEnabled" class="value">--</span></div>
+                  <div class="row"><span class="label">待赎回数量</span><span id="runtimeRedeemPending" class="value">--</span></div>
+                  <div class="row"><span class="label">最近结果</span><span id="runtimeRedeemResult" class="value">--</span></div>
+                  <div class="row"><span class="label">最近尝试</span><span id="runtimeRedeemAttempt" class="value">--</span></div>
+                  <div class="row"><span class="label">最近交易哈希</span><span id="runtimeRedeemTxHash" class="value">--</span></div>
+                </div>
+                <div id="runtimeOptimizerRows">
+                  <div class="row"><span class="label">优化器</span><span id="runtimeOptimizerEnabled" class="value">--</span></div>
+                  <div class="row"><span class="label">当前冠军</span><span id="runtimeOptimizerChampion" class="value">--</span></div>
+                  <div class="row"><span class="label">活动挑战者</span><span id="runtimeOptimizerChallengers" class="value">--</span></div>
+                  <div class="row"><span class="label">可晋级数量</span><span id="runtimeOptimizerPromotable" class="value">--</span></div>
+                  <div class="row"><span class="label">最近运行</span><span id="runtimeOptimizerLastRun" class="value">--</span></div>
+                  <div class="row"><span class="label">挑战者明细</span><span id="runtimeOptimizerChallengerList" class="value">--</span></div>
+                  <div class="row"><span class="label">可晋级明细</span><span id="runtimeOptimizerPromotableList" class="value">--</span></div>
+                </div>
+              </div>
+            </div>
+          </div>
+
           <div id=\"wsRuntimeList\" class=\"runtime-list\"></div>
           <div class=\"footnote\">说明：行情来源显示为 websocket 时，表示使用 WS 缓存盘口；显示为 http 时，表示回退到 HTTP 拉取。</div>
         </div>
