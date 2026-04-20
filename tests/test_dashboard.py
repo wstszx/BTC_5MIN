@@ -997,6 +997,33 @@ def test_dashboard_assets_remove_visible_config_status_block():
     assert 'id="cfgSavedAt"' not in html
 
 
+def test_dashboard_assets_allow_strategy_panel_rows_to_wrap_without_overflow():
+    css = dashboard._dashboard_css()
+
+    assert '.strategy-panel-row {' in css
+    assert 'grid-template-columns: minmax(0, 1fr) auto;' in css
+    assert '.strategy-panel-row-main {' in css
+    assert 'grid-template-columns: auto minmax(0, 1fr);' in css
+    assert '.strategy-panel-primary {' in css
+    assert 'justify-self: end;' in css
+    assert '@media (max-width: 1024px) {' in css
+    assert '.strategy-panel-row { grid-template-columns: 1fr; }' in css
+    assert '.strategy-panel-primary { justify-self: start; }' in css
+
+
+def test_dashboard_assets_allow_strategy_guide_content_to_wrap_fully():
+    css = dashboard._dashboard_css()
+
+    assert '.strategy-guide-title {' in css
+    assert 'white-space: normal;' in css
+    assert 'overflow-wrap: anywhere;' in css
+    assert '.strategy-guide-subtitle {' in css
+    assert '.strategy-guide-head {' in css
+    assert 'align-items: flex-start;' in css
+    assert '.strategy-guide-head .chip {' in css
+    assert 'max-width: 100%;' in css
+
+
 def test_dashboard_assets_move_runtime_monitoring_into_monitor_column():
     html = _dashboard_html()
 

@@ -2349,18 +2349,27 @@ body::before {
   justify-content: space-between;
   gap: 12px;
   align-items: flex-start;
+  flex-wrap: wrap;
 }
 
 .strategy-guide-title {
   font-size: 14px;
   font-weight: 700;
   color: var(--text);
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 .strategy-guide-subtitle {
   font-size: 12px;
   color: var(--muted);
   line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.strategy-guide-head .chip {
+  white-space: normal;
+  max-width: 100%;
 }
 
 .strategy-guide-note {
