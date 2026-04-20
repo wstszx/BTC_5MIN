@@ -547,8 +547,20 @@ def test_dashboard_assets_mark_pending_recent_trades_clearly():
 
     assert "const isPending = row.pending_status === 'pending_settlement';" in js
     assert "const resultText = isPending ? '待结算' : (row.result || '--');" in js
-    assert "const rowClass = isPending ? 'recent-pending' : '';" in js
+    assert "const rowClass = isPending ? 'recent-pending' : (isMissedEntry ? 'recent-missed-entry' : '');" in js
     assert "setChip('recentStatus', pendingCount > 0 ? (rows.length + ' 行 · ' + pendingCount + ' 待结算') : (rows.length + ' 行'), pendingCount > 0 ? 'warn' : 'ok');" in js
+
+def test_dashboard_assets_highlight_recent_missed_entry_rows():
+    js = _dashboard_js()
+    css = dashboard._dashboard_css()
+
+    assert "const isMissedEntry = row.skip_reason === 'entry_window_missed';" in js
+    assert "const rowClass = isPending ? 'recent-pending' : (isMissedEntry ? 'recent-missed-entry' : '');" in js
+    assert "const reasonHtml = isMissedEntry" in js
+    assert "skip-reason-badge missed-entry" in js
+    assert '.recent-missed-entry td {' in css
+    assert '.skip-reason-badge {' in css
+    assert '.skip-reason-badge.missed-entry {' in css
 
 def test_dashboard_assets_show_serial_waiting_hint_for_pending_paper_trades():
     html = _dashboard_html()

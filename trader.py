@@ -1126,7 +1126,12 @@ def _resolve_side_from_strategy(
                 signal_threshold=cfg.strategy7_momentum_threshold,
                 signal_delta=momentum_delta,
             )
-        if entry_time is not None and (entry_time - now).total_seconds() < cfg.strategy7_confirm_before_entry_seconds:
+        effective_confirm_before_entry_seconds = _effective_strategy7_confirm_before_entry_seconds(
+            cfg=cfg,
+            window=window,
+            entry_time=entry_time,
+        )
+        if entry_time is not None and (entry_time - now).total_seconds() < effective_confirm_before_entry_seconds:
             return SideDecision(
                 side=None,
                 reason='strategy7_entry_too_late',
@@ -2063,6 +2068,19 @@ def _entry_window_missed(now: datetime, entry_time: datetime, *, grace_seconds: 
     return now > (entry_time + timedelta(seconds=max(0.0, grace_seconds)))
 
 
+def _effective_strategy7_confirm_before_entry_seconds(
+    *,
+    cfg: AppConfig,
+    window: MarketWindow | None,
+    entry_time: datetime | None,
+) -> float:
+    configured = max(0.0, float(cfg.strategy7_confirm_before_entry_seconds))
+    if window is None or entry_time is None:
+        return configured
+    available = max(0.0, (entry_time - window.start_time).total_seconds())
+    return min(configured, available)
+
+
 def _select_target_round(
     cfg: AppConfig,
     *,
@@ -2667,7 +2685,19 @@ def run_paper_trading(
                 )
                 return {"status": "stopped"}
             current_round, next_round = client.find_current_and_next_rounds(now=now)
-            target_round = _select_target_round(cfg, now=now, current_round=current_round, next_round=next_round)
+            current_entry_time = _entry_time_for_round(cfg, current_round) if current_round is not None else None
+            should_log_missed_current_round = (
+                not dry_run_once
+                and current_round is not None
+                and next_round is not None
+                and current_entry_time is not None
+                and _entry_window_missed(now, current_entry_time, grace_seconds=cfg.entry_grace_seconds)
+            )
+            target_round = (
+                current_round
+                if should_log_missed_current_round
+                else _select_target_round(cfg, now=now, current_round=current_round, next_round=next_round)
+            )
             if target_round is None:
                 if dry_run_once:
                     return {"status": "no_market"}

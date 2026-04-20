@@ -1754,6 +1754,52 @@ def test_strategy7_skips_when_confirmation_is_too_late():
     assert decision.reason == "strategy7_entry_too_late"
 
 
+def test_strategy7_clamps_confirmation_window_to_available_open_entry_window():
+    now = datetime.now(timezone.utc)
+    cfg = AppConfig(
+        strategy_id=7,
+        open_delay_seconds=5,
+        strategy7_ofi_threshold=0.65,
+        strategy7_momentum_threshold=0.02,
+        strategy7_max_entry_price=0.56,
+        strategy7_min_signal_gap=0.01,
+        strategy7_confirm_before_entry_seconds=12,
+        binance_signal_stale_seconds=2.0,
+    )
+    window = MarketWindow(
+        event_id="evt-s1",
+        market_id="mkt-s1",
+        slug="s1",
+        title="Strategy 7 Open Window Clamp",
+        start_time=now,
+        end_time=now + timedelta(minutes=15),
+        up_token_id="up",
+        down_token_id="down",
+    )
+    state = SessionState(round_index=0, signal_round_slug="s1", signal_round_open_up_price=0.50)
+    quote = MarketQuote(
+        slug="s1",
+        up_price=0.54,
+        up_best_ask=0.54,
+        strategy6_ofi_score=0.8,
+        fetched_at=now,
+        strategy6_signal_at=now,
+    )
+
+    decision = _resolve_side_from_strategy(
+        cfg=cfg,
+        state=state,
+        slug="s1",
+        quote=quote,
+        window=window,
+        now=now,
+        entry_time=now + timedelta(seconds=cfg.open_delay_seconds),
+    )
+
+    assert decision.side == "UP"
+    assert decision.reason is None
+
+
 def test_append_trade_log_rotates_legacy_schema_file(tmp_path):
     log_path = tmp_path / "paper_trades.csv"
     log_path.write_text("timestamp,mode\n2026-03-31T00:00:00+00:00,paper\n", encoding="utf-8")
@@ -1966,6 +2012,58 @@ def test_run_paper_trading_dry_run_prefers_next_round_when_current_entry_window_
     assert result["slug"] == "btc-updown-5m-next"
     assert result["should_trade"] is True
     assert result["skip_reason"] is None
+
+
+def test_run_paper_trading_logs_current_round_skip_before_advancing_to_next_round(tmp_path, monkeypatch):
+    cfg = AppConfig(strategy_id=2, paper_strategy_ids=[2])
+    monkeypatch.setattr("trader._sleep_until_round_end", lambda cfg, window, stop_event=None: False)
+
+    class _CurrentMissedNextAvailableClient(_LiveMarketClient):
+        def find_current_and_next_rounds(self, *, now):
+            current = MarketWindow(
+                event_id="evt-current",
+                market_id="mkt-current",
+                slug="btc-updown-5m-current",
+                title="BTC 5m Current",
+                start_time=now - timedelta(minutes=1),
+                end_time=now + timedelta(minutes=4),
+                up_token_id="up-token",
+                down_token_id="down-token",
+            )
+            upcoming = MarketWindow(
+                event_id="evt-next",
+                market_id="mkt-next",
+                slug="btc-updown-5m-next",
+                title="BTC 5m Next",
+                start_time=now + timedelta(minutes=4),
+                end_time=now + timedelta(minutes=9),
+                up_token_id="up-token",
+                down_token_id="down-token",
+            )
+            return current, upcoming
+
+        def get_market_by_slug(self, slug: str):
+            market = super().get_market_by_slug(slug)
+            market["slug"] = slug
+            return market
+
+    log_path = tmp_path / "paper.csv"
+    state_path = tmp_path / "state.json"
+
+    result = run_paper_trading(
+        cfg,
+        client=_CurrentMissedNextAvailableClient(),
+        state_path=state_path,
+        log_path=log_path,
+    )
+
+    assert result["status"] == "stopped"
+    lines = log_path.read_text(encoding="utf-8").splitlines()
+    assert len(lines) == 2
+    assert "btc-updown-5m-current" in lines[1]
+    assert "entry_window_missed" in lines[1]
+    state = load_session_state(state_path, effective_paper_strategy_ids=[2])
+    assert state.paper_strategies[2].round_index == 1
 
 
 def test_run_paper_trading_dry_run_allows_trade_after_day_rollover(tmp_path):

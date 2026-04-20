@@ -2797,8 +2797,24 @@ tr:hover td { background: rgba(50, 88, 131, 0.1); }
 .trade-skip { color: var(--amber); font-weight: 700; }
 .pnl-plus { color: var(--green); font-family: var(--mono); }
 .pnl-minus { color: var(--red); font-family: var(--mono); }
+.skip-reason-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 8px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+}
+.skip-reason-badge.missed-entry {
+  color: #ffd7ad;
+  background: rgba(255, 138, 61, 0.14);
+  border-color: rgba(255, 138, 61, 0.32);
+  font-weight: 700;
+}
 .recent-pending td {
   background: rgba(245, 166, 35, 0.08);
+}
+.recent-missed-entry td {
+  background: rgba(255, 138, 61, 0.08);
 }
 
 .empty {
@@ -4745,11 +4761,15 @@ function renderRecent(payload) {
     const pnlCls = classifyPnl(row.trade_pnl);
     const cashCls = classifyPnl(row.cash_pnl);
     const isPending = row.pending_status === 'pending_settlement';
+    const isMissedEntry = row.skip_reason === 'entry_window_missed';
     const resultText = isPending ? '待结算' : (row.result || '--');
     const checkText = resultCheckText(row.result_check_status);
     const checkCls = row.result_check_status === 'match' ? 'trade-up' : ((row.result_check_status === 'mismatch') ? 'trade-down' : 'trade-skip');
     const checkTitle = '官方结果: ' + (row.resolved_expected_result || '--');
-    const rowClass = isPending ? 'recent-pending' : '';
+    const rowClass = isPending ? 'recent-pending' : (isMissedEntry ? 'recent-missed-entry' : '');
+    const reasonHtml = isMissedEntry
+      ? ('<span class="skip-reason-badge missed-entry">' + esc(reasonText(row.skip_reason)) + '</span>')
+      : esc(reasonText(row.skip_reason));
 
     return '<tr class="' + esc(rowClass) + '">' +
       '<td>' + esc(fmtIso(row.timestamp)) + '</td>' +
@@ -4763,7 +4783,7 @@ function renderRecent(payload) {
       '<td>' + esc(fmtNum(row.resolved_final_price, 2)) + '</td>' +
       '<td class="' + esc(pnlCls) + '">' + esc(fmtPnl(row.trade_pnl, 4)) + '</td>' +
       '<td class="' + esc(cashCls) + '">' + esc(fmtPnl(row.cash_pnl, 4)) + '</td>' +
-      '<td>' + esc(reasonText(row.skip_reason)) + '</td>' +
+      '<td>' + reasonHtml + '</td>' +
       '<td>' + esc(fmtPnl(row.signal_delta, 4)) + '</td>' +
       '</tr>';
   }).join('');
