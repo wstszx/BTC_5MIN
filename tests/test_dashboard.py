@@ -994,6 +994,26 @@ def test_dashboard_assets_move_diagnostics_entry_into_decision_column():
     assert '诊断区' in html
 
 
+def test_dashboard_assets_compress_config_status_into_inline_summary():
+    html = _dashboard_html()
+    css = dashboard._dashboard_css()
+
+    assert 'class="config-status-inline"' in html
+    assert 'id="cfgError"' in html
+    assert 'id="cfgSavedAt"' in html
+    assert '<span class="meta-label">读取状态</span>' not in html
+    assert '<div class="meta">' not in html
+    assert '.config-status-inline {' in css
+
+
+def test_dashboard_assets_remove_redundant_market_updated_time_row():
+    html = _dashboard_html()
+    js = _dashboard_js()
+
+    assert 'id="marketUpdatedAt"' not in html
+    assert "el('marketUpdatedAt')" not in js
+
+
 def test_dashboard_assets_use_primary_decision_card_with_folded_signal_details():
     html = _dashboard_html()
     js = _dashboard_js()

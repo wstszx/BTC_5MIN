@@ -1514,15 +1514,15 @@ def _dashboard_html() -> str:
         <div id=\"cfgStatus\" class=\"chip\">未保存</div>
       </div>
       <div class=\"panel-body\">
-        <div class=\"meta-item\">
-          <span class=\"meta-label\">\u8bfb\u53d6\u72b6\u6001</span>
-          <span id=\"cfgError\" class=\"meta-value\">--</span>
-        </div>
-        <div class=\"meta\">
-          <div class=\"meta-item\">
-            <span class=\"meta-label\">最近保存</span>
+        <div class="config-status-inline">
+          <span class="config-status-item">
+            <span class="meta-label">状态</span>
+            <span id=\"cfgError\" class=\"meta-value\">--</span>
+          </span>
+          <span class="config-status-item">
+            <span class="meta-label">最近保存</span>
             <span id=\"cfgSavedAt\" class=\"meta-value\">--</span>
-          </div>
+          </span>
         </div>
 
         <div id=\"strategyGuideCard\" class=\"strategy-guide-card\"></div>
@@ -1644,10 +1644,6 @@ def _dashboard_html() -> str:
             <div class=\"row\">
               <span class=\"label\">WS 交易陈旧保护</span>
               <span id=\"wsGuard\" class=\"value\">--</span>
-            </div>
-            <div class=\"row\">
-              <span class=\"label\">最近刷新</span>
-              <span id=\"marketUpdatedAt\" class=\"value\">--</span>
             </div>
           </div>
 
@@ -2311,6 +2307,24 @@ body::before {
 .meta-value.flash-saved {
   color: var(--green);
   text-shadow: 0 0 12px rgba(90, 234, 165, 0.35);
+}
+
+.config-status-inline {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+  margin-bottom: 12px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: rgba(7, 14, 25, 0.8);
+}
+
+.config-status-item {
+  display: inline-flex;
+  gap: 8px;
+  align-items: baseline;
 }
 
 .form-grid {
@@ -4755,8 +4769,6 @@ function renderMarket(payload) {
   const guardNode = el('wsGuard');
   guardNode.textContent = payload.ws_stale_guard_triggered ? '触发' : '正常';
   guardNode.className = 'value ' + (payload.ws_stale_guard_triggered ? 'trade-down' : 'trade-up');
-
-  el('marketUpdatedAt').textContent = fmtIso(payload.timestamp);
 
   renderWsRuntime(payload.ws_runtime || {}, !!payload.ws_stale_guard_triggered);
 }
