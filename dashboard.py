@@ -3974,6 +3974,10 @@ function setChip(id, text, kind = '') {
   }
 }
 
+function setReportStatus(id, prefix, text, tone) {
+  setChip(id, prefix + ': ' + text, tone);
+}
+
 async function apiGet(path) {
   const resp = await fetch(path, { cache: 'no-store' });
   const data = await resp.json();
@@ -4757,7 +4761,7 @@ function renderSummary(payload) {
     el('sumDrawdown').textContent = '--';
     el('sumStrongRate').textContent = '--';
     el('daysTbody').innerHTML = '<tr><td colspan=\"5\" class=\"empty\">暂无纸面数据</td></tr>';
-    setChip('paperStatus', '暂无数据', 'warn');
+    setReportStatus('paperStatus', '汇总', '暂无数据', 'warn');
     return;
   }
 
@@ -4788,7 +4792,7 @@ function renderSummary(payload) {
   }).join('');
 
   el('daysTbody').innerHTML = rows || '<tr><td colspan=\"5\" class=\"empty\">暂无纸面数据</td></tr>';
-  setChip('paperStatus', '已更新', 'ok');
+  setReportStatus('paperStatus', '汇总', '已更新', 'ok');
 }
 
 function renderRecent(payload) {
@@ -4799,13 +4803,13 @@ function renderRecent(payload) {
   el('recentPanelDesc').textContent = recentStrategyHeaderText();
   if (rows.length === 0) {
     tbody.innerHTML = '<tr><td colspan=13 class=empty>' + (runningMode === 'live' ? '最近没有实盘交易记录' : '最近没有纸面交易记录') + '</td></tr>';
-    setChip('recentStatus', '0 行', 'warn');
+    setReportStatus('recentStatus', '明细', '0 行', 'warn');
     return;
   }
 
   if (rows.length === 0) {
     tbody.innerHTML = '<tr><td colspan="13" class="empty">最近没有纸面交易记录</td></tr>';
-    setChip('recentStatus', '0 行', 'warn');
+    setReportStatus('recentStatus', '明细', '0 行', 'warn');
     return;
   }
 
@@ -4844,9 +4848,9 @@ function renderRecent(payload) {
   }).join('');
 
   tbody.innerHTML = html;
-  setChip('recentStatus', pendingCount > 0 ? (rows.length + ' 行 · ' + pendingCount + ' 待结算') : (rows.length + ' 行'), pendingCount > 0 ? 'warn' : 'ok');
+  setReportStatus('recentStatus', '明细', pendingCount > 0 ? (rows.length + ' 行 · ' + pendingCount + ' 待结算') : (rows.length + ' 行'), pendingCount > 0 ? 'warn' : 'ok');
   if (pendingCount === 0) {
-    setChip('recentStatus', rows.length + ' 行' + (runningMode === 'live' ? ' · 实盘' : ''), pendingCount > 0 ? 'warn' : 'ok');
+    setReportStatus('recentStatus', '明细', rows.length + ' 行' + (runningMode === 'live' ? ' · 实盘' : ''), pendingCount > 0 ? 'warn' : 'ok');
   }
 }
 
@@ -4868,7 +4872,7 @@ async function refreshSummary() {
     const data = await apiGet(summaryEndpoint);
     renderSummary(data);
   } catch (err) {
-    setChip('paperStatus', '刷新失败', 'err');
+    setReportStatus('paperStatus', '汇总', '刷新失败', 'err');
     console.error(err);
   }
 }
@@ -4881,7 +4885,7 @@ async function refreshRecent() {
     const data = await apiGet(recentEndpoint);
     renderRecent(data);
   } catch (err) {
-    setChip('recentStatus', '刷新失败', 'err');
+    setReportStatus('recentStatus', '明细', '刷新失败', 'err');
     console.error(err);
   }
 }

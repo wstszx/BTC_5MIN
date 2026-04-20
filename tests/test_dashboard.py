@@ -1033,6 +1033,32 @@ def test_dashboard_assets_stack_unified_report_card_on_narrow_layouts():
     assert 'grid-template-columns: 1fr;' in css
 
 
+def test_dashboard_assets_render_unified_report_header_status_and_recent_copy():
+    html = _dashboard_html()
+    js = _dashboard_js()
+
+    assert 'id="paperStatus"' in html
+    assert 'id="recentStatus"' in html
+    assert 'class="report-status-group"' in html
+    assert 'id="recentPanelDesc"' in html
+    assert 'function recentStrategyHeaderText()' in js
+    assert 'function setReportStatus(' in js
+    assert "setReportStatus('paperStatus', '汇总', '已更新', 'ok');" in js
+    assert "setReportStatus('recentStatus', '明细', rows.length + ' 行' + (runningMode === 'live' ? ' · 实盘' : ''), pendingCount > 0 ? 'warn' : 'ok');" in js
+    assert "el('recentPanelDesc').textContent = recentStrategyHeaderText();" in js
+
+
+def test_dashboard_assets_refresh_shared_selector_still_updates_summary_and_recent():
+    js = _dashboard_js()
+
+    assert "state.paperReportStrategyFilter = node.value || 'all';" in js
+    assert "state.paperSummaryStrategyFilter = '';" in js
+    assert "state.paperRecentStrategyFilter = '';" in js
+    assert "await Promise.allSettled([refreshSummary(), refreshRecent()]);" in js
+    assert "const strategy = encodeURIComponent(effectivePaperSummaryStrategyFilter());" in js
+    assert "const strategy = encodeURIComponent(effectivePaperRecentStrategyFilter());" in js
+
+
 def test_dashboard_assets_use_strategy_panel_for_unified_strategy_selection():
     html = _dashboard_html()
     js = _dashboard_js()
