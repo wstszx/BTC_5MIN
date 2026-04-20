@@ -548,7 +548,7 @@ def test_dashboard_assets_mark_pending_recent_trades_clearly():
     assert "const isPending = row.pending_status === 'pending_settlement';" in js
     assert "const resultText = isPending ? '待结算' : (row.result || '--');" in js
     assert "const rowClass = isPending ? 'recent-pending' : (isMissedEntry ? 'recent-missed-entry' : '');" in js
-    assert "setChip('recentStatus', pendingCount > 0 ? (rows.length + ' 行 · ' + pendingCount + ' 待结算') : (rows.length + ' 行'), pendingCount > 0 ? 'warn' : 'ok');" in js
+    assert "setReportStatus('recentStatus', '明细', pendingCount > 0 ? (rows.length + ' 行 · ' + pendingCount + ' 待结算') : (rows.length + ' 行'), pendingCount > 0 ? 'warn' : 'ok');" in js
 
 def test_dashboard_assets_highlight_recent_missed_entry_rows():
     js = _dashboard_js()
@@ -931,7 +931,7 @@ def test_dashboard_assets_localize_recent_panel_by_running_mode():
 
     assert "const runningMode = String((((state.config || {}).runtime_status || {}).active_mode || (((state.config || {}).runtime_status || {}).running_mode) || 'paper')).toLowerCase();" in js
     assert "tbody.innerHTML = '<tr><td colspan=13 class=empty>' + (runningMode === 'live' ? '最近没有实盘交易记录' : '最近没有纸面交易记录') + '</td></tr>';" in js
-    assert "setChip('recentStatus', rows.length + ' 行' + (runningMode === 'live' ? ' · 实盘' : ''), pendingCount > 0 ? 'warn' : 'ok');" in js
+    assert "setReportStatus('recentStatus', '明细', rows.length + ' 行' + (runningMode === 'live' ? ' · 实盘' : ''), pendingCount > 0 ? 'warn' : 'ok');" in js
 
 
 
