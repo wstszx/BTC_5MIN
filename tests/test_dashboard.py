@@ -1014,6 +1014,24 @@ def test_dashboard_assets_remove_redundant_market_updated_time_row():
     assert "el('marketUpdatedAt')" not in js
 
 
+def test_dashboard_assets_style_monitor_and_decision_columns_for_rebalanced_roles():
+    css = dashboard._dashboard_css()
+
+    assert '.monitor-stack .panel-body {' in css
+    assert '.decision-stack {' in css
+    assert '.config-stack {' in css
+    assert '.monitor-runtime-grid {' in css
+
+
+def test_dashboard_assets_responsive_layout_preserves_priority_order():
+    css = dashboard._dashboard_css()
+
+    assert '@media (max-width: 1450px) {' in css
+    assert 'grid-template-columns: 300px minmax(540px, 1.2fr);' in css
+    assert '@media (max-width: 1024px) {' in css
+    assert '.monitor-stack { grid-column: auto; grid-template-columns: 1fr; }' in css
+
+
 def test_dashboard_assets_use_primary_decision_card_with_folded_signal_details():
     html = _dashboard_html()
     js = _dashboard_js()

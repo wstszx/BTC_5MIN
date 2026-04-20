@@ -1719,7 +1719,7 @@ def _dashboard_html() -> str:
           </div>
           <div id=\"wsHealth\" class=\"chip\">待刷新</div>
         </div>
-        <div class=\"panel-body\">
+        <div class=\"panel-body monitor-runtime-grid\">
           <div id="runtimeSummaryBar" class="strategy-guide-card fold-summary">
             <div class="strategy-guide-head">
               <div>
@@ -2210,6 +2210,16 @@ body::before {
 
 .monitor-stack {
   min-width: 0;
+}
+
+.monitor-stack .panel-body {
+  display: grid;
+  gap: 12px;
+}
+
+.monitor-runtime-grid {
+  display: grid;
+  gap: 12px;
 }
 
 .panel {
@@ -2903,14 +2913,14 @@ tr:hover td { background: rgba(50, 88, 131, 0.1); }
 
 @media (max-width: 1450px) {
   .layout {
-    grid-template-columns: 350px minmax(500px, 1fr);
+    grid-template-columns: 300px minmax(540px, 1.2fr);
   }
 
   .report-card-body {
     grid-template-columns: minmax(280px, 0.95fr) minmax(0, 1.25fr);
   }
 
-  .right-stack {
+  .monitor-stack {
     grid-column: span 2;
     display: grid;
     grid-template-columns: 1fr 1fr;
@@ -2921,7 +2931,7 @@ tr:hover td { background: rgba(50, 88, 131, 0.1); }
 @media (max-width: 1024px) {
   .layout { grid-template-columns: 1fr; }
   .report-card-body { grid-template-columns: 1fr; }
-  .right-stack { grid-column: auto; grid-template-columns: 1fr; }
+  .monitor-stack { grid-column: auto; grid-template-columns: 1fr; }
   .split,
   .kv-grid,
   .group-grid { grid-template-columns: 1fr; }
