@@ -1063,6 +1063,18 @@ def test_dashboard_assets_summary_and_recent_use_their_own_filters():
     assert "const strategy = encodeURIComponent(effectivePaperRecentStrategyFilter());" in js
 
 
+def test_dashboard_assets_show_current_strategy_in_recent_panel_header():
+    html = _dashboard_html()
+    js = _dashboard_js()
+
+    assert 'id="recentPanelDesc"' in html
+    assert 'function recentStrategyHeaderText()' in js
+    assert "const strategy = effectivePaperRecentStrategyFilter();" in js
+    assert "el('recentPanelDesc').textContent = recentStrategyHeaderText();" in js
+    assert "return '按时间倒序显示最近 80 条记录 · 当前策略：全部';" in js
+    assert "return '按时间倒序显示最近 80 条记录 · 当前策略：策略 ' + strategy;" in js
+
+
 def test_dashboard_assets_refresh_all_loads_market_before_report_panels():
     js = _dashboard_js()
 

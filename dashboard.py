@@ -1828,7 +1828,7 @@ def _dashboard_html() -> str:
       <div class="panel-head">
         <div>
           <div class="head-title">最近交易明细</div>
-          <div class="head-desc">按时间倒序显示最近 80 条记录</div>
+          <div id="recentPanelDesc" class="head-desc">按时间倒序显示最近 80 条记录 · 当前策略：全部</div>
         </div>
         <div class="top-actions">
           <div id="recentStatus" class="chip">待刷新</div>
@@ -3660,12 +3660,21 @@ function effectivePaperRecentStrategyFilter() {
   return effectivePaperReportStrategyFilter();
 }
 
+function recentStrategyHeaderText() {
+  const strategy = effectivePaperRecentStrategyFilter();
+  if (!strategy || strategy === 'all') {
+    return '按时间倒序显示最近 80 条记录 · 当前策略：全部';
+  }
+  return '按时间倒序显示最近 80 条记录 · 当前策略：策略 ' + strategy;
+}
+
 function renderSharedPaperReportStrategySelector() {
   const options = paperReportStrategyOptions();
   const current = effectivePaperReportStrategyFilter();
   const summaryCurrent = effectivePaperSummaryStrategyFilter();
   const recentCurrent = effectivePaperRecentStrategyFilter();
   const node = el('paperReportStrategy');
+  el('recentPanelDesc').textContent = recentStrategyHeaderText();
   if (!node) {
     return;
   }
@@ -4742,6 +4751,7 @@ function renderRecent(payload) {
   const rows = payload.rows || [];
   const tbody = el('recentTbody');
   const runningMode = String((((state.config || {}).runtime_status || {}).active_mode || (((state.config || {}).runtime_status || {}).running_mode) || 'paper')).toLowerCase();
+  el('recentPanelDesc').textContent = recentStrategyHeaderText();
   if (rows.length === 0) {
     tbody.innerHTML = '<tr><td colspan=13 class=empty>' + (runningMode === 'live' ? '最近没有实盘交易记录' : '最近没有纸面交易记录') + '</td></tr>';
     setChip('recentStatus', '0 行', 'warn');
