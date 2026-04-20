@@ -964,6 +964,16 @@ def test_dashboard_assets_fold_runtime_and_strategy_diagnostics():
     assert 'function toggleFoldSection(' in js
 
 
+def test_dashboard_assets_rebalance_main_columns_for_config_decision_monitoring():
+    html = _dashboard_html()
+    css = dashboard._dashboard_css()
+
+    assert 'class="panel left-stack config-stack"' in html
+    assert 'class="panel center-stack decision-stack"' in html
+    assert 'class="stack right-stack monitor-stack"' in html
+    assert 'grid-template-columns: 312px minmax(620px, 1.35fr) 392px;' in css
+
+
 def test_dashboard_assets_use_primary_decision_card_with_folded_signal_details():
     html = _dashboard_html()
     js = _dashboard_js()

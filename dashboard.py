@@ -1505,7 +1505,7 @@ def _dashboard_html() -> str:
   </header>
 
   <main class=\"layout\">
-    <section class=\"panel left-stack\">
+    <section class=\"panel left-stack config-stack\">
       <div class=\"panel-head\">
         <div>
           <div class=\"head-title\">参数引擎</div>
@@ -1649,7 +1649,7 @@ def _dashboard_html() -> str:
       </div>
     </section>
 
-    <section class=\"panel center-stack\">
+    <section class=\"panel center-stack decision-stack\">
       <div class=\"panel-head\">
         <div>
           <div class=\"head-title\">行情与信号</div>
@@ -1759,7 +1759,7 @@ def _dashboard_html() -> str:
       </div>
     </section>
 
-    <section class="stack right-stack">
+    <section class="stack right-stack monitor-stack">
       <div class=\"panel\">
         <div class=\"panel-head\">
           <div>
@@ -2200,8 +2200,20 @@ body::before {
   padding: 14px;
   display: grid;
   gap: 14px;
-  grid-template-columns: 360px minmax(560px, 1fr) 360px;
+  grid-template-columns: 312px minmax(620px, 1.35fr) 392px;
   align-items: start;
+}
+
+.config-stack {
+  min-width: 0;
+}
+
+.decision-stack {
+  min-width: 0;
+}
+
+.monitor-stack {
+  min-width: 0;
 }
 
 .panel {
