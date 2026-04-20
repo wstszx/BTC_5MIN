@@ -974,6 +974,19 @@ def test_dashboard_assets_rebalance_main_columns_for_config_decision_monitoring(
     assert 'grid-template-columns: 312px minmax(620px, 1.35fr) 392px;' in css
 
 
+def test_dashboard_assets_use_near_symmetric_left_and_right_columns():
+    css = dashboard._dashboard_css()
+
+    assert 'grid-template-columns: 380px minmax(520px, 1.15fr) 380px;' in css
+
+
+def test_dashboard_assets_mid_width_layout_keeps_left_and_right_balanced():
+    css = dashboard._dashboard_css()
+
+    assert '@media (max-width: 1450px) {' in css
+    assert 'grid-template-columns: 340px minmax(500px, 1.1fr);' in css
+
+
 def test_dashboard_assets_move_runtime_monitoring_into_monitor_column():
     html = _dashboard_html()
 

@@ -2196,7 +2196,7 @@ body::before {
   padding: 14px;
   display: grid;
   gap: 14px;
-  grid-template-columns: 312px minmax(620px, 1.35fr) 392px;
+  grid-template-columns: 380px minmax(520px, 1.15fr) 380px;
   align-items: start;
 }
 
@@ -2920,7 +2920,7 @@ tr:hover td { background: rgba(50, 88, 131, 0.1); }
 
 @media (max-width: 1450px) {
   .layout {
-    grid-template-columns: 300px minmax(540px, 1.2fr);
+    grid-template-columns: 340px minmax(500px, 1.1fr);
   }
 
   .report-card-body {
