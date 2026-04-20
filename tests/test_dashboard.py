@@ -971,7 +971,7 @@ def test_dashboard_assets_rebalance_main_columns_for_config_decision_monitoring(
     assert 'class="panel left-stack config-stack"' in html
     assert 'class="panel center-stack decision-stack"' in html
     assert 'class="stack right-stack monitor-stack"' in html
-    assert 'grid-template-columns: 312px minmax(620px, 1.35fr) 392px;' in css
+    assert 'grid-template-columns: 380px minmax(520px, 1.15fr) 380px;' in css
 
 
 def test_dashboard_assets_use_near_symmetric_left_and_right_columns():
@@ -1046,14 +1046,12 @@ def test_dashboard_assets_move_diagnostics_entry_into_decision_column():
 
 def test_dashboard_assets_compress_config_status_into_inline_summary():
     html = _dashboard_html()
-    css = dashboard._dashboard_css()
 
-    assert 'class="config-status-inline"' in html
-    assert 'id="cfgError"' in html
-    assert 'id="cfgSavedAt"' in html
+    assert 'class="config-status-inline"' not in html
     assert '<span class="meta-label">读取状态</span>' not in html
-    assert '<div class="meta">' not in html
-    assert '.config-status-inline {' in css
+    assert '<span class="meta-label">最近保存</span>' not in html
+    assert 'id="cfgError"' not in html
+    assert 'id="cfgSavedAt"' not in html
 
 
 def test_dashboard_assets_remove_redundant_market_updated_time_row():
@@ -1077,7 +1075,7 @@ def test_dashboard_assets_responsive_layout_preserves_priority_order():
     css = dashboard._dashboard_css()
 
     assert '@media (max-width: 1450px) {' in css
-    assert 'grid-template-columns: 300px minmax(540px, 1.2fr);' in css
+    assert 'grid-template-columns: 340px minmax(500px, 1.1fr);' in css
     assert '@media (max-width: 1024px) {' in css
     assert '.monitor-stack { grid-column: auto; grid-template-columns: 1fr; }' in css
 
