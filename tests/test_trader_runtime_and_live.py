@@ -1824,6 +1824,41 @@ def test_strategy7_strong_signal_still_skips_when_relaxation_is_zero():
     assert decision.reason == "strategy7_entry_too_late"
 
 
+def test_strategy7_late_confirm_relaxation_requires_final_quality_gate():
+    now = datetime.now(timezone.utc)
+    cfg = AppConfig(
+        strategy_id=7,
+        strategy7_ofi_threshold=0.65,
+        strategy7_momentum_threshold=0.02,
+        strategy7_min_signal_gap=0.03,
+        strategy7_max_entry_price=0.56,
+        strategy7_confirm_before_entry_seconds=15,
+        strategy7_late_confirm_strong_signal_gap=0.01,
+        strategy7_late_confirm_relax_seconds=6,
+    )
+    state = SessionState(round_index=0, signal_round_slug="s1", signal_round_open_up_price=0.50)
+    quote = MarketQuote(
+        slug="s1",
+        up_price=0.54,
+        up_best_ask=0.54,
+        strategy6_ofi_score=0.67,
+        fetched_at=now,
+        strategy6_signal_at=now,
+    )
+
+    decision = _resolve_side_from_strategy(
+        cfg=cfg,
+        state=state,
+        slug="s1",
+        quote=quote,
+        now=now,
+        entry_time=now + timedelta(seconds=10),
+    )
+
+    assert decision.side is None
+    assert decision.reason == "strategy7_entry_too_late"
+
+
 def test_strategy7_clamps_confirmation_window_to_available_open_entry_window():
     now = datetime.now(timezone.utc)
     cfg = AppConfig(

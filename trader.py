@@ -18,7 +18,7 @@ from models import MarketQuote, MarketWindow, PaperStrategyState, PendingPaperTr
 from optimizer import load_optimizer_state, save_optimizer_state
 from polymarket_api import PolymarketClient, extract_token_ids, parse_iso_datetime
 from risk_and_sizing import apply_round_outcome, build_trade_plan, reset_after_stop_loss
-from strategy import get_side_for_round
+from strategy import get_side_for_round, strategy7_signal_gap_ok, strategy7_strong_signal_allows_late_confirm
 from runtime_control import RuntimeControl
 
 
@@ -993,21 +993,6 @@ def _apply_strategy6_signal_to_quote(
     quote.strategy6_signal_at = latest.signal_at
 
 
-def _strategy7_signal_gap_ok(*, ofi_score: float, momentum_delta: float, cfg: AppConfig) -> bool:
-    return (
-        abs(ofi_score) >= cfg.strategy7_ofi_threshold + cfg.strategy7_min_signal_gap
-        and abs(momentum_delta) >= cfg.strategy7_momentum_threshold + cfg.strategy7_min_signal_gap
-    )
-
-
-def _strategy7_strong_signal_allows_late_confirm(*, ofi_score: float, momentum_delta: float, cfg: AppConfig) -> bool:
-    strong_gap = max(0.0, float(cfg.strategy7_late_confirm_strong_signal_gap))
-    return (
-        abs(ofi_score) >= cfg.strategy7_ofi_threshold + strong_gap
-        and abs(momentum_delta) >= cfg.strategy7_momentum_threshold + strong_gap
-    )
-
-
 def _resolve_side_from_strategy(
     *,
     cfg: AppConfig,
@@ -1144,10 +1129,13 @@ def _resolve_side_from_strategy(
             window=window,
             entry_time=entry_time,
         )
-        if _strategy7_strong_signal_allows_late_confirm(
+        if strategy7_strong_signal_allows_late_confirm(
             ofi_score=ofi_score,
             momentum_delta=momentum_delta,
-            cfg=cfg,
+            ofi_threshold=cfg.strategy7_ofi_threshold,
+            momentum_threshold=cfg.strategy7_momentum_threshold,
+            signal_min_gap=cfg.strategy7_min_signal_gap,
+            strong_signal_gap=cfg.strategy7_late_confirm_strong_signal_gap,
         ):
             effective_confirm_before_entry_seconds = max(
                 0.0,
@@ -1174,7 +1162,13 @@ def _resolve_side_from_strategy(
                 signal_threshold=cfg.strategy7_momentum_threshold,
                 signal_delta=momentum_delta,
             )
-        if not _strategy7_signal_gap_ok(ofi_score=ofi_score, momentum_delta=momentum_delta, cfg=cfg):
+        if not strategy7_signal_gap_ok(
+            ofi_score=ofi_score,
+            momentum_delta=momentum_delta,
+            ofi_threshold=cfg.strategy7_ofi_threshold,
+            momentum_threshold=cfg.strategy7_momentum_threshold,
+            signal_min_gap=cfg.strategy7_min_signal_gap,
+        ):
             return SideDecision(
                 side=None,
                 reason='strategy7_confidence_too_low',

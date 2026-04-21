@@ -41,6 +41,48 @@ def _pattern_side_for_round(strategy_id: int, round_index: int) -> str:
     return 'UP' if block_index % 2 == 0 else 'DOWN'
 
 
+def strategy7_signal_gap_ok(
+    *,
+    ofi_score: float,
+    momentum_delta: float,
+    ofi_threshold: float,
+    momentum_threshold: float,
+    signal_min_gap: float,
+) -> bool:
+    threshold = max(0.0, ofi_threshold)
+    confirmation_threshold = max(0.0, momentum_threshold)
+    min_gap = max(0.0, signal_min_gap)
+    return (
+        abs(ofi_score) >= threshold + min_gap
+        and abs(momentum_delta) >= confirmation_threshold + min_gap
+    )
+
+
+def strategy7_strong_signal_allows_late_confirm(
+    *,
+    ofi_score: float,
+    momentum_delta: float,
+    ofi_threshold: float,
+    momentum_threshold: float,
+    signal_min_gap: float,
+    strong_signal_gap: float,
+) -> bool:
+    threshold = max(0.0, ofi_threshold)
+    confirmation_threshold = max(0.0, momentum_threshold)
+    extra_gap = max(0.0, strong_signal_gap)
+    return (
+        strategy7_signal_gap_ok(
+            ofi_score=ofi_score,
+            momentum_delta=momentum_delta,
+            ofi_threshold=ofi_threshold,
+            momentum_threshold=momentum_threshold,
+            signal_min_gap=signal_min_gap,
+        )
+        and abs(ofi_score) >= threshold + extra_gap
+        and abs(momentum_delta) >= confirmation_threshold + extra_gap
+    )
+
+
 def get_side_for_round(
     strategy_id: int,
     round_index: int,
@@ -93,7 +135,13 @@ def get_side_for_round(
             raise ValueError('strategy_id=7 requires strong momentum signal')
         if ofi_score * momentum_delta <= 0:
             raise ValueError('strategy_id=7 requires agreeing OFI and momentum signals')
-        if abs(ofi_score) < threshold + min_gap or abs(momentum_delta) < momentum_threshold + min_gap:
+        if not strategy7_signal_gap_ok(
+            ofi_score=ofi_score,
+            momentum_delta=momentum_delta,
+            ofi_threshold=threshold,
+            momentum_threshold=momentum_threshold,
+            signal_min_gap=min_gap,
+        ):
             raise ValueError('strategy_id=7 requires signal gap above threshold')
         return 'UP' if momentum_delta > 0 else 'DOWN'
 

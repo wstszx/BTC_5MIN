@@ -9,7 +9,7 @@ from config import AppConfig
 from models import BacktestResult, SessionState, TradeRecord
 from polymarket_api import normalize_outcome_label, parse_iso_datetime
 from risk_and_sizing import apply_round_outcome, build_trade_plan, reset_after_stop_loss
-from strategy import get_side_for_round
+from strategy import get_side_for_round, strategy7_strong_signal_allows_late_confirm
 
 
 def _optional_float(value: str | None) -> float | None:
@@ -156,15 +156,18 @@ def run_backtest(csv_path: Path, cfg: AppConfig | None = None) -> BacktestResult
             )
 
     for row in rows:
+        signal_open_up_price = _optional_float(row.get("entry_price_open_up"))
+        signal_current_up_price = _select_signal_current_up_price(row, cfg.entry_timing)
+        ofi_score = _select_ofi_score(row)
         try:
             side = get_side_for_round(
                 cfg.strategy_id,
                 state.round_index,
-                signal_open_up_price=_optional_float(row.get("entry_price_open_up")),
-                signal_current_up_price=_select_signal_current_up_price(row, cfg.entry_timing),
+                signal_open_up_price=signal_open_up_price,
+                signal_current_up_price=signal_current_up_price,
                 signal_threshold=cfg.strategy7_momentum_threshold if cfg.strategy_id == 7 else cfg.signal_momentum_threshold,
                 signal_fallback_strategy_id=cfg.signal_fallback_strategy_id,
-                ofi_score=_select_ofi_score(row),
+                ofi_score=ofi_score,
                 ofi_threshold=cfg.strategy7_ofi_threshold if cfg.strategy_id == 7 else cfg.ofi_threshold,
                 signal_min_gap=cfg.strategy7_min_signal_gap if cfg.strategy_id == 7 else 0.0,
             )
@@ -216,10 +219,28 @@ def run_backtest(csv_path: Path, cfg: AppConfig | None = None) -> BacktestResult
                 state.round_index += 1
                 continue
             entry_time = _historical_entry_time(row, cfg)
+            effective_confirm_before_entry_seconds = max(0.0, float(cfg.strategy7_confirm_before_entry_seconds))
+            if (
+                ofi_score is not None
+                and signal_open_up_price is not None
+                and signal_current_up_price is not None
+                and strategy7_strong_signal_allows_late_confirm(
+                    ofi_score=ofi_score,
+                    momentum_delta=signal_current_up_price - signal_open_up_price,
+                    ofi_threshold=cfg.strategy7_ofi_threshold,
+                    momentum_threshold=cfg.strategy7_momentum_threshold,
+                    signal_min_gap=cfg.strategy7_min_signal_gap,
+                    strong_signal_gap=cfg.strategy7_late_confirm_strong_signal_gap,
+                )
+            ):
+                effective_confirm_before_entry_seconds = max(
+                    0.0,
+                    effective_confirm_before_entry_seconds - max(0.0, float(cfg.strategy7_late_confirm_relax_seconds)),
+                )
             if (
                 quote_fetched_at is not None
                 and entry_time is not None
-                and (entry_time - quote_fetched_at).total_seconds() < cfg.strategy7_confirm_before_entry_seconds
+                and (entry_time - quote_fetched_at).total_seconds() < effective_confirm_before_entry_seconds
             ):
                 records.append(
                     _build_record(
