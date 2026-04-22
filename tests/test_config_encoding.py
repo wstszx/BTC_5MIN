@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from config import build_config_from_env_values, load_env_file_values
+from config import AppConfig, build_config_from_env_values, load_env_file_values
 
 
 def test_load_env_file_values_reads_gbk_encoded_dashboard_file(tmp_path: Path):
@@ -121,3 +121,10 @@ def test_build_config_uses_legacy_single_timeframe_paper_fields_when_paper_timef
     assert cfg.paper_profiles['15m'].strategy_id == 7
     assert cfg.paper_profiles['15m'].paper_strategy_ids == [7, 6]
     assert cfg.paper_profiles['15m'].target_profit == 1.1
+
+
+def test_direct_app_config_constructor_aligns_paper_timeframes_with_market_timeframe():
+    cfg = AppConfig(market_timeframe='15m')
+
+    assert cfg.paper_timeframes == ['15m']
+    assert cfg.paper_profiles['15m'].timeframe == '15m'

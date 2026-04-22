@@ -49,6 +49,25 @@ Credential split:
 - `POLYMARKET_BUILDER_*` and `POLYMARKET_RELAYER_*` are for official gasless live redeem only.
 - Direct Polygon `web3` redeem is not a supported runtime path.
 
+### Paper multi-timeframe profiles
+
+Paper mode can now enable more than one timeframe at once with:
+
+- `PAPER_TIMEFRAMES=5m,15m`
+
+Each timeframe can keep its own paper strategy list and thresholds. Example fields:
+
+- `PAPER_5M_STRATEGY_ID=5`
+- `PAPER_5M_STRATEGY_IDS=5,6`
+- `PAPER_5M_TARGET_PROFIT=0.8`
+- `PAPER_15M_STRATEGY_ID=2`
+- `PAPER_15M_STRATEGY_IDS=1,2,7`
+- `PAPER_15M_TARGET_PROFIT=1.0`
+
+Paper runtime files are isolated by timeframe under `logs/paper/<timeframe>/`.
+
+Live mode remains single-timeframe and continues to use `MARKET_TIMEFRAME`.
+
 ## 3. Run the supported runtime
 
 ```powershell

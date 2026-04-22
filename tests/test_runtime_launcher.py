@@ -651,3 +651,12 @@ def test_runtime_manager_keeps_dashboard_online_while_switch_pending(tmp_path):
 
     snapshot = manager.snapshot()
     assert snapshot.switch_state == 'pending'
+
+
+def test_readme_mentions_paper_timeframe_profiles():
+    text = Path('README.md').read_text(encoding='utf-8')
+
+    assert 'PAPER_TIMEFRAMES' in text
+    assert 'PAPER_5M_STRATEGY_IDS' in text
+    assert 'PAPER_15M_STRATEGY_IDS' in text
+    assert 'Live mode remains single-timeframe and continues to use `MARKET_TIMEFRAME`.' in text
