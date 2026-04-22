@@ -1662,6 +1662,7 @@ def _dashboard_html() -> str:
       </div>
       <div class=\"panel-body\">
         <div id=\"strategyGuideCard\" class=\"strategy-guide-card\"></div>
+        <div id="paperProfilesRoot" class="rows"></div>
 
         <div class=\"strategy-guide-card fold-summary\">
           <div class=\"strategy-guide-head\">
@@ -1865,6 +1866,8 @@ def _dashboard_html() -> str:
               <button id="runtimeDetailsToggle" class="btn btn-ghost" type="button" aria-expanded="false" aria-controls="runtimeDetailsPanel">展开运行详情</button>
             </div>
           </div>
+
+          <div id="paperRuntimeCards" class="rows"></div>
 
           <div id="runtimeDetailsPanel" hidden>
             <div id="runtimeModeCard" class="strategy-guide-card">
@@ -3985,6 +3988,86 @@ function renderStrategyGuide(payload, values) {
     extra;
 }
 
+function renderPaperProfiles(payload) {
+  const node = el('paperProfilesRoot');
+  if (!node) {
+    return;
+  }
+  const timeframes = Array.isArray((payload || {}).paper_timeframes) ? payload.paper_timeframes : [];
+  const profiles = ((payload || {}).paper_profiles) || {};
+  if (!timeframes.length) {
+    node.innerHTML = '';
+    return;
+  }
+  node.innerHTML = timeframes.map((timeframe) => {
+    const profile = profiles[timeframe] || {};
+    const strategyIds = Array.isArray(profile.paper_strategy_ids) ? profile.paper_strategy_ids.join(',') : '--';
+    return ''
+      + '<section class="strategy-guide-card">'
+      +   '<div class="strategy-guide-head">'
+      +     '<div>'
+      +       '<div class="strategy-guide-title">Paper ' + esc(timeframe) + '</div>'
+      +       '<div class="strategy-guide-subtitle">独立 paper profile</div>'
+      +     '</div>'
+      +     '<span class="chip ok">Timeframe</span>'
+      +   '</div>'
+      +   '<div class="rows">'
+      +     '<div class="row"><span class="label">主策略</span><span class="value">' + esc(profile.strategy_id || '--') + '</span></div>'
+      +     '<div class="row"><span class="label">运行策略</span><span class="value">' + esc(strategyIds) + '</span></div>'
+      +     '<div class="row"><span class="label">目标收益</span><span class="value">' + esc(profile.target_profit || '--') + '</span></div>'
+      +     '<div class="row"><span class="label">开盘延迟</span><span class="value">' + esc(profile.open_delay_seconds || '--') + '</span></div>'
+      +   '</div>'
+      + '</section>';
+  }).join('');
+}
+
+function paperRuntimeCardsFromConfig(payload) {
+  const timeframes = Array.isArray((payload || {}).paper_timeframes) ? payload.paper_timeframes : [];
+  const runtime = ((payload || {}).runtime_status) || {};
+  return timeframes.map((timeframe) => ({
+    timeframe,
+    active_mode: runtime.active_mode || runtime.running_mode || 'paper',
+    desired_mode: runtime.desired_mode || runtime.saved_mode || 'paper',
+    switch_state: runtime.switch_state || 'idle',
+  }));
+}
+
+function renderPaperRuntimeCards(payload) {
+  const node = el('paperRuntimeCards');
+  if (!node) {
+    return;
+  }
+  const cards = paperRuntimeCardsFromConfig(payload || {});
+  if (!cards.length) {
+    node.innerHTML = '';
+    return;
+  }
+  node.innerHTML = cards.map((card) => {
+    return ''
+      + '<section class="strategy-guide-card">'
+      +   '<div class="strategy-guide-head">'
+      +     '<div>'
+      +       '<div class="strategy-guide-title">Paper ' + esc(card.timeframe) + '</div>'
+      +       '<div class="strategy-guide-subtitle">paper runtime card</div>'
+      +     '</div>'
+      +     '<span class="chip ok">' + esc(formatModeLabel(card.active_mode || 'paper')) + '</span>'
+      +   '</div>'
+      +   '<div class="rows">'
+      +     '<div class="row"><span class="label">目标模式</span><span class="value">' + esc(formatModeLabel(card.desired_mode || 'paper')) + '</span></div>'
+      +     '<div class="row"><span class="label">切换状态</span><span class="value">' + esc(card.switch_state || '--') + '</span></div>'
+      +   '</div>'
+      + '</section>';
+  }).join('');
+}
+
+function refreshPaperRuntimeCard(timeframe) {
+  const payload = state.config || {};
+  renderPaperRuntimeCards({
+    ...payload,
+    paper_timeframes: Array.isArray(payload.paper_timeframes) ? payload.paper_timeframes.filter((item) => !timeframe || item === timeframe) : [],
+  });
+}
+
 function applyConfigFieldVisibility(values) {
   const strategyId = String(resolveUnifiedStrategySelection(state.config || {}, values || {}).focus || '');
   const isStrategyFive = strategyId === '5';
@@ -4703,6 +4786,8 @@ function renderConfig(payload) {
   form.onchange = form.oninput;
 
   renderStrategyGuide(payload, displayValues);
+  renderPaperProfiles(payload);
+  renderPaperRuntimeCards(payload);
   applyConfigFieldVisibility(expandLiveToggleValues(displayValues));
   applyAdvancedConfigVisibility(expandLiveToggleValues(displayValues));
   const timeframeNode = el('cfg_MARKET_TIMEFRAME');

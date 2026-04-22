@@ -1582,6 +1582,26 @@ def test_dashboard_assets_merge_structured_timeframe_presets():
     assert "preset.strategy7" in js
 
 
+def test_dashboard_assets_include_paper_profile_editor_hooks():
+    html = _dashboard_html()
+    js = _dashboard_js()
+
+    assert 'id="paperProfilesRoot"' in html
+    assert "function renderPaperProfiles(" in js
+    assert "paper_timeframes" in js
+    assert "paper_profiles" in js
+
+
+def test_dashboard_assets_include_multi_timeframe_paper_runtime_cards():
+    html = _dashboard_html()
+    js = _dashboard_js()
+
+    assert 'id="paperRuntimeCards"' in html
+    assert "function renderPaperRuntimeCards(" in js
+    assert "function refreshPaperRuntimeCard(" in js
+    assert "Paper " in js
+
+
 def test_dashboard_timeframe_presets_only_include_timeframe_sensitive_fields(tmp_path: Path):
     state = DashboardState(env_file=tmp_path / '.env.dashboard')
     try:
