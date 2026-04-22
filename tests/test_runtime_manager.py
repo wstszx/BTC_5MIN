@@ -126,3 +126,27 @@ def test_runtime_manager_waits_for_safe_boundary_before_reloading_config(tmp_pat
     snapshot = manager.snapshot()
     assert snapshot.active_mode == 'paper'
     assert snapshot.switch_state == 'pending'
+
+
+def test_runtime_control_aggregates_multiple_paper_worker_states():
+    control = RuntimeControl(initial_mode="paper")
+
+    control.update_paper_worker_state(
+        "5m",
+        current_round_slug=None,
+        round_in_progress=False,
+        safe_to_switch=True,
+        pending_live_order=False,
+    )
+    control.update_paper_worker_state(
+        "15m",
+        current_round_slug="btc-updown-15m-current",
+        round_in_progress=True,
+        safe_to_switch=False,
+        pending_live_order=False,
+    )
+
+    snapshot = control.snapshot()
+    assert snapshot.current_round_slug == "btc-updown-15m-current"
+    assert snapshot.round_in_progress is True
+    assert snapshot.safe_to_switch is False

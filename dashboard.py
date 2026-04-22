@@ -128,6 +128,77 @@ def _paper_trades_path(cfg: AppConfig, timeframe: str) -> Path:
     return _paper_runtime_dir(cfg, timeframe) / "paper_trades.csv"
 
 
+SUPPORTED_PAPER_TIMEFRAMES: tuple[str, ...] = ("5m", "15m")
+PAPER_PROFILE_EDITABLE_FIELDS: tuple[str, ...] = (
+    "STRATEGY_ID",
+    "STRATEGY_IDS",
+    "TARGET_PROFIT",
+    "BET_SIZING_MODE",
+    "BASE_ORDER_COST",
+    "MAX_CONSECUTIVE_LOSSES",
+    "MAX_STAKE",
+    "OPEN_DELAY_SECONDS",
+    "SIGNAL_MOMENTUM_THRESHOLD",
+    "OFI_THRESHOLD",
+    "BINANCE_SIGNAL_STALE_SECONDS",
+    "STRATEGY7_OFI_THRESHOLD",
+    "STRATEGY7_MOMENTUM_THRESHOLD",
+    "STRATEGY7_MAX_ENTRY_PRICE",
+)
+
+
+def _paper_profile_env_prefix(timeframe: str) -> str:
+    return f"PAPER_{str(timeframe).upper()}"
+
+
+def _paper_profile_config_key(timeframe: str, field_name: str) -> str:
+    return f"{_paper_profile_env_prefix(timeframe)}_{field_name}"
+
+
+def _split_paper_profile_key(key: str) -> tuple[str, str] | None:
+    for timeframe in SUPPORTED_PAPER_TIMEFRAMES:
+        prefix = _paper_profile_env_prefix(timeframe) + "_"
+        if key.startswith(prefix):
+            return timeframe, key[len(prefix):]
+    return None
+
+
+def _normalize_paper_timeframes_value(value: str) -> str:
+    selected: list[str] = []
+    for item in str(value).split(","):
+        timeframe = item.strip().lower()
+        if timeframe in SUPPORTED_PAPER_TIMEFRAMES and timeframe not in selected:
+            selected.append(timeframe)
+    if not selected:
+        raise ValueError(f"Invalid value for PAPER_TIMEFRAMES: expected comma-separated 5m/15m, got {value!r}")
+    return ",".join(selected)
+
+
+def _cfg_for_paper_timeframe(cfg: AppConfig, timeframe: str) -> AppConfig:
+    target_timeframe = _normalize_timeframe_filter(timeframe, fallback=cfg.market_timeframe)
+    profile = getattr(cfg, "paper_profiles", {}).get(target_timeframe)
+    if profile is None:
+        return replace(cfg, market_timeframe=target_timeframe)
+    return replace(
+        cfg,
+        market_timeframe=target_timeframe,
+        strategy_id=profile.strategy_id,
+        paper_strategy_ids=list(profile.paper_strategy_ids),
+        target_profit=profile.target_profit,
+        bet_sizing_mode=profile.bet_sizing_mode,
+        base_order_cost=profile.base_order_cost,
+        max_consecutive_losses=profile.max_consecutive_losses,
+        max_stake=profile.max_stake,
+        open_delay_seconds=profile.open_delay_seconds,
+        signal_momentum_threshold=profile.signal_momentum_threshold,
+        ofi_threshold=profile.ofi_threshold,
+        binance_signal_stale_seconds=profile.binance_signal_stale_seconds,
+        strategy7_ofi_threshold=profile.strategy7_ofi_threshold,
+        strategy7_momentum_threshold=profile.strategy7_momentum_threshold,
+        strategy7_max_entry_price=profile.strategy7_max_entry_price,
+    )
+
+
 def _pending_paper_trade_to_recent_row(item: PendingPaperTrade) -> dict[str, str]:
     return {
         'timestamp': item.queued_at or item.end_time,
@@ -449,6 +520,7 @@ class DashboardState:
     EDITABLE_CONFIG_KEYS: tuple[str, ...] = (
         "TRADE_MODE",
         "MARKET_TIMEFRAME",
+        "PAPER_TIMEFRAMES",
         "LIVE_TRADING_ENABLED",
         "POLYMARKET_PRIVATE_KEY",
         "POLYMARKET_FUNDER",
@@ -497,6 +569,11 @@ class DashboardState:
         "WS_QUOTE_STALE_SECONDS",
         "WS_TRADE_GUARD_STALE_SECONDS",
         "WS_CONNECT_TIMEOUT_SECONDS",
+        *tuple(
+            _paper_profile_config_key(timeframe, field_name)
+            for timeframe in SUPPORTED_PAPER_TIMEFRAMES
+            for field_name in PAPER_PROFILE_EDITABLE_FIELDS
+        ),
     )
 
     CONFIG_LABELS: dict[str, str] = {
@@ -771,6 +848,38 @@ class DashboardState:
         if normalized == "":
             return ""
 
+        if key == "PAPER_TIMEFRAMES":
+            return _normalize_paper_timeframes_value(normalized)
+
+        paper_profile_key = _split_paper_profile_key(key)
+        if paper_profile_key is not None:
+            _, base_key = paper_profile_key
+            if base_key == "STRATEGY_IDS":
+                return _normalize_strategy_id_list_value(normalized)
+            if base_key in cls.BOOL_CONFIG_KEYS:
+                return cls._normalize_bool_config_value(key, normalized)
+            if base_key in cls.SELECT_OPTIONS:
+                allowed = cls.SELECT_OPTIONS[base_key]
+                upper_value = normalized.upper()
+                lower_value = normalized.lower()
+                if normalized in allowed:
+                    return normalized
+                if upper_value in allowed:
+                    return upper_value
+                if lower_value in allowed:
+                    return lower_value
+                raise ValueError(f"Invalid value for {key}: expected one of {allowed}, got {value!r}")
+            if base_key in cls.INT_CONFIG_KEYS:
+                try:
+                    return str(int(normalized))
+                except ValueError as exc:
+                    raise ValueError(f"Invalid value for {key}: expected integer, got {value!r}") from exc
+            if base_key in cls.FLOAT_CONFIG_KEYS:
+                try:
+                    return str(float(normalized))
+                except ValueError as exc:
+                    raise ValueError(f"Invalid value for {key}: expected number, got {value!r}") from exc
+
         if key == "PAPER_STRATEGY_IDS":
             return _normalize_strategy_id_list_value(normalized)
 
@@ -856,6 +965,21 @@ class DashboardState:
         return cls.MASKED_SECRET_VALUE
 
     def _effective_config_value(self, key: str) -> str:
+        if key == "PAPER_TIMEFRAMES":
+            return ",".join(getattr(self._cfg, "paper_timeframes", []) or [])
+        paper_profile_key = _split_paper_profile_key(key)
+        if paper_profile_key is not None:
+            timeframe, base_key = paper_profile_key
+            profile = getattr(self._cfg, "paper_profiles", {}).get(timeframe)
+            if profile is None:
+                return ""
+            attr_name = "paper_strategy_ids" if base_key == "STRATEGY_IDS" else self.CONFIG_ATTR_MAP[base_key]
+            value = getattr(profile, attr_name)
+            if value is None:
+                return ""
+            if base_key == "STRATEGY_IDS":
+                return ",".join(str(item) for item in value)
+            return _fmt_env(value)
         value = getattr(self._cfg, self.CONFIG_ATTR_MAP[key])
         if value is None:
             return ""
@@ -1072,26 +1196,31 @@ class DashboardState:
             self.notify_mode_change(next_mode)
         return self.get_config_payload()
 
-    def get_market_payload(self, *, strategy: int | str | None = None) -> dict[str, Any]:
+    def get_market_payload(self, *, strategy: int | str | None = None, timeframe: str | None = None) -> dict[str, Any]:
         with self._lock:
             cfg = self._cfg
-            client = self._client
             binance_signal_service = self._binance_signal_service
 
         now = datetime.now(timezone.utc)
+        target_timeframe = _normalize_timeframe_filter(timeframe, fallback=cfg.market_timeframe)
+        timeframe_cfg = _cfg_for_paper_timeframe(cfg, target_timeframe)
         strategy_filter = _normalize_strategy_filter(strategy)
-        selected_strategy = int(strategy_filter or str(cfg.strategy_id))
-        effective_cfg = replace(cfg, strategy_id=selected_strategy)
-        effective_paper_strategy_ids = list(getattr(cfg, "paper_strategy_ids", []) or [cfg.strategy_id])
+        selected_strategy = int(strategy_filter or str(timeframe_cfg.strategy_id))
+        effective_cfg = replace(timeframe_cfg, strategy_id=selected_strategy)
+        effective_paper_strategy_ids = list(getattr(timeframe_cfg, "paper_strategy_ids", []) or [timeframe_cfg.strategy_id])
         if selected_strategy not in effective_paper_strategy_ids:
             effective_paper_strategy_ids.append(selected_strategy)
+        state_path = _paper_session_state_path(cfg, target_timeframe)
+        if timeframe is None and not state_path.exists():
+            state_path = cfg.logs_dir / "session_state.json"
         session_state = load_session_state(
-            cfg.logs_dir / "session_state.json",
+            state_path,
             effective_paper_strategy_ids=effective_paper_strategy_ids,
         )
         strategy_session = session_state
         if getattr(session_state, "paper_strategies", None):
             strategy_session = session_state.paper_strategies.get(selected_strategy) or session_state
+        client = self._client if target_timeframe == cfg.market_timeframe else PolymarketClient(effective_cfg)
         current_round, next_round = client.find_current_and_next_rounds(now=now)
         display_round = _select_display_round(current_round=current_round, next_round=next_round)
         target_round = display_round
@@ -1100,186 +1229,193 @@ class DashboardState:
             "selected": str(selected_strategy),
             "paper_strategy_ids": [str(item) for item in effective_paper_strategy_ids],
             "available": [str(item) for item in effective_paper_strategy_ids],
+            "timeframe": target_timeframe,
         }
 
-        if target_round is None:
-            return {
-                "ok": True,
-                "timestamp": _iso(now),
-                "round": None,
-                "quote": None,
-                "signal": None,
-                "plan": None,
-                "session_state": asdict(strategy_session),
-                "ws_runtime": ws_runtime,
-                "ws_stale_guard_triggered": False,
-                "message": "\u5f53\u524d\u6ca1\u6709\u53ef\u7528\u76845\u5206\u949f\u8f6e\u6b21\u3002",
-                "strategy_view": strategy_view,
-                "strategy6": {
-                    "enabled": selected_strategy == 6,
-                    "ofi_score": None,
-                    "signal_at": None,
-                    "stale": True,
-                    "threshold": effective_cfg.ofi_threshold,
-                    "max_entry_price": effective_cfg.max_entry_price,
-                    "bid_price": None,
-                    "bid_qty": None,
-                    "ask_price": None,
-                    "ask_qty": None,
-                },
-                "strategy7": {
-                    "enabled": selected_strategy == 7,
-                    "ofi_score": None,
-                    "momentum_delta": None,
-                    "agreement": None,
-                    "quality_gate": None,
-                    "final_reason": None,
-                },
+        try:
+            if target_round is None:
+                return {
+                    "ok": True,
+                    "timestamp": _iso(now),
+                    "round": None,
+                    "quote": None,
+                    "signal": None,
+                    "plan": None,
+                    "session_state": asdict(strategy_session),
+                    "ws_runtime": ws_runtime,
+                    "ws_stale_guard_triggered": False,
+                    "message": "\u5f53\u524d\u6ca1\u6709\u53ef\u7528\u7684" + target_timeframe + "\u8f6e\u6b21\u3002",
+                    "strategy_view": strategy_view,
+                    "strategy6": {
+                        "enabled": selected_strategy == 6,
+                        "ofi_score": None,
+                        "signal_at": None,
+                        "stale": True,
+                        "threshold": effective_cfg.ofi_threshold,
+                        "max_entry_price": effective_cfg.max_entry_price,
+                        "bid_price": None,
+                        "bid_qty": None,
+                        "ask_price": None,
+                        "ask_qty": None,
+                    },
+                    "strategy7": {
+                        "enabled": selected_strategy == 7,
+                        "ofi_score": None,
+                        "momentum_delta": None,
+                        "agreement": None,
+                        "quality_gate": None,
+                        "final_reason": None,
+                    },
+                }
+
+            market = client.get_market_by_slug(target_round.slug)
+            quote = client.quote_from_market(market)
+            entry_time = _entry_time_for_round(effective_cfg, target_round)
+            _apply_strategy6_signal_to_quote(cfg=effective_cfg, quote=quote, binance_signal_service=binance_signal_service)
+            latest_binance_signal = binance_signal_service.latest() if binance_signal_service is not None else None
+            strategy6_payload = {
+                "enabled": selected_strategy == 6,
+                "ofi_score": quote.strategy6_ofi_score,
+                "signal_at": _iso(quote.strategy6_signal_at),
+                "stale": (
+                    quote.strategy6_signal_at is None
+                    or (now - quote.strategy6_signal_at).total_seconds() > effective_cfg.binance_signal_stale_seconds
+                ),
+                "threshold": effective_cfg.ofi_threshold,
+                "max_entry_price": effective_cfg.max_entry_price,
+                "bid_price": latest_binance_signal.bid_price if latest_binance_signal is not None else None,
+                "bid_qty": latest_binance_signal.bid_qty if latest_binance_signal is not None else None,
+                "ask_price": latest_binance_signal.ask_price if latest_binance_signal is not None else None,
+                "ask_qty": latest_binance_signal.ask_qty if latest_binance_signal is not None else None,
             }
 
-        market = client.get_market_by_slug(target_round.slug)
-        quote = client.quote_from_market(market)
-        entry_time = _entry_time_for_round(effective_cfg, target_round)
-        _apply_strategy6_signal_to_quote(cfg=effective_cfg, quote=quote, binance_signal_service=binance_signal_service)
-        latest_binance_signal = binance_signal_service.latest() if binance_signal_service is not None else None
-        strategy6_payload = {
-            "enabled": selected_strategy == 6,
-            "ofi_score": quote.strategy6_ofi_score,
-            "signal_at": _iso(quote.strategy6_signal_at),
-            "stale": (
-                quote.strategy6_signal_at is None
-                or (now - quote.strategy6_signal_at).total_seconds() > effective_cfg.binance_signal_stale_seconds
-            ),
-            "threshold": effective_cfg.ofi_threshold,
-            "max_entry_price": effective_cfg.max_entry_price,
-            "bid_price": latest_binance_signal.bid_price if latest_binance_signal is not None else None,
-            "bid_qty": latest_binance_signal.bid_qty if latest_binance_signal is not None else None,
-            "ask_price": latest_binance_signal.ask_price if latest_binance_signal is not None else None,
-            "ask_qty": latest_binance_signal.ask_qty if latest_binance_signal is not None else None,
-        }
-
-        side_decision = _resolve_side_from_strategy(
-            cfg=effective_cfg,
-            state=strategy_session,
-            slug=target_round.slug,
-            quote=quote,
-            market_client=client,
-            window=target_round,
-            now=now,
-            entry_time=entry_time,
-        )
-
-        side = side_decision.side
-        price = resolve_quote_price(side, quote) if side in {"UP", "DOWN"} else None
-        ws_stale = _ws_is_stale_for_trade(client, effective_cfg)
-
-        if side in {"UP", "DOWN"} and not ws_stale and not _entry_window_missed(
-            now,
-            entry_time,
-            grace_seconds=effective_cfg.entry_grace_seconds,
-        ):
-            plan_obj = build_trade_plan(
+            side_decision = _resolve_side_from_strategy(
+                cfg=effective_cfg,
                 state=strategy_session,
-                side=side,
-                price=price,
-                target_profit=effective_cfg.target_profit,
-                min_price_threshold=getattr(effective_cfg, 'min_price_threshold', None),
-                max_price_threshold=effective_cfg.max_price_threshold,
-                max_stake=effective_cfg.max_stake,
-                max_consecutive_losses=effective_cfg.max_consecutive_losses,
-                bet_sizing_mode=effective_cfg.bet_sizing_mode,
-                base_order_cost=effective_cfg.base_order_cost,
+                slug=target_round.slug,
+                quote=quote,
+                market_client=client,
+                window=target_round,
+                now=now,
+                entry_time=entry_time,
             )
-            plan = {
-                "should_trade": plan_obj.should_trade,
-                "side": plan_obj.side,
-                "price": plan_obj.price,
-                "order_size": plan_obj.order_size,
-                "order_cost": plan_obj.order_cost,
-                "expected_profit": plan_obj.expected_profit,
-                "skip_reason": plan_obj.skip_reason,
-                "stop_loss_triggered": plan_obj.stop_loss_triggered,
-            }
-        else:
-            if ws_stale:
-                reason = "ws_stale"
-            elif side in {"UP", "DOWN"} and _entry_window_missed(
+
+            side = side_decision.side
+            price = resolve_quote_price(side, quote) if side in {"UP", "DOWN"} else None
+            ws_stale = _ws_is_stale_for_trade(client, effective_cfg)
+
+            if side in {"UP", "DOWN"} and not ws_stale and not _entry_window_missed(
                 now,
                 entry_time,
                 grace_seconds=effective_cfg.entry_grace_seconds,
             ):
-                reason = "entry_window_missed"
+                plan_obj = build_trade_plan(
+                    state=strategy_session,
+                    side=side,
+                    price=price,
+                    target_profit=effective_cfg.target_profit,
+                    min_price_threshold=getattr(effective_cfg, 'min_price_threshold', None),
+                    max_price_threshold=effective_cfg.max_price_threshold,
+                    max_stake=effective_cfg.max_stake,
+                    max_consecutive_losses=effective_cfg.max_consecutive_losses,
+                    bet_sizing_mode=effective_cfg.bet_sizing_mode,
+                    base_order_cost=effective_cfg.base_order_cost,
+                )
+                plan = {
+                    "should_trade": plan_obj.should_trade,
+                    "side": plan_obj.side,
+                    "price": plan_obj.price,
+                    "order_size": plan_obj.order_size,
+                    "order_cost": plan_obj.order_cost,
+                    "expected_profit": plan_obj.expected_profit,
+                    "skip_reason": plan_obj.skip_reason,
+                    "stop_loss_triggered": plan_obj.stop_loss_triggered,
+                }
             else:
-                reason = side_decision.reason or "signal_unavailable"
-            plan = {
-                "should_trade": False,
-                "side": side,
-                "price": price,
-                "order_size": 0.0,
-                "order_cost": 0.0,
-                "expected_profit": 0.0,
-                "skip_reason": reason,
-                "stop_loss_triggered": False,
+                if ws_stale:
+                    reason = "ws_stale"
+                elif side in {"UP", "DOWN"} and _entry_window_missed(
+                    now,
+                    entry_time,
+                    grace_seconds=effective_cfg.entry_grace_seconds,
+                ):
+                    reason = "entry_window_missed"
+                else:
+                    reason = side_decision.reason or "signal_unavailable"
+                plan = {
+                    "should_trade": False,
+                    "side": side,
+                    "price": price,
+                    "order_size": 0.0,
+                    "order_cost": 0.0,
+                    "expected_profit": 0.0,
+                    "skip_reason": reason,
+                    "stop_loss_triggered": False,
+                }
+
+            strategy7_payload = {
+                "enabled": selected_strategy == 7,
+                "ofi_score": quote.strategy6_ofi_score,
+                "momentum_delta": side_decision.signal_delta,
+                "agreement": (
+                    "agree"
+                    if selected_strategy == 7 and side_decision.side in {"UP", "DOWN"}
+                    else ("conflict" if side_decision.reason == "strategy7_signal_conflict" else None)
+                ),
+                "quality_gate": (
+                    "passed"
+                    if selected_strategy == 7 and side_decision.side in {"UP", "DOWN"}
+                    else (side_decision.reason if selected_strategy == 7 else None)
+                ),
+                "final_reason": side_decision.reason,
             }
 
-        strategy7_payload = {
-            "enabled": selected_strategy == 7,
-            "ofi_score": quote.strategy6_ofi_score,
-            "momentum_delta": side_decision.signal_delta,
-            "agreement": (
-                "agree"
-                if selected_strategy == 7 and side_decision.side in {"UP", "DOWN"}
-                else ("conflict" if side_decision.reason == "strategy7_signal_conflict" else None)
-            ),
-            "quality_gate": (
-                "passed"
-                if selected_strategy == 7 and side_decision.side in {"UP", "DOWN"}
-                else (side_decision.reason if selected_strategy == 7 else None)
-            ),
-            "final_reason": side_decision.reason,
-        }
-
-        return {
-            "ok": True,
-            "timestamp": _iso(now),
-            "round": {
-                "slug": target_round.slug,
-                "title": target_round.title,
-                "start_time": _iso(target_round.start_time),
-                "end_time": _iso(target_round.end_time),
-                "entry_time": _iso(entry_time),
-                "is_current": current_round is not None and target_round.slug == current_round.slug,
-                "seconds_to_entry": (entry_time - now).total_seconds(),
-                "seconds_to_end": (target_round.end_time - now).total_seconds(),
-            },
-            "quote": {
-                "source": quote.source,
-                "accepting_orders": quote.accepting_orders,
-                "up_price": quote.up_price,
-                "up_best_bid": quote.up_best_bid,
-                "up_best_ask": quote.up_best_ask,
-                "down_price": quote.down_price,
-                "down_best_bid": quote.down_best_bid,
-                "down_best_ask": quote.down_best_ask,
-                "fetched_at": _iso(quote.fetched_at),
-            },
-            "signal": {
-                "side": side_decision.side,
-                "reason": side_decision.reason,
-                "open_up": side_decision.signal_open_up_price,
-                "current_up": side_decision.signal_current_up_price,
-                "threshold": side_decision.signal_threshold,
-                "delta": side_decision.signal_delta,
-                "locked": side_decision.signal_locked,
-            },
-            "plan": plan,
-            "session_state": asdict(strategy_session),
-            "ws_runtime": ws_runtime,
-            "ws_stale_guard_triggered": ws_stale,
-            "strategy6": strategy6_payload,
-            "strategy7": strategy7_payload,
-            "strategy_view": strategy_view,
-        }
+            return {
+                "ok": True,
+                "timestamp": _iso(now),
+                "round": {
+                    "slug": target_round.slug,
+                    "title": target_round.title,
+                    "start_time": _iso(target_round.start_time),
+                    "end_time": _iso(target_round.end_time),
+                    "entry_time": _iso(entry_time),
+                    "is_current": current_round is not None and target_round.slug == current_round.slug,
+                    "seconds_to_entry": (entry_time - now).total_seconds(),
+                    "seconds_to_end": (target_round.end_time - now).total_seconds(),
+                },
+                "quote": {
+                    "source": quote.source,
+                    "accepting_orders": quote.accepting_orders,
+                    "up_price": quote.up_price,
+                    "up_best_bid": quote.up_best_bid,
+                    "up_best_ask": quote.up_best_ask,
+                    "down_price": quote.down_price,
+                    "down_best_bid": quote.down_best_bid,
+                    "down_best_ask": quote.down_best_ask,
+                    "fetched_at": _iso(quote.fetched_at),
+                },
+                "signal": {
+                    "side": side_decision.side,
+                    "reason": side_decision.reason,
+                    "open_up": side_decision.signal_open_up_price,
+                    "current_up": side_decision.signal_current_up_price,
+                    "threshold": side_decision.signal_threshold,
+                    "delta": side_decision.signal_delta,
+                    "locked": side_decision.signal_locked,
+                },
+                "plan": plan,
+                "session_state": asdict(strategy_session),
+                "ws_runtime": ws_runtime,
+                "ws_stale_guard_triggered": ws_stale,
+                "strategy6": strategy6_payload,
+                "strategy7": strategy7_payload,
+                "strategy_view": strategy_view,
+            }
+        finally:
+            if client is not self._client:
+                close = getattr(client, "close", None)
+                if callable(close):
+                    close()
     def get_paper_summary_payload(self, *, strategy: int | str | None = None, timeframe: str | None = None) -> dict[str, Any]:
         with self._lock:
             cfg = self._cfg
@@ -1440,7 +1576,8 @@ class _DashboardRequestHandler(BaseHTTPRequestHandler):
             if parsed.path == "/api/market":
                 query = parse_qs(parsed.query)
                 strategy = (query.get("strategy") or [None])[0]
-                self._send_json(self.dashboard_state.get_market_payload(strategy=strategy))
+                timeframe = (query.get("timeframe") or [None])[0]
+                self._send_json(self.dashboard_state.get_market_payload(strategy=strategy, timeframe=timeframe))
                 return
             if parsed.path == "/api/paper/summary":
                 query = parse_qs(parsed.query)
@@ -1581,6 +1718,28 @@ def _install_dashboard_min_price_threshold() -> None:
 
 
 _install_dashboard_min_price_threshold()
+
+
+def _install_dashboard_paper_profile_fields() -> None:
+    if 'PAPER_TIMEFRAMES' not in DashboardState.CONFIG_LABELS:
+        DashboardState.CONFIG_LABELS['PAPER_TIMEFRAMES'] = '纸面时间频次'
+        DashboardState.SELECT_OPTIONS['PAPER_TIMEFRAMES'] = list(SUPPORTED_PAPER_TIMEFRAMES)
+        DashboardState.FIELD_HELP['PAPER_TIMEFRAMES'] = '纸面模式下要同时运行的时间频次列表，例如 5m,15m。'
+    for timeframe in SUPPORTED_PAPER_TIMEFRAMES:
+        for field_name in PAPER_PROFILE_EDITABLE_FIELDS:
+            scoped_key = _paper_profile_config_key(timeframe, field_name)
+            if scoped_key not in DashboardState.CONFIG_LABELS:
+                label_key = 'PAPER_STRATEGY_IDS' if field_name == 'STRATEGY_IDS' else field_name
+                base_label = DashboardState.CONFIG_LABELS[label_key]
+                DashboardState.CONFIG_LABELS[scoped_key] = f'Paper {timeframe} · {base_label}'
+            select_key = 'STRATEGY_ID' if field_name == 'STRATEGY_IDS' else field_name
+            if select_key in DashboardState.SELECT_OPTIONS and scoped_key not in DashboardState.SELECT_OPTIONS:
+                DashboardState.SELECT_OPTIONS[scoped_key] = list(DashboardState.SELECT_OPTIONS[select_key])
+            if scoped_key not in DashboardState.FIELD_HELP:
+                DashboardState.FIELD_HELP[scoped_key] = f'仅作用于 paper {timeframe} profile。'
+
+
+_install_dashboard_paper_profile_fields()
 
 
 def create_dashboard_runtime(
@@ -3107,10 +3266,12 @@ const state = {
   market: null,
   summary: null,
   recent: null,
+  paperRuntimeCards: {},
   paperStrategyFilter: 'all',
   paperReportStrategyFilter: 'all',
   paperSummaryStrategyFilter: null,
   paperRecentStrategyFilter: null,
+  paperTimeframeFilter: '',
   countdownSnapshotAtMs: null,
   countdownBaseSeconds: null,
   showInternalKeys: false,
@@ -3669,6 +3830,39 @@ function parseStrategyIdList(rawValue) {
     .filter((item, index, arr) => item && arr.indexOf(item) === index);
 }
 
+function parsePaperTimeframeList(rawValue) {
+  return String(rawValue || '')
+    .split(',')
+    .map((item) => String(item || '').trim().toLowerCase())
+    .filter((item, index, arr) => (item === '5m' || item === '15m') && arr.indexOf(item) === index);
+}
+
+function effectivePaperTimeframeFilter() {
+  const payload = state.config || {};
+  const configured = parsePaperTimeframeList((((payload || {}).env_values || {}).PAPER_TIMEFRAMES) || ((payload.paper_timeframes || []).join(',')));
+  if (configured.indexOf(String(state.paperTimeframeFilter || '').toLowerCase()) >= 0) {
+    return String(state.paperTimeframeFilter).toLowerCase();
+  }
+  if (configured.length > 0) {
+    state.paperTimeframeFilter = configured[0];
+    return configured[0];
+  }
+  const fallback = String((((payload || {}).env_values || {}).MARKET_TIMEFRAME) || '5m').toLowerCase();
+  state.paperTimeframeFilter = fallback;
+  return fallback;
+}
+
+function paperTimeframeLabel(timeframe) {
+  const raw = String(timeframe || '').toLowerCase();
+  if (raw === '15m') return '15m';
+  return '5m';
+}
+
+function isPaperProfileConfigKey(key) {
+  const raw = String(key || '');
+  return raw === 'PAPER_TIMEFRAMES' || /^PAPER_(5M|15M)_/.test(raw);
+}
+
 function resolveUnifiedStrategySelection(payload, values) {
   const envValues = (payload && payload.env_values) || {};
   const options = (((payload || {}).select_options || {}).PAPER_STRATEGY_IDS || []).map((item) => String(item));
@@ -3899,11 +4093,12 @@ function effectivePaperRecentStrategyFilter() {
 }
 
 function recentStrategyHeaderText() {
+  const timeframe = effectivePaperTimeframeFilter();
   const strategy = effectivePaperRecentStrategyFilter();
   if (!strategy || strategy === 'all') {
-    return '按时间倒序显示最近 80 条记录 · 当前策略：全部';
+    return '按时间倒序显示最近 80 条记录 · 当前频次：' + timeframe + ' · 当前策略：全部';
   }
-  return '按时间倒序显示最近 80 条记录 · 当前策略：策略 ' + strategy;
+  return '按时间倒序显示最近 80 条记录 · 当前频次：' + timeframe + ' · 当前策略：策略 ' + strategy;
 }
 
 function renderSharedPaperReportStrategySelector() {
@@ -3995,30 +4190,105 @@ function renderPaperProfiles(payload) {
   }
   const timeframes = Array.isArray((payload || {}).paper_timeframes) ? payload.paper_timeframes : [];
   const profiles = ((payload || {}).paper_profiles) || {};
+  const envValues = ((payload || {}).env_values) || {};
+  const selectOptions = ((payload || {}).select_options) || {};
+  const labels = ((payload || {}).labels) || {};
+  const enabled = parsePaperTimeframeList(envValues.PAPER_TIMEFRAMES || timeframes.join(','));
   if (!timeframes.length) {
     node.innerHTML = '';
     return;
   }
-  node.innerHTML = timeframes.map((timeframe) => {
-    const profile = profiles[timeframe] || {};
-    const strategyIds = Array.isArray(profile.paper_strategy_ids) ? profile.paper_strategy_ids.join(',') : '--';
-    return ''
-      + '<section class="strategy-guide-card">'
-      +   '<div class="strategy-guide-head">'
-      +     '<div>'
-      +       '<div class="strategy-guide-title">Paper ' + esc(timeframe) + '</div>'
-      +       '<div class="strategy-guide-subtitle">独立 paper profile</div>'
-      +     '</div>'
-      +     '<span class="chip ok">Timeframe</span>'
-      +   '</div>'
-      +   '<div class="rows">'
-      +     '<div class="row"><span class="label">主策略</span><span class="value">' + esc(profile.strategy_id || '--') + '</span></div>'
-      +     '<div class="row"><span class="label">运行策略</span><span class="value">' + esc(strategyIds) + '</span></div>'
-      +     '<div class="row"><span class="label">目标收益</span><span class="value">' + esc(profile.target_profit || '--') + '</span></div>'
-      +     '<div class="row"><span class="label">开盘延迟</span><span class="value">' + esc(profile.open_delay_seconds || '--') + '</span></div>'
-      +   '</div>'
-      + '</section>';
+
+  const timeframeToggleHtml = timeframes.map((timeframe) => {
+    const checked = enabled.indexOf(String(timeframe).toLowerCase()) >= 0 ? ' checked' : '';
+    return '<label class="strategy-panel-toggle"><input type="checkbox" data-paper-timeframe="' + esc(timeframe) + '"' + checked + '>运行 ' + esc(paperTimeframeLabel(timeframe)) + '</label>';
   }).join('');
+
+  const fieldNames = [
+    'STRATEGY_ID',
+    'STRATEGY_IDS',
+    'TARGET_PROFIT',
+    'BET_SIZING_MODE',
+    'BASE_ORDER_COST',
+    'MAX_CONSECUTIVE_LOSSES',
+    'MAX_STAKE',
+    'OPEN_DELAY_SECONDS',
+    'SIGNAL_MOMENTUM_THRESHOLD',
+    'OFI_THRESHOLD',
+    'BINANCE_SIGNAL_STALE_SECONDS',
+    'STRATEGY7_OFI_THRESHOLD',
+    'STRATEGY7_MOMENTUM_THRESHOLD',
+    'STRATEGY7_MAX_ENTRY_PRICE',
+  ];
+
+  node.innerHTML = ''
+    + '<section class="strategy-guide-card">'
+    +   '<div class="strategy-guide-head">'
+    +     '<div><div class="strategy-guide-title">Paper Profiles</div><div class="strategy-guide-subtitle">按 timeframe 独立编辑 paper 配置。</div></div>'
+    +     '<span class="chip ok">Profiles</span>'
+    +   '</div>'
+    +   '<div class="rows">' + timeframeToggleHtml + '<input id="cfg_PAPER_TIMEFRAMES" type="hidden" value="' + esc(enabled.join(',')) + '"></div>'
+    + '</section>'
+    + timeframes.map((timeframe) => {
+      const profile = profiles[timeframe] || {};
+      const lowerTimeframe = String(timeframe).toLowerCase();
+      const hiddenStyle = enabled.indexOf(lowerTimeframe) >= 0 ? '' : ' style="display:none"';
+      const fieldsHtml = fieldNames.map((fieldName) => {
+        const scopedKey = 'PAPER_' + String(timeframe).toUpperCase() + '_' + fieldName;
+        const label = (labels && labels[scopedKey]) || scopedKey;
+        const normalizedValue = fieldName === 'STRATEGY_IDS' && Array.isArray(profile.paper_strategy_ids)
+          ? String(envValues[scopedKey] ?? profile.paper_strategy_ids.join(','))
+          : String(envValues[scopedKey] ?? profile[
+              fieldName === 'STRATEGY_ID' ? 'strategy_id'
+              : fieldName === 'TARGET_PROFIT' ? 'target_profit'
+              : fieldName === 'BET_SIZING_MODE' ? 'bet_sizing_mode'
+              : fieldName === 'BASE_ORDER_COST' ? 'base_order_cost'
+              : fieldName === 'MAX_CONSECUTIVE_LOSSES' ? 'max_consecutive_losses'
+              : fieldName === 'MAX_STAKE' ? 'max_stake'
+              : fieldName === 'OPEN_DELAY_SECONDS' ? 'open_delay_seconds'
+              : fieldName === 'SIGNAL_MOMENTUM_THRESHOLD' ? 'signal_momentum_threshold'
+              : fieldName === 'OFI_THRESHOLD' ? 'ofi_threshold'
+              : fieldName === 'BINANCE_SIGNAL_STALE_SECONDS' ? 'binance_signal_stale_seconds'
+              : fieldName === 'STRATEGY7_OFI_THRESHOLD' ? 'strategy7_ofi_threshold'
+              : fieldName === 'STRATEGY7_MOMENTUM_THRESHOLD' ? 'strategy7_momentum_threshold'
+              : 'strategy7_max_entry_price'
+            ] ?? '');
+        const options = selectOptions[scopedKey] || selectOptions[fieldName] || null;
+        const controlHtml = Array.isArray(options)
+          ? ('<select id="cfg_' + esc(scopedKey) + '">' + options.map((opt) => {
+              const selected = String(opt) === normalizedValue ? ' selected' : '';
+              return '<option value="' + esc(opt) + '"' + selected + '>' + esc(String(opt)) + '</option>';
+            }).join('') + '</select>')
+          : ('<input id="cfg_' + esc(scopedKey) + '" type="text" value="' + esc(normalizedValue) + '">');
+        return '<div class="field"><label for="cfg_' + esc(scopedKey) + '">' + esc(label) + '</label>' + controlHtml + '</div>';
+      }).join('');
+      return ''
+        + '<section class="strategy-guide-card" data-paper-profile="' + esc(timeframe) + '"' + hiddenStyle + '>'
+        +   '<div class="strategy-guide-head">'
+        +     '<div><div class="strategy-guide-title">Paper ' + esc(timeframe) + '</div><div class="strategy-guide-subtitle">独立 paper profile</div></div>'
+        +     '<span class="chip ok">Editable</span>'
+        +   '</div>'
+        +   '<div class="group-grid">' + fieldsHtml + '</div>'
+        + '</section>';
+    }).join('');
+
+  const hiddenInput = el('cfg_PAPER_TIMEFRAMES');
+  const syncVisibility = () => {
+    const selected = Array.from(node.querySelectorAll('input[data-paper-timeframe]'))
+      .filter((checkbox) => checkbox.checked)
+      .map((checkbox) => String(checkbox.getAttribute('data-paper-timeframe') || '').toLowerCase());
+    if (hiddenInput) {
+      hiddenInput.value = selected.join(',');
+    }
+    node.querySelectorAll('[data-paper-profile]').forEach((section) => {
+      const sectionTimeframe = String(section.getAttribute('data-paper-profile') || '').toLowerCase();
+      section.style.display = selected.indexOf(sectionTimeframe) >= 0 ? '' : 'none';
+    });
+  };
+  node.querySelectorAll('input[data-paper-timeframe]').forEach((checkbox) => {
+    checkbox.addEventListener('change', syncVisibility);
+  });
+  syncVisibility();
 }
 
 function paperRuntimeCardsFromConfig(payload) {
@@ -4042,9 +4312,14 @@ function renderPaperRuntimeCards(payload) {
     node.innerHTML = '';
     return;
   }
+  const activeTimeframe = effectivePaperTimeframeFilter();
   node.innerHTML = cards.map((card) => {
+    const detail = (state.paperRuntimeCards || {})[card.timeframe] || {};
+    const roundSlug = (((detail || {}).round || {}).slug) || '--';
+    const shouldTrade = (((detail || {}).plan || {}).should_trade);
+    const selectedCls = String(card.timeframe) === String(activeTimeframe) ? ' strategy-panel-row-primary' : '';
     return ''
-      + '<section class="strategy-guide-card">'
+      + '<section class="strategy-guide-card' + selectedCls + '" data-paper-runtime-card="' + esc(card.timeframe) + '">'
       +   '<div class="strategy-guide-head">'
       +     '<div>'
       +       '<div class="strategy-guide-title">Paper ' + esc(card.timeframe) + '</div>'
@@ -4055,17 +4330,43 @@ function renderPaperRuntimeCards(payload) {
       +   '<div class="rows">'
       +     '<div class="row"><span class="label">目标模式</span><span class="value">' + esc(formatModeLabel(card.desired_mode || 'paper')) + '</span></div>'
       +     '<div class="row"><span class="label">切换状态</span><span class="value">' + esc(card.switch_state || '--') + '</span></div>'
+      +     '<div class="row"><span class="label">当前轮次</span><span class="value">' + esc(roundSlug) + '</span></div>'
+      +     '<div class="row"><span class="label">计划下单</span><span class="value">' + esc(shouldTrade === undefined ? '--' : (shouldTrade ? '是' : '否')) + '</span></div>'
       +   '</div>'
       + '</section>';
   }).join('');
+  node.querySelectorAll('[data-paper-runtime-card]').forEach((cardNode) => {
+    cardNode.addEventListener('click', async () => {
+      state.paperTimeframeFilter = String(cardNode.getAttribute('data-paper-runtime-card') || '').toLowerCase();
+      renderPaperRuntimeCards(state.config || {});
+      await Promise.allSettled([refreshMarket(), refreshSummary(), refreshRecent()]);
+    });
+  });
 }
 
-function refreshPaperRuntimeCard(timeframe) {
+async function refreshPaperRuntimeCard(timeframe) {
   const payload = state.config || {};
-  renderPaperRuntimeCards({
-    ...payload,
-    paper_timeframes: Array.isArray(payload.paper_timeframes) ? payload.paper_timeframes.filter((item) => !timeframe || item === timeframe) : [],
-  });
+  const targetTimeframe = String(timeframe || '').toLowerCase();
+  if (!targetTimeframe) {
+    return;
+  }
+  const profiles = payload.paper_profiles || {};
+  const profile = profiles[targetTimeframe] || {};
+  const strategy = encodeURIComponent(String(profile.strategy_id || 'all'));
+  const data = await apiGet('/api/market?strategy=' + strategy + '&timeframe=' + encodeURIComponent(targetTimeframe));
+  state.paperRuntimeCards[targetTimeframe] = data;
+  renderPaperRuntimeCards(payload);
+}
+
+async function refreshPaperRuntimeCards() {
+  const payload = state.config || {};
+  const timeframes = Array.isArray(payload.paper_timeframes) ? payload.paper_timeframes : [];
+  if (!timeframes.length) {
+    state.paperRuntimeCards = {};
+    renderPaperRuntimeCards(payload);
+    return;
+  }
+  await Promise.allSettled(timeframes.map((timeframe) => refreshPaperRuntimeCard(timeframe)));
 }
 
 function applyConfigFieldVisibility(values) {
@@ -4607,6 +4908,7 @@ function shouldConfirmLiveModeSwitch(previousMode, nextMode) {
 
 function renderConfig(payload) {
   state.config = payload;
+  state.paperTimeframeFilter = effectivePaperTimeframeFilter();
   applyTimeframeCopy(payload);
   const savedAtNode = el('cfgSavedAt');
   if (savedAtNode) {
@@ -4628,7 +4930,7 @@ function renderConfig(payload) {
     ? payload.field_groups
     : [{ title: '\u5168\u90e8\u53c2\u6570', description: '', keys }];
   const editableKeySet = new Set(['ENABLE_LIVE_TRADING', ...keys.filter((key) => !isSingleLiveToggleKey(key))]);
-  const hiddenKeys = new Set(['PAPER_STRATEGY_IDS']);
+  const hiddenKeys = new Set(['PAPER_STRATEGY_IDS', 'PAPER_TIMEFRAMES']);
   const advancedPanel = el('advancedConfigPanel');
   if (advancedPanel) {
     advancedPanel.innerHTML = '';
@@ -4639,7 +4941,7 @@ function renderConfig(payload) {
       keys: (group.keys || [])
         .filter((key) => !isSingleLiveToggleKey(key) || key === 'TRADE_MODE')
         .map((key) => (key === 'TRADE_MODE' ? 'ENABLE_LIVE_TRADING' : key))
-        .filter((key, index, arr) => editableKeySet.has(key) && arr.indexOf(key) === index && !hiddenKeys.has(key)),
+        .filter((key, index, arr) => editableKeySet.has(key) && arr.indexOf(key) === index && !hiddenKeys.has(key) && !isPaperProfileConfigKey(key)),
     };
   });
 
@@ -5172,7 +5474,8 @@ function renderRecent(payload) {
 async function refreshMarket() {
   try {
     const strategy = encodeURIComponent(String(state.paperStrategyFilter || 'all'));
-    const data = await apiGet('/api/market?strategy=' + strategy);
+    const timeframe = encodeURIComponent(effectivePaperTimeframeFilter());
+    const data = await apiGet('/api/market?strategy=' + strategy + '&timeframe=' + timeframe);
     renderMarket(data);
   } catch (err) {
     setChip('marketHealth', '刷新失败', 'err');
@@ -5183,7 +5486,8 @@ async function refreshMarket() {
 async function refreshSummary() {
   try {
     const strategy = encodeURIComponent(effectivePaperSummaryStrategyFilter());
-    const summaryEndpoint = '/api/paper/summary?strategy=' + strategy;
+    const timeframe = encodeURIComponent(effectivePaperTimeframeFilter());
+    const summaryEndpoint = '/api/paper/summary?strategy=' + strategy + '&timeframe=' + timeframe;
     const data = await apiGet(summaryEndpoint);
     renderSummary(data);
   } catch (err) {
@@ -5196,7 +5500,8 @@ async function refreshRecent() {
   try {
     const runningMode = String((((state.config || {}).runtime_status || {}).active_mode || (((state.config || {}).runtime_status || {}).running_mode) || 'paper')).toLowerCase();
     const strategy = encodeURIComponent(effectivePaperRecentStrategyFilter());
-    const recentEndpoint = runningMode === 'live' ? '/api/live/recent?limit=80' : '/api/paper/recent?limit=80&strategy=' + strategy;
+    const timeframe = encodeURIComponent(effectivePaperTimeframeFilter());
+    const recentEndpoint = runningMode === 'live' ? '/api/live/recent?limit=80' : '/api/paper/recent?limit=80&strategy=' + strategy + '&timeframe=' + timeframe;
     const data = await apiGet(recentEndpoint);
     renderRecent(data);
   } catch (err) {
@@ -5207,6 +5512,7 @@ async function refreshRecent() {
 
 async function refreshAll() {
   await refreshConfig();
+  await refreshPaperRuntimeCards();
   await refreshMarket();
   await Promise.allSettled([refreshSummary(), refreshRecent()]);
 }
@@ -5256,6 +5562,7 @@ function bindActions() {
 
 function startPolling() {
   setInterval(refreshMarket, POLL_MS.market);
+  setInterval(refreshPaperRuntimeCards, POLL_MS.market);
   setInterval(refreshSummary, POLL_MS.summary);
   setInterval(refreshRecent, POLL_MS.recent);
   setInterval(tickClock, POLL_MS.clock);

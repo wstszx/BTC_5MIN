@@ -922,8 +922,9 @@ def test_dashboard_assets_switch_recent_endpoint_by_running_mode():
     js = _dashboard_js()
 
     assert "const runningMode = String((((state.config || {}).runtime_status || {}).active_mode || (((state.config || {}).runtime_status || {}).running_mode) || 'paper')).toLowerCase();" in js
-    assert "const strategy = encodeURIComponent(String(state.paperStrategyFilter || 'all'));" in js
-    assert "const recentEndpoint = runningMode === 'live' ? '/api/live/recent?limit=80' : '/api/paper/recent?limit=80&strategy=' + strategy;" in js
+    assert "const strategy = encodeURIComponent(effectivePaperRecentStrategyFilter());" in js
+    assert "const timeframe = encodeURIComponent(effectivePaperTimeframeFilter());" in js
+    assert "const recentEndpoint = runningMode === 'live' ? '/api/live/recent?limit=80' : '/api/paper/recent?limit=80&strategy=' + strategy + '&timeframe=' + timeframe;" in js
 
 
 def test_dashboard_assets_localize_recent_panel_by_running_mode():
@@ -1204,7 +1205,7 @@ def test_dashboard_assets_use_strategy_panel_for_unified_strategy_selection():
     assert 'function togglePaperStrategySelection(' in js
     assert 'function setPrimaryStrategy(' in js
     assert "state.paperStrategyFilter = focusStrategy;" in js
-    assert "const summaryEndpoint = '/api/paper/summary?strategy=' + strategy;" in js
+    assert "const summaryEndpoint = '/api/paper/summary?strategy=' + strategy + '&timeframe=' + timeframe;" in js
     assert 'function resolveUnifiedStrategySelection(' in js
     assert 'function renderUnifiedStrategyToolbar(' in js
     assert 'function collectUnifiedStrategyValues(' in js
@@ -1281,10 +1282,11 @@ def test_dashboard_assets_show_current_strategy_in_recent_panel_header():
 
     assert 'id="recentPanelDesc"' in html
     assert 'function recentStrategyHeaderText()' in js
+    assert "const timeframe = effectivePaperTimeframeFilter();" in js
     assert "const strategy = effectivePaperRecentStrategyFilter();" in js
     assert "el('recentPanelDesc').textContent = recentStrategyHeaderText();" in js
-    assert "return '按时间倒序显示最近 80 条记录 · 当前策略：全部';" in js
-    assert "return '按时间倒序显示最近 80 条记录 · 当前策略：策略 ' + strategy;" in js
+    assert "return '按时间倒序显示最近 80 条记录 · 当前频次：' + timeframe + ' · 当前策略：全部';" in js
+    assert "return '按时间倒序显示最近 80 条记录 · 当前频次：' + timeframe + ' · 当前策略：策略 ' + strategy;" in js
 
 
 def test_dashboard_assets_refresh_all_loads_market_before_report_panels():
@@ -1729,6 +1731,33 @@ def test_dashboard_recent_trades_payload_reads_timeframe_specific_paths(tmp_path
         state.close()
 
 
+def test_dashboard_update_config_accepts_paper_timeframe_profile_fields(tmp_path: Path):
+    env_file = tmp_path / '.env.dashboard'
+    state = DashboardState(env_file=env_file)
+    try:
+        payload = state.update_config(
+            {
+                'PAPER_TIMEFRAMES': '5m,15m',
+                'PAPER_5M_STRATEGY_ID': '5',
+                'PAPER_5M_STRATEGY_IDS': '5,6',
+                'PAPER_5M_TARGET_PROFIT': '0.8',
+                'PAPER_15M_STRATEGY_ID': '2',
+                'PAPER_15M_STRATEGY_IDS': '1,2',
+                'PAPER_15M_TARGET_PROFIT': '1.0',
+            }
+        )
+
+        assert payload['env_values']['PAPER_TIMEFRAMES'] == '5m,15m'
+        assert payload['env_values']['PAPER_5M_TARGET_PROFIT'] == '0.8'
+        assert payload['env_values']['PAPER_15M_TARGET_PROFIT'] == '1.0'
+        text = env_file.read_text(encoding='utf-8')
+        assert 'PAPER_TIMEFRAMES=5m,15m' in text
+        assert 'PAPER_5M_STRATEGY_IDS=5,6' in text
+        assert 'PAPER_15M_STRATEGY_IDS=1,2' in text
+    finally:
+        state.close()
+
+
 def test_dashboard_update_config_accepts_strategy_6_as_primary(tmp_path: Path):
     env_file = tmp_path / '.env.dashboard'
     state = DashboardState(env_file=env_file)
@@ -1953,6 +1982,74 @@ def test_dashboard_market_payload_can_show_strategy7_view(tmp_path: Path):
 
         assert payload['strategy_view']['selected'] == '7'
         assert payload['strategy7']['enabled'] is True
+    finally:
+        state.close()
+        os.chdir(old_cwd)
+
+
+def test_dashboard_market_payload_can_switch_timeframe_view(tmp_path: Path, monkeypatch):
+    class StubClient:
+        def __init__(self, cfg):
+            self.config = cfg
+
+        def close(self) -> None:
+            return
+
+        def find_current_and_next_rounds(self, *, now):
+            timeframe = self.config.market_timeframe
+            window = MarketWindow(
+                event_id=f'evt-{timeframe}',
+                market_id=f'mkt-{timeframe}',
+                slug=f'btc-updown-{timeframe}-current',
+                title=f'BTC {timeframe} Current',
+                start_time=now - timedelta(minutes=1),
+                end_time=now + timedelta(minutes=4),
+                up_token_id='up-token',
+                down_token_id='down-token',
+            )
+            return window, None
+
+        def get_market_by_slug(self, slug: str):
+            return {'slug': slug}
+
+        def quote_from_market(self, market):
+            return MarketQuote(
+                slug=str(market.get('slug', '')),
+                up_price=0.55,
+                down_price=0.45,
+                up_best_ask=0.56,
+                fetched_at=datetime.now(timezone.utc),
+            )
+
+        def get_ws_runtime_stats(self):
+            return {}
+
+    monkeypatch.setattr(dashboard, 'PolymarketClient', StubClient)
+
+    env_file = tmp_path / '.env.dashboard'
+    env_file.write_text(
+        '\n'.join(
+            [
+                'TRADE_MODE=paper',
+                'MARKET_TIMEFRAME=5m',
+                'PAPER_TIMEFRAMES=5m,15m',
+                'PAPER_5M_STRATEGY_ID=5',
+                'PAPER_5M_STRATEGY_IDS=5,6',
+                'PAPER_15M_STRATEGY_ID=2',
+                'PAPER_15M_STRATEGY_IDS=1,2',
+            ]
+        ) + '\n',
+        encoding='utf-8',
+    )
+    old_cwd = Path.cwd()
+    os.chdir(tmp_path)
+    state = DashboardState(env_file=env_file)
+    try:
+        payload = state.get_market_payload(timeframe='15m')
+
+        assert payload['round']['slug'] == 'btc-updown-15m-current'
+        assert payload['strategy_view']['selected'] == '2'
+        assert payload['strategy_view']['paper_strategy_ids'] == ['1', '2']
     finally:
         state.close()
         os.chdir(old_cwd)

@@ -25,6 +25,7 @@ class RuntimeControl:
     def __init__(self, initial_mode: str) -> None:
         normalized = self._normalize_mode(initial_mode)
         self._lock = threading.Lock()
+        self._paper_worker_states: dict[str, dict[str, object | None]] = {}
         self._snapshot = RuntimeSnapshot(
             active_mode=normalized,
             desired_mode=normalized,
@@ -93,6 +94,56 @@ class RuntimeControl:
 
             return self._apply_updates(snapshot, updates)
 
+    def update_paper_worker_state(self, worker_key: str, **changes) -> RuntimeSnapshot:
+        if not worker_key:
+            raise ValueError("worker_key must be provided")
+        allowed = {
+            "current_round_slug",
+            "round_in_progress",
+            "safe_to_switch",
+            "pending_live_order",
+        }
+        invalid = set(changes) - allowed
+        if invalid:
+            raise ValueError(f"unexpected worker state keys: {invalid}")
+
+        with self._lock:
+            current = dict(self._paper_worker_states.get(worker_key) or {})
+            for field_name in allowed:
+                if field_name in changes:
+                    current[field_name] = changes[field_name]
+                else:
+                    current.setdefault(field_name, None if field_name == "current_round_slug" else False)
+            self._paper_worker_states[worker_key] = current
+
+            snapshot = self._snapshot
+            worker_states = list(self._paper_worker_states.values())
+            current_round_slug = next(
+                (str(item.get("current_round_slug")) for item in worker_states if item.get("current_round_slug")),
+                None,
+            )
+            updates: dict[str, object | None] = {
+                "current_round_slug": current_round_slug,
+                "round_in_progress": any(bool(item.get("round_in_progress")) for item in worker_states),
+                "safe_to_switch": all(bool(item.get("safe_to_switch")) for item in worker_states) if worker_states else True,
+                "pending_live_order": any(bool(item.get("pending_live_order")) for item in worker_states),
+            }
+            return self._apply_updates(snapshot, updates)
+
+    def clear_paper_worker_states(self) -> RuntimeSnapshot:
+        with self._lock:
+            self._paper_worker_states.clear()
+            snapshot = self._snapshot
+            return self._apply_updates(
+                snapshot,
+                {
+                    "current_round_slug": None,
+                    "round_in_progress": False,
+                    "safe_to_switch": True,
+                    "pending_live_order": False,
+                },
+            )
+
     def mark_switching(self, reason: str | None = None) -> RuntimeSnapshot:
         with self._lock:
             snapshot = self._snapshot
@@ -125,6 +176,8 @@ class RuntimeControl:
         with self._lock:
             snapshot = self._snapshot
             updates = {}
+            if normalized != "paper":
+                self._paper_worker_states.clear()
             if snapshot.active_mode != normalized:
                 updates["active_mode"] = normalized
             if snapshot.desired_mode != normalized:

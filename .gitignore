@@ -22,6 +22,7 @@ logs/*.json
 logs/*.out
 logs/*.err
 logs/*.log
+logs/paper/
 logs/live_runtime_check_*.out
 logs/live_runtime_check_*.err
 !logs/.gitkeep

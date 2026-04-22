@@ -74,6 +74,15 @@ def _paper_cfg_for_timeframe(cfg: AppConfig, timeframe: str) -> AppConfig:
         strategy7_max_entry_price=profile.strategy7_max_entry_price,
     )
 
+
+class _PaperRuntimeControlProxy:
+    def __init__(self, runtime_control: RuntimeControl, worker_key: str) -> None:
+        self._runtime_control = runtime_control
+        self._worker_key = worker_key
+
+    def update_worker_state(self, **changes):
+        return self._runtime_control.update_paper_worker_state(self._worker_key, **changes)
+
 def _load_shared_config(env_file: Path) -> AppConfig:
     env_values = load_env_file_values(env_file)
     return build_config_from_env_values(env_values)
@@ -262,6 +271,7 @@ def run_single_command_runtime(
                     worker_targets.append(('paper-trading-worker', trader_target))
                 else:
                     paper_timeframes = list(getattr(current_cfg, 'paper_timeframes', []) or [current_cfg.market_timeframe])
+                    manager.runtime_control.clear_paper_worker_states()
                     paper_signature = inspect.signature(run_paper_trading)
                     supports_state_path = 'state_path' in paper_signature.parameters
                     supports_log_path = 'log_path' in paper_signature.parameters
@@ -272,7 +282,7 @@ def run_single_command_runtime(
                             run_paper_trading,
                             stop_event=stop_event,
                             config_provider=lambda timeframe=timeframe: _paper_cfg_for_timeframe(_config_provider(), timeframe),
-                            runtime_control=manager.runtime_control,
+                            runtime_control=_PaperRuntimeControlProxy(manager.runtime_control, timeframe),
                             stop_when_safe=manager.restart_requested,
                         )
                         if supports_state_path:
