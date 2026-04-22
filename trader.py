@@ -2084,6 +2084,25 @@ def _entry_window_missed(now: datetime, entry_time: datetime, *, grace_seconds: 
     return now > (entry_time + timedelta(seconds=max(0.0, grace_seconds)))
 
 
+def _poll_interval_for_target_round(
+    *,
+    cfg: AppConfig,
+    now: datetime,
+    target_round: MarketWindow | None,
+) -> float:
+    base_interval = max(0.0, float(cfg.poll_interval_seconds))
+    if target_round is None:
+        return base_interval
+    entry_time = _entry_time_for_round(cfg, target_round)
+    if _entry_window_missed(now, entry_time, grace_seconds=cfg.entry_grace_seconds):
+        return base_interval
+    remaining = (entry_time - now).total_seconds()
+    near_entry_window = max(0.0, float(cfg.near_entry_poll_window_seconds))
+    if remaining <= near_entry_window:
+        return min(base_interval, max(0.0, float(cfg.fast_poll_interval_seconds)))
+    return base_interval
+
+
 def _effective_strategy7_confirm_before_entry_seconds(
     *,
     cfg: AppConfig,
@@ -2719,7 +2738,10 @@ def run_paper_trading(
                     return {"status": "no_market"}
                 _runtime_log('no active round found; waiting ' + str(cfg.poll_interval_seconds) + 's')
                 consecutive_errors = 0
-                if not _sleep_if_not_stopped(stop_event, cfg.poll_interval_seconds):
+                if not _sleep_if_not_stopped(
+                    stop_event,
+                    _poll_interval_for_target_round(cfg=cfg, now=now, target_round=None),
+                ):
                     return {"status": "stopped"}
                 continue
 
@@ -3148,14 +3170,35 @@ def run_paper_trading(
                     return {"status": "stopped"}
                 continue
             if not any_processed and pending_strategy_ids:
-                if not _sleep_if_not_stopped(stop_event, cfg.poll_interval_seconds):
+                if not _sleep_if_not_stopped(
+                    stop_event,
+                    _poll_interval_for_target_round(
+                        cfg=cfg,
+                        now=datetime.now(timezone.utc),
+                        target_round=target_round,
+                    ),
+                ):
                     return {"status": "stopped"}
                 continue
             if any_processed and datetime.now(timezone.utc) < target_round.end_time:
-                if not _sleep_if_not_stopped(stop_event, cfg.poll_interval_seconds):
+                if not _sleep_if_not_stopped(
+                    stop_event,
+                    _poll_interval_for_target_round(
+                        cfg=cfg,
+                        now=datetime.now(timezone.utc),
+                        target_round=target_round,
+                    ),
+                ):
                     return {"status": "stopped"}
                 continue
-            if not _sleep_if_not_stopped(stop_event, cfg.poll_interval_seconds):
+            if not _sleep_if_not_stopped(
+                stop_event,
+                _poll_interval_for_target_round(
+                    cfg=cfg,
+                    now=datetime.now(timezone.utc),
+                    target_round=target_round,
+                ),
+            ):
                 return {"status": "stopped"}
             continue
         except Exception as exc:

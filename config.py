@@ -221,6 +221,12 @@ class AppConfig:
     binance_depth_stream: str = field(default_factory=lambda: os.getenv('BINANCE_DEPTH_STREAM') or 'btcusdt@depth5')
     binance_signal_stale_seconds: float = field(default_factory=lambda: _env_float('BINANCE_SIGNAL_STALE_SECONDS', 2.0))
     poll_interval_seconds: int = 5
+    near_entry_poll_window_seconds: float = field(
+        default_factory=lambda: _env_float("NEAR_ENTRY_POLL_WINDOW_SECONDS", 10.0)
+    )
+    fast_poll_interval_seconds: float = field(
+        default_factory=lambda: _env_float("FAST_POLL_INTERVAL_SECONDS", 1.0)
+    )
     ws_enabled: bool = field(default_factory=lambda: _env_bool("WS_ENABLED", True))
     ws_market_url: str = field(default_factory=lambda: os.getenv("WS_MARKET_URL") or "wss://ws-subscriptions-clob.polymarket.com/ws/market")
     ws_quote_stale_seconds: int = field(default_factory=lambda: _env_int("WS_QUOTE_STALE_SECONDS", 3))

@@ -9,6 +9,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 import requests
+import trader
 
 from binance_signal import BinanceDepth5SignalService
 from config import AppConfig
@@ -1905,6 +1906,68 @@ def test_strategy7_clamps_confirmation_window_to_available_open_entry_window():
     assert decision.reason is None
 
 
+def test_poll_interval_uses_base_when_no_target_round():
+    cfg = AppConfig()
+    now = datetime.now(timezone.utc)
+
+    assert trader._poll_interval_for_target_round(
+        cfg=cfg,
+        now=now,
+        target_round=None,
+    ) == pytest.approx(cfg.poll_interval_seconds)
+
+
+def test_poll_interval_switches_to_fast_window_near_entry_target_round():
+    now = datetime(2026, 4, 22, 1, 29, 18, tzinfo=timezone.utc)
+    window = MarketWindow(
+        event_id="evt-near-entry",
+        market_id="mkt-near-entry",
+        slug="btc-updown-15m-near-entry",
+        title="Near Entry Window",
+        start_time=datetime(2026, 4, 22, 1, 29, 0, tzinfo=timezone.utc),
+        end_time=datetime(2026, 4, 22, 1, 44, 0, tzinfo=timezone.utc),
+        up_token_id="up",
+        down_token_id="down",
+    )
+    cfg = AppConfig(
+        open_delay_seconds=25,
+        near_entry_poll_window_seconds=10,
+        fast_poll_interval_seconds=1,
+    )
+
+    assert trader._poll_interval_for_target_round(
+        cfg=cfg,
+        now=now,
+        target_round=window,
+    ) == pytest.approx(1.0)
+
+
+def test_poll_interval_stays_base_after_entry_window_is_missed_target_round():
+    now = datetime(2026, 4, 22, 1, 29, 31, tzinfo=timezone.utc)
+    window = MarketWindow(
+        event_id="evt-missed-entry",
+        market_id="mkt-missed-entry",
+        slug="btc-updown-15m-missed-entry",
+        title="Missed Entry Window",
+        start_time=datetime(2026, 4, 22, 1, 29, 0, tzinfo=timezone.utc),
+        end_time=datetime(2026, 4, 22, 1, 44, 0, tzinfo=timezone.utc),
+        up_token_id="up",
+        down_token_id="down",
+    )
+    cfg = AppConfig(
+        open_delay_seconds=25,
+        entry_grace_seconds=5,
+        near_entry_poll_window_seconds=10,
+        fast_poll_interval_seconds=1,
+    )
+
+    assert trader._poll_interval_for_target_round(
+        cfg=cfg,
+        now=now,
+        target_round=window,
+    ) == pytest.approx(cfg.poll_interval_seconds)
+
+
 def test_append_trade_log_rotates_legacy_schema_file(tmp_path):
     log_path = tmp_path / "paper_trades.csv"
     log_path.write_text("timestamp,mode\n2026-03-31T00:00:00+00:00,paper\n", encoding="utf-8")
@@ -2811,6 +2874,53 @@ def test_run_paper_trading_stop_event_stops_during_round_end_wait(tmp_path, monk
     result = run_paper_trading(
         AppConfig(poll_interval_seconds=1),
         client=_RoundEndMarketClient(),
+        state_path=tmp_path / "state.json",
+        log_path=tmp_path / "paper.csv",
+        stop_event=stop_event,
+    )
+
+    assert result["status"] == "stopped"
+    assert sleep_calls == [1.0]
+
+
+def test_run_paper_trading_near_entry_fast_poll_uses_shorter_sleep(tmp_path, monkeypatch):
+    stop_event = threading.Event()
+    sleep_calls: list[float] = []
+
+    class _NearEntryFastPollClient(_LiveMarketClient):
+        def find_current_and_next_rounds(self, *, now):
+            window = MarketWindow(
+                event_id="evt-near-entry-fast-poll",
+                market_id="mkt-near-entry-fast-poll",
+                slug="btc-updown-15m-near-entry-fast-poll",
+                title="Near Entry Fast Poll",
+                start_time=now - timedelta(seconds=16),
+                end_time=now + timedelta(minutes=14, seconds=44),
+                up_token_id="up-token",
+                down_token_id="down-token",
+            )
+            return window, None
+
+    def fake_sleep(seconds):
+        sleep_calls.append(seconds)
+        stop_event.set()
+
+    monkeypatch.setattr("trader.time.sleep", fake_sleep)
+    monkeypatch.setattr(
+        "trader._resolve_side_from_strategy",
+        lambda **kwargs: SideDecision(side=None, reason="signal_unavailable"),
+    )
+
+    result = run_paper_trading(
+        AppConfig(
+            strategy_id=7,
+            paper_strategy_ids=[7],
+            poll_interval_seconds=5,
+            near_entry_poll_window_seconds=10,
+            fast_poll_interval_seconds=1,
+            open_delay_seconds=25,
+        ),
+        client=_NearEntryFastPollClient(),
         state_path=tmp_path / "state.json",
         log_path=tmp_path / "paper.csv",
         stop_event=stop_event,
