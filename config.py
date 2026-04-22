@@ -225,7 +225,7 @@ class AppConfig:
     clob_api_base: str = "https://clob.polymarket.com"
     data_api_base: str = "https://data-api.polymarket.com"
     market_timeframe: str = field(default_factory=lambda: _env_market_timeframe("5m"))
-    paper_timeframes: list[str] = field(default_factory=lambda: _env_paper_timeframes(_env_market_timeframe("5m")))
+    paper_timeframes: list[str] = field(default_factory=list)
     paper_strategy_ids: list[int] = field(default_factory=lambda: _parse_strategy_id_list(os.getenv(PAPER_STRATEGY_IDS), fallback=_env_int(STRATEGY_ID, 2)))
     trade_mode: str = field(default_factory=lambda: (os.getenv("TRADE_MODE") or "paper").strip().lower() or "paper")
     strategy_id: int = field(default_factory=lambda: _env_int("STRATEGY_ID", 2))
@@ -311,6 +311,8 @@ class AppConfig:
     paper_profiles: dict[str, PaperTimeframeProfile] = field(init=False)
 
     def __post_init__(self) -> None:
+        if not self.paper_timeframes:
+            self.paper_timeframes = _env_paper_timeframes(self.market_timeframe)
         self.paper_profiles = {}
         for timeframe in self.paper_timeframes:
             prefix = f"PAPER_{timeframe.upper()}"

@@ -45,6 +45,35 @@ def _cfg_for_active_mode(cfg: AppConfig, mode: str) -> AppConfig:
     worker_cfg.trade_mode = mode
     return worker_cfg
 
+
+def _paper_runtime_paths(cfg: AppConfig, timeframe: str) -> tuple[Path, Path]:
+    base = cfg.logs_dir / 'paper' / timeframe
+    return base / 'session_state.json', base / 'paper_trades.csv'
+
+
+def _paper_cfg_for_timeframe(cfg: AppConfig, timeframe: str) -> AppConfig:
+    if not hasattr(cfg, '__dataclass_fields__') or not hasattr(cfg, 'paper_profiles'):
+        return cfg
+    profile = cfg.paper_profiles[timeframe]
+    return replace(
+        cfg,
+        market_timeframe=timeframe,
+        strategy_id=profile.strategy_id,
+        paper_strategy_ids=list(profile.paper_strategy_ids),
+        target_profit=profile.target_profit,
+        bet_sizing_mode=profile.bet_sizing_mode,
+        base_order_cost=profile.base_order_cost,
+        max_consecutive_losses=profile.max_consecutive_losses,
+        max_stake=profile.max_stake,
+        open_delay_seconds=profile.open_delay_seconds,
+        signal_momentum_threshold=profile.signal_momentum_threshold,
+        ofi_threshold=profile.ofi_threshold,
+        binance_signal_stale_seconds=profile.binance_signal_stale_seconds,
+        strategy7_ofi_threshold=profile.strategy7_ofi_threshold,
+        strategy7_momentum_threshold=profile.strategy7_momentum_threshold,
+        strategy7_max_entry_price=profile.strategy7_max_entry_price,
+    )
+
 def _load_shared_config(env_file: Path) -> AppConfig:
     env_values = load_env_file_values(env_file)
     return build_config_from_env_values(env_values)
@@ -214,22 +243,56 @@ def run_single_command_runtime(
                 startup_label = 'live trading'
                 worker = run_live_trading
             else:
-                worker_name = 'paper-trading-worker'
                 startup_label = 'paper trading'
                 worker = run_paper_trading
 
             worker_signature = inspect.signature(worker)
             worker_supports_runtime_control = 'runtime_control' in worker_signature.parameters
-            worker_kwargs = _build_worker_call_kwargs(
-                worker,
-                stop_event=stop_event,
-                config_provider=_config_provider,
-                runtime_control=manager.runtime_control,
-                stop_when_safe=manager.restart_requested,
-            )
             worker_targets: list[tuple[str, object]] = []
-            trader_target = lambda worker=worker, cfg=current_cfg, worker_kwargs=worker_kwargs: worker(cfg, **worker_kwargs)
-            worker_targets.append((worker_name, trader_target))
+            if active_mode == 'paper':
+                if not hasattr(current_cfg, '__dataclass_fields__') or not hasattr(current_cfg, 'paper_profiles'):
+                    paper_kwargs = _build_worker_call_kwargs(
+                        run_paper_trading,
+                        stop_event=stop_event,
+                        config_provider=_config_provider,
+                        runtime_control=manager.runtime_control,
+                        stop_when_safe=manager.restart_requested,
+                    )
+                    trader_target = lambda cfg=current_cfg, paper_kwargs=paper_kwargs: run_paper_trading(cfg, **paper_kwargs)
+                    worker_targets.append(('paper-trading-worker', trader_target))
+                else:
+                    paper_timeframes = list(getattr(current_cfg, 'paper_timeframes', []) or [current_cfg.market_timeframe])
+                    paper_signature = inspect.signature(run_paper_trading)
+                    supports_state_path = 'state_path' in paper_signature.parameters
+                    supports_log_path = 'log_path' in paper_signature.parameters
+                    for timeframe in paper_timeframes:
+                        paper_cfg = _paper_cfg_for_timeframe(current_cfg, timeframe)
+                        state_path, log_path = _paper_runtime_paths(current_cfg, timeframe)
+                        paper_kwargs = _build_worker_call_kwargs(
+                            run_paper_trading,
+                            stop_event=stop_event,
+                            config_provider=lambda timeframe=timeframe: _paper_cfg_for_timeframe(_config_provider(), timeframe),
+                            runtime_control=manager.runtime_control,
+                            stop_when_safe=manager.restart_requested,
+                        )
+                        if supports_state_path:
+                            paper_kwargs['state_path'] = state_path
+                        if supports_log_path:
+                            paper_kwargs['log_path'] = log_path
+                        trader_target = lambda paper_cfg=paper_cfg, paper_kwargs=paper_kwargs: run_paper_trading(paper_cfg, **paper_kwargs)
+                        worker_targets.append((f'paper-trading-worker-{timeframe}', trader_target))
+            else:
+                worker_name = 'live-trading-worker'
+                worker_kwargs = _build_worker_call_kwargs(
+                    worker,
+                    stop_event=stop_event,
+                    config_provider=_config_provider,
+                    runtime_control=manager.runtime_control,
+                    stop_when_safe=manager.restart_requested,
+                )
+                trader_target = lambda worker=worker, cfg=current_cfg, worker_kwargs=worker_kwargs: worker(cfg, **worker_kwargs)
+                worker_targets.append((worker_name, trader_target))
+
             if active_mode == 'live':
                 redeem_kwargs = _build_worker_call_kwargs(
                     run_live_redeem_worker,

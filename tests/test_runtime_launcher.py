@@ -552,6 +552,87 @@ def test_run_single_command_runtime_restarts_worker_after_timeframe_reload_reque
     assert calls == [('paper', '5m'), ('paper', '15m')]
 
 
+def test_run_single_command_runtime_starts_one_paper_worker_per_enabled_timeframe(monkeypatch, tmp_path: Path):
+    startup_cfg = build_config_from_env_values(
+        {
+            'TRADE_MODE': 'paper',
+            'PAPER_TIMEFRAMES': '5m,15m',
+            'PAPER_5M_STRATEGY_ID': '5',
+            'PAPER_5M_STRATEGY_IDS': '5,6',
+            'PAPER_15M_STRATEGY_ID': '2',
+            'PAPER_15M_STRATEGY_IDS': '1,2',
+        }
+    )
+    calls: list[tuple[str, list[int], str, str]] = []
+
+    class FakeDashboardRuntime:
+        def serve_forever(self) -> None:
+            return
+
+        def shutdown(self) -> None:
+            return
+
+        def close(self) -> None:
+            return
+
+    def fake_run_paper_trading(cfg, *, stop_event, config_provider, state_path=None, log_path=None, runtime_control=None, stop_when_safe=None):
+        calls.append((cfg.market_timeframe, list(cfg.paper_strategy_ids), str(state_path), str(log_path)))
+        if len(calls) == 2:
+            stop_event.set()
+        return {'status': 'stopped'}
+
+    monkeypatch.setattr(main, '_load_shared_config', lambda _: startup_cfg)
+    monkeypatch.setattr(main, 'run_paper_trading', fake_run_paper_trading)
+    monkeypatch.setattr(main, 'create_dashboard_runtime', lambda **_: FakeDashboardRuntime())
+
+    exit_code = main.run_single_command_runtime(env_file=tmp_path / '.env.dashboard')
+
+    assert exit_code == 0
+    assert [call[0] for call in calls] == ['5m', '15m']
+    assert calls[0][1] == [5, 6]
+    assert calls[1][1] == [1, 2]
+    assert calls[0][2].endswith('logs\\paper\\5m\\session_state.json')
+    assert calls[1][3].endswith('logs\\paper\\15m\\paper_trades.csv')
+
+
+def test_run_single_command_runtime_keeps_live_single_worker_when_paper_profiles_exist(monkeypatch):
+    cfg = build_config_from_env_values(
+        {
+            'TRADE_MODE': 'live',
+            'MARKET_TIMEFRAME': '15m',
+            'LIVE_TRADING_ENABLED': 'true',
+            'POLYMARKET_PRIVATE_KEY': 'pk',
+            'POLYMARKET_FUNDER': '0xfunder',
+            'PAPER_TIMEFRAMES': '5m,15m',
+        }
+    )
+    live_calls: list[str] = []
+
+    class FakeDashboardRuntime:
+        def serve_forever(self) -> None:
+            return
+
+        def shutdown(self) -> None:
+            return
+
+        def close(self) -> None:
+            return
+
+    monkeypatch.setattr(main, '_load_shared_config', lambda _: cfg)
+    monkeypatch.setattr(main, 'create_dashboard_runtime', lambda **_: FakeDashboardRuntime())
+    monkeypatch.setattr(
+        main,
+        'run_live_trading',
+        lambda cfg, **kwargs: live_calls.append(cfg.market_timeframe) or {'status': 'stopped'},
+        raising=False,
+    )
+
+    exit_code = main.run_single_command_runtime()
+
+    assert exit_code == 0
+    assert live_calls == ['15m']
+
+
 
 def test_runtime_manager_keeps_dashboard_online_while_switch_pending(tmp_path):
     cfg = AppConfig(trade_mode='paper')
