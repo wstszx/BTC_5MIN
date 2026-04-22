@@ -315,12 +315,14 @@ def _field_groups() -> list[dict[str, Any]]:
             "keys": [
                 "STRATEGY_ID",
                 "PAPER_STRATEGY_IDS",
+                "OPEN_DELAY_SECONDS",
                 "TARGET_PROFIT",
                 "BET_SIZING_MODE",
                 "BASE_ORDER_COST",
                 "MAX_CONSECUTIVE_LOSSES",
                 "MAX_STAKE",
                 "MAX_PRICE_THRESHOLD",
+                "OFI_THRESHOLD",
                 "STRATEGY7_MAX_ENTRY_PRICE",
             ],
         },
@@ -337,6 +339,7 @@ def _field_groups() -> list[dict[str, Any]]:
                 "SIGNAL_DYNAMIC_THRESHOLD_K",
                 "SIGNAL_DYNAMIC_THRESHOLD_MIN_POINTS",
                 "SIGNAL_LOCK_BEFORE_ENTRY_SECONDS",
+                "BINANCE_SIGNAL_STALE_SECONDS",
                 "STRATEGY7_OFI_THRESHOLD",
                 "STRATEGY7_MOMENTUM_THRESHOLD",
                 "STRATEGY7_MIN_SIGNAL_GAP",
@@ -361,6 +364,62 @@ def _field_groups() -> list[dict[str, Any]]:
             ],
         },
     ]
+
+
+TIMEFRAME_PRESETS: dict[str, dict[str, dict[str, str]]] = {
+    "5m": {
+        "shared": {
+            "OPEN_DELAY_SECONDS": "12",
+            "SIGNAL_LOCK_BEFORE_ENTRY_SECONDS": "10",
+        },
+        "strategy5": {
+            "SIGNAL_MOMENTUM_THRESHOLD": "0.020",
+            "SIGNAL_FALLBACK_STRATEGY_ID": "2",
+            "MAX_PRICE_THRESHOLD": "0.60",
+            "TARGET_PROFIT": "0.8",
+        },
+        "strategy6": {
+            "OFI_THRESHOLD": "0.72",
+            "BINANCE_SIGNAL_STALE_SECONDS": "1.0",
+            "TARGET_PROFIT": "0.8",
+        },
+        "strategy7": {
+            "STRATEGY7_OFI_THRESHOLD": "0.58",
+            "STRATEGY7_MOMENTUM_THRESHOLD": "0.008",
+            "STRATEGY7_MAX_ENTRY_PRICE": "0.54",
+            "STRATEGY7_MIN_SIGNAL_GAP": "0.015",
+            "STRATEGY7_CONFIRM_BEFORE_ENTRY_SECONDS": "2",
+            "STRATEGY7_LATE_CONFIRM_STRONG_SIGNAL_GAP": "0.035",
+            "STRATEGY7_LATE_CONFIRM_RELAX_SECONDS": "2",
+        },
+    },
+    "15m": {
+        "shared": {
+            "OPEN_DELAY_SECONDS": "25",
+            "SIGNAL_LOCK_BEFORE_ENTRY_SECONDS": "20",
+        },
+        "strategy5": {
+            "SIGNAL_MOMENTUM_THRESHOLD": "0.015",
+            "SIGNAL_FALLBACK_STRATEGY_ID": "2",
+            "MAX_PRICE_THRESHOLD": "0.65",
+            "TARGET_PROFIT": "1.0",
+        },
+        "strategy6": {
+            "OFI_THRESHOLD": "0.65",
+            "BINANCE_SIGNAL_STALE_SECONDS": "2.0",
+            "TARGET_PROFIT": "1.0",
+        },
+        "strategy7": {
+            "STRATEGY7_OFI_THRESHOLD": "0.50",
+            "STRATEGY7_MOMENTUM_THRESHOLD": "0.005",
+            "STRATEGY7_MAX_ENTRY_PRICE": "0.55",
+            "STRATEGY7_MIN_SIGNAL_GAP": "0.01",
+            "STRATEGY7_CONFIRM_BEFORE_ENTRY_SECONDS": "3",
+            "STRATEGY7_LATE_CONFIRM_STRONG_SIGNAL_GAP": "0.03",
+            "STRATEGY7_LATE_CONFIRM_RELAX_SECONDS": "3",
+        },
+    },
+}
 
 
 class ConfigValidationError(ValueError):
@@ -392,12 +451,14 @@ class DashboardState:
         "LIVE_AUTO_REDEEM_MAX_BACKOFF_SECONDS",
         "STRATEGY_ID",
         "PAPER_STRATEGY_IDS",
+        "OPEN_DELAY_SECONDS",
         "TARGET_PROFIT",
         "BET_SIZING_MODE",
         "BASE_ORDER_COST",
         "MAX_CONSECUTIVE_LOSSES",
         "MAX_STAKE",
         "MAX_PRICE_THRESHOLD",
+        "OFI_THRESHOLD",
         "STRATEGY7_OFI_THRESHOLD",
         "STRATEGY7_MOMENTUM_THRESHOLD",
         "STRATEGY7_MAX_ENTRY_PRICE",
@@ -413,6 +474,7 @@ class DashboardState:
         "SIGNAL_DYNAMIC_THRESHOLD_K",
         "SIGNAL_DYNAMIC_THRESHOLD_MIN_POINTS",
         "SIGNAL_LOCK_BEFORE_ENTRY_SECONDS",
+        "BINANCE_SIGNAL_STALE_SECONDS",
         "MAX_STAKE_SKIP_ALERT_THRESHOLD",
         "WS_ENABLED",
         "WS_QUOTE_STALE_SECONDS",
@@ -443,12 +505,14 @@ class DashboardState:
         "LIVE_AUTO_REDEEM_MAX_BACKOFF_SECONDS": "自动赎回最大退避秒数",
         "STRATEGY_ID": "基础策略",
         "PAPER_STRATEGY_IDS": "纸面策略组合",
+        "OPEN_DELAY_SECONDS": "开盘后入场秒数",
         "TARGET_PROFIT": "每次目标净利",
         "BET_SIZING_MODE": "下注模式",
         "BASE_ORDER_COST": "固定起始下注金额",
         "MAX_CONSECUTIVE_LOSSES": "连亏重置轮数",
         "MAX_STAKE": "单笔最大下注金额",
         "MAX_PRICE_THRESHOLD": "最高买入价格阈值",
+        "OFI_THRESHOLD": "OFI阈值",
         "STRATEGY7_OFI_THRESHOLD": "策略7 OFI阈值",
         "STRATEGY7_MOMENTUM_THRESHOLD": "策略7 动量阈值",
         "STRATEGY7_MAX_ENTRY_PRICE": "策略7 最高入场价",
@@ -464,6 +528,7 @@ class DashboardState:
         "SIGNAL_DYNAMIC_THRESHOLD_K": "动态阈值系数K",
         "SIGNAL_DYNAMIC_THRESHOLD_MIN_POINTS": "动态阈值最少样本点",
         "SIGNAL_LOCK_BEFORE_ENTRY_SECONDS": "入场前锁边秒数",
+        "BINANCE_SIGNAL_STALE_SECONDS": "Binance 信号过期秒",
         "MAX_STAKE_SKIP_ALERT_THRESHOLD": "超额跳过告警阈值",
         "WS_ENABLED": "实时连接开关",
         "WS_QUOTE_STALE_SECONDS": "行情过期秒",
@@ -508,12 +573,14 @@ class DashboardState:
         "LIVE_AUTO_REDEEM_MAX_BACKOFF_SECONDS": "live_auto_redeem_max_backoff_seconds",
         "STRATEGY_ID": "strategy_id",
         "PAPER_STRATEGY_IDS": "paper_strategy_ids",
+        "OPEN_DELAY_SECONDS": "open_delay_seconds",
         "TARGET_PROFIT": "target_profit",
         "BET_SIZING_MODE": "bet_sizing_mode",
         "BASE_ORDER_COST": "base_order_cost",
         "MAX_CONSECUTIVE_LOSSES": "max_consecutive_losses",
         "MAX_STAKE": "max_stake",
         "MAX_PRICE_THRESHOLD": "max_price_threshold",
+        "OFI_THRESHOLD": "ofi_threshold",
         "STRATEGY7_OFI_THRESHOLD": "strategy7_ofi_threshold",
         "STRATEGY7_MOMENTUM_THRESHOLD": "strategy7_momentum_threshold",
         "STRATEGY7_MAX_ENTRY_PRICE": "strategy7_max_entry_price",
@@ -529,6 +596,7 @@ class DashboardState:
         "SIGNAL_DYNAMIC_THRESHOLD_K": "signal_dynamic_threshold_k",
         "SIGNAL_DYNAMIC_THRESHOLD_MIN_POINTS": "signal_dynamic_threshold_min_points",
         "SIGNAL_LOCK_BEFORE_ENTRY_SECONDS": "signal_lock_before_entry_seconds",
+        "BINANCE_SIGNAL_STALE_SECONDS": "binance_signal_stale_seconds",
         "MAX_STAKE_SKIP_ALERT_THRESHOLD": "max_stake_skip_alert_threshold",
         "WS_ENABLED": "ws_enabled",
         "WS_QUOTE_STALE_SECONDS": "ws_quote_stale_seconds",
@@ -540,6 +608,7 @@ class DashboardState:
         "STRATEGY_ID",
         "MAX_CONSECUTIVE_LOSSES",
         "STRATEGY7_CONFIRM_BEFORE_ENTRY_SECONDS",
+        "OPEN_DELAY_SECONDS",
         "SIGNAL_FALLBACK_STRATEGY_ID",
         "SIGNAL_HISTORY_FIDELITY_SECONDS",
         "SIGNAL_ANCHOR_MAX_OFFSET_SECONDS",
@@ -559,6 +628,8 @@ class DashboardState:
         "BASE_ORDER_COST",
         "MAX_STAKE",
         "MAX_PRICE_THRESHOLD",
+        "BINANCE_SIGNAL_STALE_SECONDS",
+        "OFI_THRESHOLD",
         "STRATEGY7_OFI_THRESHOLD",
         "STRATEGY7_MOMENTUM_THRESHOLD",
         "STRATEGY7_MAX_ENTRY_PRICE",
@@ -623,6 +694,7 @@ class DashboardState:
         "BET_SIZING_MODE": "固定金额模式会使用固定首笔下注额；目标收益模式会根据目标净利反推下注金额。",
         "ENABLE_LIVE_TRADING": "关闭时仅运行纸面测试；开启后，运行时可以切换到实盘配置并允许真实下单。",
         "MARKET_TIMEFRAME": "选择当前要玩的 Polymarket BTC 预测频次，仅支持 5 分钟和 15 分钟。",
+        "OPEN_DELAY_SECONDS": "OPEN 模式下，从每轮开始后延迟多少秒再尝试入场。",
         "POLYMARKET_PRIVATE_KEY": "实盘钱包私钥，仅在实盘模式下需要。",
         "POLYMARKET_FUNDER": "与私钥对应的实盘钱包地址（0x...），并且需要实际承担实盘订单资金。",
         "POLYMARKET_API_KEY": "CLOB 实盘下单凭证，仅用于 live order 私有接口。",
@@ -643,6 +715,7 @@ class DashboardState:
         "MAX_CONSECUTIVE_LOSSES": "连续亏损达到这个次数后，策略会执行一次止损重置。",
         "MAX_STAKE": "单笔订单允许投入的最大 USDC；超过后会直接跳过本轮。",
         "MAX_PRICE_THRESHOLD": "目标方向价格高于该阈值时不入场。",
+        "OFI_THRESHOLD": "策略 6 的 Binance OFI 最小强度要求，低于该阈值直接跳过。",
         "STRATEGY7_OFI_THRESHOLD": "策略 7 对 Binance OFI 的最小强度要求，低于该阈值直接跳过。",
         "STRATEGY7_MOMENTUM_THRESHOLD": "策略 7 对 Polymarket 轮内动量确认的最小要求。",
         "STRATEGY7_MAX_ENTRY_PRICE": "策略 7 的更严格入场价格上限，高于该价格不入场。",
@@ -658,6 +731,7 @@ class DashboardState:
         "SIGNAL_DYNAMIC_THRESHOLD_K": "动态阈值系数，运行时会使用 max(基础阈值, k * sigma)。",
         "SIGNAL_DYNAMIC_THRESHOLD_MIN_POINTS": "启用动态阈值前要求的最少样本点数量。",
         "SIGNAL_LOCK_BEFORE_ENTRY_SECONDS": "在计划入场前提前锁定方向，避免最后几秒来回翻边。",
+        "BINANCE_SIGNAL_STALE_SECONDS": "Binance OFI 信号最多允许滞后多少秒，超过后视为过期。",
         "MAX_STAKE_SKIP_ALERT_THRESHOLD": "连续因超过 MAX_STAKE 而跳过多少次后触发提醒。",
         "WS_ENABLED": "优先使用 WS(WebSocket) 行情缓存；必要时再回退到 HTTP。",
         "WS_QUOTE_STALE_SECONDS": "WS(WebSocket) 行情在多久未更新后视为过期。",
@@ -889,6 +963,7 @@ class DashboardState:
             return {
                 "env_file": str(self.env_file),
                 "env_values": self._masked_env_values(env_values),
+                "timeframe_presets": json.loads(json.dumps(TIMEFRAME_PRESETS)),
                 "editable_keys": list(self.EDITABLE_CONFIG_KEYS),
                 "labels": self.CONFIG_LABELS,
                 "select_options": select_options,
@@ -4353,6 +4428,35 @@ function applyTimeframeCopy(payload) {
   }
 }
 
+function flattenTimeframePreset(preset) {
+  if (!preset) {
+    return {};
+  }
+  return {
+    ...(preset.shared || {}),
+    ...(preset.strategy5 || {}),
+    ...(preset.strategy6 || {}),
+    ...(preset.strategy7 || {}),
+  };
+}
+
+
+function applyTimeframePreset(timeframe) {
+  const presets = (((state.config || {}).timeframe_presets) || {});
+  const preset = presets[String(timeframe || '').toLowerCase()];
+  const flatPreset = flattenTimeframePreset(preset);
+  if (!Object.keys(flatPreset).length) {
+    return;
+  }
+  Object.entries(flatPreset).forEach(([key, value]) => {
+    const field = el('cfg_' + key);
+    if (!field) {
+      return;
+    }
+    field.value = String(value);
+  });
+}
+
 
 function shouldConfirmLiveModeSwitch(previousMode, nextMode) {
   previousMode = String(previousMode || 'paper').toLowerCase();
@@ -4543,6 +4647,12 @@ function renderConfig(payload) {
   renderStrategyGuide(payload, displayValues);
   applyConfigFieldVisibility(expandLiveToggleValues(displayValues));
   applyAdvancedConfigVisibility(expandLiveToggleValues(displayValues));
+  const timeframeNode = el('cfg_MARKET_TIMEFRAME');
+  if (timeframeNode) {
+    timeframeNode.addEventListener('change', () => {
+      applyTimeframePreset(timeframeNode.value);
+    });
+  }
   setConfigError('--');
   setChip('cfgStatus', '\u5df2\u52a0\u8f7d', 'ok');
   setSaveButtonState('idle');

@@ -1522,6 +1522,22 @@ def test_dashboard_config_payload_includes_market_timeframe_selector(tmp_path: P
         state.close()
 
 
+def test_dashboard_config_payload_includes_structured_timeframe_presets(tmp_path: Path):
+    state = DashboardState(env_file=tmp_path / '.env.dashboard')
+    try:
+        payload = state.get_config_payload()
+        presets = payload['timeframe_presets']
+        assert set(presets) == {'5m', '15m'}
+        assert set(presets['5m']) == {'shared', 'strategy5', 'strategy6', 'strategy7'}
+        assert set(presets['15m']) == {'shared', 'strategy5', 'strategy6', 'strategy7'}
+        assert presets['5m']['shared']['OPEN_DELAY_SECONDS'] == '12'
+        assert presets['5m']['strategy5']['SIGNAL_MOMENTUM_THRESHOLD'] == '0.020'
+        assert presets['5m']['strategy6']['OFI_THRESHOLD'] == '0.72'
+        assert presets['5m']['strategy7']['STRATEGY7_OFI_THRESHOLD'] == '0.58'
+    finally:
+        state.close()
+
+
 def test_dashboard_rejects_invalid_market_timeframe(tmp_path: Path):
     state = DashboardState(env_file=tmp_path / '.env.dashboard')
     try:
@@ -1542,6 +1558,85 @@ def test_dashboard_assets_include_timeframe_copy_hooks():
     assert "function applyTimeframeCopy(payload)" in js
     assert '"15m": {' in js
     assert '"10m"' not in js
+
+
+def test_dashboard_assets_include_timeframe_preset_auto_apply_logic():
+    js = _dashboard_js()
+
+    assert "timeframe_presets" in js
+    assert "MARKET_TIMEFRAME" in js
+    assert "function applyTimeframePreset(" in js
+    assert "const preset = presets[String(timeframe || '').toLowerCase()];" in js
+    assert "const flatPreset = flattenTimeframePreset(preset);" in js
+    assert "Object.entries(flatPreset).forEach(([key, value]) => {" in js
+    assert "const field = el('cfg_' + key);" in js
+
+
+def test_dashboard_assets_merge_structured_timeframe_presets():
+    js = _dashboard_js()
+
+    assert "function flattenTimeframePreset(" in js
+    assert "preset.shared" in js
+    assert "preset.strategy5" in js
+    assert "preset.strategy6" in js
+    assert "preset.strategy7" in js
+
+
+def test_dashboard_timeframe_presets_only_include_timeframe_sensitive_fields(tmp_path: Path):
+    state = DashboardState(env_file=tmp_path / '.env.dashboard')
+    try:
+        payload = state.get_config_payload()
+        presets = payload['timeframe_presets']
+        for timeframe in ('5m', '15m'):
+            preset = presets[timeframe]
+            assert set(preset) == {'shared', 'strategy5', 'strategy6', 'strategy7'}
+            assert 'OPEN_DELAY_SECONDS' in preset['shared']
+            assert 'SIGNAL_LOCK_BEFORE_ENTRY_SECONDS' in preset['shared']
+            assert 'SIGNAL_MOMENTUM_THRESHOLD' in preset['strategy5']
+            assert 'SIGNAL_FALLBACK_STRATEGY_ID' in preset['strategy5']
+            assert 'OFI_THRESHOLD' in preset['strategy6']
+            assert 'BINANCE_SIGNAL_STALE_SECONDS' in preset['strategy6']
+            assert 'STRATEGY7_OFI_THRESHOLD' in preset['strategy7']
+            assert 'TRADE_MODE' not in preset['shared']
+            assert 'POLYMARKET_PRIVATE_KEY' not in preset['strategy5']
+            assert 'LIVE_TRADING_ENABLED' not in preset['strategy6']
+    finally:
+        state.close()
+
+
+def test_dashboard_update_config_notifies_runtime_reload_after_market_timeframe_save_with_presets(tmp_path: Path):
+    calls: list[str] = []
+    state = DashboardState(
+        env_file=tmp_path / '.env.dashboard',
+        notify_runtime_reload=lambda reason: calls.append(reason),
+    )
+    try:
+        payload = state.update_config(
+            {
+                'MARKET_TIMEFRAME': '15m',
+                'OPEN_DELAY_SECONDS': '25',
+                'SIGNAL_LOCK_BEFORE_ENTRY_SECONDS': '20',
+                'SIGNAL_MOMENTUM_THRESHOLD': '0.015',
+                'SIGNAL_FALLBACK_STRATEGY_ID': '2',
+                'MAX_PRICE_THRESHOLD': '0.65',
+                'TARGET_PROFIT': '1.0',
+                'OFI_THRESHOLD': '0.65',
+                'BINANCE_SIGNAL_STALE_SECONDS': '2.0',
+                'STRATEGY7_OFI_THRESHOLD': '0.50',
+                'STRATEGY7_MOMENTUM_THRESHOLD': '0.005',
+                'STRATEGY7_MAX_ENTRY_PRICE': '0.55',
+                'STRATEGY7_MIN_SIGNAL_GAP': '0.01',
+                'STRATEGY7_CONFIRM_BEFORE_ENTRY_SECONDS': '3',
+                'STRATEGY7_LATE_CONFIRM_STRONG_SIGNAL_GAP': '0.03',
+                'STRATEGY7_LATE_CONFIRM_RELAX_SECONDS': '3',
+            }
+        )
+        assert payload['env_values']['MARKET_TIMEFRAME'] == '15m'
+        assert payload['env_values']['SIGNAL_MOMENTUM_THRESHOLD'] == '0.015'
+        assert payload['env_values']['OFI_THRESHOLD'] == '0.65'
+        assert calls == ['market_timeframe']
+    finally:
+        state.close()
 
 
 def test_dashboard_update_config_normalizes_paper_strategy_ids(tmp_path: Path):
