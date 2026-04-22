@@ -65,3 +65,59 @@ def test_build_config_supports_open_delay_override():
     cfg = build_config_from_env_values({'OPEN_DELAY_SECONDS': '15'})
 
     assert cfg.open_delay_seconds == 15
+
+
+def test_build_config_parses_enabled_paper_timeframes_and_profile_values():
+    cfg = build_config_from_env_values(
+        {
+            'TRADE_MODE': 'paper',
+            'PAPER_TIMEFRAMES': '5m,15m',
+            'PAPER_5M_STRATEGY_ID': '5',
+            'PAPER_5M_STRATEGY_IDS': '5,6',
+            'PAPER_5M_TARGET_PROFIT': '0.8',
+            'PAPER_15M_STRATEGY_ID': '2',
+            'PAPER_15M_STRATEGY_IDS': '1,2,7',
+            'PAPER_15M_TARGET_PROFIT': '1.0',
+        }
+    )
+
+    assert cfg.paper_timeframes == ['5m', '15m']
+    assert cfg.paper_profiles['5m'].strategy_id == 5
+    assert cfg.paper_profiles['5m'].paper_strategy_ids == [5, 6]
+    assert cfg.paper_profiles['5m'].target_profit == 0.8
+    assert cfg.paper_profiles['15m'].strategy_id == 2
+    assert cfg.paper_profiles['15m'].paper_strategy_ids == [1, 2, 7]
+    assert cfg.paper_profiles['15m'].target_profit == 1.0
+
+
+def test_build_config_keeps_live_single_timeframe_when_paper_profiles_exist():
+    cfg = build_config_from_env_values(
+        {
+            'TRADE_MODE': 'live',
+            'MARKET_TIMEFRAME': '15m',
+            'PAPER_TIMEFRAMES': '5m,15m',
+            'PAPER_5M_STRATEGY_IDS': '5,6',
+            'PAPER_15M_STRATEGY_IDS': '1,2',
+        }
+    )
+
+    assert cfg.market_timeframe == '15m'
+    assert cfg.series_slug == 'btc-up-or-down-15m'
+    assert cfg.paper_timeframes == ['5m', '15m']
+
+
+def test_build_config_uses_legacy_single_timeframe_paper_fields_when_paper_timeframes_missing():
+    cfg = build_config_from_env_values(
+        {
+            'TRADE_MODE': 'paper',
+            'MARKET_TIMEFRAME': '15m',
+            'STRATEGY_ID': '7',
+            'PAPER_STRATEGY_IDS': '7,6',
+            'TARGET_PROFIT': '1.1',
+        }
+    )
+
+    assert cfg.paper_timeframes == ['15m']
+    assert cfg.paper_profiles['15m'].strategy_id == 7
+    assert cfg.paper_profiles['15m'].paper_strategy_ids == [7, 6]
+    assert cfg.paper_profiles['15m'].target_profit == 1.1

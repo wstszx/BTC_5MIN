@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 MARKET_TIMEFRAME = "MARKET_TIMEFRAME"
+PAPER_TIMEFRAMES = "PAPER_TIMEFRAMES"
 PAPER_STRATEGY_IDS = bytes([80, 65, 80, 69, 82, 95, 83, 84, 82, 65, 84, 69, 71, 89, 95, 73, 68, 83]).decode()
 STRATEGY_ID = bytes([83, 84, 82, 65, 84, 69, 71, 89, 95, 73, 68]).decode()
 
@@ -179,12 +180,52 @@ def _env_market_timeframe(default: str = "5m") -> str:
     return default
 
 
+def _env_paper_timeframes(default_timeframe: str) -> list[str]:
+    raw = (os.getenv(PAPER_TIMEFRAMES) or "").strip().lower()
+    if not raw:
+        return [default_timeframe]
+
+    timeframes: list[str] = []
+    for item in raw.split(","):
+        timeframe = item.strip().lower()
+        if timeframe in MARKET_TIMEFRAME_DEFINITIONS and timeframe not in timeframes:
+            timeframes.append(timeframe)
+    return timeframes or [default_timeframe]
+
+
+def _paper_profile_strategy_ids(prefix: str, fallback_ids: list[int], fallback_strategy_id: int) -> list[int]:
+    raw = os.getenv(f"{prefix}_STRATEGY_IDS")
+    if raw is None:
+        return list(fallback_ids)
+    return _parse_strategy_id_list(raw, fallback=fallback_strategy_id)
+
+
+@dataclass(frozen=True, slots=True)
+class PaperTimeframeProfile:
+    timeframe: str
+    strategy_id: int
+    paper_strategy_ids: list[int]
+    target_profit: float
+    bet_sizing_mode: str
+    base_order_cost: float
+    max_consecutive_losses: int
+    max_stake: float | None
+    open_delay_seconds: int
+    signal_momentum_threshold: float
+    ofi_threshold: float
+    binance_signal_stale_seconds: float
+    strategy7_ofi_threshold: float
+    strategy7_momentum_threshold: float
+    strategy7_max_entry_price: float
+
+
 @dataclass(slots=True)
 class AppConfig:
     gamma_api_base: str = "https://gamma-api.polymarket.com"
     clob_api_base: str = "https://clob.polymarket.com"
     data_api_base: str = "https://data-api.polymarket.com"
     market_timeframe: str = field(default_factory=lambda: _env_market_timeframe("5m"))
+    paper_timeframes: list[str] = field(default_factory=lambda: _env_paper_timeframes(_env_market_timeframe("5m")))
     paper_strategy_ids: list[int] = field(default_factory=lambda: _parse_strategy_id_list(os.getenv(PAPER_STRATEGY_IDS), fallback=_env_int(STRATEGY_ID, 2)))
     trade_mode: str = field(default_factory=lambda: (os.getenv("TRADE_MODE") or "paper").strip().lower() or "paper")
     strategy_id: int = field(default_factory=lambda: _env_int("STRATEGY_ID", 2))
@@ -267,6 +308,43 @@ class AppConfig:
     live_auto_redeem_initial_backoff_seconds: int = field(default_factory=lambda: _env_int("LIVE_AUTO_REDEEM_INITIAL_BACKOFF_SECONDS", 30))
     live_auto_redeem_max_backoff_seconds: int = field(default_factory=lambda: _env_int("LIVE_AUTO_REDEEM_MAX_BACKOFF_SECONDS", 300))
     live_auto_redeem_dry_run: bool = field(default_factory=lambda: _env_bool("LIVE_AUTO_REDEEM_DRY_RUN", False))
+    paper_profiles: dict[str, PaperTimeframeProfile] = field(init=False)
+
+    def __post_init__(self) -> None:
+        self.paper_profiles = {}
+        for timeframe in self.paper_timeframes:
+            prefix = f"PAPER_{timeframe.upper()}"
+            strategy_id = _env_int(f"{prefix}_STRATEGY_ID", self.strategy_id)
+            self.paper_profiles[timeframe] = PaperTimeframeProfile(
+                timeframe=timeframe,
+                strategy_id=strategy_id,
+                paper_strategy_ids=_paper_profile_strategy_ids(prefix, self.paper_strategy_ids, strategy_id),
+                target_profit=_env_float(f"{prefix}_TARGET_PROFIT", self.target_profit),
+                bet_sizing_mode=(os.getenv(f"{prefix}_BET_SIZING_MODE") or self.bet_sizing_mode).upper(),
+                base_order_cost=_env_float(f"{prefix}_BASE_ORDER_COST", self.base_order_cost),
+                max_consecutive_losses=_env_int(f"{prefix}_MAX_CONSECUTIVE_LOSSES", self.max_consecutive_losses),
+                max_stake=(
+                    _env_optional_float(f"{prefix}_MAX_STAKE")
+                    if os.getenv(f"{prefix}_MAX_STAKE") is not None
+                    else self.max_stake
+                ),
+                open_delay_seconds=_env_int(f"{prefix}_OPEN_DELAY_SECONDS", self.open_delay_seconds),
+                signal_momentum_threshold=_env_float(f"{prefix}_SIGNAL_MOMENTUM_THRESHOLD", self.signal_momentum_threshold),
+                ofi_threshold=_env_float(f"{prefix}_OFI_THRESHOLD", self.ofi_threshold),
+                binance_signal_stale_seconds=_env_float(
+                    f"{prefix}_BINANCE_SIGNAL_STALE_SECONDS",
+                    self.binance_signal_stale_seconds,
+                ),
+                strategy7_ofi_threshold=_env_float(f"{prefix}_STRATEGY7_OFI_THRESHOLD", self.strategy7_ofi_threshold),
+                strategy7_momentum_threshold=_env_float(
+                    f"{prefix}_STRATEGY7_MOMENTUM_THRESHOLD",
+                    self.strategy7_momentum_threshold,
+                ),
+                strategy7_max_entry_price=_env_float(
+                    f"{prefix}_STRATEGY7_MAX_ENTRY_PRICE",
+                    self.strategy7_max_entry_price,
+                ),
+            )
 
     @property
     def market_definition(self) -> MarketTimeframeDefinition:
