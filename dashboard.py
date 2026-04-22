@@ -111,6 +111,23 @@ def _filter_pending_paper_trades_by_strategy(items: list[PendingPaperTrade], str
     return [item for item in items if str(item.strategy) == strategy_filter]
 
 
+def _normalize_timeframe_filter(timeframe: str | None, *, fallback: str = "5m") -> str:
+    raw = str(timeframe or fallback).strip().lower()
+    return raw if raw in {"5m", "15m"} else fallback
+
+
+def _paper_runtime_dir(cfg: AppConfig, timeframe: str) -> Path:
+    return cfg.logs_dir / "paper" / timeframe
+
+
+def _paper_session_state_path(cfg: AppConfig, timeframe: str) -> Path:
+    return _paper_runtime_dir(cfg, timeframe) / "session_state.json"
+
+
+def _paper_trades_path(cfg: AppConfig, timeframe: str) -> Path:
+    return _paper_runtime_dir(cfg, timeframe) / "paper_trades.csv"
+
+
 def _pending_paper_trade_to_recent_row(item: PendingPaperTrade) -> dict[str, str]:
     return {
         'timestamp': item.queued_at or item.end_time,
@@ -960,6 +977,25 @@ class DashboardState:
                 field_groups[0]["title"] = "运行模式"
             select_options = json.loads(json.dumps(self.SELECT_OPTIONS))
             select_options["STRATEGY_ID"] = ["1", "2", "3", "4", "5", "6", "7"]
+            paper_profiles = {
+                timeframe: {
+                    "strategy_id": str(profile.strategy_id),
+                    "paper_strategy_ids": [str(item) for item in profile.paper_strategy_ids],
+                    "target_profit": _fmt_env(profile.target_profit),
+                    "bet_sizing_mode": profile.bet_sizing_mode,
+                    "base_order_cost": _fmt_env(profile.base_order_cost),
+                    "max_consecutive_losses": _fmt_env(profile.max_consecutive_losses),
+                    "max_stake": _fmt_env(profile.max_stake) if profile.max_stake is not None else "",
+                    "open_delay_seconds": _fmt_env(profile.open_delay_seconds),
+                    "signal_momentum_threshold": _fmt_env(profile.signal_momentum_threshold),
+                    "ofi_threshold": _fmt_env(profile.ofi_threshold),
+                    "binance_signal_stale_seconds": _fmt_env(profile.binance_signal_stale_seconds),
+                    "strategy7_ofi_threshold": _fmt_env(profile.strategy7_ofi_threshold),
+                    "strategy7_momentum_threshold": _fmt_env(profile.strategy7_momentum_threshold),
+                    "strategy7_max_entry_price": _fmt_env(profile.strategy7_max_entry_price),
+                }
+                for timeframe, profile in getattr(self._cfg, "paper_profiles", {}).items()
+            }
             return {
                 "env_file": str(self.env_file),
                 "env_values": self._masked_env_values(env_values),
@@ -974,6 +1010,8 @@ class DashboardState:
                 "validation_errors": validation_errors,
                 "runtime_status": runtime_status,
                 "saved_at": _iso(self._last_saved_at),
+                "paper_timeframes": list(getattr(self._cfg, "paper_timeframes", [])),
+                "paper_profiles": paper_profiles,
             }
 
     def update_config(self, values: dict[str, str]) -> dict[str, Any]:
@@ -1242,9 +1280,13 @@ class DashboardState:
             "strategy7": strategy7_payload,
             "strategy_view": strategy_view,
         }
-    def get_paper_summary_payload(self, *, strategy: int | str | None = None) -> dict[str, Any]:
+    def get_paper_summary_payload(self, *, strategy: int | str | None = None, timeframe: str | None = None) -> dict[str, Any]:
         with self._lock:
-            paper_csv = self._cfg.logs_dir / "paper_trades.csv"
+            cfg = self._cfg
+            target_timeframe = _normalize_timeframe_filter(timeframe, fallback=cfg.market_timeframe)
+            paper_csv = _paper_trades_path(cfg, target_timeframe)
+            if timeframe is None and not paper_csv.exists():
+                paper_csv = cfg.logs_dir / "paper_trades.csv"
         strategy_filter = _normalize_strategy_filter(strategy)
         try:
             if strategy_filter is None:
@@ -1271,20 +1313,28 @@ class DashboardState:
             "csv_path": str(paper_csv),
             "tz_offset": "+08:00",
             "strategy": strategy_filter or "all",
+            "timeframe": target_timeframe,
             "days": days,
             "latest": days[-1] if days else None,
         }
 
-    def get_recent_trades_payload(self, *, limit: int, strategy: int | str | None = None) -> dict[str, Any]:
+    def get_recent_trades_payload(self, *, limit: int, strategy: int | str | None = None, timeframe: str | None = None) -> dict[str, Any]:
         with self._lock:
             cfg = self._cfg
-            paper_csv = cfg.logs_dir / "paper_trades.csv"
-            state_path = cfg.logs_dir / "session_state.json"
+            target_timeframe = _normalize_timeframe_filter(timeframe, fallback=cfg.market_timeframe)
+            paper_csv = _paper_trades_path(cfg, target_timeframe)
+            state_path = _paper_session_state_path(cfg, target_timeframe)
+            effective_paper_strategy_ids = list(
+                getattr(getattr(cfg, "paper_profiles", {}).get(target_timeframe), "paper_strategy_ids", cfg.paper_strategy_ids)
+            )
+            if timeframe is None and not paper_csv.exists():
+                paper_csv = cfg.logs_dir / "paper_trades.csv"
+                state_path = cfg.logs_dir / "session_state.json"
         capped_limit = max(1, min(300, int(limit)))
         strategy_filter = _normalize_strategy_filter(strategy)
         rows = _filter_trade_rows_by_strategy(_tail_csv_rows(paper_csv, limit=capped_limit * 4), strategy_filter)
         pending_rows: list[dict[str, str]] = []
-        session_state = load_session_state(state_path, effective_paper_strategy_ids=cfg.paper_strategy_ids)
+        session_state = load_session_state(state_path, effective_paper_strategy_ids=effective_paper_strategy_ids)
         pending_items = list(getattr(session_state, "pending_paper_trades", []) or [])
         if getattr(session_state, "paper_strategies", None):
             pending_items = []
@@ -1304,7 +1354,13 @@ class DashboardState:
             if callable(close):
                 close()
 
-        return {"csv_path": str(paper_csv), "strategy": strategy_filter or "all", "count": len(validated_rows), "rows": validated_rows}
+        return {
+            "csv_path": str(paper_csv),
+            "strategy": strategy_filter or "all",
+            "timeframe": target_timeframe,
+            "count": len(validated_rows),
+            "rows": validated_rows,
+        }
 
     def get_live_recent_orders_payload(self, *, limit: int) -> dict[str, Any]:
         with self._lock:
@@ -1389,13 +1445,15 @@ class _DashboardRequestHandler(BaseHTTPRequestHandler):
             if parsed.path == "/api/paper/summary":
                 query = parse_qs(parsed.query)
                 strategy = (query.get("strategy") or [None])[0]
-                self._send_json(self.dashboard_state.get_paper_summary_payload(strategy=strategy))
+                timeframe = (query.get("timeframe") or [None])[0]
+                self._send_json(self.dashboard_state.get_paper_summary_payload(strategy=strategy, timeframe=timeframe))
                 return
             if parsed.path == "/api/paper/recent":
                 query = parse_qs(parsed.query)
                 limit = int((query.get("limit") or ["20"])[0])
                 strategy = (query.get("strategy") or [None])[0]
-                self._send_json(self.dashboard_state.get_recent_trades_payload(limit=limit, strategy=strategy))
+                timeframe = (query.get("timeframe") or [None])[0]
+                self._send_json(self.dashboard_state.get_recent_trades_payload(limit=limit, strategy=strategy, timeframe=timeframe))
                 return
             if parsed.path == "/api/live/recent":
                 query = parse_qs(parsed.query)

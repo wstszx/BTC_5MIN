@@ -1651,6 +1651,64 @@ def test_dashboard_update_config_normalizes_paper_strategy_ids(tmp_path: Path):
         state.close()
 
 
+def test_dashboard_config_payload_includes_paper_timeframes_and_profiles(tmp_path: Path):
+    env_file = tmp_path / '.env.dashboard'
+    env_file.write_text(
+        '\n'.join(
+            [
+                'TRADE_MODE=paper',
+                'PAPER_TIMEFRAMES=5m,15m',
+                'PAPER_5M_STRATEGY_ID=5',
+                'PAPER_5M_STRATEGY_IDS=5,6',
+                'PAPER_15M_STRATEGY_ID=2',
+                'PAPER_15M_STRATEGY_IDS=1,2',
+            ]
+        ) + '\n',
+        encoding='utf-8',
+    )
+    state = DashboardState(env_file=env_file)
+    try:
+        payload = state.get_config_payload()
+        assert payload['paper_timeframes'] == ['5m', '15m']
+        assert payload['paper_profiles']['5m']['strategy_id'] == '5'
+        assert payload['paper_profiles']['5m']['paper_strategy_ids'] == ['5', '6']
+        assert payload['paper_profiles']['15m']['strategy_id'] == '2'
+        assert payload['paper_profiles']['15m']['paper_strategy_ids'] == ['1', '2']
+    finally:
+        state.close()
+
+
+def test_dashboard_recent_trades_payload_reads_timeframe_specific_paths(tmp_path: Path):
+    logs_dir = tmp_path / 'logs' / 'paper'
+    (logs_dir / '5m').mkdir(parents=True, exist_ok=True)
+    (logs_dir / '15m').mkdir(parents=True, exist_ok=True)
+    header = (
+        'timestamp,mode,round_index,strategy,entry_timing,event_slug,start_time,end_time,side,price,order_size,'
+        'order_cost,expected_profit,result,trade_pnl,cash_pnl,recovery_loss,consecutive_losses,stop_loss_triggered,'
+        'skip_reason,signal_open_up_price,signal_current_up_price,signal_threshold,signal_delta,signal_locked,'
+        'signal_reason,experiment_id\n'
+    )
+    (logs_dir / '5m' / 'paper_trades.csv').write_text(
+        header
+        + '2026-04-22T10:00:00+00:00,paper,1,5,OPEN,btc-updown-5m-a,2026-04-22T09:55:00+00:00,2026-04-22T10:00:00+00:00,UP,0.5,2,1,1,UP,1,1,0,0,False,,,,,,False,,\n',
+        encoding='utf-8',
+    )
+    (logs_dir / '15m' / 'paper_trades.csv').write_text(
+        header
+        + '2026-04-22T10:15:00+00:00,paper,1,2,OPEN,btc-updown-15m-a,2026-04-22T10:00:00+00:00,2026-04-22T10:15:00+00:00,DOWN,0.4,2.5,1,1,DOWN,1,1,0,0,False,,,,,,False,,\n',
+        encoding='utf-8',
+    )
+    state = DashboardState(env_file=tmp_path / '.env.dashboard')
+    try:
+        state._cfg.logs_dir = tmp_path / 'logs'
+        payload_5m = state.get_recent_trades_payload(limit=20, timeframe='5m')
+        payload_15m = state.get_recent_trades_payload(limit=20, timeframe='15m')
+        assert payload_5m['rows'][0]['event_slug'] == 'btc-updown-5m-a'
+        assert payload_15m['rows'][0]['event_slug'] == 'btc-updown-15m-a'
+    finally:
+        state.close()
+
+
 def test_dashboard_update_config_accepts_strategy_6_as_primary(tmp_path: Path):
     env_file = tmp_path / '.env.dashboard'
     state = DashboardState(env_file=env_file)
