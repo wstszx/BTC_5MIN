@@ -12,6 +12,7 @@ from pathlib import Path
 
 import pytest
 import dashboard
+from config import LIVE_STRATEGY_IDS
 from dashboard import (
     ConfigValidationError,
     DashboardState,
@@ -475,6 +476,20 @@ def test_dashboard_help_center_includes_live_auto_redeem_copy():
     assert '实盘自动赎回' in js
     assert '演练' in js
     assert 'Polygon' in js
+
+
+def test_dashboard_config_payload_exposes_live_strategy_ids(tmp_path: Path):
+    state = DashboardState(env_file=tmp_path / '.env.dashboard')
+    try:
+        payload = state.get_config_payload()
+        assert LIVE_STRATEGY_IDS in payload['editable_keys']
+        assert payload['labels'][LIVE_STRATEGY_IDS] == '实盘策略组合'
+        assert payload['field_help'][LIVE_STRATEGY_IDS].startswith('实盘模式下可轮询的策略列表')
+        assert payload['select_options'][LIVE_STRATEGY_IDS] == ['1', '2', '3', '4', '5', '6', '7']
+        assert LIVE_STRATEGY_IDS in payload['field_groups'][1]['keys']
+    finally:
+        state.close()
+
 
 def test_dashboard_assets_include_help_center_shell():
     html = _dashboard_html()
@@ -1423,6 +1438,85 @@ def test_dashboard_runtime_payload_reads_optimizer_state_file(tmp_path: Path):
         state.close()
         os.chdir(old_cwd)
 
+
+def test_dashboard_runtime_status_includes_live_strategy_ids_and_states(tmp_path: Path):
+    old_cwd = Path.cwd()
+    os.chdir(tmp_path)
+    env_file = tmp_path / '.env.dashboard'
+    env_file.write_text(
+        'TRADE_MODE=live\n'
+        'LIVE_TRADING_ENABLED=true\n'
+        'POLYMARKET_PRIVATE_KEY=private-key\n'
+        'POLYMARKET_FUNDER=0xfunder\n'
+        'LIVE_STRATEGY_IDS=3,6\n',
+        encoding='utf-8',
+    )
+    logs_dir = tmp_path / 'logs'
+    logs_dir.mkdir(parents=True, exist_ok=True)
+    (logs_dir / 'live_session_state.json').write_text(
+        json.dumps(
+            {
+                'live_strategies': {
+                    '3': {
+                        'round_index': 12,
+                        'cash_pnl': 1.5,
+                        'recovery_loss': 0.0,
+                        'consecutive_losses': 0,
+                        'consecutive_max_stake_skips': 0,
+                        'signal_round_slug': None,
+                        'signal_round_open_up_price': None,
+                        'signal_round_locked_side': None,
+                        'strategy6_last_ofi_score': None,
+                        'stop_loss_count': 0,
+                        'daily_realized_pnl': 1.5,
+                        'current_day': '2026-04-23',
+                        'pending_live_slug': None,
+                        'pending_live_side': None,
+                        'pending_live_price': None,
+                        'pending_live_order_size': None,
+                        'pending_live_order_cost': None,
+                        'pending_live_expected_profit': None,
+                        'pending_live_order_id': None,
+                        'pending_live_end_time': None,
+                    },
+                    '6': {
+                        'round_index': 13,
+                        'cash_pnl': 2.5,
+                        'recovery_loss': 0.5,
+                        'consecutive_losses': 1,
+                        'consecutive_max_stake_skips': 0,
+                        'signal_round_slug': None,
+                        'signal_round_open_up_price': None,
+                        'signal_round_locked_side': None,
+                        'strategy6_last_ofi_score': 0.82,
+                        'stop_loss_count': 0,
+                        'daily_realized_pnl': 2.5,
+                        'current_day': '2026-04-23',
+                        'pending_live_slug': 'btc-updown-5m-current',
+                        'pending_live_side': 'UP',
+                        'pending_live_price': 0.51,
+                        'pending_live_order_size': 25.0,
+                        'pending_live_order_cost': 12.75,
+                        'pending_live_expected_profit': 1.25,
+                        'pending_live_order_id': 'order-6',
+                        'pending_live_end_time': '2026-04-23T03:45:00+00:00',
+                    },
+                }
+            }
+        ),
+        encoding='utf-8',
+    )
+    state = DashboardState(env_file=env_file)
+    try:
+        payload = state.get_config_payload()
+        runtime = payload['runtime_status']
+        assert runtime['live_strategy_ids'] == ['3', '6']
+        assert runtime['pending_live_order'] is True
+        assert runtime['live_strategy_states']['3']['round_index'] == 12
+        assert runtime['live_strategy_states']['6']['pending_live_slug'] == 'btc-updown-5m-current'
+    finally:
+        state.close()
+        os.chdir(old_cwd)
 
 
 def test_dashboard_update_config_notifies_runtime_manager(tmp_path: Path):

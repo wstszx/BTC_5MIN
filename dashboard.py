@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
-from config import AppConfig, build_config_from_env_values, load_env_file_values, PAPER_STRATEGY_IDS
+from config import AppConfig, build_config_from_env_values, load_env_file_values, LIVE_STRATEGY_IDS, PAPER_STRATEGY_IDS
 from binance_signal import BinanceDepth5SignalService
 from models import MarketWindow, PendingPaperTrade
 from paper_report import summarize_paper_trades
@@ -71,6 +71,19 @@ def _normalize_strategy_id_list_value(value: str) -> str:
     normalized = [str(item) for item in cfg.paper_strategy_ids]
     if not normalized:
         raise ValueError(f"Invalid value for PAPER_STRATEGY_IDS: expected comma-separated strategy ids 1-7, got {value!r}")
+    return ",".join(normalized)
+
+
+def _normalize_live_strategy_id_list_value(value: str) -> str:
+    cfg = build_config_from_env_values({LIVE_STRATEGY_IDS: value})
+    raw = [item.strip() for item in str(value).split(',') if item.strip()]
+    if raw and len(cfg.live_strategy_ids) == 1 and cfg.live_strategy_ids[0] == cfg.strategy_id:
+        has_valid = any(item in {"1", "2", "3", "4", "5", "6", "7"} for item in raw)
+        if not has_valid:
+            raise ValueError(f"Invalid value for LIVE_STRATEGY_IDS: expected comma-separated strategy ids 1-7, got {value!r}")
+    normalized = [str(item) for item in cfg.live_strategy_ids]
+    if not normalized:
+        raise ValueError(f"Invalid value for LIVE_STRATEGY_IDS: expected comma-separated strategy ids 1-7, got {value!r}")
     return ",".join(normalized)
 
 def _tail_csv_rows(path: Path, *, limit: int) -> list[dict[str, str]]:
@@ -406,6 +419,7 @@ def _field_groups() -> list[dict[str, Any]]:
             "description": "决定方向节奏、下注模式和主要风险边界。",
             "keys": [
                 "STRATEGY_ID",
+                "LIVE_STRATEGY_IDS",
                 "PAPER_STRATEGY_IDS",
                 "OPEN_DELAY_SECONDS",
                 "TARGET_PROFIT",
@@ -543,6 +557,7 @@ class DashboardState:
         "LIVE_AUTO_REDEEM_INITIAL_BACKOFF_SECONDS",
         "LIVE_AUTO_REDEEM_MAX_BACKOFF_SECONDS",
         "STRATEGY_ID",
+        "LIVE_STRATEGY_IDS",
         "PAPER_STRATEGY_IDS",
         "OPEN_DELAY_SECONDS",
         "TARGET_PROFIT",
@@ -602,6 +617,7 @@ class DashboardState:
         "LIVE_AUTO_REDEEM_INITIAL_BACKOFF_SECONDS": "自动赎回初始退避秒数",
         "LIVE_AUTO_REDEEM_MAX_BACKOFF_SECONDS": "自动赎回最大退避秒数",
         "STRATEGY_ID": "基础策略",
+        "LIVE_STRATEGY_IDS": "实盘策略组合",
         "PAPER_STRATEGY_IDS": "纸面策略组合",
         "OPEN_DELAY_SECONDS": "开盘后入场秒数",
         "TARGET_PROFIT": "每次目标净利",
@@ -642,6 +658,7 @@ class DashboardState:
         "LIVE_AUTO_REDEEM_ENABLED": ["false", "true"],
         "LIVE_AUTO_REDEEM_DRY_RUN": ["false", "true"],
         "STRATEGY_ID": ["1", "2", "3", "4", "5", "6", "7"],
+        "LIVE_STRATEGY_IDS": ["1", "2", "3", "4", "5", "6", "7"],
         "PAPER_STRATEGY_IDS": ["1", "2", "3", "4", "5", "6", "7"],
         "BET_SIZING_MODE": ["FIXED_BASE_COST", "TARGET_PROFIT"],
         "SIGNAL_WEAK_SIGNAL_MODE": ["SKIP", "FALLBACK"],
@@ -670,6 +687,7 @@ class DashboardState:
         "LIVE_AUTO_REDEEM_INITIAL_BACKOFF_SECONDS": "live_auto_redeem_initial_backoff_seconds",
         "LIVE_AUTO_REDEEM_MAX_BACKOFF_SECONDS": "live_auto_redeem_max_backoff_seconds",
         "STRATEGY_ID": "strategy_id",
+        "LIVE_STRATEGY_IDS": "live_strategy_ids",
         "PAPER_STRATEGY_IDS": "paper_strategy_ids",
         "OPEN_DELAY_SECONDS": "open_delay_seconds",
         "TARGET_PROFIT": "target_profit",
@@ -787,6 +805,7 @@ class DashboardState:
     }
     FIELD_HELP: dict[str, str] = {
         "STRATEGY_ID": "策略 1-4 是固定节奏策略，策略 5 是动量策略，策略 6 是 Binance OFI 盘口失衡策略。",
+        "LIVE_STRATEGY_IDS": "实盘模式下可轮询的策略列表，按输入顺序去重，例如 2,6。未填写时会回退到 STRATEGY_ID。",
         "PAPER_STRATEGY_IDS": "纸面测试可同时运行多个策略，按输入顺序去重，例如 1,2,6。",
         "TARGET_PROFIT": "在目标收益模式下，这里表示每轮期望净利；在固定金额模式下，它更多用于观察研究，不直接决定首笔下注金额。",
         "BET_SIZING_MODE": "固定金额模式会使用固定首笔下注额；目标收益模式会根据目标净利反推下注金额。",
@@ -883,6 +902,9 @@ class DashboardState:
                     return str(float(normalized))
                 except ValueError as exc:
                     raise ValueError(f"Invalid value for {key}: expected number, got {value!r}") from exc
+
+        if key == "LIVE_STRATEGY_IDS":
+            return _normalize_live_strategy_id_list_value(normalized)
 
         if key == "PAPER_STRATEGY_IDS":
             return _normalize_strategy_id_list_value(normalized)
@@ -987,7 +1009,7 @@ class DashboardState:
         value = getattr(self._cfg, self.CONFIG_ATTR_MAP[key])
         if value is None:
             return ""
-        if key == "PAPER_STRATEGY_IDS":
+        if key in {"LIVE_STRATEGY_IDS", "PAPER_STRATEGY_IDS"}:
             return ",".join(str(item) for item in value)
         return _fmt_env(value)
 
@@ -1018,6 +1040,20 @@ class DashboardState:
             live_validation_error = _localize_runtime_message(str(exc))
 
         redeem_cfg = validated_live_cfg if validated_live_cfg is not None else self._build_config(validation_values)
+        live_strategy_ids = [str(item) for item in (getattr(redeem_cfg, "live_strategy_ids", None) or [redeem_cfg.strategy_id])]
+        live_session_state = load_session_state(
+            redeem_cfg.logs_dir / "live_session_state.json",
+            effective_live_strategy_ids=[int(item) for item in live_strategy_ids],
+        )
+        live_strategy_states = {
+            str(strategy_id): asdict(strategy_state)
+            for strategy_id, strategy_state in getattr(live_session_state, "live_strategies", {}).items()
+        }
+        live_pending_live_order = any(
+            bool(state.get("pending_live_slug"))
+            for strategy_id, state in live_strategy_states.items()
+            if strategy_id in live_strategy_ids
+        )
         redeem_state = load_live_redeem_state(redeem_cfg.logs_dir / "live_redeem_state.json")
         redeem_runtime = redeem_state.get("runtime") if isinstance(redeem_state, dict) else {}
         redeem_runtime = redeem_runtime if isinstance(redeem_runtime, dict) else {}
@@ -1051,7 +1087,9 @@ class DashboardState:
             "current_round_slug": runtime_snapshot.current_round_slug if runtime_snapshot is not None else None,
             "round_in_progress": runtime_snapshot.round_in_progress if runtime_snapshot is not None else False,
             "safe_to_switch": runtime_snapshot.safe_to_switch if runtime_snapshot is not None else (saved_mode == active_mode),
-            "pending_live_order": runtime_snapshot.pending_live_order if runtime_snapshot is not None else False,
+            "pending_live_order": bool((runtime_snapshot.pending_live_order if runtime_snapshot is not None else False) or live_pending_live_order),
+            "live_strategy_ids": live_strategy_ids,
+            "live_strategy_states": live_strategy_states,
             "redeem_visible": redeem_visible,
             "redeem_enabled": redeem_enabled,
             "redeem_auth_mode": getattr(redeem_cfg, "live_redeem_auth_mode", "unconfigured"),
