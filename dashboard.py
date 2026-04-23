@@ -1824,6 +1824,25 @@ def _dashboard_html() -> str:
         <div id=\"cfgStatus\" class=\"chip\">未保存</div>
       </div>
       <div class=\"panel-body\">
+        <section class="strategy-guide-card">
+          <div class="strategy-guide-head">
+            <div>
+              <div class="strategy-guide-title">模式任务流</div>
+              <div id="configContextSummary" class="strategy-guide-subtitle">当前按模拟盘配置展示。</div>
+            </div>
+            <select id="configModeSelect" class="input-compact" aria-label="左侧配置模式选择">
+              <option value="paper">模拟盘</option>
+              <option value="live">实盘</option>
+            </select>
+          </div>
+          <div id="paperTaskflowRoot" class="rows">
+            <div class="field-help">模拟盘任务流区域预留中，当前先显示模式摘要与可见性壳层。</div>
+          </div>
+          <div id="liveTaskflowRoot" class="rows" hidden>
+            <div class="field-help">实盘任务流区域预留中，当前先显示模式摘要与可见性壳层。</div>
+          </div>
+        </section>
+
         <div id=\"strategyGuideCard\" class=\"strategy-guide-card\"></div>
         <div id="paperProfilesRoot" class="rows"></div>
 
@@ -3271,7 +3290,7 @@ const state = {
   summary: null,
   recent: null,
   paperRuntimeCards: {},
-  paperStrategyFilter: 'all',
+  marketStrategyFilter: 'all',
   paperReportStrategyFilter: 'all',
   paperSummaryStrategyFilter: null,
   paperRecentStrategyFilter: null,
@@ -4069,7 +4088,7 @@ function renderUnifiedStrategyToolbar(payload, values) {
     multiNode.appendChild(option);
   });
   renderStrategyPanel(payload, values);
-  state.paperStrategyFilter = focusStrategy;
+  state.marketStrategyFilter = focusStrategy;
 }
 
 function paperReportStrategyOptions() {
@@ -4079,7 +4098,7 @@ function paperReportStrategyOptions() {
 }
 
 function effectivePaperReportStrategyFilter() {
-  return String(state.paperReportStrategyFilter || state.paperStrategyFilter || 'all');
+  return String(state.paperReportStrategyFilter || 'all');
 }
 
 function effectivePaperSummaryStrategyFilter() {
@@ -4801,6 +4820,63 @@ function buildLiveToggleValue(values) {
   return mode === 'live' && enabled === 'true' ? 'true' : 'false';
 }
 
+function effectiveConfigMode(payload) {
+  const envValues = (payload && payload.env_values) || {};
+  return buildLiveToggleValue(envValues) === 'true' ? 'live' : 'paper';
+}
+
+function renderTaskflowVisibility(mode) {
+  const normalizedMode = String(mode || 'paper').toLowerCase() === 'live' ? 'live' : 'paper';
+  const paperRoot = el('paperTaskflowRoot');
+  const liveRoot = el('liveTaskflowRoot');
+  if (paperRoot) {
+    paperRoot.hidden = normalizedMode !== 'paper';
+  }
+  if (liveRoot) {
+    liveRoot.hidden = normalizedMode !== 'live';
+  }
+}
+
+function renderConfigModeShell(payload) {
+  const selectNode = el('configModeSelect');
+  const summaryNode = el('configContextSummary');
+  if (!selectNode || !summaryNode) {
+    return;
+  }
+  const runtime = (payload && payload.runtime_status) || {};
+  const currentMode = effectiveConfigMode(payload);
+  selectNode.value = currentMode;
+  summaryNode.textContent =
+    '当前按' + formatModeLabel(currentMode) +
+    '配置展示 / 运行中 ' + formatModeLabel(runtime.active_mode || runtime.running_mode || 'paper') +
+    ' / ' + (runtime.restart_required ? '切换待生效' : '无需切换');
+  renderTaskflowVisibility(currentMode);
+  if (selectNode.dataset.bound === 'true') {
+    return;
+  }
+  selectNode.dataset.bound = 'true';
+  selectNode.addEventListener('change', () => {
+    const nextMode = String(selectNode.value || 'paper').toLowerCase() === 'live' ? 'live' : 'paper';
+    const hiddenModeField = el('cfg_ENABLE_LIVE_TRADING');
+    if (hiddenModeField) {
+      hiddenModeField.value = nextMode === 'live' ? 'true' : 'false';
+    }
+    state.config = {
+      ...(state.config || {}),
+      env_values: {
+        ...(((state.config || {}).env_values) || {}),
+        TRADE_MODE: nextMode,
+        LIVE_TRADING_ENABLED: nextMode === 'live' ? 'true' : 'false',
+      },
+    };
+    const form = el('configForm');
+    if (form && typeof form.oninput === 'function') {
+      form.oninput();
+    }
+    renderConfigModeShell(state.config || {});
+  });
+}
+
 function expandLiveToggleValues(values) {
   const expanded = { ...values };
   if (!Object.prototype.hasOwnProperty.call(expanded, 'ENABLE_LIVE_TRADING')) {
@@ -5082,10 +5158,18 @@ function renderConfig(payload) {
   }
 
   renderUnifiedStrategyToolbar(payload, displayValues);
+  renderConfigModeShell(payload);
   form.oninput = () => {
     const liveValues = expandLiveToggleValues(collectConfigValues());
     renderUnifiedStrategyToolbar(state.config, liveValues);
     renderStrategyGuide(state.config, liveValues);
+    renderConfigModeShell({
+      ...(state.config || {}),
+      env_values: {
+        ...((state.config || {}).env_values || {}),
+        ...liveValues,
+      },
+    });
     applyConfigFieldVisibility(liveValues);
     applyAdvancedConfigVisibility(liveValues);
   };
@@ -5282,7 +5366,7 @@ function renderDecisionCard(payload) {
 function renderMarket(payload) {
   state.market = payload;
   const strategyView = payload.strategy_view || {};
-  state.paperStrategyFilter = String(strategyView.selected || state.paperStrategyFilter || 'all');
+  state.marketStrategyFilter = String(strategyView.selected || state.marketStrategyFilter || 'all');
   renderSharedPaperReportStrategySelector();
   const round = payload.round || null;
   const quote = payload.quote || {};
@@ -5477,7 +5561,7 @@ function renderRecent(payload) {
 
 async function refreshMarket() {
   try {
-    const strategy = encodeURIComponent(String(state.paperStrategyFilter || 'all'));
+    const strategy = encodeURIComponent(String(state.marketStrategyFilter || 'all'));
     const timeframe = encodeURIComponent(effectivePaperTimeframeFilter());
     const data = await apiGet('/api/market?strategy=' + strategy + '&timeframe=' + timeframe);
     renderMarket(data);

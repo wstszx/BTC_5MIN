@@ -401,6 +401,48 @@ def test_dashboard_assets_include_strategy_guide_and_human_labels():
     assert "\u52a8\u91cf\u4fe1\u53f7 V2" in js
 
 
+def test_dashboard_assets_include_left_panel_mode_selector_shell():
+    html = _dashboard_html()
+    js = _dashboard_js()
+
+    assert 'id="configModeSelect"' in html
+    assert 'id="configContextSummary"' in html
+    assert 'id="paperTaskflowRoot"' in html
+    assert 'id="liveTaskflowRoot"' in html
+    assert "function effectiveConfigMode(payload)" in js
+    assert "function renderConfigModeShell(payload)" in js
+    assert "function renderTaskflowVisibility(mode)" in js
+    assert "const envValues = (payload && payload.env_values) || {};" in js
+    assert "return buildLiveToggleValue(envValues) === 'true' ? 'live' : 'paper';" in js
+
+
+def test_dashboard_assets_hide_paper_and_live_sections_by_active_mode():
+    js = _dashboard_js()
+
+    assert "const paperRoot = el('paperTaskflowRoot');" in js
+    assert "const liveRoot = el('liveTaskflowRoot');" in js
+    assert "paperRoot.hidden = normalizedMode !== 'paper';" in js
+    assert "liveRoot.hidden = normalizedMode !== 'live';" in js
+    assert "state.config = {" in js
+    assert "const hiddenModeField = el('cfg_ENABLE_LIVE_TRADING');" in js
+    assert "hiddenModeField.value = nextMode === 'live' ? 'true' : 'false';" in js
+    assert "if (form && typeof form.oninput === 'function') {" in js
+    assert "form.oninput();" in js
+    assert "renderConfigModeShell(state.config || {});" in js
+
+
+def test_dashboard_assets_mode_selector_propagates_into_save_payload_path():
+    js = _dashboard_js()
+
+    assert "const hiddenModeField = el('cfg_ENABLE_LIVE_TRADING');" in js
+    assert "hiddenModeField.value = nextMode === 'live' ? 'true' : 'false';" in js
+    assert "const keys = ['ENABLE_LIVE_TRADING', ...(((state.config && state.config.editable_keys) || []).filter((key) => !isSingleLiveToggleKey(key)))];" in js
+    assert "payload[key] = node.value;" in js
+    assert "expanded.TRADE_MODE = normalized === 'true' ? 'live' : 'paper';" in js
+    assert "expanded.LIVE_TRADING_ENABLED = normalized;" in js
+    assert "const hiddenKeys = new Set(['PAPER_STRATEGY_IDS', 'PAPER_TIMEFRAMES']);" in js
+
+
 
 
 def test_dashboard_config_payload_exposes_live_auto_redeem_fields(tmp_path: Path):
@@ -1204,7 +1246,7 @@ def test_dashboard_assets_use_strategy_panel_for_unified_strategy_selection():
     assert 'function clearPaperStrategies()' in js
     assert 'function togglePaperStrategySelection(' in js
     assert 'function setPrimaryStrategy(' in js
-    assert "state.paperStrategyFilter = focusStrategy;" in js
+    assert "state.marketStrategyFilter = focusStrategy;" in js
     assert "const summaryEndpoint = '/api/paper/summary?strategy=' + strategy + '&timeframe=' + timeframe;" in js
     assert 'function resolveUnifiedStrategySelection(' in js
     assert 'function renderUnifiedStrategyToolbar(' in js
@@ -1264,9 +1306,10 @@ def test_dashboard_assets_keep_summary_and_recent_filters_independent():
 def test_dashboard_assets_market_refresh_does_not_reset_report_filters():
     js = _dashboard_js()
 
-    assert "state.paperStrategyFilter = String(strategyView.selected || state.paperStrategyFilter || 'all');" in js
-    assert "state.paperSummaryStrategyFilter = String(strategyView.selected || state.paperStrategyFilter || 'all');" not in js
-    assert "state.paperRecentStrategyFilter = String(strategyView.selected || state.paperStrategyFilter || 'all');" not in js
+    assert "state.marketStrategyFilter = String(strategyView.selected || state.marketStrategyFilter || 'all');" in js
+    assert "state.paperReportStrategyFilter || state.marketStrategyFilter || 'all'" not in js
+    assert "state.paperSummaryStrategyFilter = String(strategyView.selected || state.marketStrategyFilter || 'all');" not in js
+    assert "state.paperRecentStrategyFilter = String(strategyView.selected || state.marketStrategyFilter || 'all');" not in js
 
 
 def test_dashboard_assets_summary_and_recent_use_their_own_filters():
