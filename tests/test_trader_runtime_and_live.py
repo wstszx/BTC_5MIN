@@ -776,11 +776,14 @@ class _RoundEndMarketClient(_LiveMarketClient):
 
 
 class _StubClobClient:
-    def __init__(self, *, post_response=None, order_payloads=None):
+    def __init__(self, *, post_response=None, order_payloads=None, balance_payload=None):
         self.created_orders = []
         self.posted_orders = []
         self.post_response = post_response if post_response is not None else {"success": True, "orderID": "oid-123"}
         self.order_payloads = order_payloads or {}
+        self.balance_payload = (
+            balance_payload if balance_payload is not None else {"available": 100.0, "balance": 100.0}
+        )
 
     def create_market_order(self, order_args):
         self.created_orders.append(order_args)
@@ -792,6 +795,9 @@ class _StubClobClient:
 
     def get_order(self, order_id):
         return self.order_payloads.get(order_id, {})
+
+    def get_balance(self):
+        return self.balance_payload
 
 
 class _StrictStubClobClient(_StubClobClient):
@@ -1795,6 +1801,122 @@ def test_place_live_order_waits_for_previous_pending_trade_settlement(tmp_path):
     assert result["status"] == "pending_settlement"
     assert result["skip_reason"] == "awaiting_fill_confirmation"
     assert stub_clob.created_orders == []
+
+
+def test_run_live_trading_submits_multiple_strategies_in_same_round_when_wallet_budget_allows(tmp_path, monkeypatch):
+    stop_event = threading.Event()
+    stub_clob = _StubClobClient(balance_payload={"available": 3.0})
+
+    def fake_sleep(_seconds):
+        stop_event.set()
+
+    monkeypatch.setattr("trader.time.sleep", fake_sleep)
+    monkeypatch.setattr(
+        "trader._resolve_side_from_strategy",
+        lambda **kwargs: SideDecision(side="UP"),
+    )
+    monkeypatch.setattr(
+        "trader.build_trade_plan",
+        lambda *args, **kwargs: TradePlan(
+            True,
+            "UP",
+            price=0.55,
+            order_size=2.0,
+            order_cost=1.5,
+            expected_profit=0.5,
+        ),
+    )
+
+    cfg = AppConfig(
+        trade_mode="live",
+        live_trading_enabled=True,
+        live_private_key="pk",
+        live_funder="0xfunder",
+        strategy_id=1,
+        live_strategy_ids=[1, 3],
+        base_order_cost=1.5,
+        poll_interval_seconds=1,
+    )
+
+    result = run_live_trading(
+        cfg,
+        market_client=_LiveMarketClient(),
+        clob_client=stub_clob,
+        state_path=tmp_path / "live_state.json",
+        log_path=tmp_path / "live_orders.csv",
+        stop_event=stop_event,
+    )
+
+    state = load_session_state(tmp_path / "live_state.json", effective_live_strategy_ids=[1, 3])
+
+    assert result["status"] == "stopped"
+    assert len(stub_clob.created_orders) == 2
+    assert state.live_strategies[1].pending_live_slug == "btc-updown-5m-test"
+    assert state.live_strategies[3].pending_live_slug == "btc-updown-5m-test"
+    rows = (tmp_path / "live_orders.csv").read_text(encoding="utf-8").splitlines()
+    assert len(rows) == 3
+    assert ",1,OPEN,btc-updown-5m-test," in rows[1]
+    assert ",3,OPEN,btc-updown-5m-test," in rows[2]
+
+
+def test_run_live_trading_wallet_budget_skips_later_strategy_after_earlier_submission(tmp_path, monkeypatch):
+    stop_event = threading.Event()
+    stub_clob = _StubClobClient(balance_payload={"available": 2.0})
+
+    def fake_sleep(_seconds):
+        stop_event.set()
+
+    def fake_plan(*args, **kwargs):
+        order_cost = kwargs["base_order_cost"]
+        return TradePlan(
+            True,
+            "UP",
+            price=0.55,
+            order_size=order_cost / 0.55,
+            order_cost=order_cost,
+            expected_profit=0.5,
+        )
+
+    monkeypatch.setattr("trader.time.sleep", fake_sleep)
+    monkeypatch.setattr(
+        "trader._resolve_side_from_strategy",
+        lambda **kwargs: SideDecision(side="UP"),
+    )
+    monkeypatch.setattr("trader.build_trade_plan", fake_plan)
+
+    cfg = AppConfig(
+        trade_mode="live",
+        live_trading_enabled=True,
+        live_private_key="pk",
+        live_funder="0xfunder",
+        strategy_id=1,
+        live_strategy_ids=[1, 3],
+        base_order_cost=1.5,
+        poll_interval_seconds=1,
+    )
+    cfg.live_profiles[3].base_order_cost = 0.75
+
+    result = run_live_trading(
+        cfg,
+        market_client=_LiveMarketClient(),
+        clob_client=stub_clob,
+        state_path=tmp_path / "live_state.json",
+        log_path=tmp_path / "live_orders.csv",
+        stop_event=stop_event,
+    )
+
+    state = load_session_state(tmp_path / "live_state.json", effective_live_strategy_ids=[1, 3])
+
+    assert result["status"] == "stopped"
+    assert len(stub_clob.created_orders) == 1
+    assert state.live_strategies[1].pending_live_slug == "btc-updown-5m-test"
+    assert state.live_strategies[3].pending_live_slug is None
+    rows = (tmp_path / "live_orders.csv").read_text(encoding="utf-8").splitlines()
+    assert len(rows) == 3
+    assert ",1,OPEN,btc-updown-5m-test," in rows[1]
+    assert ",3,OPEN,btc-updown-5m-test," in rows[2]
+    assert ",UP,0.56,0.0,0.0,0.0," in rows[2]
+    assert "insufficient_live_wallet_balance" in rows[2]
 
 
 def test_settle_pending_live_trade_operates_on_single_strategy_state():
