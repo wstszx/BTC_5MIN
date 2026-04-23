@@ -994,6 +994,129 @@ def test_load_session_state_preserves_paper_experiment_ids(tmp_path):
     assert state.paper_strategies[5].experiment_id == "challenger-s5-a"
 
 
+def test_load_session_state_live_strategies_wraps_legacy_live_state_for_effective_strategy(tmp_path):
+    state_path = tmp_path / "session_state.json"
+    state_path.write_text(
+        json.dumps(
+            {
+                "round_index": 5,
+                "cash_pnl": 2.5,
+                "recovery_loss": 0.75,
+                "consecutive_losses": 2,
+                "consecutive_max_stake_skips": 1,
+                "signal_round_slug": "btc-updown-5m-live-prev",
+                "signal_round_open_up_price": 0.51,
+                "signal_round_locked_side": "UP",
+                "strategy6_last_ofi_score": 0.82,
+                "stop_loss_count": 3,
+                "daily_realized_pnl": -1.25,
+                "current_day": "2026-04-21",
+                "pending_live_slug": "btc-updown-5m-live-pending",
+                "pending_live_side": "DOWN",
+                "pending_live_price": 0.43,
+                "pending_live_order_size": 12.0,
+                "pending_live_order_cost": 5.16,
+                "pending_live_expected_profit": 6.84,
+                "pending_live_order_id": "oid-live-7",
+                "pending_live_end_time": "2026-04-21T12:05:00+00:00",
+                "pending_paper_trades": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    state = load_session_state(state_path, effective_live_strategy_ids=[7])
+
+    assert sorted(state.live_strategies.keys()) == [7]
+    live_state = state.live_strategies[7]
+    assert live_state.round_index == 5
+    assert live_state.cash_pnl == 2.5
+    assert live_state.recovery_loss == 0.75
+    assert live_state.consecutive_losses == 2
+    assert live_state.consecutive_max_stake_skips == 1
+    assert live_state.signal_round_slug == "btc-updown-5m-live-prev"
+    assert live_state.signal_round_open_up_price == 0.51
+    assert live_state.signal_round_locked_side == "UP"
+    assert live_state.strategy6_last_ofi_score == 0.82
+    assert live_state.stop_loss_count == 3
+    assert live_state.daily_realized_pnl == -1.25
+    assert live_state.current_day == "2026-04-21"
+    assert live_state.pending_live_slug == "btc-updown-5m-live-pending"
+    assert live_state.pending_live_side == "DOWN"
+    assert live_state.pending_live_price == 0.43
+    assert live_state.pending_live_order_size == 12.0
+    assert live_state.pending_live_order_cost == 5.16
+    assert live_state.pending_live_expected_profit == 6.84
+    assert live_state.pending_live_order_id == "oid-live-7"
+    assert live_state.pending_live_end_time == "2026-04-21T12:05:00+00:00"
+
+
+def test_load_session_state_live_strategies_preserves_multiple_live_strategy_entries(tmp_path):
+    state_path = tmp_path / "session_state.json"
+    state_path.write_text(
+        json.dumps(
+            {
+                "live_strategies": {
+                    "3": {
+                        "round_index": 2,
+                        "cash_pnl": 1.2,
+                        "recovery_loss": 0.0,
+                        "consecutive_losses": 0,
+                        "consecutive_max_stake_skips": 0,
+                        "signal_round_slug": "btc-updown-5m-live-3",
+                        "signal_round_open_up_price": 0.5,
+                        "signal_round_locked_side": None,
+                        "strategy6_last_ofi_score": None,
+                        "stop_loss_count": 0,
+                        "daily_realized_pnl": 1.2,
+                        "current_day": "2026-04-22",
+                        "pending_live_slug": None,
+                        "pending_live_side": None,
+                        "pending_live_price": None,
+                        "pending_live_order_size": None,
+                        "pending_live_order_cost": None,
+                        "pending_live_expected_profit": None,
+                        "pending_live_order_id": None,
+                        "pending_live_end_time": None,
+                    },
+                    "7": {
+                        "round_index": 9,
+                        "cash_pnl": -0.4,
+                        "recovery_loss": 1.1,
+                        "consecutive_losses": 1,
+                        "consecutive_max_stake_skips": 2,
+                        "signal_round_slug": "btc-updown-5m-live-7",
+                        "signal_round_open_up_price": 0.47,
+                        "signal_round_locked_side": "DOWN",
+                        "strategy6_last_ofi_score": 0.76,
+                        "stop_loss_count": 2,
+                        "daily_realized_pnl": -0.4,
+                        "current_day": "2026-04-22",
+                        "pending_live_slug": "btc-updown-5m-live-7-pending",
+                        "pending_live_side": "UP",
+                        "pending_live_price": 0.48,
+                        "pending_live_order_size": 8.0,
+                        "pending_live_order_cost": 3.84,
+                        "pending_live_expected_profit": 4.16,
+                        "pending_live_order_id": "oid-live-7-existing",
+                        "pending_live_end_time": "2026-04-22T09:35:00+00:00",
+                    },
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    state = load_session_state(state_path, effective_live_strategy_ids=[3, 7])
+
+    assert sorted(state.live_strategies.keys()) == [3, 7]
+    assert state.live_strategies[3].round_index == 2
+    assert state.live_strategies[3].cash_pnl == 1.2
+    assert state.live_strategies[7].round_index == 9
+    assert state.live_strategies[7].strategy6_last_ofi_score == 0.76
+    assert state.live_strategies[7].pending_live_order_id == "oid-live-7-existing"
+
+
 
 
 
