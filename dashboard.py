@@ -155,6 +155,10 @@ def _paper_profile_config_key(timeframe: str, field_name: str) -> str:
     return f"{_paper_profile_env_prefix(timeframe)}_{field_name}"
 
 
+def _paper_profile_display_prefix(timeframe: str) -> str:
+    return f"{str(timeframe).lower()} 纸面配置"
+
+
 def _split_paper_profile_key(key: str) -> tuple[str, str] | None:
     for timeframe in SUPPORTED_PAPER_TIMEFRAMES:
         prefix = _paper_profile_env_prefix(timeframe) + "_"
@@ -356,14 +360,14 @@ def _strategy_catalog() -> dict[str, dict[str, Any]]:
             "detail": "弱信号时按 SIGNAL_WEAK_SIGNAL_MODE 决定跳过还是回退到基础策略。",
         },
         "6": {
-            "label": "Binance OFI 失衡",
-            "summary": "根据 Binance 深度盘口的 OFI 强弱决定方向。",
+            "label": "币安盘口失衡",
+            "summary": "根据币安深度盘口的失衡强弱决定方向。",
             "preview": ["OFI", "THRESHOLD", "SKIP"],
-            "detail": "仅在 OFI 信号足够强且未过期时给出方向，否则按规则跳过。",
+            "detail": "仅在盘口失衡信号足够强且未过期时给出方向，否则按规则跳过。",
         },
         "7": {
-            "label": "OFI+动量共识",
-            "summary": "只有 Binance OFI 和 Polymarket 动量同向时才允许交易。",
+            "label": "盘口+动量共识",
+            "summary": "只有币安盘口失衡和预测市场动量同向时才允许交易。",
             "preview": ["OFI", "MOMENTUM", "THRESHOLD", "SKIP"],
             "detail": "更偏向少做、做高质量信号。",
         },
@@ -586,11 +590,11 @@ class DashboardState:
         "POLYMARKET_API_KEY": "官方 API 访问密钥",
         "POLYMARKET_API_SECRET": "官方 API 签名密钥",
         "POLYMARKET_API_PASSPHRASE": "官方 API 通行口令",
-        "POLYMARKET_BUILDER_API_KEY": "Builder Redeem API Key",
-        "POLYMARKET_BUILDER_SECRET": "Builder Redeem Secret",
-        "POLYMARKET_BUILDER_PASSPHRASE": "Builder Redeem Passphrase",
-        "POLYMARKET_RELAYER_API_KEY": "Relayer API Key",
-        "POLYMARKET_RELAYER_API_KEY_ADDRESS": "Relayer Key Address",
+        "POLYMARKET_BUILDER_API_KEY": "Builder 自动赎回接口密钥",
+        "POLYMARKET_BUILDER_SECRET": "Builder 自动赎回签名密钥",
+        "POLYMARKET_BUILDER_PASSPHRASE": "Builder 自动赎回口令",
+        "POLYMARKET_RELAYER_API_KEY": "Relayer 接口密钥",
+        "POLYMARKET_RELAYER_API_KEY_ADDRESS": "Relayer 密钥地址",
         "LIVE_AUTO_REDEEM_ENABLED": "实盘自动赎回",
         "LIVE_AUTO_REDEEM_DRY_RUN": "自动赎回演练模式",
         "LIVE_AUTO_REDEEM_POLL_SECONDS": "自动赎回轮询秒数",
@@ -606,8 +610,8 @@ class DashboardState:
         "MAX_CONSECUTIVE_LOSSES": "连亏重置轮数",
         "MAX_STAKE": "单笔最大下注金额",
         "MAX_PRICE_THRESHOLD": "最高买入价格阈值",
-        "OFI_THRESHOLD": "OFI阈值",
-        "STRATEGY7_OFI_THRESHOLD": "策略7 OFI阈值",
+        "OFI_THRESHOLD": "盘口失衡阈值",
+        "STRATEGY7_OFI_THRESHOLD": "策略7 盘口失衡阈值",
         "STRATEGY7_MOMENTUM_THRESHOLD": "策略7 动量阈值",
         "STRATEGY7_MAX_ENTRY_PRICE": "策略7 最高入场价",
         "STRATEGY7_MIN_SIGNAL_GAP": "策略7 最小信号优势",
@@ -622,7 +626,7 @@ class DashboardState:
         "SIGNAL_DYNAMIC_THRESHOLD_K": "动态阈值系数K",
         "SIGNAL_DYNAMIC_THRESHOLD_MIN_POINTS": "动态阈值最少样本点",
         "SIGNAL_LOCK_BEFORE_ENTRY_SECONDS": "入场前锁边秒数",
-        "BINANCE_SIGNAL_STALE_SECONDS": "Binance 信号过期秒",
+        "BINANCE_SIGNAL_STALE_SECONDS": "盘口信号过期秒",
         "MAX_STAKE_SKIP_ALERT_THRESHOLD": "超额跳过告警阈值",
         "WS_ENABLED": "实时连接开关",
         "WS_QUOTE_STALE_SECONDS": "行情过期秒",
@@ -791,14 +795,14 @@ class DashboardState:
         "OPEN_DELAY_SECONDS": "OPEN 模式下，从每轮开始后延迟多少秒再尝试入场。",
         "POLYMARKET_PRIVATE_KEY": "实盘钱包私钥，仅在实盘模式下需要。",
         "POLYMARKET_FUNDER": "与私钥对应的实盘钱包地址（0x...），并且需要实际承担实盘订单资金。",
-        "POLYMARKET_API_KEY": "CLOB 实盘下单凭证，仅用于 live order 私有接口。",
-        "POLYMARKET_API_SECRET": "CLOB 实盘下单签名密钥，仅用于 live order 私有接口。",
-        "POLYMARKET_API_PASSPHRASE": "CLOB 实盘下单通行口令，仅用于 live order 私有接口。",
-        "POLYMARKET_BUILDER_API_KEY": "官方 gasless redeem 的 Builder API key，仅用于自动赎回。",
-        "POLYMARKET_BUILDER_SECRET": "官方 gasless redeem 的 Builder secret，仅用于自动赎回。",
-        "POLYMARKET_BUILDER_PASSPHRASE": "官方 gasless redeem 的 Builder passphrase，仅用于自动赎回。",
-        "POLYMARKET_RELAYER_API_KEY": "官方 gasless redeem 的 Relayer API key，仅用于自动赎回。",
-        "POLYMARKET_RELAYER_API_KEY_ADDRESS": "与 Relayer API key 配套的地址，仅用于自动赎回认证。",
+        "POLYMARKET_API_KEY": "CLOB 实盘下单凭证，仅用于实盘下单私有接口。",
+        "POLYMARKET_API_SECRET": "CLOB 实盘下单签名密钥，仅用于实盘下单私有接口。",
+        "POLYMARKET_API_PASSPHRASE": "CLOB 实盘下单通行口令，仅用于实盘下单私有接口。",
+        "POLYMARKET_BUILDER_API_KEY": "官方免 Gas 赎回的 Builder 接口密钥，仅用于自动赎回。",
+        "POLYMARKET_BUILDER_SECRET": "官方免 Gas 赎回的 Builder 签名密钥，仅用于自动赎回。",
+        "POLYMARKET_BUILDER_PASSPHRASE": "官方免 Gas 赎回的 Builder 口令，仅用于自动赎回。",
+        "POLYMARKET_RELAYER_API_KEY": "官方免 Gas 赎回的 Relayer 接口密钥，仅用于自动赎回。",
+        "POLYMARKET_RELAYER_API_KEY_ADDRESS": "与 Relayer 接口密钥配套的地址，仅用于自动赎回认证。",
         "LIVE_AUTO_REDEEM_ENABLED": "仅实盘模式使用。开启后会启动独立的自动赎回线程，扫描可赎回的获胜仓位并自动尝试赎回。",
         "LIVE_AUTO_REDEEM_DRY_RUN": "仅在开启自动赎回后才有意义。设为 true 时，自动赎回线程仍会检测仓位、写入状态并更新监控页面，但不会发送真实的 Polygon 链上赎回交易。正常实盘请保持 false，只在首次验证或调试时临时开启。",
         "LIVE_AUTO_REDEEM_POLL_SECONDS": "检查可赎回实盘仓位的轮询间隔，单位秒。",
@@ -825,12 +829,12 @@ class DashboardState:
         "SIGNAL_DYNAMIC_THRESHOLD_K": "动态阈值系数，运行时会使用 max(基础阈值, k * sigma)。",
         "SIGNAL_DYNAMIC_THRESHOLD_MIN_POINTS": "启用动态阈值前要求的最少样本点数量。",
         "SIGNAL_LOCK_BEFORE_ENTRY_SECONDS": "在计划入场前提前锁定方向，避免最后几秒来回翻边。",
-        "BINANCE_SIGNAL_STALE_SECONDS": "Binance OFI 信号最多允许滞后多少秒，超过后视为过期。",
+        "BINANCE_SIGNAL_STALE_SECONDS": "盘口失衡信号最多允许滞后多少秒，超过后视为过期。",
         "MAX_STAKE_SKIP_ALERT_THRESHOLD": "连续因超过 MAX_STAKE 而跳过多少次后触发提醒。",
-        "WS_ENABLED": "优先使用 WS(WebSocket) 行情缓存；必要时再回退到 HTTP。",
-        "WS_QUOTE_STALE_SECONDS": "WS(WebSocket) 行情在多久未更新后视为过期。",
-        "WS_TRADE_GUARD_STALE_SECONDS": "入场前若 WS 行情年龄超过该阈值，则禁止本轮交易。",
-        "WS_CONNECT_TIMEOUT_SECONDS": "建立 WebSocket 会话时的连接超时秒数。",
+        "WS_ENABLED": "优先使用实时连接行情缓存；必要时再回退到接口拉取。",
+        "WS_QUOTE_STALE_SECONDS": "实时连接行情在多久未更新后视为过期。",
+        "WS_TRADE_GUARD_STALE_SECONDS": "入场前若实时连接行情年龄超过该阈值，则禁止本轮交易。",
+        "WS_CONNECT_TIMEOUT_SECONDS": "建立实时连接会话时的连接超时秒数。",
     }
 
     @classmethod
@@ -1731,12 +1735,12 @@ def _install_dashboard_paper_profile_fields() -> None:
             if scoped_key not in DashboardState.CONFIG_LABELS:
                 label_key = 'PAPER_STRATEGY_IDS' if field_name == 'STRATEGY_IDS' else field_name
                 base_label = DashboardState.CONFIG_LABELS[label_key]
-                DashboardState.CONFIG_LABELS[scoped_key] = f'Paper {timeframe} · {base_label}'
+                DashboardState.CONFIG_LABELS[scoped_key] = f'{_paper_profile_display_prefix(timeframe)} · {base_label}'
             select_key = 'STRATEGY_ID' if field_name == 'STRATEGY_IDS' else field_name
             if select_key in DashboardState.SELECT_OPTIONS and scoped_key not in DashboardState.SELECT_OPTIONS:
                 DashboardState.SELECT_OPTIONS[scoped_key] = list(DashboardState.SELECT_OPTIONS[select_key])
             if scoped_key not in DashboardState.FIELD_HELP:
-                DashboardState.FIELD_HELP[scoped_key] = f'仅作用于 paper {timeframe} profile。'
+                DashboardState.FIELD_HELP[scoped_key] = f'仅作用于 {str(timeframe).lower()} 纸面配置。'
 
 
 _install_dashboard_paper_profile_fields()
@@ -3320,10 +3324,10 @@ const HELP_SECTIONS = {
       {
         title: '实盘自动赎回',
         bullets: [
-          'LIVE_AUTO_REDEEM_ENABLED 只在实盘模式下生效，开启后会启动独立的自动赎回线程。',
+          '实盘自动赎回开关只在实盘模式下生效，开启后会启动独立的自动赎回线程。',
           '该线程会扫描可赎回的获胜仓位，并通过 Polygon 的 redeemPositions 方法尝试把它们转回可用余额。',
-          '当 LIVE_AUTO_REDEEM_DRY_RUN=true 时，自动赎回线程只做检测、记录和监控页面展示，不会发送真实赎回交易。',
-          '正常实盘请保持 LIVE_AUTO_REDEEM_DRY_RUN=false，只在首次验证或调试时临时打开。',
+          '当自动赎回演练模式开启时，自动赎回线程只做检测、记录和监控页面展示，不会发送真实赎回交易。',
+          '正常实盘请保持自动赎回演练模式关闭，只在首次验证或调试时临时打开。',
         ],
       },
       {
@@ -3332,7 +3336,7 @@ const HELP_SECTIONS = {
           '先看行情与信号，确认当前轮次、方向判断和倒计时是否正常。',
           '再看下注计划与风控，确认当前是否准备下注、为什么跳过、以及预期收益是多少。',
           '然后看会话状态，关注累计盈亏、待回补亏损和连续亏损轮数。',
-          '最后看实时连接状态，判断 WS(WebSocket) 数据是否可靠。',
+          '最后看实时连接状态，判断实时连接数据是否可靠。',
         ],
       },
       {
@@ -3347,10 +3351,10 @@ const HELP_SECTIONS = {
       {
         title: '怎么判断当前能不能跑',
         bullets: [
-          'should_trade=true 说明当前轮次、价格、风控检查和 WS 防护都允许执行。',
-          'should_trade=false 时先结合 skip_reason 字段一起看，不要先默认程序坏了。',
+          '允许下单=是，说明当前轮次、价格、风控检查和实时连接防护都允许执行。',
+          '允许下单=否时先结合跳过原因一起看，不要先默认程序坏了。',
           '价格超过阈值、弱信号、超过下注上限，这些都属于正常的跳过原因。',
-          '如果是 WS 陈旧、当日亏损限制或止损重置，则应立即复核。',
+          '如果是实时连接陈旧、当日亏损限制或止损重置，则应立即复核。',
         ],
       },
     ],
@@ -3389,7 +3393,7 @@ const HELP_SECTIONS = {
       {
         title: '实时连接状态',
         bullets: [
-          '用于判断 WS(WebSocket) 行情是否可信。',
+          '用于判断实时连接行情是否可信。',
           '重点关注最近消息延迟、重连次数、最近错误和是否触发陈旧保护。',
         ],
       },
@@ -3413,15 +3417,15 @@ const HELP_SECTIONS = {
 
 const HELP_FAQ = [
   ['为什么保存了参数却像是没生效？', '先看字段提示和页面上的生效值。无效输入会回退到上一次有效配置，不会带着错误参数直接运行。'],
-  ['为什么现在没有下注？', '先看下注计划与风控里的 skip_reason，再判断是价格、风控、信号还是 WS 保护在阻止执行。'],
-  ['为什么策略 5 经常没有信号？', '策略 5 不是固定节奏，它需要价格波动幅度超过阈值；弱信号会按照 SKIP 或 FALLBACK 这两种规则处理。'],
+  ['为什么现在没有下注？', '先看下注计划与风控里的跳过原因，再判断是价格、风控、信号还是实时连接保护在阻止执行。'],
+  ['为什么策略 5 经常没有信号？', '策略 5 不是固定节奏，它需要价格波动幅度超过阈值；弱信号会按照“跳过”或“回退到基础策略”这两种规则处理。'],
   ['为什么方向和我预期的不一样？', '固定节奏策略取决于当前轮次索引；动量策略则取决于开盘价、当前价、阈值和偏移。'],
-  ['为什么会触发 WS 保护？', '这表示 WS(WebSocket) 行情数据已经过旧，系统会选择阻止执行，而不是拿陈旧数据去下注。'],
+  ['为什么会触发实时连接保护？', '这表示实时连接行情数据已经过旧，系统会选择阻止执行，而不是拿陈旧数据去下注。'],
   ['为什么当日已实现盈亏会重置？', '这是按天统计的自然切日行为；累计盈亏仍然保留在会话状态里。'],
-  ['LIVE_AUTO_REDEEM_ENABLED 是什么意思？', '这是实盘自动赎回开关。开启后，实盘模式会启动单独的自动赎回线程，自动扫描并尝试赎回获胜仓位。'],
-  ['LIVE_AUTO_REDEEM_DRY_RUN 需要去掉吗？', '不需要。它是一个安全阀：true 表示只做演练，不会发送真实的 Polygon 赎回交易。正常实盘应保持 false，仅在首次验证或调试时开启。'],
-  ['为什么触发 max stake 后会连续跳过？', '待回补亏损和当前价格条件可能会把本轮所需金额推高到 MAX_STAKE 之上，需要结合 recovery loss 一起判断。'],
-  ['新用户最容易配错什么？', '最常见的是一次改太多参数、把固定节奏和动量逻辑混在一起看，以及把 WS 保护误当成策略故障。'],
+  ['实盘自动赎回开关是什么意思？', '这是实盘自动赎回开关。开启后，实盘模式会启动单独的自动赎回线程，自动扫描并尝试赎回获胜仓位。'],
+  ['自动赎回演练模式需要关闭吗？', '不需要一直关闭。它是一个安全阀：开启时只做演练，不会发送真实的 Polygon 赎回交易。正常实盘应保持关闭，仅在首次验证或调试时开启。'],
+  ['为什么触发最大下注金额后会连续跳过？', '待回补亏损和当前价格条件可能会把本轮所需金额推高到最大下注金额之上，需要结合待回补亏损一起判断。'],
+  ['新用户最容易配错什么？', '最常见的是一次改太多参数、把固定节奏和动量逻辑混在一起看，以及把实时连接保护误当成策略故障。'],
 ];
 
 const STORAGE_KEYS = {
@@ -3434,8 +3438,8 @@ const STRATEGY_LABELS = {
   3: '三轮分组交替',
   4: '四轮分组交替',
   5: '动量信号 V2',
-  6: 'Binance OFI 失衡',
-  7: 'OFI+动量共识',
+  6: '币安盘口失衡',
+  7: '盘口+动量共识',
 };
 
 const OPTION_LABELS = {
@@ -3484,21 +3488,21 @@ const REASON_LABELS = {
   max_consecutive_losses_reached: '达到连续亏损重置阈值',
   stop_loss_triggered: '触发止损重置',
   manual_skip: '人工跳过',
-  ofi_unavailable: 'OFI 信号不可用',
-  ofi_stale: 'OFI 信号已过期',
-  ofi_too_weak: 'OFI 信号过弱',
-  strategy7_ofi_unavailable: '策略7 OFI 信号不可用',
-  strategy7_ofi_stale: '策略7 OFI 信号已过期',
-  strategy7_ofi_too_weak: '策略7 OFI 信号过弱',
+  ofi_unavailable: '盘口失衡信号不可用',
+  ofi_stale: '盘口失衡信号已过期',
+  ofi_too_weak: '盘口失衡信号过弱',
+  strategy7_ofi_unavailable: '策略7 盘口失衡信号不可用',
+  strategy7_ofi_stale: '策略7 盘口失衡信号已过期',
+  strategy7_ofi_too_weak: '策略7 盘口失衡信号过弱',
   strategy7_momentum_unavailable: '策略7 动量信号不可用',
   strategy7_momentum_too_weak: '策略7 动量信号过弱',
-  strategy7_signal_conflict: 'OFI+动量需同向确认',
+  strategy7_signal_conflict: '盘口失衡与动量需同向确认',
   strategy7_entry_too_late: '策略7 确认出现过晚',
   strategy7_price_too_high: '策略7 入场价格过高',
   strategy7_confidence_too_low: '策略7 信号优势不足',
   awaiting_fill_confirmation: '等待成交确认',
   market_timeframe: '市场频次切换待生效',
-  'INVALID OPERATION': 'WebSocket 订阅请求无效',
+  'INVALID OPERATION': '实时连接订阅请求无效',
 };
 
 const CONFIG_KEY_NAMES = {
@@ -3514,7 +3518,7 @@ const CONFIG_KEY_NAMES = {
   MAX_CONSECUTIVE_LOSSES: '连亏重置轮数',
   MAX_STAKE: '单笔最大下注金额',
   MAX_PRICE_THRESHOLD: '最高买入价格阈值',
-  STRATEGY7_OFI_THRESHOLD: '策略7 OFI阈值',
+  STRATEGY7_OFI_THRESHOLD: '策略7 盘口失衡阈值',
   STRATEGY7_MOMENTUM_THRESHOLD: '策略7 动量阈值',
   STRATEGY7_MAX_ENTRY_PRICE: '策略7 最高入场价',
   STRATEGY7_MIN_SIGNAL_GAP: '策略7 最小信号优势',
@@ -3804,7 +3808,7 @@ function strategyPreviewText(token) {
   if (token === 'THRESHOLD') return '\u9608\u503c\u8fc7\u6ee4';
   if (token === 'FALLBACK') return '\u5f31\u4fe1\u53f7\u8df3\u8fc7';
   if (token === 'SKIP') return '\u5f31\u4fe1\u53f7\u8df3\u8fc7';
-  if (token === 'OFI') return 'OFI \u5224\u65ad';
+  if (token === 'OFI') return '\u76d8\u53e3\u5931\u8861\u5224\u65ad';
   return String(token || '--');
 }
 
@@ -4224,8 +4228,8 @@ function renderPaperProfiles(payload) {
   node.innerHTML = ''
     + '<section class="strategy-guide-card">'
     +   '<div class="strategy-guide-head">'
-    +     '<div><div class="strategy-guide-title">Paper Profiles</div><div class="strategy-guide-subtitle">按 timeframe 独立编辑 paper 配置。</div></div>'
-    +     '<span class="chip ok">Profiles</span>'
+    +     '<div><div class="strategy-guide-title">纸面配置组</div><div class="strategy-guide-subtitle">按时间频次独立编辑纸面配置。</div></div>'
+    +     '<span class="chip ok">已配置</span>'
     +   '</div>'
     +   '<div class="rows">' + timeframeToggleHtml + '<input id="cfg_PAPER_TIMEFRAMES" type="hidden" value="' + esc(enabled.join(',')) + '"></div>'
     + '</section>'
@@ -4265,8 +4269,8 @@ function renderPaperProfiles(payload) {
       return ''
         + '<section class="strategy-guide-card" data-paper-profile="' + esc(timeframe) + '"' + hiddenStyle + '>'
         +   '<div class="strategy-guide-head">'
-        +     '<div><div class="strategy-guide-title">Paper ' + esc(timeframe) + '</div><div class="strategy-guide-subtitle">独立 paper profile</div></div>'
-        +     '<span class="chip ok">Editable</span>'
+        +     '<div><div class="strategy-guide-title">' + esc(paperTimeframeLabel(timeframe)) + ' 纸面配置</div><div class="strategy-guide-subtitle">独立纸面配置</div></div>'
+        +     '<span class="chip ok">可编辑</span>'
         +   '</div>'
         +   '<div class="group-grid">' + fieldsHtml + '</div>'
         + '</section>';
@@ -4322,8 +4326,8 @@ function renderPaperRuntimeCards(payload) {
       + '<section class="strategy-guide-card' + selectedCls + '" data-paper-runtime-card="' + esc(card.timeframe) + '">'
       +   '<div class="strategy-guide-head">'
       +     '<div>'
-      +       '<div class="strategy-guide-title">Paper ' + esc(card.timeframe) + '</div>'
-      +       '<div class="strategy-guide-subtitle">paper runtime card</div>'
+      +       '<div class="strategy-guide-title">' + esc(paperTimeframeLabel(card.timeframe)) + ' 纸面运行</div>'
+      +       '<div class="strategy-guide-subtitle">该时间频次的纸面运行状态</div>'
       +     '</div>'
       +     '<span class="chip ok">' + esc(formatModeLabel(card.active_mode || 'paper')) + '</span>'
       +   '</div>'
@@ -4432,7 +4436,7 @@ function sourceText(source) {
     return '实时连接';
   }
   if (normalized === 'http') {
-    return 'HTTP回退';
+    return '接口回退';
   }
   return String(source);
 }
@@ -4749,7 +4753,7 @@ function renderHelpDrawer() {
     body.innerHTML = renderHelpFaq();
   }
   footer.innerHTML =
-    '<a href="docs/dashboard_runbook.md" target="_blank" rel="noreferrer">Dashboard 操作说明</a>' +
+    '<a href="docs/dashboard_runbook.md" target="_blank" rel="noreferrer">监控面板操作说明</a>' +
     '<a href="docs/operations_runbook.md" target="_blank" rel="noreferrer">运行操作手册</a>' +
     '<a href="docs/daily_ops_checklist.md" target="_blank" rel="noreferrer">日常检查清单</a>';
 
@@ -5236,7 +5240,7 @@ function renderWsRuntime(ws, staleGuard) {
     return '<div class=\"runtime-item\"><span class=\"rk\">' + esc(displayKey) + '</span><span class=\"rv\">' + esc(shown) + '</span></div>';
   }).join('');
 
-  list.innerHTML = rows || '<div class=\"empty\">暂无 WS 运行数据</div>';
+  list.innerHTML = rows || '<div class=\"empty\">暂无实时连接运行数据</div>';
 
   if (staleGuard) {
     setChip('wsHealth', '已触发陈旧保护', 'err');

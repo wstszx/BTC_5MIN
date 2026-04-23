@@ -425,8 +425,8 @@ def test_dashboard_config_payload_exposes_live_auto_redeem_fields(tmp_path: Path
 def test_dashboard_help_center_includes_live_auto_redeem_copy():
     js = _dashboard_js()
 
-    assert 'LIVE_AUTO_REDEEM_ENABLED' in js
-    assert 'LIVE_AUTO_REDEEM_DRY_RUN' in js
+    assert '实盘自动赎回开关' in js
+    assert '自动赎回演练模式' in js
     assert '实盘自动赎回' in js
     assert '演练' in js
     assert 'Polygon' in js
@@ -461,7 +461,7 @@ def test_dashboard_help_center_includes_quickstart_copy():
     assert "先看哪里" in js
     assert "怎么安全改参数" in js
     assert "怎么判断当前能不能跑" in js
-    assert "Dashboard 操作说明" in js
+    assert "监控面板操作说明" in js
     assert "运行操作手册" in js
     assert "日常检查清单" in js
     assert "\u9875\u9762\u5143\u7d20\u8bf4\u660e" in js
@@ -667,8 +667,8 @@ def test_dashboard_runtime_payload_includes_redeem_auth_mode(tmp_path: Path):
 
 
 def test_dashboard_help_text_distinguishes_trading_and_redeem_credentials():
-    assert 'live order' in DashboardState.FIELD_HELP['POLYMARKET_API_KEY'].lower()
-    assert 'redeem' in DashboardState.FIELD_HELP['POLYMARKET_BUILDER_API_KEY'].lower()
+    assert '实盘下单私有接口' in DashboardState.FIELD_HELP['POLYMARKET_API_KEY']
+    assert '自动赎回' in DashboardState.FIELD_HELP['POLYMARKET_BUILDER_API_KEY']
 
 def test_dashboard_update_config_preserves_masked_private_key_on_unrelated_save(tmp_path: Path):
     env_file = tmp_path / '.env.dashboard'
@@ -1601,7 +1601,8 @@ def test_dashboard_assets_include_multi_timeframe_paper_runtime_cards():
     assert 'id="paperRuntimeCards"' in html
     assert "function renderPaperRuntimeCards(" in js
     assert "function refreshPaperRuntimeCard(" in js
-    assert "Paper " in js
+    assert "纸面运行" in js
+    assert "该时间频次的纸面运行状态" in js
 
 
 def test_dashboard_timeframe_presets_only_include_timeframe_sensitive_fields(tmp_path: Path):
@@ -1700,6 +1701,95 @@ def test_dashboard_config_payload_includes_paper_timeframes_and_profiles(tmp_pat
         state.close()
 
 
+def test_dashboard_paper_profile_copy_is_localized(tmp_path: Path):
+    state = DashboardState(env_file=tmp_path / '.env.dashboard')
+    try:
+        payload = state.get_config_payload()
+        assert payload['labels']['PAPER_15M_STRATEGY_ID'] == '15m 纸面配置 · 基础策略'
+        assert payload['labels']['PAPER_15M_STRATEGY_IDS'] == '15m 纸面配置 · 纸面策略组合'
+        assert payload['labels']['PAPER_15M_TARGET_PROFIT'] == '15m 纸面配置 · 每次目标净利'
+        assert payload['field_help']['PAPER_15M_TARGET_PROFIT'] == '仅作用于 15m 纸面配置。'
+    finally:
+        state.close()
+
+    js = _dashboard_js()
+    assert 'Paper Profiles' not in js
+    assert '独立 paper profile' not in js
+    assert 'paper runtime card' not in js
+    assert '按 timeframe 独立编辑 paper 配置。' not in js
+    assert '纸面配置组' in js
+    assert '按时间频次独立编辑纸面配置。' in js
+    assert '独立纸面配置' in js
+
+
+def test_dashboard_config_labels_and_help_reduce_english_copy(tmp_path: Path):
+    state = DashboardState(env_file=tmp_path / '.env.dashboard')
+    try:
+        payload = state.get_config_payload()
+        assert payload['labels']['POLYMARKET_BUILDER_API_KEY'] == 'Builder 自动赎回接口密钥'
+        assert payload['labels']['POLYMARKET_BUILDER_SECRET'] == 'Builder 自动赎回签名密钥'
+        assert payload['labels']['POLYMARKET_BUILDER_PASSPHRASE'] == 'Builder 自动赎回口令'
+        assert payload['labels']['POLYMARKET_RELAYER_API_KEY'] == 'Relayer 接口密钥'
+        assert payload['labels']['POLYMARKET_RELAYER_API_KEY_ADDRESS'] == 'Relayer 密钥地址'
+        assert '官方 gasless redeem 的 Builder API key' not in payload['field_help']['POLYMARKET_BUILDER_API_KEY']
+        assert '官方 gasless redeem 的 Relayer API key' not in payload['field_help']['POLYMARKET_RELAYER_API_KEY']
+        assert '仅用于自动赎回' in payload['field_help']['POLYMARKET_BUILDER_API_KEY']
+        assert '仅用于自动赎回认证' in payload['field_help']['POLYMARKET_RELAYER_API_KEY_ADDRESS']
+    finally:
+        state.close()
+
+    js = _dashboard_js()
+    assert 'Builder Redeem API Key' not in js
+    assert 'Builder Redeem Secret' not in js
+    assert 'Builder Redeem Passphrase' not in js
+    assert 'Relayer API Key' not in js
+    assert 'Relayer Key Address' not in js
+
+
+def test_dashboard_help_center_reduces_internal_english_terms():
+    js = _dashboard_js()
+
+    assert 'LIVE_AUTO_REDEEM_ENABLED 是什么意思？' not in js
+    assert 'LIVE_AUTO_REDEEM_DRY_RUN 需要去掉吗？' not in js
+    assert '先看下注计划与风控里的 skip_reason' not in js
+    assert 'should_trade=true 说明当前轮次、价格、风控检查和 WS 防护都允许执行。' not in js
+    assert 'should_trade=false 时先结合 skip_reason 字段一起看，不要先默认程序坏了。' not in js
+    assert 'Dashboard 操作说明' not in js
+
+    assert '实盘自动赎回开关是什么意思？' in js
+    assert '自动赎回演练模式需要关闭吗？' in js
+    assert '跳过原因' in js
+    assert '允许下单=是' in js
+    assert '允许下单=否' in js
+    assert '监控面板操作说明' in js
+
+
+def test_dashboard_user_copy_reduces_ws_http_and_ofi_terms(tmp_path: Path):
+    state = DashboardState(env_file=tmp_path / '.env.dashboard')
+    try:
+        payload = state.get_config_payload()
+        assert payload['labels']['OFI_THRESHOLD'] == '盘口失衡阈值'
+        assert payload['labels']['STRATEGY7_OFI_THRESHOLD'] == '策略7 盘口失衡阈值'
+        assert payload['labels']['BINANCE_SIGNAL_STALE_SECONDS'] == '盘口信号过期秒'
+        assert payload['strategy_catalog']['6']['label'] == '币安盘口失衡'
+        assert payload['strategy_catalog']['7']['label'] == '盘口+动量共识'
+    finally:
+        state.close()
+
+    js = _dashboard_js()
+    assert 'HTTP回退' not in js
+    assert 'WebSocket 订阅请求无效' not in js
+    assert '暂无 WS 运行数据' not in js
+    assert 'OFI 判断' not in js
+    assert 'Binance OFI 失衡' not in js
+
+    assert '接口回退' in js
+    assert '实时连接订阅请求无效' in js
+    assert '暂无实时连接运行数据' in js
+    assert '盘口失衡判断' in js
+    assert '币安盘口失衡' in js
+
+
 def test_dashboard_recent_trades_payload_reads_timeframe_specific_paths(tmp_path: Path):
     logs_dir = tmp_path / 'logs' / 'paper'
     (logs_dir / '5m').mkdir(parents=True, exist_ok=True)
@@ -1776,7 +1866,7 @@ def test_dashboard_config_payload_includes_strategy7_fields(tmp_path: Path):
     try:
         payload = state.get_config_payload()
         assert payload['select_options']['STRATEGY_ID'] == ['1', '2', '3', '4', '5', '6', '7']
-        assert payload['labels']['STRATEGY7_OFI_THRESHOLD'] == '策略7 OFI阈值'
+        assert payload['labels']['STRATEGY7_OFI_THRESHOLD'] == '策略7 盘口失衡阈值'
         assert payload['labels']['STRATEGY7_MOMENTUM_THRESHOLD'] == '策略7 动量阈值'
         assert payload['labels']['STRATEGY7_LATE_CONFIRM_STRONG_SIGNAL_GAP'] == '策略7 强信号额外优势'
         assert payload['labels']['STRATEGY7_LATE_CONFIRM_RELAX_SECONDS'] == '策略7 强信号放宽秒数'
@@ -1959,12 +2049,12 @@ def test_dashboard_assets_include_strategy7_copy_and_reasons(tmp_path: Path):
     finally:
         state.close()
 
-    assert payload['strategy_catalog']['7']['label'] == 'OFI+动量共识'
-    assert payload['strategy_catalog']['7']['summary'] == '只有 Binance OFI 和 Polymarket 动量同向时才允许交易。'
+        assert payload['strategy_catalog']['7']['label'] == '盘口+动量共识'
+    assert payload['strategy_catalog']['7']['summary'] == '只有币安盘口失衡和预测市场动量同向时才允许交易。'
     assert 'strategy7_signal_conflict' in js
     assert 'strategy7_confidence_too_low' in js
-    assert 'OFI+动量需同向确认' in js
-    assert '策略7 OFI阈值' in js
+    assert '盘口失衡与动量需同向确认' in js
+    assert '策略7 盘口失衡阈值' in js
     assert 'id=strategy7Panel' in html
     assert 'strategy7Agreement' in html
     assert 'strategy7QualityGate' in html
