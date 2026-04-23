@@ -68,6 +68,25 @@ Paper runtime files are isolated by timeframe under `logs/paper/<timeframe>/`.
 
 Live mode remains single-timeframe and continues to use `MARKET_TIMEFRAME`.
 
+### Live multi-strategy profiles
+
+Live mode can run more than one strategy in the same session with:
+
+- `LIVE_STRATEGY_IDS=5,7`
+
+When `LIVE_STRATEGY_IDS` is empty, live mode falls back to `STRATEGY_ID` and behaves like the original single-strategy setup.
+
+Each live strategy can keep its own parameter overrides with `LIVE_STRATEGY_<id>_<FIELD>` keys. Example fields:
+
+- `LIVE_STRATEGY_5_BASE_ORDER_COST=1.5`
+- `LIVE_STRATEGY_5_TARGET_PROFIT=0.8`
+- `LIVE_STRATEGY_7_BASE_ORDER_COST=2.0`
+- `LIVE_STRATEGY_7_STRATEGY7_MAX_ENTRY_PRICE=0.53`
+
+Live multi-strategy mode still uses one `MARKET_TIMEFRAME`, one wallet, one live session state file, and one shared `live_orders.csv`.
+
+Strategy ledger state and pending live orders remain isolated per strategy inside that shared live session.
+
 ## 3. Run the supported runtime
 
 ```powershell
