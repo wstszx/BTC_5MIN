@@ -2322,6 +2322,244 @@ def test_dashboard_report_strategy_selection_survives_market_refresh_browser_reg
             runtime.close()
 
 
+def test_dashboard_report_strategy_switch_ignores_stale_browser_responses(tmp_path: Path, monkeypatch):
+    npx_path = shutil.which('npx')
+    if npx_path is None:
+        pytest.skip('npx is required for browser regression coverage')
+
+    class StubClient:
+        def __init__(self, cfg):
+            self.config = cfg
+
+        def close(self) -> None:
+            return
+
+    monkeypatch.setattr(dashboard, 'PolymarketClient', StubClient)
+
+    strategy_catalog = json.loads(json.dumps(DashboardState.STRATEGY_CATALOG))
+
+    def fake_get_config_payload(self):
+        return {
+            'env_file': str(tmp_path / '.env.dashboard'),
+            'env_values': {
+                'TRADE_MODE': 'paper',
+                'MARKET_TIMEFRAME': '15m',
+                'STRATEGY_ID': '1',
+                'PAPER_STRATEGY_IDS': '1,7',
+                'PAPER_TIMEFRAMES': '15m',
+            },
+            'timeframe_presets': {'5m': {}, '15m': {}},
+            'editable_keys': ['TRADE_MODE', 'MARKET_TIMEFRAME', 'STRATEGY_ID', 'PAPER_STRATEGY_IDS'],
+            'labels': DashboardState.CONFIG_LABELS,
+            'select_options': {
+                'TRADE_MODE': ['paper', 'live'],
+                'MARKET_TIMEFRAME': ['5m', '15m'],
+                'STRATEGY_ID': ['1', '7'],
+                'PAPER_STRATEGY_IDS': ['1', '7'],
+            },
+            'strategy_catalog': strategy_catalog,
+            'field_groups': [{'title': '基础策略', 'description': '', 'keys': ['STRATEGY_ID', 'PAPER_STRATEGY_IDS']}],
+            'field_scope': {},
+            'field_help': {},
+            'validation_errors': {},
+            'runtime_status': {
+                'saved_mode': 'paper',
+                'running_mode': 'paper',
+                'restart_required': False,
+                'live_ready': False,
+                'live_validation_error': None,
+                'active_mode': 'paper',
+                'desired_mode': 'paper',
+                'switch_state': 'idle',
+                'switch_reason': None,
+                'current_round_slug': None,
+                'round_in_progress': False,
+                'safe_to_switch': True,
+                'pending_live_order': False,
+                'redeem_visible': False,
+                'redeem_enabled': False,
+                'redeem_auth_mode': 'unconfigured',
+                'redeem_pending_count': 0,
+                'redeem_last_result': None,
+                'redeem_last_attempt_at': None,
+                'redeem_last_submission_id': None,
+                'redeem_last_submission_status': None,
+                'redeem_last_tx_hash': None,
+                'optimizer_enabled': False,
+                'optimizer_last_run_at': None,
+                'optimizer_champion_id': None,
+                'optimizer_active_challengers': [],
+                'optimizer_promotable_count': 0,
+            },
+            'saved_at': None,
+            'paper_timeframes': ['15m'],
+            'paper_profiles': {
+                '15m': {
+                    'strategy_id': '1',
+                    'paper_strategy_ids': ['1', '7'],
+                    'target_profit': '1.0',
+                    'bet_sizing_mode': 'FIXED_BASE_COST',
+                    'base_order_cost': '1.0',
+                    'max_consecutive_losses': '7',
+                    'max_stake': '',
+                    'open_delay_seconds': '25',
+                    'signal_momentum_threshold': '0.015',
+                    'ofi_threshold': '0.65',
+                    'binance_signal_stale_seconds': '2.0',
+                    'strategy7_ofi_threshold': '0.5',
+                    'strategy7_momentum_threshold': '0.005',
+                    'strategy7_max_entry_price': '0.55',
+                }
+            },
+        }
+
+    def fake_get_market_payload(self, *, strategy=None, timeframe=None):
+        return {
+            'ok': True,
+            'timestamp': '2026-04-23T03:40:00+00:00',
+            'round': {
+                'slug': 'btc-updown-15m-current',
+                'title': 'BTC 15m Current',
+                'start_time': '2026-04-23T03:30:00+00:00',
+                'end_time': '2026-04-23T03:45:00+00:00',
+                'entry_time': '2026-04-23T03:30:25+00:00',
+                'is_current': True,
+                'seconds_to_entry': -10,
+                'seconds_to_end': 300,
+            },
+            'quote': {
+                'source': 'websocket',
+                'accepting_orders': True,
+                'up_price': 0.5,
+                'up_best_bid': 0.49,
+                'up_best_ask': 0.51,
+                'down_price': 0.5,
+                'down_best_bid': 0.49,
+                'down_best_ask': 0.51,
+                'fetched_at': '2026-04-23T03:40:00+00:00',
+            },
+            'signal': {'side': None, 'reason': 'signal_unavailable', 'open_up': None, 'current_up': None, 'threshold': None, 'delta': None, 'locked': False},
+            'plan': {'should_trade': False, 'side': None, 'price': None, 'order_size': 0.0, 'order_cost': 0.0, 'expected_profit': 0.0, 'skip_reason': 'signal_unavailable', 'stop_loss_triggered': False},
+            'session_state': {'round_index': 1, 'cash_pnl': 0.0, 'recovery_loss': 0.0, 'consecutive_losses': 0, 'stop_loss_count': 0, 'daily_realized_pnl': 0.0, 'pending_paper_trades': []},
+            'ws_runtime': {},
+            'ws_stale_guard_triggered': False,
+            'strategy6': {'enabled': False, 'ofi_score': None, 'signal_at': None, 'stale': False, 'threshold': 0.65, 'max_entry_price': 0.56, 'bid_price': None, 'bid_qty': None, 'ask_price': None, 'ask_qty': None},
+            'strategy7': {'enabled': False, 'ofi_score': None, 'momentum_delta': None, 'agreement': None, 'quality_gate': None, 'final_reason': None},
+            'strategy_view': {'selected': '1', 'paper_strategy_ids': ['1', '7'], 'available': ['1', '7'], 'timeframe': '15m'},
+        }
+
+    def fake_get_paper_summary_payload(self, *, strategy=None, timeframe=None):
+        return {'csv_path': 'paper.csv', 'tz_offset': '+08:00', 'strategy': str(strategy or 'all'), 'timeframe': str(timeframe or '15m'), 'days': [], 'latest': None}
+
+    def fake_get_recent_trades_payload(self, *, limit, strategy=None, timeframe=None):
+        return {'csv_path': 'paper.csv', 'strategy': str(strategy or 'all'), 'timeframe': str(timeframe or '15m'), 'count': 0, 'rows': []}
+
+    monkeypatch.setattr(DashboardState, 'get_config_payload', fake_get_config_payload)
+    monkeypatch.setattr(DashboardState, 'get_market_payload', fake_get_market_payload)
+    monkeypatch.setattr(DashboardState, 'get_paper_summary_payload', fake_get_paper_summary_payload)
+    monkeypatch.setattr(DashboardState, 'get_recent_trades_payload', fake_get_recent_trades_payload)
+
+    runtime = create_dashboard_runtime(host='127.0.0.1', port=0, env_file=tmp_path / '.env.dashboard')
+    thread = threading.Thread(target=runtime.serve_forever, daemon=True)
+    thread.start()
+
+    port = runtime.server.server_address[1]
+    session = f"dashboard-report-stale-{uuid.uuid4().hex}"
+
+    def pw(*args: str) -> str:
+        completed = subprocess.run(
+            [npx_path, '--yes', '--package', '@playwright/cli', 'playwright-cli', f'-s={session}', *args],
+            cwd=str(Path.cwd()),
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        return completed.stdout.strip()
+
+    def pw_eval(script: str) -> dict[str, object]:
+        output = pw('eval', script, '--raw')
+        return json.loads(output)
+
+    try:
+        pw('open', f'http://127.0.0.1:{port}')
+
+        ready = None
+        for _ in range(20):
+            ready = pw_eval("() => ({ ready: !!document.getElementById('paperReportStrategy') && document.getElementById('paperReportStrategy').options.length >= 3 })")
+            if ready.get('ready'):
+                break
+            time.sleep(0.5)
+        assert ready and ready.get('ready') is True
+
+        raced = pw_eval(
+            "() => (async () => {"
+            "const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));"
+            "const originalFetch = window.fetch.bind(window);"
+            "const summaryPayload = (strategy) => ({"
+            "csv_path: 'paper.csv', tz_offset: '+08:00', strategy, timeframe: '15m',"
+            "days: [{ date: '2026-04-23', trade_rows: strategy === '7' ? 7 : 1, hit_rate: strategy === '7' ? 1 : 0, total_pnl: strategy === '7' ? 7.7 : 1.1, max_drawdown: 0.1 }],"
+            "latest: { date: '2026-04-23', trade_rows: strategy === '7' ? 7 : 1, hit_rate: strategy === '7' ? 1 : 0, total_pnl: strategy === '7' ? 7.7 : 1.1, max_drawdown: 0.1, strong_signal_rate: strategy === '7' ? 1 : 0 }"
+            "});"
+            "const recentPayload = (strategy) => ({"
+            "csv_path: 'paper.csv', strategy, timeframe: '15m', count: 1,"
+            "rows: [{"
+            "timestamp: '2026-04-23T03:40:00+00:00', event_slug: strategy === '7' ? 'seven-row' : 'all-row', side: 'UP', price: 0.5, order_cost: 1.0,"
+            "result: 'UP', result_check_status: 'match', resolved_expected_result: 'UP', resolved_price_to_beat: 100000, resolved_final_price: 100100,"
+            "trade_pnl: strategy === '7' ? 7.7 : 1.1, cash_pnl: strategy === '7' ? 7.7 : 1.1, skip_reason: '', signal_delta: strategy === '7' ? 0.7 : 0.1, pending_status: ''"
+            "}]"
+            "});"
+            "window.fetch = async (input, init) => {"
+            "const url = String(input);"
+            "if (url.includes('/api/paper/summary')) {"
+            "const strategy = new URL(url, window.location.origin).searchParams.get('strategy') || 'all';"
+            "await wait(strategy === '7' ? 40 : 220);"
+            "return { ok: true, json: async () => summaryPayload(strategy) };"
+            "}"
+            "if (url.includes('/api/paper/recent')) {"
+            "const strategy = new URL(url, window.location.origin).searchParams.get('strategy') || 'all';"
+            "await wait(strategy === '7' ? 40 : 220);"
+            "return { ok: true, json: async () => recentPayload(strategy) };"
+            "}"
+            "return originalFetch(input, init);"
+            "};"
+            "try {"
+            "const staleSummary = refreshSummary();"
+            "const staleRecent = refreshRecent();"
+            "const node = document.getElementById('paperReportStrategy');"
+            "node.value = '7';"
+            "node.dispatchEvent(new Event('change', { bubbles: true }));"
+            "await Promise.allSettled([staleSummary, staleRecent]);"
+            "await wait(260);"
+            "return {"
+            "selected: document.getElementById('paperReportStrategy')?.value || '',"
+            "totalPnl: document.getElementById('sumTotalPnl')?.textContent || '',"
+            "recentRow: document.querySelector('#recentTbody tr td:nth-child(2)')?.textContent || '',"
+            "recentDesc: document.getElementById('recentPanelDesc')?.textContent || '',"
+            "status: document.getElementById('paperStatus')?.textContent || ''"
+            "};"
+            "} finally {"
+            "window.fetch = originalFetch;"
+            "}"
+            "})()"
+        )
+
+        assert raced['selected'] == '7'
+        assert raced['totalPnl'] == '+7.7000'
+        assert raced['recentRow'] == 'seven-row'
+        assert '策略 7' in str(raced['recentDesc'])
+    finally:
+        try:
+            subprocess.run(
+                [npx_path, '--yes', '--package', '@playwright/cli', 'playwright-cli', f'-s={session}', 'close'],
+                cwd=str(Path.cwd()),
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+        finally:
+            runtime.close()
+
+
 def test_dashboard_market_payload_can_switch_timeframe_view(tmp_path: Path, monkeypatch):
     class StubClient:
         def __init__(self, cfg):

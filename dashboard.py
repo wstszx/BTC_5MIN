@@ -3289,6 +3289,8 @@ const state = {
   market: null,
   summary: null,
   recent: null,
+  summaryRequestSeq: 0,
+  recentRequestSeq: 0,
   paperRuntimeCards: {},
   marketStrategyFilter: 'all',
   paperReportStrategyFilter: 'all',
@@ -4575,6 +4577,17 @@ function setReportStatus(id, prefix, text, tone) {
   setChip(id, prefix + ': ' + text, tone);
 }
 
+function nextReportRequestSeq(key) {
+  const stateKey = key + 'RequestSeq';
+  const nextSeq = Number(state[stateKey] || 0) + 1;
+  state[stateKey] = nextSeq;
+  return nextSeq;
+}
+
+function isCurrentReportRequest(key, seq) {
+  return Number(state[key + 'RequestSeq'] || 0) === Number(seq);
+}
+
 async function apiGet(path) {
   const resp = await fetch(path, { cache: 'no-store' });
   const data = await resp.json();
@@ -5572,27 +5585,41 @@ async function refreshMarket() {
 }
 
 async function refreshSummary() {
+  const requestSeq = nextReportRequestSeq('summary');
   try {
     const strategy = encodeURIComponent(effectivePaperSummaryStrategyFilter());
     const timeframe = encodeURIComponent(effectivePaperTimeframeFilter());
     const summaryEndpoint = '/api/paper/summary?strategy=' + strategy + '&timeframe=' + timeframe;
     const data = await apiGet(summaryEndpoint);
+    if (!isCurrentReportRequest('summary', requestSeq)) {
+      return;
+    }
     renderSummary(data);
   } catch (err) {
+    if (!isCurrentReportRequest('summary', requestSeq)) {
+      return;
+    }
     setReportStatus('paperStatus', '汇总', '刷新失败', 'err');
     console.error(err);
   }
 }
 
 async function refreshRecent() {
+  const requestSeq = nextReportRequestSeq('recent');
   try {
     const runningMode = String((((state.config || {}).runtime_status || {}).active_mode || (((state.config || {}).runtime_status || {}).running_mode) || 'paper')).toLowerCase();
     const strategy = encodeURIComponent(effectivePaperRecentStrategyFilter());
     const timeframe = encodeURIComponent(effectivePaperTimeframeFilter());
     const recentEndpoint = runningMode === 'live' ? '/api/live/recent?limit=80' : '/api/paper/recent?limit=80&strategy=' + strategy + '&timeframe=' + timeframe;
     const data = await apiGet(recentEndpoint);
+    if (!isCurrentReportRequest('recent', requestSeq)) {
+      return;
+    }
     renderRecent(data);
   } catch (err) {
+    if (!isCurrentReportRequest('recent', requestSeq)) {
+      return;
+    }
     setReportStatus('recentStatus', '明细', '刷新失败', 'err');
     console.error(err);
   }
