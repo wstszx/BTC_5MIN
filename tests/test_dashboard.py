@@ -1519,6 +1519,63 @@ def test_dashboard_runtime_status_includes_live_strategy_ids_and_states(tmp_path
         os.chdir(old_cwd)
 
 
+def test_dashboard_runtime_status_keeps_pending_live_order_from_removed_strategy(tmp_path: Path):
+    old_cwd = Path.cwd()
+    os.chdir(tmp_path)
+    env_file = tmp_path / '.env.dashboard'
+    env_file.write_text(
+        'TRADE_MODE=live\n'
+        'LIVE_TRADING_ENABLED=true\n'
+        'POLYMARKET_PRIVATE_KEY=private-key\n'
+        'POLYMARKET_FUNDER=0xfunder\n'
+        'LIVE_STRATEGY_IDS=3\n',
+        encoding='utf-8',
+    )
+    logs_dir = tmp_path / 'logs'
+    logs_dir.mkdir(parents=True, exist_ok=True)
+    (logs_dir / 'live_session_state.json').write_text(
+        json.dumps(
+            {
+                'live_strategies': {
+                    '6': {
+                        'round_index': 13,
+                        'cash_pnl': 2.5,
+                        'recovery_loss': 0.5,
+                        'consecutive_losses': 1,
+                        'consecutive_max_stake_skips': 0,
+                        'signal_round_slug': None,
+                        'signal_round_open_up_price': None,
+                        'signal_round_locked_side': None,
+                        'strategy6_last_ofi_score': 0.82,
+                        'stop_loss_count': 0,
+                        'daily_realized_pnl': 2.5,
+                        'current_day': '2026-04-23',
+                        'pending_live_slug': 'btc-updown-5m-orphaned',
+                        'pending_live_side': 'UP',
+                        'pending_live_price': 0.51,
+                        'pending_live_order_size': 25.0,
+                        'pending_live_order_cost': 12.75,
+                        'pending_live_expected_profit': 1.25,
+                        'pending_live_order_id': 'order-6',
+                        'pending_live_end_time': '2026-04-23T03:45:00+00:00',
+                    }
+                }
+            }
+        ),
+        encoding='utf-8',
+    )
+    state = DashboardState(env_file=env_file)
+    try:
+        payload = state.get_config_payload()
+        runtime = payload['runtime_status']
+        assert runtime['live_strategy_ids'] == ['3']
+        assert runtime['pending_live_order'] is True
+        assert runtime['live_strategy_states']['6']['pending_live_slug'] == 'btc-updown-5m-orphaned'
+    finally:
+        state.close()
+        os.chdir(old_cwd)
+
+
 def test_dashboard_update_config_notifies_runtime_manager(tmp_path: Path):
     calls: list[str] = []
     state = DashboardState(

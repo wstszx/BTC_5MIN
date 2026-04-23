@@ -760,6 +760,70 @@ def test_run_live_trading_reports_pending_live_order_blocks_switch(tmp_path):
     assert result['status'] == 'pending_settlement'
 
 
+def test_run_live_trading_keeps_removed_pending_live_strategy_managed(tmp_path):
+    control = RuntimeControl(initial_mode='live')
+    state_path = tmp_path / 'live_state.json'
+    state_path.write_text(
+        json.dumps(
+            {
+                'live_strategies': {
+                    '6': {
+                        'round_index': 4,
+                        'cash_pnl': 0.0,
+                        'recovery_loss': 0.0,
+                        'consecutive_losses': 0,
+                        'consecutive_max_stake_skips': 0,
+                        'signal_round_slug': None,
+                        'signal_round_open_up_price': None,
+                        'signal_round_locked_side': None,
+                        'strategy6_last_ofi_score': 0.75,
+                        'stop_loss_count': 0,
+                        'daily_realized_pnl': 0.0,
+                        'current_day': '2026-04-23',
+                        'pending_live_slug': 'btc-updown-5m-orphaned',
+                        'pending_live_side': 'UP',
+                        'pending_live_price': 0.51,
+                        'pending_live_order_size': 2.0,
+                        'pending_live_order_cost': 1.0,
+                        'pending_live_expected_profit': 1.0,
+                        'pending_live_order_id': 'oid-orphaned',
+                        'pending_live_end_time': '2099-01-01T00:00:00+00:00',
+                    }
+                }
+            }
+        ),
+        encoding='utf-8',
+    )
+
+    result = run_live_trading(
+        AppConfig(
+            trade_mode='live',
+            live_trading_enabled=True,
+            live_private_key='pk',
+            live_funder='0xfunder',
+            strategy_id=3,
+            live_strategy_ids=[3],
+        ),
+        market_client=_NoTradeLiveMarketClient(),
+        clob_client=_StubClobClient(),
+        state_path=state_path,
+        log_path=tmp_path / 'live_orders.csv',
+        runtime_control=control,
+        stop_when_safe=lambda: True,
+    )
+
+    snapshot = control.snapshot()
+    state = load_session_state(state_path, effective_live_strategy_ids=[3])
+
+    assert result['status'] == 'pending_settlement'
+    assert any(item['strategy_id'] == 6 and item['status'] == 'pending_settlement' for item in result['strategies'])
+    assert snapshot.pending_live_order is True
+    assert snapshot.safe_to_switch is False
+    assert snapshot.current_round_slug == 'btc-updown-5m-orphaned'
+    assert state.live_strategies[6].pending_live_order_id == 'oid-orphaned'
+    assert state.live_strategies[6].pending_live_slug == 'btc-updown-5m-orphaned'
+
+
 class _RoundEndMarketClient(_LiveMarketClient):
     def find_current_and_next_rounds(self, *, now):
         window = MarketWindow(
@@ -1904,6 +1968,62 @@ def test_run_live_trading_submits_multiple_strategies_in_same_round_when_wallet_
     assert len(rows) == 3
     assert ",1,OPEN,btc-updown-5m-test," in rows[1]
     assert ",3,OPEN,btc-updown-5m-test," in rows[2]
+
+
+def test_run_live_trading_isolates_strategy_exceptions_and_continues(tmp_path, monkeypatch):
+    stop_event = threading.Event()
+    stub_clob = _StubClobClient(balance_payload={"available": 3.0})
+
+    def fake_sleep(_seconds):
+        stop_event.set()
+
+    def fake_side(**kwargs):
+        strategy_id = kwargs["cfg"].strategy_id
+        if strategy_id == 1:
+            raise RuntimeError("strategy 1 blew up")
+        return SideDecision(side="UP")
+
+    monkeypatch.setattr("trader.time.sleep", fake_sleep)
+    monkeypatch.setattr("trader._resolve_side_from_strategy", fake_side)
+    monkeypatch.setattr(
+        "trader.build_trade_plan",
+        lambda *args, **kwargs: TradePlan(
+            True,
+            "UP",
+            price=0.55,
+            order_size=2.0,
+            order_cost=1.5,
+            expected_profit=0.5,
+        ),
+    )
+
+    result = run_live_trading(
+        AppConfig(
+            trade_mode="live",
+            live_trading_enabled=True,
+            live_private_key="pk",
+            live_funder="0xfunder",
+            strategy_id=1,
+            live_strategy_ids=[1, 3],
+            base_order_cost=1.5,
+            poll_interval_seconds=1,
+        ),
+        market_client=_LiveMarketClient(),
+        clob_client=stub_clob,
+        state_path=tmp_path / "live_state.json",
+        log_path=tmp_path / "live_orders.csv",
+        stop_event=stop_event,
+    )
+
+    state = load_session_state(tmp_path / "live_state.json", effective_live_strategy_ids=[1, 3])
+
+    assert result["status"] == "stopped"
+    assert len(stub_clob.created_orders) == 1
+    assert state.live_strategies[1].pending_live_slug is None
+    assert state.live_strategies[3].pending_live_slug == "btc-updown-5m-test"
+    rows = (tmp_path / "live_orders.csv").read_text(encoding="utf-8").splitlines()
+    assert len(rows) == 2
+    assert ",3,OPEN,btc-updown-5m-test," in rows[1]
 
 
 def test_run_live_trading_wallet_budget_skips_later_strategy_after_earlier_submission(tmp_path, monkeypatch):

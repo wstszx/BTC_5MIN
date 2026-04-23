@@ -1052,7 +1052,6 @@ class DashboardState:
         live_pending_live_order = any(
             bool(state.get("pending_live_slug"))
             for strategy_id, state in live_strategy_states.items()
-            if strategy_id in live_strategy_ids
         )
         redeem_state = load_live_redeem_state(redeem_cfg.logs_dir / "live_redeem_state.json")
         redeem_runtime = redeem_state.get("runtime") if isinstance(redeem_state, dict) else {}
