@@ -107,6 +107,24 @@ def _live_strategy_state_from_payload(payload: dict[str, Any]) -> LiveStrategySt
     )
 
 
+def _trusted_legacy_live_strategy_id(payload: dict[str, Any], effective_live_strategy_ids: list[int]) -> int | None:
+    if not effective_live_strategy_ids:
+        return None
+    for key in ("live_strategy_id", "strategy_id"):
+        raw_value = payload.get(key)
+        try:
+            strategy_id = int(raw_value)
+        except (TypeError, ValueError):
+            continue
+        if strategy_id in effective_live_strategy_ids:
+            return strategy_id
+    if len(effective_live_strategy_ids) == 1:
+        return effective_live_strategy_ids[0]
+    # Legacy single-strategy payloads do not encode strategy identity. Preserve the
+    # configured runtime ordering instead of silently reassigning by numeric min().
+    return effective_live_strategy_ids[0]
+
+
 def _hydrate_live_strategy_map(payload: dict[str, Any], effective_live_strategy_ids: list[int]) -> dict[int, LiveStrategyState]:
     raw_strategy_map = payload.get("live_strategies")
     if isinstance(raw_strategy_map, dict):
@@ -124,7 +142,9 @@ def _hydrate_live_strategy_map(payload: dict[str, Any], effective_live_strategy_
             strategy_id: LiveStrategyState()
             for strategy_id in effective_live_strategy_ids
         }
-        hydrated_map[min(effective_live_strategy_ids)] = legacy_state
+        selected_strategy_id = _trusted_legacy_live_strategy_id(payload, effective_live_strategy_ids)
+        if selected_strategy_id is not None:
+            hydrated_map[selected_strategy_id] = legacy_state
         return hydrated_map
 
     return {}
@@ -150,6 +170,8 @@ def _load_session_state_legacy(path: Path) -> SessionState:
             int(raw_key): _hydrate_live_strategy_state(raw_value)
             for raw_key, raw_value in raw_live_strategy_map.items()
         }
+    payload.pop("strategy_id", None)
+    payload.pop("live_strategy_id", None)
     return SessionState(
         pending_paper_trades=pending_paper_trades,
         live_strategies=live_strategies,
@@ -203,7 +225,9 @@ def load_session_state(
     if selected_live_strategy_ids:
         state.live_strategies = _hydrate_live_strategy_map(payload, selected_live_strategy_ids)
         if not isinstance(payload.get("live_strategies"), dict):
-            active_live_state = state.live_strategies.get(min(selected_live_strategy_ids))
+            active_live_state = state.live_strategies.get(
+                _trusted_legacy_live_strategy_id(payload, selected_live_strategy_ids)
+            )
         else:
             active_live_state = None
         if active_live_state is not None:
@@ -1636,8 +1660,10 @@ def _find_live_balance_value(payload: Any, candidate_keys: tuple[str, ...]) -> f
                 nested_value = _find_live_balance_value(lowered[key], candidate_keys)
                 if nested_value is not None:
                     return nested_value
-        for value in payload.values():
-            nested_value = _find_live_balance_value(value, candidate_keys)
+        for container_key in ("result", "data", "balances", "allowances", "collateral", "funds"):
+            if container_key not in lowered:
+                continue
+            nested_value = _find_live_balance_value(lowered[container_key], candidate_keys)
             if nested_value is not None:
                 return nested_value
     if isinstance(payload, (list, tuple)):
@@ -1662,13 +1688,10 @@ def _read_available_live_balance(*, cfg: AppConfig, clob_client: Any | None) -> 
         "availablebalance",
         "available_usdc",
         "free",
-    )
-    balance_keys = (
-        "balance",
-        "total",
-        "total_balance",
-        "totalbalance",
-        "usdc",
+        "allowance",
+        "available_allowance",
+        "spendable",
+        "spendable_balance",
     )
     for method_name in candidate_methods:
         read_balance = getattr(live_client, method_name, None)
@@ -1678,9 +1701,6 @@ def _read_available_live_balance(*, cfg: AppConfig, clob_client: Any | None) -> 
         available_balance = _find_live_balance_value(payload, available_keys)
         if available_balance is not None:
             return available_balance
-        total_balance = _find_live_balance_value(payload, balance_keys)
-        if total_balance is not None:
-            return total_balance
     raise RuntimeError("Unable to determine a trustworthy live wallet balance.")
 
 

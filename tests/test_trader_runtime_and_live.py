@@ -1088,16 +1088,56 @@ def test_load_session_state_live_strategies_preserves_legacy_pending_state_durin
         encoding="utf-8",
     )
 
-    state = load_session_state(state_path, effective_live_strategy_ids=[3, 7])
+    state = load_session_state(state_path, effective_live_strategy_ids=[7, 3])
 
-    assert sorted(state.live_strategies.keys()) == [3, 7]
-    preserved = state.live_strategies[3]
-    empty = state.live_strategies[7]
+    assert list(state.live_strategies.keys()) == [7, 3]
+    preserved = state.live_strategies[7]
+    empty = state.live_strategies[3]
     assert preserved.pending_live_order_id == "oid-live-7"
     assert preserved.pending_live_slug == "btc-updown-5m-live-pending"
     assert preserved.round_index == 5
     assert empty.pending_live_order_id is None
     assert empty.pending_live_slug is None
+
+
+def test_load_session_state_live_strategies_uses_trusted_legacy_strategy_identity_when_present(tmp_path):
+    state_path = tmp_path / "session_state.json"
+    state_path.write_text(
+        json.dumps(
+            {
+                "strategy_id": 7,
+                "round_index": 5,
+                "cash_pnl": 2.5,
+                "recovery_loss": 0.75,
+                "consecutive_losses": 2,
+                "consecutive_max_stake_skips": 1,
+                "signal_round_slug": "btc-updown-5m-live-prev",
+                "signal_round_open_up_price": 0.51,
+                "signal_round_locked_side": "UP",
+                "strategy6_last_ofi_score": 0.82,
+                "stop_loss_count": 3,
+                "daily_realized_pnl": -1.25,
+                "current_day": "2026-04-21",
+                "pending_live_slug": "btc-updown-5m-live-pending",
+                "pending_live_side": "DOWN",
+                "pending_live_price": 0.43,
+                "pending_live_order_size": 12.0,
+                "pending_live_order_cost": 5.16,
+                "pending_live_expected_profit": 6.84,
+                "pending_live_order_id": "oid-live-7",
+                "pending_live_end_time": "2026-04-21T12:05:00+00:00",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    state = load_session_state(state_path, effective_live_strategy_ids=[3, 7])
+
+    assert sorted(state.live_strategies.keys()) == [3, 7]
+    assert state.live_strategies[7].pending_live_order_id == "oid-live-7"
+    assert state.live_strategies[7].pending_live_slug == "btc-updown-5m-live-pending"
+    assert state.live_strategies[3].pending_live_order_id is None
+    assert state.live_strategies[3].pending_live_slug is None
 
 
 def test_load_session_state_live_strategies_preserves_multiple_live_strategy_entries(tmp_path):
@@ -1525,7 +1565,14 @@ def test_place_live_order_strategy7_sets_market_order_price_cap(tmp_path, monkey
                 fetched_at=datetime.now(timezone.utc),
             )
 
-    monkeypatch.setattr("trader._entry_time_for_round", lambda cfg, window: datetime.now(timezone.utc))
+    monkeypatch.setattr(
+        "trader._entry_time_for_round",
+        lambda cfg, window: datetime.now(timezone.utc) - timedelta(seconds=1),
+    )
+    monkeypatch.setattr(
+        "trader._resolve_side_from_strategy",
+        lambda **kwargs: SideDecision(side="UP"),
+    )
 
     result = place_live_order(
         cfg=cfg,
@@ -1917,6 +1964,33 @@ def test_run_live_trading_wallet_budget_skips_later_strategy_after_earlier_submi
     assert ",3,OPEN,btc-updown-5m-test," in rows[2]
     assert ",UP,0.56,0.0,0.0,0.0," in rows[2]
     assert "insufficient_live_wallet_balance" in rows[2]
+
+
+def test_read_available_live_balance_rejects_untrusted_or_missing_payloads():
+    class _BalanceOnlyClient:
+        def __init__(self, payload):
+            self.payload = payload
+
+        def get_balance(self):
+            return self.payload
+
+    bad_payloads = [
+        {"balance": "12.5"},
+        {"available": "n/a"},
+        {},
+    ]
+
+    for payload in bad_payloads:
+        with pytest.raises(RuntimeError, match="trustworthy live wallet balance"):
+            trader._read_available_live_balance(
+                cfg=AppConfig(
+                    trade_mode="live",
+                    live_trading_enabled=True,
+                    live_private_key="pk",
+                    live_funder="0xfunder",
+                ),
+                clob_client=_BalanceOnlyClient(payload),
+            )
 
 
 def test_settle_pending_live_trade_operates_on_single_strategy_state():
