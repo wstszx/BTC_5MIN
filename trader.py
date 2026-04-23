@@ -1470,15 +1470,15 @@ def _refresh_daily_session_state(state: SessionState, now: datetime) -> bool:
     return True
 
 
-def _clear_pending_live_trade(state: SessionState) -> None:
-    state.pending_live_slug = None
-    state.pending_live_side = None
-    state.pending_live_price = None
-    state.pending_live_order_size = None
-    state.pending_live_order_cost = None
-    state.pending_live_expected_profit = None
-    state.pending_live_order_id = None
-    state.pending_live_end_time = None
+def _clear_pending_live_trade(strategy_state: LiveStrategyState) -> None:
+    strategy_state.pending_live_slug = None
+    strategy_state.pending_live_side = None
+    strategy_state.pending_live_price = None
+    strategy_state.pending_live_order_size = None
+    strategy_state.pending_live_order_cost = None
+    strategy_state.pending_live_expected_profit = None
+    strategy_state.pending_live_order_id = None
+    strategy_state.pending_live_end_time = None
 
 
 def _build_pending_live_trade_plan(state: SessionState) -> TradePlan:
@@ -1541,13 +1541,13 @@ def _validate_live_submission_response(response: Any) -> str:
 
 
 def _build_verified_pending_live_trade_plan(
-    state: SessionState,
+    strategy_state: LiveStrategyState,
     *,
     clob_client: Any | None,
 ) -> TradePlan | None:
-    if state.pending_live_side not in {"UP", "DOWN"}:
+    if strategy_state.pending_live_side not in {"UP", "DOWN"}:
         raise RuntimeError("Pending live trade is missing a valid side.")
-    if not state.pending_live_order_id:
+    if not strategy_state.pending_live_order_id:
         return None
     if clob_client is None:
         return None
@@ -1556,7 +1556,7 @@ def _build_verified_pending_live_trade_plan(
     if not callable(get_order):
         return None
 
-    order_payload = get_order(state.pending_live_order_id)
+    order_payload = get_order(strategy_state.pending_live_order_id)
     if not isinstance(order_payload, dict):
         return None
 
@@ -1606,7 +1606,7 @@ def _build_verified_pending_live_trade_plan(
 
     return TradePlan(
         True,
-        side=state.pending_live_side,
+        side=strategy_state.pending_live_side,
         price=fill_price,
         order_size=order_size,
         order_cost=order_cost,
@@ -1618,68 +1618,68 @@ def _settle_pending_live_trade_if_needed(
     *,
     market_client: PolymarketClient | Any,
     clob_client: Any | None,
-    state: SessionState,
+    strategy_state: LiveStrategyState,
     now: datetime,
-) -> tuple[SessionState, dict[str, Any] | None, bool]:
-    if not state.pending_live_slug:
-        return state, None, False
+) -> tuple[LiveStrategyState, dict[str, Any] | None, bool]:
+    if not strategy_state.pending_live_slug:
+        return strategy_state, None, False
 
-    end_time = parse_iso_datetime(state.pending_live_end_time)
+    end_time = parse_iso_datetime(strategy_state.pending_live_end_time)
     if end_time is None:
         raise RuntimeError("Pending live trade is missing round end time.")
 
     if now < end_time:
         return (
-            state,
+            strategy_state,
             {
                 "status": "pending_settlement",
-                "slug": state.pending_live_slug,
-                "side": state.pending_live_side,
+                "slug": strategy_state.pending_live_slug,
+                "side": strategy_state.pending_live_side,
                 "skip_reason": "round_in_progress",
-                "pending_end_time": state.pending_live_end_time,
+                "pending_end_time": strategy_state.pending_live_end_time,
             },
             False,
         )
 
-    plan = _build_verified_pending_live_trade_plan(state, clob_client=clob_client)
+    plan = _build_verified_pending_live_trade_plan(strategy_state, clob_client=clob_client)
     if plan is None:
         return (
-            state,
+            strategy_state,
             {
                 "status": "pending_settlement",
-                "slug": state.pending_live_slug,
-                "side": state.pending_live_side,
+                "slug": strategy_state.pending_live_slug,
+                "side": strategy_state.pending_live_side,
                 "skip_reason": "awaiting_fill_confirmation",
-                "pending_end_time": state.pending_live_end_time,
-                "order_id": state.pending_live_order_id,
+                "pending_end_time": strategy_state.pending_live_end_time,
+                "order_id": strategy_state.pending_live_order_id,
             },
             False,
         )
 
-    event = market_client.get_event_by_slug(state.pending_live_slug)
+    event = market_client.get_event_by_slug(strategy_state.pending_live_slug)
     metadata = event.get("eventMetadata") or {}
     if metadata.get("priceToBeat") is None or metadata.get("finalPrice") is None:
         return (
-            state,
+            strategy_state,
             {
                 "status": "pending_settlement",
-                "slug": state.pending_live_slug,
-                "side": state.pending_live_side,
+                "slug": strategy_state.pending_live_slug,
+                "side": strategy_state.pending_live_side,
                 "skip_reason": "round_unresolved",
-                "pending_end_time": state.pending_live_end_time,
+                "pending_end_time": strategy_state.pending_live_end_time,
             },
             False,
         )
 
     result = "UP" if float(metadata["finalPrice"]) >= float(metadata["priceToBeat"]) else "DOWN"
-    updated_state = apply_round_outcome(state, plan, won=(result == plan.side))
-    trade_pnl = updated_state.cash_pnl - state.cash_pnl
+    updated_state = apply_round_outcome(strategy_state, plan, won=(result == plan.side))
+    trade_pnl = updated_state.cash_pnl - strategy_state.cash_pnl
     _clear_pending_live_trade(updated_state)
     return (
         updated_state,
         {
             "status": "settled",
-            "slug": state.pending_live_slug,
+            "slug": strategy_state.pending_live_slug,
             "side": plan.side,
             "result": result,
             "trade_pnl": trade_pnl,
@@ -1753,12 +1753,14 @@ def place_live_order(
     daily_state_changed = _refresh_daily_session_state(state, now)
     if state.pending_live_slug and live_client is None and state.pending_live_order_id and cfg.live_private_key:
         live_client = _create_live_clob_client(cfg)
-    state, pending_status, settled_previous_trade = _settle_pending_live_trade_if_needed(
+    strategy_state = _live_strategy_state_from_payload(asdict(state))
+    strategy_state, pending_status, settled_previous_trade = _settle_pending_live_trade_if_needed(
         market_client=market_client,
         clob_client=live_client,
-        state=state,
+        strategy_state=strategy_state,
         now=now,
     )
+    _apply_live_strategy_state_to_session_state(state, strategy_state)
     if pending_status is not None and pending_status["status"] == "pending_settlement":
         if daily_state_changed and persist_state:
             save_session_state(state_path, state)

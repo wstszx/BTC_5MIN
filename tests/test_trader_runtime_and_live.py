@@ -13,7 +13,7 @@ import trader
 
 from binance_signal import BinanceDepth5SignalService
 from config import AppConfig
-from models import MarketQuote, MarketWindow, PaperStrategyState, SessionState, TradePlan, TradeRecord
+from models import LiveStrategyState, MarketQuote, MarketWindow, PaperStrategyState, SessionState, TradePlan, TradeRecord
 from runtime_control import RuntimeControl
 from trader import (
     SideDecision,
@@ -1688,6 +1688,61 @@ def test_place_live_order_waits_for_previous_pending_trade_settlement(tmp_path):
     assert result["status"] == "pending_settlement"
     assert result["skip_reason"] == "awaiting_fill_confirmation"
     assert stub_clob.created_orders == []
+
+
+def test_settle_pending_live_trade_operates_on_single_strategy_state():
+    pending_strategy = LiveStrategyState(
+        round_index=1,
+        cash_pnl=0.0,
+        recovery_loss=0.0,
+        consecutive_losses=0,
+        pending_live_slug="btc-updown-5m-prev",
+        pending_live_side="UP",
+        pending_live_price=0.5,
+        pending_live_order_size=2.0,
+        pending_live_order_cost=1.0,
+        pending_live_expected_profit=1.0,
+        pending_live_order_id="oid-prev",
+        pending_live_end_time="2026-04-02T00:00:00+00:00",
+    )
+    untouched_strategy = LiveStrategyState(
+        pending_live_slug="btc-updown-5m-other",
+        pending_live_order_id="oid-other",
+    )
+    stub_clob = _StubClobClient(
+        order_payloads={
+            "oid-prev": {
+                "status": "filled",
+                "filled_order_size": 2.0,
+                "filled_order_cost": 1.0,
+                "avg_price": 0.5,
+            }
+        }
+    )
+
+    updated_strategy, status, settled = trader._settle_pending_live_trade_if_needed(
+        market_client=_SettlingLiveClient(),
+        clob_client=stub_clob,
+        strategy_state=pending_strategy,
+        now=datetime(2026, 4, 2, 0, 6, tzinfo=timezone.utc),
+    )
+
+    assert settled is True
+    assert status == {
+        "status": "settled",
+        "slug": "btc-updown-5m-prev",
+        "side": "UP",
+        "result": "DOWN",
+        "trade_pnl": -1.0,
+    }
+    assert updated_strategy.round_index == 1
+    assert updated_strategy.cash_pnl == pytest.approx(-1.0)
+    assert updated_strategy.recovery_loss == pytest.approx(1.0)
+    assert updated_strategy.consecutive_losses == 1
+    assert updated_strategy.pending_live_slug is None
+    assert updated_strategy.pending_live_order_id is None
+    assert untouched_strategy.pending_live_slug == "btc-updown-5m-other"
+    assert untouched_strategy.pending_live_order_id == "oid-other"
 
 
 def test_place_live_order_requires_private_key_without_injected_client(tmp_path):
