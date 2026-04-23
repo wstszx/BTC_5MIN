@@ -886,6 +886,12 @@ def _ensure_paper_strategy_state_map(state: SessionState, strategy_ids: list[int
     }
 
 
+def _sync_current_live_strategy_state(state: SessionState, strategy_id: int) -> None:
+    if not state.live_strategies and strategy_id not in state.live_strategies:
+        return
+    state.live_strategies[strategy_id] = _live_strategy_state_from_payload(asdict(state))
+
+
 def _sync_legacy_paper_state_fields(state: SessionState, strategy_ids: list[int]) -> None:
     if not strategy_ids:
         return
@@ -1763,15 +1769,18 @@ def place_live_order(
     _apply_live_strategy_state_to_session_state(state, strategy_state)
     if pending_status is not None and pending_status["status"] == "pending_settlement":
         if daily_state_changed and persist_state:
+            _sync_current_live_strategy_state(state, cfg.strategy_id)
             save_session_state(state_path, state)
         return pending_status
     if settled_previous_trade and persist_state:
+        _sync_current_live_strategy_state(state, cfg.strategy_id)
         save_session_state(state_path, state)
 
     current_round, next_round = market_client.find_current_and_next_rounds(now=now)
     target_round = _select_target_round(cfg, now=now, current_round=current_round, next_round=next_round)
     if target_round is None:
         if daily_state_changed and persist_state:
+            _sync_current_live_strategy_state(state, cfg.strategy_id)
             save_session_state(state_path, state)
         return {"status": "no_market"}
 
@@ -2170,6 +2179,7 @@ def place_live_order(
     state.pending_live_end_time = target_round.end_time.isoformat()
     state.round_index += 1
     if persist_state:
+        _sync_current_live_strategy_state(state, cfg.strategy_id)
         save_session_state(state_path, state)
 
     return {

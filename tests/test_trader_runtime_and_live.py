@@ -1646,6 +1646,113 @@ def test_place_live_order_settles_previous_pending_trade_before_new_submission(t
     assert state.round_index == 2
 
 
+def test_place_live_order_syncs_live_strategy_map_before_persisting(tmp_path):
+    cfg = AppConfig(strategy_id=1, live_trading_enabled=True, max_stake=25.0)
+    stub_clob = _StubClobClient(
+        order_payloads={
+            "oid-prev": {
+                "status": "filled",
+                "filled_order_size": 2.0,
+                "filled_order_cost": 1.0,
+                "avg_price": 0.5,
+            }
+        }
+    )
+    state_path = tmp_path / "state.json"
+    state_path.write_text(
+        json.dumps(
+            {
+                "round_index": 1,
+                "cash_pnl": 0.0,
+                "recovery_loss": 0.0,
+                "consecutive_losses": 0,
+                "consecutive_max_stake_skips": 0,
+                "signal_round_slug": None,
+                "signal_round_open_up_price": None,
+                "signal_round_locked_side": None,
+                "stop_loss_count": 0,
+                "daily_realized_pnl": 0.0,
+                "current_day": "2026-04-02",
+                "pending_live_slug": "btc-updown-5m-prev",
+                "pending_live_side": "UP",
+                "pending_live_price": 0.5,
+                "pending_live_order_size": 2.0,
+                "pending_live_order_cost": 1.0,
+                "pending_live_expected_profit": 1.0,
+                "pending_live_end_time": "2026-04-02T00:00:00+00:00",
+                "pending_live_order_id": "oid-prev",
+                "live_strategies": {
+                    "3": {
+                        "round_index": 8,
+                        "cash_pnl": 2.5,
+                        "recovery_loss": 0.0,
+                        "consecutive_losses": 0,
+                        "consecutive_max_stake_skips": 0,
+                        "signal_round_slug": None,
+                        "signal_round_open_up_price": None,
+                        "signal_round_locked_side": None,
+                        "strategy6_last_ofi_score": None,
+                        "stop_loss_count": 0,
+                        "daily_realized_pnl": 2.5,
+                        "current_day": "2026-04-02",
+                        "pending_live_slug": "btc-updown-5m-other",
+                        "pending_live_side": "DOWN",
+                        "pending_live_price": 0.4,
+                        "pending_live_order_size": 5.0,
+                        "pending_live_order_cost": 2.0,
+                        "pending_live_expected_profit": 3.0,
+                        "pending_live_order_id": "oid-other",
+                        "pending_live_end_time": "2026-04-02T00:05:00+00:00",
+                    },
+                    "1": {
+                        "round_index": 1,
+                        "cash_pnl": 0.0,
+                        "recovery_loss": 0.0,
+                        "consecutive_losses": 0,
+                        "consecutive_max_stake_skips": 0,
+                        "signal_round_slug": None,
+                        "signal_round_open_up_price": None,
+                        "signal_round_locked_side": None,
+                        "strategy6_last_ofi_score": None,
+                        "stop_loss_count": 0,
+                        "daily_realized_pnl": 0.0,
+                        "current_day": "2026-04-02",
+                        "pending_live_slug": "btc-updown-5m-prev",
+                        "pending_live_side": "UP",
+                        "pending_live_price": 0.5,
+                        "pending_live_order_size": 2.0,
+                        "pending_live_order_cost": 1.0,
+                        "pending_live_expected_profit": 1.0,
+                        "pending_live_order_id": "oid-prev",
+                        "pending_live_end_time": "2026-04-02T00:00:00+00:00",
+                    },
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = place_live_order(
+        cfg=cfg,
+        market_client=_SettlingLiveClient(),
+        clob_client=stub_clob,
+        state_path=state_path,
+        log_path=tmp_path / "live.csv",
+    )
+
+    reloaded_payload = json.loads(state_path.read_text(encoding="utf-8"))
+
+    assert result["status"] == "submitted"
+    assert reloaded_payload["pending_live_order_id"] == "oid-123"
+    assert reloaded_payload["pending_live_slug"] == "btc-updown-5m-test"
+    assert reloaded_payload["round_index"] == 2
+    assert reloaded_payload["live_strategies"]["1"]["pending_live_order_id"] == "oid-123"
+    assert reloaded_payload["live_strategies"]["1"]["pending_live_slug"] == "btc-updown-5m-test"
+    assert reloaded_payload["live_strategies"]["1"]["round_index"] == 2
+    assert reloaded_payload["live_strategies"]["3"]["pending_live_order_id"] == "oid-other"
+    assert reloaded_payload["live_strategies"]["3"]["pending_live_slug"] == "btc-updown-5m-other"
+
+
 def test_place_live_order_waits_for_previous_pending_trade_settlement(tmp_path):
     cfg = AppConfig(live_trading_enabled=True, max_stake=25.0)
     stub_clob = _StubClobClient(order_payloads={"oid-prev": {"status": "filled"}})
