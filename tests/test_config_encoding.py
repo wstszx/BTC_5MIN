@@ -39,6 +39,44 @@ def test_build_config_falls_back_to_strategy_id_for_paper():
     assert cfg.paper_strategy_ids == [5]
 
 
+def test_build_config_uses_live_strategy_ids_when_present():
+    cfg = build_config_from_env_values({'STRATEGY_ID': '2', 'LIVE_STRATEGY_IDS': '6,2,6,1'})
+
+    assert cfg.strategy_id == 2
+    assert cfg.live_strategy_ids == [6, 2, 1]
+
+
+def test_build_config_falls_back_to_strategy_id_for_live_strategy():
+    cfg = build_config_from_env_values({'STRATEGY_ID': '5'})
+
+    assert cfg.live_strategy_ids == [5]
+
+
+def test_build_config_applies_live_strategy_profile_overrides():
+    cfg = build_config_from_env_values(
+        {
+            'STRATEGY_ID': '2',
+            'TARGET_PROFIT': '1.1',
+            'SIGNAL_WEAK_SIGNAL_MODE': 'skip',
+            'LIVE_STRATEGY_IDS': '5,2',
+            'LIVE_STRATEGY_5_TARGET_PROFIT': '0.8',
+            'LIVE_STRATEGY_5_BASE_ORDER_COST': '12.5',
+            'LIVE_STRATEGY_5_SIGNAL_WEAK_SIGNAL_MODE': 'force',
+            'LIVE_STRATEGY_5_STRATEGY7_CONFIRM_BEFORE_ENTRY_SECONDS': '18',
+        }
+    )
+
+    assert cfg.live_strategy_ids == [5, 2]
+    assert cfg.live_profiles[5].strategy_id == 5
+    assert cfg.live_profiles[5].target_profit == 0.8
+    assert cfg.live_profiles[5].base_order_cost == 12.5
+    assert cfg.live_profiles[5].signal_weak_signal_mode == 'FORCE'
+    assert cfg.live_profiles[5].strategy7_confirm_before_entry_seconds == 18
+    assert cfg.live_profiles[2].strategy_id == 2
+    assert cfg.live_profiles[2].target_profit == 1.1
+    assert cfg.live_profiles[2].signal_weak_signal_mode == 'SKIP'
+
+
 def test_build_config_ignores_invalid_paper_strategy_entries():
     cfg = build_config_from_env_values({'STRATEGY_ID': '3', 'PAPER_STRATEGY_IDS': '6,x,9,2,6'})
 
