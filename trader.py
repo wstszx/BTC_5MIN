@@ -81,6 +81,31 @@ def _apply_live_strategy_state_to_session_state(state: SessionState, strategy_st
         setattr(state, field_name, getattr(strategy_state, field_name))
 
 
+def _live_strategy_state_from_payload(payload: dict[str, Any]) -> LiveStrategyState:
+    return LiveStrategyState(
+        round_index=payload.get("round_index", 0),
+        cash_pnl=payload.get("cash_pnl", 0.0),
+        recovery_loss=payload.get("recovery_loss", 0.0),
+        consecutive_losses=payload.get("consecutive_losses", 0),
+        consecutive_max_stake_skips=payload.get("consecutive_max_stake_skips", 0),
+        signal_round_slug=payload.get("signal_round_slug"),
+        signal_round_open_up_price=payload.get("signal_round_open_up_price"),
+        signal_round_locked_side=payload.get("signal_round_locked_side"),
+        strategy6_last_ofi_score=payload.get("strategy6_last_ofi_score"),
+        stop_loss_count=payload.get("stop_loss_count", 0),
+        daily_realized_pnl=payload.get("daily_realized_pnl", 0.0),
+        current_day=payload.get("current_day"),
+        pending_live_slug=payload.get("pending_live_slug"),
+        pending_live_side=payload.get("pending_live_side"),
+        pending_live_price=payload.get("pending_live_price"),
+        pending_live_order_size=payload.get("pending_live_order_size"),
+        pending_live_order_cost=payload.get("pending_live_order_cost"),
+        pending_live_expected_profit=payload.get("pending_live_expected_profit"),
+        pending_live_order_id=payload.get("pending_live_order_id"),
+        pending_live_end_time=payload.get("pending_live_end_time"),
+    )
+
+
 def _hydrate_live_strategy_map(payload: dict[str, Any], effective_live_strategy_ids: list[int]) -> dict[int, LiveStrategyState]:
     raw_strategy_map = payload.get("live_strategies")
     if isinstance(raw_strategy_map, dict):
@@ -92,40 +117,13 @@ def _hydrate_live_strategy_map(payload: dict[str, Any], effective_live_strategy_
             hydrated_map.setdefault(strategy_id, LiveStrategyState())
         return hydrated_map
 
-    if len(effective_live_strategy_ids) > 1:
-        return {
-            strategy_id: LiveStrategyState()
-            for strategy_id in effective_live_strategy_ids
-        }
-
     if effective_live_strategy_ids:
-        legacy_state = LiveStrategyState(
-            round_index=payload.get("round_index", 0),
-            cash_pnl=payload.get("cash_pnl", 0.0),
-            recovery_loss=payload.get("recovery_loss", 0.0),
-            consecutive_losses=payload.get("consecutive_losses", 0),
-            consecutive_max_stake_skips=payload.get("consecutive_max_stake_skips", 0),
-            signal_round_slug=payload.get("signal_round_slug"),
-            signal_round_open_up_price=payload.get("signal_round_open_up_price"),
-            signal_round_locked_side=payload.get("signal_round_locked_side"),
-            strategy6_last_ofi_score=payload.get("strategy6_last_ofi_score"),
-            stop_loss_count=payload.get("stop_loss_count", 0),
-            daily_realized_pnl=payload.get("daily_realized_pnl", 0.0),
-            current_day=payload.get("current_day"),
-            pending_live_slug=payload.get("pending_live_slug"),
-            pending_live_side=payload.get("pending_live_side"),
-            pending_live_price=payload.get("pending_live_price"),
-            pending_live_order_size=payload.get("pending_live_order_size"),
-            pending_live_order_cost=payload.get("pending_live_order_cost"),
-            pending_live_expected_profit=payload.get("pending_live_expected_profit"),
-            pending_live_order_id=payload.get("pending_live_order_id"),
-            pending_live_end_time=payload.get("pending_live_end_time"),
-        )
+        legacy_state = _live_strategy_state_from_payload(payload)
         hydrated_map = {
             strategy_id: LiveStrategyState()
             for strategy_id in effective_live_strategy_ids
         }
-        hydrated_map[effective_live_strategy_ids[0]] = legacy_state
+        hydrated_map[min(effective_live_strategy_ids)] = legacy_state
         return hydrated_map
 
     return {}
@@ -203,7 +201,10 @@ def load_session_state(
 
     if selected_live_strategy_ids:
         state.live_strategies = _hydrate_live_strategy_map(payload, selected_live_strategy_ids)
-        active_live_state = state.live_strategies.get(selected_live_strategy_ids[0])
+        if not isinstance(payload.get("live_strategies"), dict):
+            active_live_state = state.live_strategies.get(min(selected_live_strategy_ids))
+        else:
+            active_live_state = None
         if active_live_state is not None:
             _apply_live_strategy_state_to_session_state(state, active_live_state)
     return state
