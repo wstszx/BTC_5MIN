@@ -166,3 +166,11 @@ def test_direct_app_config_constructor_aligns_paper_timeframes_with_market_timef
 
     assert cfg.paper_timeframes == ['15m']
     assert cfg.paper_profiles['15m'].timeframe == '15m'
+
+
+def test_direct_app_config_constructor_aligns_live_strategy_ids_with_strategy_id():
+    cfg = AppConfig(strategy_id=5)
+
+    assert cfg.live_strategy_ids == [5]
+    assert list(cfg.live_profiles) == [5]
+    assert cfg.live_profiles[5].strategy_id == 5

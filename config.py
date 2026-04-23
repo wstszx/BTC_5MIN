@@ -340,7 +340,7 @@ class AppConfig:
     paper_strategy_ids: list[int] = field(default_factory=lambda: _parse_strategy_id_list(os.getenv(PAPER_STRATEGY_IDS), fallback=_env_int(STRATEGY_ID, 2)))
     trade_mode: str = field(default_factory=lambda: (os.getenv("TRADE_MODE") or "paper").strip().lower() or "paper")
     strategy_id: int = field(default_factory=lambda: _env_int("STRATEGY_ID", 2))
-    live_strategy_ids: list[int] = field(default_factory=lambda: _parse_strategy_id_list(os.getenv(LIVE_STRATEGY_IDS), fallback=_env_int(STRATEGY_ID, 2)))
+    live_strategy_ids: list[int] = field(default_factory=list)
     target_profit: float = field(default_factory=lambda: _env_float("TARGET_PROFIT", 1.0))
     bet_sizing_mode: str = field(default_factory=lambda: (os.getenv("BET_SIZING_MODE") or "FIXED_BASE_COST").upper())
     base_order_cost: float = field(default_factory=lambda: _env_float("BASE_ORDER_COST", 1.0))
@@ -426,6 +426,8 @@ class AppConfig:
     def __post_init__(self) -> None:
         if not self.paper_timeframes:
             self.paper_timeframes = _env_paper_timeframes(self.market_timeframe)
+        if not self.live_strategy_ids:
+            self.live_strategy_ids = _parse_strategy_id_list(os.getenv(LIVE_STRATEGY_IDS), fallback=self.strategy_id)
         self.paper_profiles = {}
         for timeframe in self.paper_timeframes:
             prefix = f"PAPER_{timeframe.upper()}"
