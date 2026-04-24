@@ -17,7 +17,7 @@ from config import AppConfig
 from binance_signal import BinanceDepth5SignalService
 from models import LiveStrategyState, MarketQuote, MarketWindow, PaperStrategyState, PendingPaperTrade, SessionState, TradePlan, TradeRecord
 from optimizer import load_optimizer_state, save_optimizer_state
-from polymarket_api import PolymarketClient, extract_token_ids, parse_iso_datetime
+from polymarket_api import PolymarketClient, extract_token_ids, parse_iso_datetime, parse_outcome_prices
 from risk_and_sizing import apply_round_outcome, build_trade_plan, reset_after_stop_loss
 from strategy import get_side_for_round, strategy7_signal_gap_ok, strategy7_strong_signal_allows_late_confirm
 from runtime_control import RuntimeControl
@@ -1892,20 +1892,32 @@ def _settle_pending_live_trade_if_needed(
 
     event = market_client.get_event_by_slug(strategy_state.pending_live_slug)
     metadata = event.get("eventMetadata") or {}
-    if metadata.get("priceToBeat") is None or metadata.get("finalPrice") is None:
-        return (
-            strategy_state,
-            {
-                "status": "pending_settlement",
-                "slug": strategy_state.pending_live_slug,
-                "side": strategy_state.pending_live_side,
-                "skip_reason": "round_unresolved",
-                "pending_end_time": strategy_state.pending_live_end_time,
-            },
-            False,
-        )
-
-    result = "UP" if float(metadata["finalPrice"]) >= float(metadata["priceToBeat"]) else "DOWN"
+    market = (event.get("markets") or [{}])[0]
+    if metadata.get("priceToBeat") is not None and metadata.get("finalPrice") is not None:
+        result = "UP" if float(metadata["finalPrice"]) >= float(metadata["priceToBeat"]) else "DOWN"
+    else:
+        prices = parse_outcome_prices(market.get("outcomePrices"), market.get("outcomes"))
+        up_price = prices.get("UP")
+        down_price = prices.get("DOWN")
+        is_closed = bool(event.get("closed") or market.get("closed"))
+        if (
+            not is_closed
+            or up_price is None
+            or down_price is None
+            or {up_price, down_price} != {0.0, 1.0}
+        ):
+            return (
+                strategy_state,
+                {
+                    "status": "pending_settlement",
+                    "slug": strategy_state.pending_live_slug,
+                    "side": strategy_state.pending_live_side,
+                    "skip_reason": "round_unresolved",
+                    "pending_end_time": strategy_state.pending_live_end_time,
+                },
+                False,
+            )
+        result = "UP" if up_price > down_price else "DOWN"
     updated_state = apply_round_outcome(strategy_state, plan, won=(result == plan.side))
     trade_pnl = updated_state.cash_pnl - strategy_state.cash_pnl
     _clear_pending_live_trade(updated_state)
@@ -2744,10 +2756,22 @@ def _settle_pending_paper_trade(
 ) -> tuple[SessionState, str, float]:
     event = client.get_event_by_slug(item.event_slug)
     metadata = event.get('eventMetadata') or {}
-    if metadata.get('priceToBeat') is None or metadata.get('finalPrice') is None:
-        raise RuntimeError(f'Round {item.event_slug} is not resolved yet.')
-
-    result = 'UP' if float(metadata['finalPrice']) >= float(metadata['priceToBeat']) else 'DOWN'
+    market = (event.get('markets') or [{}])[0]
+    if metadata.get('priceToBeat') is not None and metadata.get('finalPrice') is not None:
+        result = 'UP' if float(metadata['finalPrice']) >= float(metadata['priceToBeat']) else 'DOWN'
+    else:
+        prices = parse_outcome_prices(market.get('outcomePrices'), market.get('outcomes'))
+        up_price = prices.get('UP')
+        down_price = prices.get('DOWN')
+        is_closed = bool(event.get('closed') or market.get('closed'))
+        if (
+            not is_closed
+            or up_price is None
+            or down_price is None
+            or {up_price, down_price} != {0.0, 1.0}
+        ):
+            raise RuntimeError(f'Round {item.event_slug} is not resolved yet.')
+        result = 'UP' if up_price > down_price else 'DOWN'
     plan = _build_frozen_pending_paper_plan(item)
     updated_state = apply_round_outcome(state, plan, won=(result == item.side))
     trade_pnl = updated_state.cash_pnl - state.cash_pnl

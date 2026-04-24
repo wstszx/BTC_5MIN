@@ -885,6 +885,23 @@ class _UnresolvedSettlingLiveClient(_LiveMarketClient):
         return {"eventMetadata": {"priceToBeat": None, "finalPrice": None}}
 
 
+class _TerminalPricesSettlingLiveClient(_LiveMarketClient):
+    def get_event_by_slug(self, slug: str):
+        if slug != "btc-updown-5m-prev":
+            raise AssertionError(f"Unexpected slug {slug}")
+        return {
+            "closed": True,
+            "eventMetadata": {},
+            "markets": [
+                {
+                    "closed": True,
+                    "outcomes": '["Up","Down"]',
+                    "outcomePrices": '["0","1"]',
+                }
+            ],
+        }
+
+
 def test_session_state_roundtrip_preserves_pending_paper_trades(tmp_path):
     state_path = tmp_path / "session_state.json"
     state_path.write_text(
@@ -1761,6 +1778,64 @@ def test_place_live_order_settles_previous_pending_trade_before_new_submission(t
     assert state.recovery_loss == pytest.approx(1.0)
     assert state.consecutive_losses == 1
     assert state.round_index == 2
+
+
+def test_place_live_order_settles_previous_pending_trade_from_terminal_outcome_prices_when_metadata_missing(tmp_path):
+    cfg = AppConfig(live_trading_enabled=True, max_stake=25.0)
+    stub_clob = _StubClobClient(
+        order_payloads={
+            "oid-prev": {
+                "status": "filled",
+                "filled_order_size": 2.0,
+                "filled_order_cost": 1.0,
+                "avg_price": 0.5,
+            }
+        }
+    )
+    state_path = tmp_path / "state.json"
+    state_path.write_text(
+        json.dumps(
+            {
+                "round_index": 1,
+                "cash_pnl": 0.0,
+                "recovery_loss": 0.0,
+                "consecutive_losses": 0,
+                "consecutive_max_stake_skips": 0,
+                "signal_round_slug": None,
+                "signal_round_open_up_price": None,
+                "signal_round_locked_side": None,
+                "stop_loss_count": 0,
+                "daily_realized_pnl": 0.0,
+                "current_day": "2026-04-02",
+                "pending_live_slug": "btc-updown-5m-prev",
+                "pending_live_side": "UP",
+                "pending_live_price": 0.5,
+                "pending_live_order_size": 2.0,
+                "pending_live_order_cost": 1.0,
+                "pending_live_expected_profit": 1.0,
+                "pending_live_end_time": "2026-04-02T00:00:00+00:00",
+                "pending_live_order_id": "oid-prev",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = place_live_order(
+        cfg=cfg,
+        market_client=_TerminalPricesSettlingLiveClient(),
+        clob_client=stub_clob,
+        state_path=state_path,
+        log_path=tmp_path / "live.csv",
+    )
+
+    assert result["status"] == "submitted"
+
+    state = load_session_state(state_path)
+    assert state.recovery_loss == pytest.approx(1.0)
+    assert state.consecutive_losses == 1
+    assert state.round_index == 2
+    assert state.pending_live_order_id == "oid-123"
+    assert state.pending_live_slug == "btc-updown-5m-test"
 
 
 def test_place_live_order_syncs_live_strategy_map_before_persisting(tmp_path):
@@ -3521,6 +3596,87 @@ def test_run_paper_trading_settles_pending_paper_trade_before_processing_new_rou
     assert state.recovery_loss == 0.0
     assert state.consecutive_losses == 0
     assert state.pending_paper_trades == []
+
+
+def test_run_paper_trading_settles_pending_paper_trade_from_terminal_outcome_prices_when_metadata_missing(tmp_path):
+    state_path = tmp_path / 'state.json'
+    state_path.write_text(
+        json.dumps(
+            {
+                'round_index': 1,
+                'cash_pnl': 0.0,
+                'recovery_loss': 0.0,
+                'consecutive_losses': 0,
+                'consecutive_max_stake_skips': 0,
+                'signal_round_slug': None,
+                'signal_round_open_up_price': None,
+                'signal_round_locked_side': None,
+                'stop_loss_count': 0,
+                'daily_realized_pnl': 0.0,
+                'current_day': '2026-04-06',
+                'pending_live_slug': None,
+                'pending_live_side': None,
+                'pending_live_price': None,
+                'pending_live_order_size': None,
+                'pending_live_order_cost': None,
+                'pending_live_expected_profit': None,
+                'pending_live_order_id': None,
+                'pending_live_end_time': None,
+                'pending_paper_trades': [
+                    {
+                        'round_index': 0,
+                        'event_slug': 'btc-updown-15m-paper-prev',
+                        'start_time': '2026-04-06T06:00:00+00:00',
+                        'end_time': '2026-04-06T06:15:00+00:00',
+                        'side': 'DOWN',
+                        'price': 0.54,
+                        'order_size': 1.8518518518518516,
+                        'order_cost': 1.0,
+                        'expected_profit': 0.8518518518518516,
+                        'strategy': 1,
+                        'entry_timing': 'OPEN',
+                        'signal_open_up_price': None,
+                        'signal_current_up_price': None,
+                        'signal_threshold': None,
+                        'signal_delta': None,
+                        'signal_locked': False,
+                        'signal_reason': None,
+                        'queued_at': '2026-04-06T06:00:05+00:00',
+                    }
+                ],
+            }
+        ),
+        encoding='utf-8',
+    )
+
+    class _TerminalPricesClient(_NoMarketClient):
+        def get_event_by_slug(self, slug: str):
+            assert slug == 'btc-updown-15m-paper-prev'
+            return {
+                'closed': True,
+                'eventMetadata': {},
+                'markets': [
+                    {
+                        'closed': True,
+                        'outcomes': '["Up","Down"]',
+                        'outcomePrices': '["0","1"]',
+                    }
+                ],
+            }
+
+    result = run_paper_trading(
+        AppConfig(market_timeframe='15m', poll_interval_seconds=1),
+        client=_TerminalPricesClient(),
+        state_path=state_path,
+        log_path=tmp_path / 'paper.csv',
+        stop_when_safe=lambda: True,
+    )
+
+    state = load_session_state(state_path)
+    assert result['status'] == 'stopped'
+    assert state.pending_paper_trades == []
+    assert state.cash_pnl == pytest.approx(0.8518518518518516)
+    assert state.daily_realized_pnl == pytest.approx(0.8518518518518516)
 
 
 def test_run_paper_trading_stop_event_during_settlement_wait_prevents_settlement(tmp_path, monkeypatch):
