@@ -810,6 +810,31 @@ def test_dashboard_live_recent_orders_reads_live_specific_csv(tmp_path: Path):
         os.chdir(old_cwd)
 
 
+def test_dashboard_live_recent_orders_filters_by_strategy(tmp_path: Path):
+    old_cwd = Path.cwd()
+    os.chdir(tmp_path)
+    state = DashboardState(env_file=tmp_path / '.env.dashboard')
+    try:
+        live_csv = tmp_path / 'logs' / 'live_orders.csv'
+        live_csv.parent.mkdir(parents=True, exist_ok=True)
+        live_csv.write_text(
+            'timestamp,mode,round_index,strategy,event_slug,side,price,order_cost,trade_pnl,skip_reason\n'
+            '2026-04-05T00:00:00+00:00,live,1,1,slug-one,UP,0.51,10.0,0.0,\n'
+            '2026-04-05T00:05:00+00:00,live,1,7,slug-seven,DOWN,0.49,12.0,1.5,\n',
+            encoding='utf-8',
+        )
+
+        payload = state.get_live_recent_orders_payload(limit=10, strategy='7')
+
+        assert payload['strategy'] == '7'
+        assert payload['count'] == 1
+        assert payload['rows'][0]['event_slug'] == 'slug-seven'
+        assert payload['rows'][0]['strategy'] == '7'
+    finally:
+        state.close()
+        os.chdir(old_cwd)
+
+
 
 def test_dashboard_runtime_factory_accepts_running_trade_mode(tmp_path: Path):
     runtime = create_dashboard_runtime(
@@ -984,7 +1009,7 @@ def test_dashboard_assets_switch_recent_endpoint_by_running_mode():
     assert "const runningMode = String((((state.config || {}).runtime_status || {}).active_mode || (((state.config || {}).runtime_status || {}).running_mode) || 'paper')).toLowerCase();" in js
     assert "const strategy = encodeURIComponent(effectivePaperRecentStrategyFilter());" in js
     assert "const timeframe = encodeURIComponent(effectivePaperTimeframeFilter());" in js
-    assert "const recentEndpoint = runningMode === 'live' ? '/api/live/recent?limit=80' : '/api/paper/recent?limit=80&strategy=' + strategy + '&timeframe=' + timeframe;" in js
+    assert "const recentEndpoint = runningMode === 'live' ? '/api/live/recent?limit=80&strategy=' + strategy : '/api/paper/recent?limit=80&strategy=' + strategy + '&timeframe=' + timeframe;" in js
 
 
 def test_dashboard_assets_localize_recent_panel_by_running_mode():

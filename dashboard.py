@@ -1539,11 +1539,14 @@ class DashboardState:
             "rows": validated_rows,
         }
 
-    def get_live_recent_orders_payload(self, *, limit: int) -> dict[str, Any]:
+    def get_live_recent_orders_payload(self, *, limit: int, strategy: int | str | None = None) -> dict[str, Any]:
         with self._lock:
             live_csv = self._cfg.logs_dir / "live_orders.csv"
-        rows = _tail_csv_rows(live_csv, limit=max(1, min(300, int(limit))))
-        return {"csv_path": str(live_csv), "count": len(rows), "rows": rows}
+        capped_limit = max(1, min(300, int(limit)))
+        strategy_filter = _normalize_strategy_filter(strategy)
+        rows = _filter_trade_rows_by_strategy(_tail_csv_rows(live_csv, limit=capped_limit * 4), strategy_filter)
+        rows = rows[:capped_limit]
+        return {"csv_path": str(live_csv), "strategy": strategy_filter or "all", "count": len(rows), "rows": rows}
 
 
 class _DashboardRequestHandler(BaseHTTPRequestHandler):
@@ -1636,7 +1639,8 @@ class _DashboardRequestHandler(BaseHTTPRequestHandler):
             if parsed.path == "/api/live/recent":
                 query = parse_qs(parsed.query)
                 limit = int((query.get("limit") or ["20"])[0])
-                self._send_json(self.dashboard_state.get_live_recent_orders_payload(limit=limit))
+                strategy = (query.get("strategy") or [None])[0]
+                self._send_json(self.dashboard_state.get_live_recent_orders_payload(limit=limit, strategy=strategy))
                 return
             self._send_json({"error": "Not found"}, status=HTTPStatus.NOT_FOUND)
         except OSError as exc:
@@ -5649,7 +5653,7 @@ async function refreshRecent() {
     const runningMode = String((((state.config || {}).runtime_status || {}).active_mode || (((state.config || {}).runtime_status || {}).running_mode) || 'paper')).toLowerCase();
     const strategy = encodeURIComponent(effectivePaperRecentStrategyFilter());
     const timeframe = encodeURIComponent(effectivePaperTimeframeFilter());
-    const recentEndpoint = runningMode === 'live' ? '/api/live/recent?limit=80' : '/api/paper/recent?limit=80&strategy=' + strategy + '&timeframe=' + timeframe;
+    const recentEndpoint = runningMode === 'live' ? '/api/live/recent?limit=80&strategy=' + strategy : '/api/paper/recent?limit=80&strategy=' + strategy + '&timeframe=' + timeframe;
     const data = await apiGet(recentEndpoint);
     if (!isCurrentReportRequest('recent', requestSeq)) {
       return;
