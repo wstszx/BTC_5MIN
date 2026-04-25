@@ -2181,6 +2181,7 @@ def _dashboard_html() -> str:
                 <tr>
                   <th>时间</th>
                   <th>轮次</th>
+                  <th>策略</th>
                   <th>方向</th>
                   <th>价格</th>
                   <th>下注金额</th>
@@ -5557,13 +5558,13 @@ function renderRecent(payload) {
   const runningMode = String((((state.config || {}).runtime_status || {}).active_mode || (((state.config || {}).runtime_status || {}).running_mode) || 'paper')).toLowerCase();
   el('recentPanelDesc').textContent = recentStrategyHeaderText();
   if (rows.length === 0) {
-    tbody.innerHTML = '<tr><td colspan=13 class=empty>' + (runningMode === 'live' ? '最近没有实盘交易记录' : '最近没有纸面交易记录') + '</td></tr>';
+    tbody.innerHTML = '<tr><td colspan=14 class=empty>' + (runningMode === 'live' ? '最近没有实盘交易记录' : '最近没有纸面交易记录') + '</td></tr>';
     setReportStatus('recentStatus', '明细', '0 行', 'warn');
     return;
   }
 
   if (rows.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="13" class="empty">最近没有纸面交易记录</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="14" class="empty">最近没有纸面交易记录</td></tr>';
     setReportStatus('recentStatus', '明细', '0 行', 'warn');
     return;
   }
@@ -5588,6 +5589,7 @@ function renderRecent(payload) {
     return '<tr class="' + esc(rowClass) + '">' +
       '<td>' + esc(fmtIso(row.timestamp)) + '</td>' +
       '<td title="' + esc(row.event_slug || '--') + '">' + esc(formatRoundSlug(row.event_slug)) + '</td>' +
+      '<td>' + esc(row.strategy || '--') + '</td>' +
       '<td class="' + esc(sideCls) + '">' + esc(sideText(side)) + '</td>' +
       '<td>' + esc(fmtNum(row.price, 4)) + '</td>' +
       '<td>' + esc(fmtNum(row.order_cost, 4)) + '</td>' +

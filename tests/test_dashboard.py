@@ -991,7 +991,7 @@ def test_dashboard_assets_localize_recent_panel_by_running_mode():
     js = _dashboard_js()
 
     assert "const runningMode = String((((state.config || {}).runtime_status || {}).active_mode || (((state.config || {}).runtime_status || {}).running_mode) || 'paper')).toLowerCase();" in js
-    assert "tbody.innerHTML = '<tr><td colspan=13 class=empty>' + (runningMode === 'live' ? '最近没有实盘交易记录' : '最近没有纸面交易记录') + '</td></tr>';" in js
+    assert "tbody.innerHTML = '<tr><td colspan=14 class=empty>' + (runningMode === 'live' ? '最近没有实盘交易记录' : '最近没有纸面交易记录') + '</td></tr>';" in js
     assert "setReportStatus('recentStatus', '明细', rows.length + ' 行' + (runningMode === 'live' ? ' · 实盘' : ''), pendingCount > 0 ? 'warn' : 'ok');" in js
 
 
@@ -1673,6 +1673,15 @@ def test_dashboard_assets_include_recent_result_validation_column():
     assert "row.result_check_status" in js
     assert "resolved_price_to_beat" in js
     assert "resolved_final_price" in js
+
+
+def test_dashboard_assets_include_recent_strategy_column():
+    html = _dashboard_html()
+    js = _dashboard_js()
+
+    assert '<th>策略</th>' in html
+    assert "'<td>' + esc(row.strategy || '--') + '</td>' +" in js
+    assert "tbody.innerHTML = '<tr><td colspan=14 class=empty>'" in js
 
 
 def test_dashboard_assets_include_recent_result_prices_and_status_styles():
