@@ -61,8 +61,8 @@ class _LiveMarketClient:
             market_id="mkt-1",
             slug="btc-updown-5m-test",
             title="BTC 5m Test",
-            start_time=now - timedelta(minutes=1),
-            end_time=now + timedelta(minutes=4),
+            start_time=now - timedelta(seconds=9),
+            end_time=now + timedelta(minutes=4, seconds=51),
             up_token_id="up-token",
             down_token_id="down-token",
         )
@@ -92,6 +92,21 @@ class _LiveMarketClient:
 class _NoTradeLiveMarketClient(_LiveMarketClient):
     def find_current_and_next_rounds(self, *, now):
         return None, None
+
+
+class _MissedEntryNoNextLiveClient(_LiveMarketClient):
+    def find_current_and_next_rounds(self, *, now):
+        window = MarketWindow(
+            event_id="evt-missed",
+            market_id="mkt-missed",
+            slug="btc-updown-5m-missed",
+            title="BTC 5m Missed",
+            start_time=now - timedelta(seconds=30),
+            end_time=now + timedelta(minutes=4, seconds=30),
+            up_token_id="up-token",
+            down_token_id="down-token",
+        )
+        return window, None
 
 
 def test_create_live_clob_client_prefers_explicit_api_credentials(monkeypatch):
@@ -1498,6 +1513,64 @@ def test_place_live_order_dry_run_returns_order_plan(tmp_path):
     assert result["order_cost"] > 0
 
 
+def test_live_and_paper_dry_runs_expose_matching_trade_plan_for_same_config(tmp_path):
+    cfg = AppConfig(
+        strategy_id=4,
+        paper_strategy_ids=[4],
+        live_strategy_ids=[4],
+        bet_sizing_mode="FIXED_BASE_COST",
+        base_order_cost=1.25,
+        max_stake=10.0,
+    )
+    market_client = _LiveMarketClient()
+
+    live_result = place_live_order(
+        cfg=cfg,
+        market_client=market_client,
+        state_path=tmp_path / "live_state.json",
+        dry_run=True,
+    )
+    paper_result = run_paper_trading(
+        cfg,
+        client=market_client,
+        state_path=tmp_path / "paper_state.json",
+        log_path=tmp_path / "paper.csv",
+        dry_run_once=True,
+    )
+
+    assert paper_result["status"] == "dry_run"
+    assert live_result["status"] == "dry_run"
+    for key in ("side", "price", "should_trade", "skip_reason", "order_size", "order_cost", "expected_profit"):
+        if isinstance(live_result[key], float):
+            assert paper_result[key] == pytest.approx(live_result[key])
+        else:
+            assert paper_result[key] == live_result[key]
+
+
+def test_place_live_order_skips_when_entry_window_missed_without_next_round(tmp_path):
+    cfg = AppConfig(
+        live_trading_enabled=True,
+        open_delay_seconds=0,
+        entry_grace_seconds=1,
+    )
+    stub_clob = _StubClobClient()
+
+    result = place_live_order(
+        cfg=cfg,
+        market_client=_MissedEntryNoNextLiveClient(),
+        clob_client=stub_clob,
+        state_path=tmp_path / "state.json",
+        log_path=tmp_path / "live.csv",
+    )
+
+    state = load_session_state(tmp_path / "state.json")
+    assert result["status"] == "skipped"
+    assert result["should_trade"] is False
+    assert result["skip_reason"] == "entry_window_missed"
+    assert stub_clob.created_orders == []
+    assert state.pending_live_slug is None
+
+
 def test_place_live_order_waits_until_entry_window_before_submitting(tmp_path):
     cfg = AppConfig(live_trading_enabled=True)
     stub_clob = _StubClobClient()
@@ -2043,6 +2116,43 @@ def test_run_live_trading_submits_multiple_strategies_in_same_round_when_wallet_
     assert len(rows) == 3
     assert ",1,OPEN,btc-updown-5m-test," in rows[1]
     assert ",3,OPEN,btc-updown-5m-test," in rows[2]
+
+
+def test_run_live_trading_skips_missed_entry_window_without_submitting(tmp_path, monkeypatch):
+    stop_event = threading.Event()
+    stub_clob = _StubClobClient(balance_payload={"available": 3.0})
+
+    def fake_sleep(_seconds):
+        stop_event.set()
+
+    monkeypatch.setattr("trader.time.sleep", fake_sleep)
+
+    result = run_live_trading(
+        AppConfig(
+            trade_mode="live",
+            live_trading_enabled=True,
+            live_private_key="pk",
+            live_funder="0xfunder",
+            strategy_id=4,
+            live_strategy_ids=[4],
+            open_delay_seconds=0,
+            entry_grace_seconds=1,
+            poll_interval_seconds=1,
+        ),
+        market_client=_MissedEntryNoNextLiveClient(),
+        clob_client=stub_clob,
+        state_path=tmp_path / "live_state.json",
+        log_path=tmp_path / "live_orders.csv",
+        stop_event=stop_event,
+    )
+
+    state = load_session_state(tmp_path / "live_state.json", effective_live_strategy_ids=[4])
+    rows = (tmp_path / "live_orders.csv").read_text(encoding="utf-8").splitlines()
+    assert result["status"] == "stopped"
+    assert stub_clob.created_orders == []
+    assert state.live_strategies[4].pending_live_slug is None
+    assert len(rows) == 2
+    assert "entry_window_missed" in rows[1]
 
 
 def test_run_live_trading_isolates_strategy_exceptions_and_continues(tmp_path, monkeypatch):
@@ -2902,7 +3012,7 @@ def test_run_paper_trading_dry_run_skips_when_entry_window_missed(tmp_path):
 
     result = run_paper_trading(
         cfg,
-        client=_LiveMarketClient(),
+        client=_MissedEntryNoNextLiveClient(),
         state_path=tmp_path / "state.json",
         log_path=tmp_path / "paper.csv",
         dry_run_once=True,

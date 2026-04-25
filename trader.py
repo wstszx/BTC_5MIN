@@ -2200,6 +2200,69 @@ def place_live_order(
             "signal_delta": side_decision.signal_delta,
             "signal_locked": side_decision.signal_locked,
         }
+    if _entry_window_missed(now, entry_time, grace_seconds=cfg.entry_grace_seconds):
+        skip_reason = "entry_window_missed"
+        if dry_run:
+            return {
+                "status": "dry_run",
+                "slug": target_round.slug,
+                "side": side,
+                "token_id": None,
+                "price": price,
+                "should_trade": False,
+                "skip_reason": skip_reason,
+                "entry_time": entry_time.isoformat(),
+                "projected_max_stake_skip_streak": 0,
+                "signal_open_up_price": side_decision.signal_open_up_price,
+                "signal_current_up_price": side_decision.signal_current_up_price,
+                "signal_threshold": side_decision.signal_threshold,
+                "signal_delta": side_decision.signal_delta,
+                "signal_locked": side_decision.signal_locked,
+            }
+        append_trade_log(
+            log_path,
+            TradeRecord(
+                timestamp=datetime.now(timezone.utc),
+                mode="live",
+                round_index=state.round_index,
+                strategy=cfg.strategy_id,
+                entry_timing=cfg.entry_timing,
+                event_slug=target_round.slug,
+                start_time=target_round.start_time,
+                end_time=target_round.end_time,
+                side=side,
+                price=price,
+                order_size=0.0,
+                order_cost=0.0,
+                expected_profit=0.0,
+                result=None,
+                trade_pnl=0.0,
+                cash_pnl=state.cash_pnl,
+                recovery_loss=state.recovery_loss,
+                consecutive_losses=state.consecutive_losses,
+                skip_reason=skip_reason,
+                **_signal_record_kwargs(side_decision),
+            ),
+        )
+        state.round_index += 1
+        if persist_state:
+            save_session_state(state_path, state)
+        return {
+            "status": "skipped",
+            "slug": target_round.slug,
+            "side": side,
+            "token_id": None,
+            "price": price,
+            "should_trade": False,
+            "skip_reason": skip_reason,
+            "entry_time": entry_time.isoformat(),
+            "projected_max_stake_skip_streak": 0,
+            "signal_open_up_price": side_decision.signal_open_up_price,
+            "signal_current_up_price": side_decision.signal_current_up_price,
+            "signal_threshold": side_decision.signal_threshold,
+            "signal_delta": side_decision.signal_delta,
+            "signal_locked": side_decision.signal_locked,
+        }
     plan = build_trade_plan(
         state=state,
         side=side,
@@ -3140,6 +3203,55 @@ def run_live_trading(
                                 }
                             )
                             continue
+                        if _entry_window_missed(now, entry_time, grace_seconds=strategy_cfg.entry_grace_seconds):
+                            append_trade_log(
+                                log_path,
+                                TradeRecord(
+                                    timestamp=datetime.now(timezone.utc),
+                                    mode="live",
+                                    round_index=strategy_state.round_index,
+                                    strategy=strategy_id,
+                                    entry_timing=strategy_cfg.entry_timing,
+                                    event_slug=target_round.slug,
+                                    start_time=target_round.start_time,
+                                    end_time=target_round.end_time,
+                                    side=side,
+                                    price=price,
+                                    order_size=0.0,
+                                    order_cost=0.0,
+                                    expected_profit=0.0,
+                                    result=None,
+                                    trade_pnl=0.0,
+                                    cash_pnl=strategy_state.cash_pnl,
+                                    recovery_loss=strategy_state.recovery_loss,
+                                    consecutive_losses=strategy_state.consecutive_losses,
+                                    skip_reason="entry_window_missed",
+                                    **_signal_record_kwargs(side_decision),
+                                ),
+                            )
+                            strategy_state.round_index += 1
+                            state.live_strategies[strategy_id] = strategy_state
+                            strategy_results.append(
+                                {
+                                    "strategy_id": strategy_id,
+                                    "status": "skipped",
+                                    "slug": target_round.slug,
+                                    "side": side,
+                                    "price": price,
+                                    "should_trade": False,
+                                    "skip_reason": "entry_window_missed",
+                                    "order_size": 0.0,
+                                    "order_cost": 0.0,
+                                    "expected_profit": 0.0,
+                                    "entry_time": entry_time.isoformat(),
+                                    "signal_open_up_price": side_decision.signal_open_up_price,
+                                    "signal_current_up_price": side_decision.signal_current_up_price,
+                                    "signal_threshold": side_decision.signal_threshold,
+                                    "signal_delta": side_decision.signal_delta,
+                                    "signal_locked": side_decision.signal_locked,
+                                }
+                            )
+                            continue
                         plan = build_trade_plan(
                             state=strategy_state,
                             side=side,
@@ -3870,6 +3982,9 @@ def run_paper_trading(
                         "price": price,
                         "should_trade": plan.should_trade,
                         "skip_reason": plan.skip_reason,
+                        "order_size": plan.order_size,
+                        "order_cost": plan.order_cost,
+                        "expected_profit": plan.expected_profit,
                         "entry_time": entry_time.isoformat(),
                         "projected_max_stake_skip_streak": projected_streak,
                         "signal_open_up_price": side_decision.signal_open_up_price,
