@@ -1231,10 +1231,22 @@ def test_dashboard_assets_style_unified_report_card_layout():
 
     assert '.unified-report-card {' in css
     assert '.report-card-body {' in css
-    assert 'grid-template-columns: minmax(280px, 0.8fr) minmax(0, 1.6fr);' in css
+    assert 'grid-template-columns: minmax(220px, 0.55fr) minmax(0, 1.85fr);' in css
     assert '.report-status-group {' in css
     assert '.report-section {' in css
     assert '.report-recent-table {' in css
+
+
+def test_dashboard_assets_keep_recent_trades_table_without_horizontal_scroll():
+    css = dashboard._dashboard_css()
+
+    assert 'grid-template-columns: minmax(220px, 0.55fr) minmax(0, 1.85fr);' in css
+    assert '.report-recent-table table {' in css
+    assert 'table-layout: fixed;' in css
+    assert 'overflow-x: hidden;' in css
+    assert '.report-recent-table th,\n.report-recent-table td {' in css
+    assert 'white-space: normal;' in css
+    assert 'overflow-wrap: anywhere;' in css
 
 
 def test_dashboard_assets_stack_unified_report_card_on_narrow_layouts():
@@ -1242,7 +1254,7 @@ def test_dashboard_assets_stack_unified_report_card_on_narrow_layouts():
 
     assert '@media (max-width: 1450px) {' in css
     assert '.report-card-body {' in css
-    assert 'grid-template-columns: minmax(240px, 0.72fr) minmax(0, 1.48fr);' in css
+    assert 'grid-template-columns: minmax(200px, 0.48fr) minmax(0, 1.72fr);' in css
     assert '@media (max-width: 1024px) {' in css
     assert 'grid-template-columns: 1fr;' in css
 
@@ -2458,6 +2470,8 @@ def test_dashboard_report_strategy_selection_survives_market_refresh_browser_reg
             cwd=str(Path.cwd()),
             capture_output=True,
             text=True,
+            encoding='utf-8',
+            errors='replace',
             check=True,
         )
         return completed.stdout.strip()
@@ -2501,6 +2515,8 @@ def test_dashboard_report_strategy_selection_survives_market_refresh_browser_reg
                 cwd=str(Path.cwd()),
                 capture_output=True,
                 text=True,
+                encoding='utf-8',
+                errors='replace',
                 check=False,
             )
         finally:
@@ -2657,6 +2673,8 @@ def test_dashboard_report_strategy_switch_ignores_stale_browser_responses(tmp_pa
             cwd=str(Path.cwd()),
             capture_output=True,
             text=True,
+            encoding='utf-8',
+            errors='replace',
             check=True,
         )
         return completed.stdout.strip()
@@ -2739,6 +2757,8 @@ def test_dashboard_report_strategy_switch_ignores_stale_browser_responses(tmp_pa
                 cwd=str(Path.cwd()),
                 capture_output=True,
                 text=True,
+                encoding='utf-8',
+                errors='replace',
                 check=False,
             )
         finally:

@@ -3207,7 +3207,7 @@ tr:hover td { background: rgba(50, 88, 131, 0.1); }
 
 .report-card-body {
   display: grid;
-  grid-template-columns: minmax(280px, 0.8fr) minmax(0, 1.6fr);
+  grid-template-columns: minmax(220px, 0.55fr) minmax(0, 1.85fr);
   gap: 14px;
   padding: 14px;
 }
@@ -3220,11 +3220,38 @@ tr:hover td { background: rgba(50, 88, 131, 0.1); }
 
 .report-recent-table {
   max-height: 420px;
-  overflow: auto;
   border: 1px solid var(--line);
   border-radius: 10px;
   background: rgba(6, 12, 22, 0.66);
 }
+
+.report-recent-table table {
+  table-layout: fixed;
+}
+
+.report-recent-table th,
+.report-recent-table td {
+  padding: 7px 5px;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  line-height: 1.35;
+  vertical-align: top;
+}
+
+.report-recent-table th:nth-child(1) { width: 9%; }
+.report-recent-table th:nth-child(2) { width: 8%; }
+.report-recent-table th:nth-child(3) { width: 6%; }
+.report-recent-table th:nth-child(4) { width: 5%; }
+.report-recent-table th:nth-child(5) { width: 6%; }
+.report-recent-table th:nth-child(6) { width: 7%; }
+.report-recent-table th:nth-child(7) { width: 5%; }
+.report-recent-table th:nth-child(8) { width: 6%; }
+.report-recent-table th:nth-child(9) { width: 6%; }
+.report-recent-table th:nth-child(10) { width: 6%; }
+.report-recent-table th:nth-child(11) { width: 7%; }
+.report-recent-table th:nth-child(12) { width: 7%; }
+.report-recent-table th:nth-child(13) { width: 15%; }
+.report-recent-table th:nth-child(14) { width: 7%; }
 
 .section-title {
   font-size: 11px;
@@ -3245,6 +3272,11 @@ tr:hover td { background: rgba(50, 88, 131, 0.1); }
   overflow: auto;
   border-top: 1px solid var(--line);
   background: rgba(6, 12, 22, 0.66);
+}
+
+.report-recent-table.table-wrap {
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 
 .trade-up { color: var(--green); font-weight: 700; }
@@ -3296,7 +3328,7 @@ tr:hover td { background: rgba(50, 88, 131, 0.1); }
   }
 
   .report-card-body {
-    grid-template-columns: minmax(240px, 0.72fr) minmax(0, 1.48fr);
+    grid-template-columns: minmax(200px, 0.48fr) minmax(0, 1.72fr);
   }
 
   .monitor-stack {
