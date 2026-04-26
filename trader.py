@@ -13,6 +13,7 @@ from pathlib import Path
 from statistics import pstdev
 from typing import Any
 
+from atomic_io import atomic_write_text
 from config import AppConfig
 from binance_signal import BinanceDepth5SignalService
 from models import LiveStrategyState, MarketQuote, MarketWindow, PaperStrategyState, PendingPaperTrade, SessionState, TradePlan, TradeRecord
@@ -151,8 +152,7 @@ def _hydrate_live_strategy_map(payload: dict[str, Any], effective_live_strategy_
 
 
 def save_session_state(path: Path, state: SessionState) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(asdict(state), indent=2), encoding="utf-8")
+    atomic_write_text(path, json.dumps(asdict(state), indent=2), encoding="utf-8")
 
 
 def _load_session_state_legacy(path: Path) -> SessionState:
@@ -387,7 +387,6 @@ def load_live_redeem_state(path: Path) -> dict[str, Any]:
 
 
 def save_live_redeem_state(path: Path, state: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
     sanitized = _default_live_redeem_state()
     raw_conditions = state.get("conditions") if isinstance(state, dict) else {}
     if isinstance(raw_conditions, dict):
@@ -396,7 +395,7 @@ def save_live_redeem_state(path: Path, state: dict[str, Any]) -> None:
             for condition_id, raw_entry in raw_conditions.items()
         }
     sanitized["runtime"] = _normalize_live_redeem_runtime((state or {}).get("runtime") if isinstance(state, dict) else None)
-    path.write_text(json.dumps(sanitized, indent=2), encoding="utf-8")
+    atomic_write_text(path, json.dumps(sanitized, indent=2), encoding="utf-8")
 
 
 _LIVE_REDEEM_CTF_CONTRACT = os.getenv("POLYMARKET_CTF_CONTRACT") or "0x4D97DCd97eC945f40cF65F87097ACe5EA0476045"
@@ -2608,6 +2607,11 @@ def _is_stop_requested(stop_event: threading.Event | None) -> bool:
 def _sleep_if_not_stopped(stop_event: threading.Event | None, seconds: float) -> bool:
     if _is_stop_requested(stop_event):
         return False
+    if stop_event is not None:
+        time.sleep(0)
+        if _is_stop_requested(stop_event):
+            return False
+        return not stop_event.wait(max(0.0, seconds))
     time.sleep(seconds)
     return not _is_stop_requested(stop_event)
 

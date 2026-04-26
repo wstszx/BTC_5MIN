@@ -18,6 +18,7 @@ from runtime_control import RuntimeControl
 from trader import (
     SideDecision,
     _list_redeemable_live_positions,
+    _sleep_if_not_stopped,
     load_live_redeem_state,
     save_live_redeem_state,
     execute_live_redeem,
@@ -67,8 +68,92 @@ def _install_fake_clob_v2(monkeypatch, fake_client_cls):
 def test_requirements_use_py_clob_client_v2_dependency():
     requirements = Path('requirements.txt').read_text(encoding='utf-8').splitlines()
 
-    assert 'py-clob-client-v2' in requirements
+    assert any(line.startswith('py-clob-client-v2') for line in requirements)
     assert 'py-clob-client' not in requirements
+
+
+def test_requirements_pin_runtime_dependencies():
+    requirements = [
+        line.strip()
+        for line in Path('requirements.txt').read_text(encoding='utf-8').splitlines()
+        if line.strip() and not line.strip().startswith('#')
+    ]
+
+    for package_name in (
+        'requests',
+        'pandas',
+        'python-dateutil',
+        'pytest',
+        'websocket-client',
+        'tenacity',
+        'py-clob-client-v2',
+        'web3',
+    ):
+        matching = [line for line in requirements if line.startswith(package_name)]
+        assert matching, f'missing {package_name}'
+        assert any(any(operator in line for operator in ('>=', '==', '~=')) for line in matching)
+        assert any('<' in line for line in matching)
+
+
+def test_sleep_if_not_stopped_waits_on_stop_event(monkeypatch):
+    class FakeStopEvent:
+        def __init__(self) -> None:
+            self.wait_seconds: float | None = None
+            self._stopped = False
+
+        def is_set(self) -> bool:
+            return self._stopped
+
+        def wait(self, seconds: float) -> bool:
+            self.wait_seconds = seconds
+            self._stopped = True
+            return True
+
+    def fail_sleep(seconds):
+        if seconds != 0:
+            raise AssertionError(f'long time.sleep should not be used with stop_event; got {seconds}')
+
+    stop_event = FakeStopEvent()
+    monkeypatch.setattr(trader.time, 'sleep', fail_sleep)
+
+    assert _sleep_if_not_stopped(stop_event, 30.0) is False
+    assert stop_event.wait_seconds == 30.0
+
+
+def test_save_session_state_uses_atomic_replace(monkeypatch, tmp_path: Path):
+    state_path = tmp_path / 'session_state.json'
+    replace_calls: list[tuple[Path, Path]] = []
+    original_replace = Path.replace
+
+    def spy_replace(self: Path, target: Path):
+        replace_calls.append((self, Path(target)))
+        return original_replace(self, target)
+
+    monkeypatch.setattr(Path, 'replace', spy_replace)
+
+    save_session_state(state_path, SessionState(cash_pnl=1.25))
+
+    assert replace_calls
+    assert replace_calls[-1][1] == state_path
+    assert json.loads(state_path.read_text(encoding='utf-8'))['cash_pnl'] == 1.25
+
+
+def test_save_live_redeem_state_uses_atomic_replace(monkeypatch, tmp_path: Path):
+    state_path = tmp_path / 'live_redeem_state.json'
+    replace_calls: list[tuple[Path, Path]] = []
+    original_replace = Path.replace
+
+    def spy_replace(self: Path, target: Path):
+        replace_calls.append((self, Path(target)))
+        return original_replace(self, target)
+
+    monkeypatch.setattr(Path, 'replace', spy_replace)
+
+    save_live_redeem_state(state_path, {'runtime': {'enabled': True}, 'conditions': {}})
+
+    assert replace_calls
+    assert replace_calls[-1][1] == state_path
+    assert json.loads(state_path.read_text(encoding='utf-8'))['runtime']['enabled'] is True
 
 
 class _TransientPaperClient:
@@ -3479,17 +3564,18 @@ def test_run_paper_trading_refreshes_config_provider_between_iterations(tmp_path
     monkeypatch.setattr("trader.save_session_state", lambda path, payload: None)
     monkeypatch.setattr("trader._refresh_daily_session_state", lambda state_arg, now: False)
 
-    def fake_sleep(seconds):
+    def fake_sleep_if_not_stopped(_stop_event, seconds):
         sleep_calls.append(seconds)
         if len(sleep_calls) == 2:
             stop_event.set()
+        return not stop_event.is_set()
 
     def config_provider():
         value = config_sequence.pop(0) if config_sequence else 5.0
         config_calls.append(value)
         return AppConfig(poll_interval_seconds=value)
 
-    monkeypatch.setattr("trader.time.sleep", fake_sleep)
+    monkeypatch.setattr("trader._sleep_if_not_stopped", fake_sleep_if_not_stopped)
 
     result = run_paper_trading(
         AppConfig(poll_interval_seconds=1),
@@ -3520,15 +3606,16 @@ def test_run_paper_trading_config_provider_refreshes_default_client(tmp_path, mo
     stop_event = threading.Event()
     sleep_calls: list[float] = []
 
-    def fake_sleep(seconds):
+    def fake_sleep_if_not_stopped(_stop_event, seconds):
         sleep_calls.append(seconds)
         stop_event.set()
+        return False
 
     def config_provider():
         return AppConfig(poll_interval_seconds=99)
 
     monkeypatch.setattr("trader.PolymarketClient", RecordingClient)
-    monkeypatch.setattr("trader.time.sleep", fake_sleep)
+    monkeypatch.setattr("trader._sleep_if_not_stopped", fake_sleep_if_not_stopped)
 
     result = run_paper_trading(
         AppConfig(poll_interval_seconds=1),
@@ -3570,10 +3657,11 @@ def test_run_paper_trading_starts_binance_service_when_strategy6_is_enabled_by_c
         AppConfig(strategy_id=2, paper_strategy_ids=[2, 6], poll_interval_seconds=1),
     ]
 
-    def fake_sleep(seconds):
+    def fake_sleep_if_not_stopped(_stop_event, seconds):
         sleep_calls.append(seconds)
         if len(sleep_calls) >= 2:
             stop_event.set()
+        return not stop_event.is_set()
 
     def config_provider():
         if configs:
@@ -3581,7 +3669,7 @@ def test_run_paper_trading_starts_binance_service_when_strategy6_is_enabled_by_c
         return AppConfig(strategy_id=2, paper_strategy_ids=[2, 6], poll_interval_seconds=1)
 
     monkeypatch.setattr("trader.BinanceDepth5SignalService", RecordingBinanceSignalService)
-    monkeypatch.setattr("trader.time.sleep", fake_sleep)
+    monkeypatch.setattr("trader._sleep_if_not_stopped", fake_sleep_if_not_stopped)
 
     result = run_paper_trading(
         AppConfig(strategy_id=2, paper_strategy_ids=[2], poll_interval_seconds=1),
@@ -3934,11 +4022,12 @@ def test_run_paper_trading_stop_event_stops_during_round_end_wait(tmp_path, monk
     stop_event = threading.Event()
     sleep_calls: list[float] = []
 
-    def fake_sleep(seconds):
+    def fake_sleep_if_not_stopped(_stop_event, seconds):
         sleep_calls.append(seconds)
         stop_event.set()
+        return False
 
-    monkeypatch.setattr("trader.time.sleep", fake_sleep)
+    monkeypatch.setattr("trader._sleep_if_not_stopped", fake_sleep_if_not_stopped)
     monkeypatch.setattr(
         "trader._resolve_side_from_strategy",
         lambda **kwargs: SideDecision(side="UP"),
@@ -3988,11 +4077,12 @@ def test_run_paper_trading_near_entry_fast_poll_uses_shorter_sleep(tmp_path, mon
             )
             return window, None
 
-    def fake_sleep(seconds):
+    def fake_sleep_if_not_stopped(_stop_event, seconds):
         sleep_calls.append(seconds)
         stop_event.set()
+        return False
 
-    monkeypatch.setattr("trader.time.sleep", fake_sleep)
+    monkeypatch.setattr("trader._sleep_if_not_stopped", fake_sleep_if_not_stopped)
     monkeypatch.setattr(
         "trader._resolve_side_from_strategy",
         lambda **kwargs: SideDecision(side=None, reason="signal_unavailable"),

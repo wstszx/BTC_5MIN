@@ -11,6 +11,7 @@ from itertools import product
 from statistics import mean
 from typing import Any, Callable, Iterable, Sequence
 
+from atomic_io import atomic_write_text
 from config import AppConfig, build_config_from_env_values, load_env_file_values
 from backtest import run_backtest
 from paper_evaluator import compare_paper_candidates_from_csv
@@ -173,8 +174,7 @@ def build_optimizer_state(
 
 
 def save_optimizer_state(path: Path, payload: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    atomic_write_text(path, json.dumps(payload, indent=2), encoding="utf-8")
 
 
 def load_optimizer_state(path: Path) -> dict[str, Any]:

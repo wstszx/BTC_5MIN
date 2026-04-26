@@ -1,37 +1,33 @@
 ﻿# BTC_5MIN 每日固定巡检清单（1 页命令版）
 
-适用目录：`D:\python\BTC_5MIN`
+适用目录：`D:\pythonProject\BTC_5MIN`
 
 目标：每天按固定节奏跑策略 5 纸测，并快速发现异常。
 
 ## 1. 每日启动（开盘前/早上）
 
 ```powershell
-cd D:\python\BTC_5MIN
+cd D:\pythonProject\BTC_5MIN
 git pull origin main
 python -m pytest -q
 ```
 
-启动策略 5（弱信号跳过）后台任务，并记录 PID：
+启动统一运行时（策略、时间框架和模式从 `.env.dashboard` 读取），并记录 PID：
 
 ```powershell
-cd D:\python\BTC_5MIN
+cd D:\pythonProject\BTC_5MIN
 $ts = Get-Date -Format 'yyyyMMdd_HHmmss'
-$env:STRATEGY_ID='5'
-$env:SIGNAL_WEAK_SIGNAL_MODE='SKIP'
-$env:SIGNAL_MOMENTUM_THRESHOLD='0.015'
-$proc = Start-Process -FilePath python -ArgumentList @('main.py','paper-trade') `
-  -WorkingDirectory 'D:\python\BTC_5MIN' `
-  -RedirectStandardOutput "logs/paper_live_signal_$ts.out" `
-  -RedirectStandardError "logs/paper_live_signal_$ts.err" `
+$proc = Start-Process -FilePath python -ArgumentList @('main.py') `
+  -WorkingDirectory 'D:\pythonProject\BTC_5MIN' `
+  -RedirectStandardOutput "logs/runtime_$ts.out" `
+  -RedirectStandardError "logs/runtime_$ts.err" `
   -PassThru
-Set-Content -Path logs\paper_live_signal_latest.pid -Value $proc.Id
-Set-Content -Path logs\paper_live_signal_latest_ts.txt -Value $ts
-Remove-Item Env:STRATEGY_ID -ErrorAction SilentlyContinue
-Remove-Item Env:SIGNAL_WEAK_SIGNAL_MODE -ErrorAction SilentlyContinue
-Remove-Item Env:SIGNAL_MOMENTUM_THRESHOLD -ErrorAction SilentlyContinue
+Set-Content -Path logs\runtime_latest.pid -Value $proc.Id
+Set-Content -Path logs\runtime_latest_ts.txt -Value $ts
 "Started PID=$($proc.Id) TS=$ts"
 ```
+
+启动成功后打开 `http://127.0.0.1:8787/` 查看行情、信号、配置和纸面交易汇总。
 
 ## 2. 盘中巡检（建议每 2~4 小时执行一次）
 
@@ -44,8 +40,8 @@ Get-Process | Where-Object { $_.ProcessName -like 'python*' } | Select-Object Id
 查看最新日志文件：
 
 ```powershell
-$latestOut = Get-ChildItem logs\paper_live_signal_*.out | Sort-Object LastWriteTime -Descending | Select-Object -First 1
-$latestErr = Get-ChildItem logs\paper_live_signal_*.err | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+$latestOut = Get-ChildItem logs\runtime_*.out | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+$latestErr = Get-ChildItem logs\runtime_*.err | Sort-Object LastWriteTime -Descending | Select-Object -First 1
 $latestOut.FullName
 $latestErr.FullName
 ```
@@ -57,33 +53,39 @@ Get-Content $latestOut.FullName -Tail 80
 Get-Content $latestErr.FullName -Tail 80
 ```
 
-手动做一次 dry-run 健康检查：
+手动做一次轻量健康检查：
 
 ```powershell
-cd D:\python\BTC_5MIN
-$env:STRATEGY_ID='5'
-$env:SIGNAL_WEAK_SIGNAL_MODE='SKIP'
-python main.py paper-trade --dry-run-once
-Remove-Item Env:STRATEGY_ID -ErrorAction SilentlyContinue
-Remove-Item Env:SIGNAL_WEAK_SIGNAL_MODE -ErrorAction SilentlyContinue
+cd D:\pythonProject\BTC_5MIN
+python -m pytest tests\test_strategy.py tests\test_risk_and_sizing.py -q
 ```
 
 ## 3. 日终复盘（每天固定时间）
 
-输出当日摘要：
+优先在 Dashboard 的“纸面交易汇总”和“最近交易明细”查看当日摘要。需要命令行导出时，可直接调用 `paper_report` 模块：
 
 ```powershell
-cd D:\python\BTC_5MIN
+cd D:\pythonProject\BTC_5MIN
 $d = Get-Date -Format 'yyyy-MM-dd'
-python main.py paper-report --csv logs/paper_trades.csv --tz-offset +08:00 --start-date $d --end-date $d
+@"
+from pathlib import Path
+from paper_report import summarize_paper_trades
+for item in summarize_paper_trades(Path('logs/paper/5m/paper_trades.csv'), tz_offset='+08:00', start_date='$d', end_date='$d'):
+    print(item)
+"@ | python -
 ```
 
 保存一份日报到文件：
 
 ```powershell
-cd D:\python\BTC_5MIN
+cd D:\pythonProject\BTC_5MIN
 $ts = Get-Date -Format 'yyyyMMdd_HHmmss'
-python main.py paper-report --csv logs/paper_trades.csv --tz-offset +08:00 | Tee-Object -FilePath "logs/paper_report_$ts.txt"
+@"
+from pathlib import Path
+from paper_report import summarize_paper_trades
+for item in summarize_paper_trades(Path('logs/paper/5m/paper_trades.csv'), tz_offset='+08:00'):
+    print(item)
+"@ | python - | Tee-Object -FilePath "logs/paper_report_$ts.txt"
 ```
 
 ## 4. 快速异常处理
@@ -109,7 +111,7 @@ $env:SIGNAL_MOMENTUM_THRESHOLD='0.010'
 按 PID 停止：
 
 ```powershell
-$pid = Get-Content logs\paper_live_signal_latest.pid
+$pid = Get-Content logs\runtime_latest.pid
 Stop-Process -Id $pid
 ```
 

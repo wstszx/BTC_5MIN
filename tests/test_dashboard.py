@@ -18,6 +18,7 @@ from dashboard import (
     DashboardState,
     _dashboard_html,
     _dashboard_js,
+    _write_env_file,
     create_dashboard_runtime,
 )
 from models import MarketQuote, MarketWindow
@@ -65,6 +66,25 @@ def test_dashboard_runtime_shutdown_close_idempotent(tmp_path: Path):
     runtime.close()
     thread.join(timeout=2)
     assert not thread.is_alive()
+
+
+def test_write_env_file_uses_atomic_replace(monkeypatch, tmp_path: Path):
+    env_path = tmp_path / '.env.dashboard'
+    replace_calls: list[tuple[Path, Path]] = []
+    original_replace = Path.replace
+
+    def spy_replace(self: Path, target: Path):
+        replace_calls.append((self, Path(target)))
+        return original_replace(self, target)
+
+    monkeypatch.setattr(Path, 'replace', spy_replace)
+
+    _write_env_file(env_path, {'B': '2', 'A': '1'})
+
+    assert replace_calls
+    assert replace_calls[-1][1] == env_path
+    assert env_path.read_text(encoding='utf-8') == 'A=1\nB=2\n'
+
 
 def test_dashboard_config_roundtrip_updates_env_file(tmp_path: Path):
     env_file = tmp_path / ".env.dashboard"
@@ -1701,6 +1721,59 @@ def test_recent_trades_payload_includes_result_validation_fields(tmp_path: Path,
         os.chdir(old_cwd)
 
 
+def test_recent_trades_payload_caches_official_validation_by_slug(tmp_path: Path, monkeypatch):
+    old_cwd = Path.cwd()
+    os.chdir(tmp_path)
+    calls: list[str] = []
+
+    class StubClient:
+        def __init__(self, cfg):
+            self.config = cfg
+
+        def close(self) -> None:
+            return
+
+        def get_event_by_slug(self, slug: str):
+            calls.append(slug)
+            return {
+                'id': 'evt-1',
+                'slug': slug,
+                'eventMetadata': {
+                    'priceToBeat': 69333.0,
+                    'finalPrice': 69400.0,
+                },
+                'markets': [
+                    {
+                        'id': 'mkt-1',
+                        'outcomes': '["Up", "Down"]',
+                        'outcomePrices': '["1", "0"]',
+                        'clobTokenIds': '["up-token", "down-token"]',
+                    }
+                ],
+            }
+
+    monkeypatch.setattr(dashboard, 'PolymarketClient', StubClient)
+    state = DashboardState(env_file=tmp_path / '.env.dashboard')
+    try:
+        logs_dir = tmp_path / 'logs'
+        logs_dir.mkdir(parents=True, exist_ok=True)
+        (logs_dir / 'paper_trades.csv').write_text(
+            'timestamp,mode,round_index,strategy,entry_timing,event_slug,start_time,end_time,side,price,order_size,order_cost,expected_profit,result,trade_pnl,cash_pnl,recovery_loss,consecutive_losses,stop_loss_triggered,skip_reason,signal_open_up_price,signal_current_up_price,signal_threshold,signal_delta,signal_locked,signal_reason\n'
+            '2026-04-06T13:32:38+00:00,paper,37,2,OPEN,btc-updown-5m-same,2026-04-06T13:20:00+00:00,2026-04-06T13:25:00+00:00,UP,0.56,4.5454,2.5454,2.0,UP,2.0,4.7293,0.0,0,False,,,,,,False,\n'
+            '2026-04-06T13:37:38+00:00,paper,38,2,OPEN,btc-updown-5m-same,2026-04-06T13:20:00+00:00,2026-04-06T13:25:00+00:00,UP,0.57,4.5454,2.5909,1.9545,UP,1.9545,6.6838,0.0,0,False,,,,,,False,\n',
+            encoding='utf-8',
+        )
+
+        payload = state.get_recent_trades_payload(limit=10)
+
+        assert payload['count'] == 2
+        assert calls == ['btc-updown-5m-same']
+        assert [row['result_check_status'] for row in payload['rows']] == ['match', 'match']
+    finally:
+        state.close()
+        os.chdir(old_cwd)
+
+
 def test_recent_trades_payload_validates_from_official_winning_outcome_when_final_price_missing(tmp_path: Path, monkeypatch):
     old_cwd = Path.cwd()
     os.chdir(tmp_path)
@@ -2187,7 +2260,22 @@ def test_dashboard_user_copy_reduces_ws_http_and_ofi_terms(tmp_path: Path):
     assert '币安盘口失衡' in js
 
 
-def test_dashboard_recent_trades_payload_reads_timeframe_specific_paths(tmp_path: Path):
+def test_dashboard_recent_trades_payload_reads_timeframe_specific_paths(tmp_path: Path, monkeypatch):
+    class StubClient:
+        def __init__(self, cfg):
+            self.config = cfg
+
+        def close(self) -> None:
+            return
+
+        def get_event_by_slug(self, slug: str):
+            return {
+                'slug': slug,
+                'eventMetadata': {'priceToBeat': 1.0, 'finalPrice': 2.0},
+                'markets': [{'outcomes': '["Up", "Down"]', 'outcomePrices': '["1", "0"]'}],
+            }
+
+    monkeypatch.setattr(dashboard, 'PolymarketClient', StubClient)
     logs_dir = tmp_path / 'logs' / 'paper'
     (logs_dir / '5m').mkdir(parents=True, exist_ok=True)
     (logs_dir / '15m').mkdir(parents=True, exist_ok=True)

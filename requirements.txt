@@ -1,8 +1,8 @@
-﻿requests
-pandas
-python-dateutil
-pytest
-websocket-client
-tenacity
-py-clob-client-v2
-web3
+requests>=2.32,<3
+pandas>=2.3,<3
+python-dateutil>=2.9,<3
+pytest>=9,<10
+websocket-client>=1.8,<2
+tenacity>=9,<10
+py-clob-client-v2>=1,<2
+web3>=7,<8

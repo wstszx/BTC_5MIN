@@ -14,7 +14,15 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
-from config import AppConfig, build_config_from_env_values, load_env_file_values, LIVE_STRATEGY_IDS, PAPER_STRATEGY_IDS
+from atomic_io import atomic_write_text
+from config import (
+    AppConfig,
+    MARKET_TIMEFRAME_DEFINITIONS,
+    build_config_from_env_values,
+    load_env_file_values,
+    LIVE_STRATEGY_IDS,
+    PAPER_STRATEGY_IDS,
+)
 from binance_signal import BinanceDepth5SignalService
 from models import MarketWindow, PendingPaperTrade
 from paper_report import summarize_paper_trades
@@ -58,12 +66,11 @@ def _fmt_env(value: Any) -> str:
 
 
 def _write_env_file(path: Path, values: dict[str, str]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
     lines = [f"{key}={values[key]}" for key in sorted(values.keys())]
     text = "\n".join(lines)
     if text:
         text += "\n"
-    path.write_text(text, encoding="utf-8")
+    atomic_write_text(path, text, encoding="utf-8")
 
 
 def _normalize_strategy_id_list_value(value: str) -> str:
@@ -354,10 +361,22 @@ def _official_winning_outcome(event_payload: dict[str, Any]) -> str:
     return ""
 
 
+def _slug_matches_client_series(slug: str, client: PolymarketClient | Any) -> bool:
+    supported_prefixes = tuple(
+        prefix
+        for definition in MARKET_TIMEFRAME_DEFINITIONS.values()
+        for prefix in definition.slug_prefixes
+    )
+    if not supported_prefixes:
+        return True
+    return any(slug.startswith(prefix) for prefix in supported_prefixes)
+
+
 def _validate_recent_trade_row(
     row: dict[str, str],
     *,
     client: PolymarketClient | Any,
+    validation_cache: dict[str, dict[str, str]] | None = None,
 ) -> dict[str, str]:
     validated = dict(row)
     validated.setdefault('resolved_price_to_beat', '')
@@ -373,27 +392,48 @@ def _validate_recent_trade_row(
     result = str(validated.get('result') or '').strip().upper()
     if not slug or not result or result == '--':
         return validated
-
-    try:
-        event_payload = client.get_event_by_slug(slug)
-    except Exception:
-        validated['result_check_status'] = 'error'
+    if not _slug_matches_client_series(slug, client):
         return validated
 
-    metadata = event_payload.get("eventMetadata") or {}
-    price_to_beat = _optional_float(metadata.get("priceToBeat"))
-    final_price = _optional_float(metadata.get("finalPrice"))
-    if price_to_beat is not None:
-        validated['resolved_price_to_beat'] = str(price_to_beat)
-    if final_price is not None:
-        validated['resolved_final_price'] = str(final_price)
+    cache_key = slug
+    resolved = dict((validation_cache or {}).get(cache_key) or {})
+    if not resolved:
+        resolved = {
+            'resolved_price_to_beat': '',
+            'resolved_final_price': '',
+            'resolved_expected_result': '',
+            'result_check_status': '',
+        }
+        try:
+            event_payload = client.get_event_by_slug(slug)
+        except Exception:
+            validated['result_check_status'] = 'error'
+            return validated
 
-    official_result = _official_winning_outcome(event_payload)
-    if not official_result and price_to_beat is not None and final_price is not None:
-        official_result = "UP" if final_price >= price_to_beat else "DOWN"
+        metadata = event_payload.get("eventMetadata") or {}
+        price_to_beat = _optional_float(metadata.get("priceToBeat"))
+        final_price = _optional_float(metadata.get("finalPrice"))
+        if price_to_beat is not None:
+            resolved['resolved_price_to_beat'] = str(price_to_beat)
+        if final_price is not None:
+            resolved['resolved_final_price'] = str(final_price)
 
+        official_result = _official_winning_outcome(event_payload)
+        if not official_result and price_to_beat is not None and final_price is not None:
+            official_result = "UP" if final_price >= price_to_beat else "DOWN"
+
+        if not official_result:
+            resolved['result_check_status'] = 'official_pending'
+        else:
+            resolved['resolved_expected_result'] = official_result
+            if validation_cache is not None:
+                validation_cache[cache_key] = dict(resolved)
+
+    validated['resolved_price_to_beat'] = resolved.get('resolved_price_to_beat', '')
+    validated['resolved_final_price'] = resolved.get('resolved_final_price', '')
+    official_result = resolved.get('resolved_expected_result', '')
     if not official_result:
-        validated['result_check_status'] = 'official_pending'
+        validated['result_check_status'] = resolved.get('result_check_status') or 'official_pending'
         return validated
 
     validated['resolved_expected_result'] = official_result
@@ -1071,6 +1111,7 @@ class DashboardState:
         self._cfg = self._build_config(self._env_values)
         self._client = PolymarketClient(self._cfg)
         self._binance_signal_service = self._build_binance_signal_service(self._cfg)
+        self._result_validation_cache: dict[str, dict[str, str]] = {}
         self._last_saved_at: datetime | None = None
 
     def close(self) -> None:
@@ -1609,6 +1650,7 @@ class DashboardState:
     def get_recent_trades_payload(self, *, limit: int, strategy: int | str | None = None, timeframe: str | None = None) -> dict[str, Any]:
         with self._lock:
             cfg = self._cfg
+            validation_cache = self._result_validation_cache
             target_timeframe = _normalize_timeframe_filter(timeframe, fallback=cfg.market_timeframe)
             paper_csv = _paper_trades_path(cfg, target_timeframe)
             state_path = _paper_session_state_path(cfg, target_timeframe)
@@ -1636,7 +1678,10 @@ class DashboardState:
 
         client = PolymarketClient(cfg)
         try:
-            validated_rows = [_validate_recent_trade_row(row, client=client) for row in merged_rows]
+            validated_rows = [
+                _validate_recent_trade_row(row, client=client, validation_cache=validation_cache)
+                for row in merged_rows
+            ]
         finally:
             close = getattr(client, "close", None)
             if callable(close):
