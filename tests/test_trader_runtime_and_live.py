@@ -87,6 +87,7 @@ def test_requirements_pin_runtime_dependencies():
         'websocket-client',
         'tenacity',
         'py-clob-client-v2',
+        'py-builder-relayer-client',
         'web3',
     ):
         matching = [line for line in requirements if line.startswith(package_name)]
@@ -360,6 +361,58 @@ def test_create_live_clob_client_falls_back_when_explicit_api_credentials_are_in
             api_key='builder-key',
             api_secret='builder-secret',
             api_passphrase='builder-passphrase',
+        ),
+        {'api_key': 'derived-key'},
+    ]
+
+
+def test_create_live_clob_client_prefers_deriving_api_credentials_after_explicit_rejection(monkeypatch):
+    captured: dict[str, object] = {"creds": [], "calls": []}
+
+    class _FakeClobClient:
+        def __init__(self, host, chain_id, key, signature_type, funder):
+            captured['key'] = key
+            captured['funder'] = funder
+
+        def set_api_creds(self, creds):
+            captured['creds'].append(creds)
+
+        def get_api_keys(self):
+            if len(captured['creds']) == 1:
+                raise Exception("PolyApiException[status_code=401, error_message={'error': 'Unauthorized/Invalid api key'}]")
+            captured['validated_after_fallback'] = True
+            return {'apiKeys': ['derived-key']}
+
+        def derive_api_key(self):
+            captured['calls'].append('derive')
+            return {'api_key': 'derived-key'}
+
+        def create_api_key(self):
+            captured['calls'].append('create')
+            raise Exception("Could not create api key")
+
+    _install_fake_clob_v2(monkeypatch, _FakeClobClient)
+
+    client = _create_live_clob_client(
+        AppConfig(
+            trade_mode='live',
+            live_trading_enabled=True,
+            live_private_key='pk-live',
+            live_funder='0xfunder',
+            live_api_key='stale-key',
+            live_api_secret='stale-secret',
+            live_api_passphrase='stale-passphrase',
+        )
+    )
+
+    assert client is not None
+    assert captured['validated_after_fallback'] is True
+    assert captured['calls'] == ['derive']
+    assert captured['creds'] == [
+        _FakeApiCreds(
+            api_key='stale-key',
+            api_secret='stale-secret',
+            api_passphrase='stale-passphrase',
         ),
         {'api_key': 'derived-key'},
     ]
@@ -2475,6 +2528,81 @@ def test_read_available_live_balance_rejects_untrusted_or_missing_payloads():
                 ),
                 clob_client=_BalanceOnlyClient(payload),
             )
+
+
+def test_read_available_live_balance_passes_collateral_asset_type_to_v2_balance_allowance():
+    class _V2BalanceClient:
+        def __init__(self):
+            self.params = None
+
+        def get_balance_allowance(self, params):
+            self.params = params
+            if getattr(params, "asset_type", None) != "COLLATERAL":
+                raise AssertionError("expected COLLATERAL asset_type")
+            return {"available": 12.5}
+
+    client = _V2BalanceClient()
+
+    balance = trader._read_available_live_balance(
+        cfg=AppConfig(
+            trade_mode="live",
+            live_trading_enabled=True,
+            live_private_key="pk",
+            live_funder="0xfunder",
+        ),
+        clob_client=client,
+    )
+
+    assert balance == 12.5
+    assert client.params is not None
+
+
+def test_read_available_live_balance_handles_v2_balance_allowance_payload():
+    class _V2BalanceClient:
+        def get_balance_allowance(self, _params):
+            return {
+                "balance": "12500000",
+                "allowances": {
+                    "0xexchange": "8000000",
+                    "0xexchangeV2": "9250000",
+                },
+            }
+
+    balance = trader._read_available_live_balance(
+        cfg=AppConfig(
+            trade_mode="live",
+            live_trading_enabled=True,
+            live_private_key="pk",
+            live_funder="0xfunder",
+        ),
+        clob_client=_V2BalanceClient(),
+    )
+
+    assert balance == 9.25
+
+
+def test_read_available_live_balance_accepts_zero_v2_balance_allowance_payload():
+    class _V2BalanceClient:
+        def get_balance_allowance(self, _params):
+            return {
+                "balance": "0",
+                "allowances": {
+                    "0xexchange": "0",
+                    "0xexchangeV2": "0",
+                },
+            }
+
+    balance = trader._read_available_live_balance(
+        cfg=AppConfig(
+            trade_mode="live",
+            live_trading_enabled=True,
+            live_private_key="pk",
+            live_funder="0xfunder",
+        ),
+        clob_client=_V2BalanceClient(),
+    )
+
+    assert balance == 0.0
 
 
 def test_settle_pending_live_trade_operates_on_single_strategy_state():

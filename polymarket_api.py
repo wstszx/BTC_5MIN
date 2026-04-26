@@ -398,14 +398,19 @@ class PolymarketClient:
 
         def run_ping_loop() -> None:
             interval = max(1.0, float(getattr(self.config, "ws_ping_interval_seconds", 10)))
-            while not self._ws_ping_stop.is_set():
+            while not self._ws_ping_stop.wait(interval):
                 self._send_ws_ping_once()
-                self._ws_ping_stop.wait(interval)
 
         thread = threading.Thread(target=run_ping_loop, daemon=True)
         with self._ws_lock:
             self._ws_ping_thread = thread
         thread.start()
+
+    def _handle_ws_close(self, _status_code: Any, _msg: Any) -> None:
+        self._ws_ping_stop.set()
+        with self._ws_lock:
+            self._ws_opened_at = None
+            self._ws_subscribed_assets.clear()
 
     def _ensure_ws_connection(self) -> None:
         if not self.config.ws_enabled:
@@ -425,7 +430,6 @@ class PolymarketClient:
             def on_open(_ws: websocket.WebSocketApp) -> None:
                 with self._ws_lock:
                     self._ws_opened_at = datetime.now(timezone.utc)
-                self._start_ws_ping_loop()
 
             def on_message(_ws: websocket.WebSocketApp, message: str) -> None:
                 self._handle_ws_message(message)
@@ -436,10 +440,7 @@ class PolymarketClient:
                 return
 
             def on_close(_ws: websocket.WebSocketApp, _status_code: Any, _msg: Any) -> None:
-                self._ws_ping_stop.set()
-                with self._ws_lock:
-                    self._ws_opened_at = None
-                return
+                self._handle_ws_close(_status_code, _msg)
 
             self._ws_app = websocket.WebSocketApp(
                 self.config.ws_market_url,
@@ -526,6 +527,7 @@ class PolymarketClient:
 
         with self._ws_lock:
             self._ws_subscribed_assets = set(desired_assets)
+        self._start_ws_ping_loop()
 
     def _ws_quote_for_assets(self, asset_ids: list[str]) -> dict[str, dict[str, Any]]:
         if not self.config.ws_enabled:

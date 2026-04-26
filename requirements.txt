@@ -5,4 +5,5 @@ pytest>=9,<10
 websocket-client>=1.8,<2
 tenacity>=9,<10
 py-clob-client-v2>=1,<2
+py-builder-relayer-client>=0.0.1,<0.1
 web3>=7,<8

@@ -1675,6 +1675,15 @@ def _parse_live_balance_value(payload: Any) -> float | None:
     return None
 
 
+def _parse_live_collateral_token_units(payload: Any) -> float | None:
+    value = _parse_live_balance_value(payload)
+    if value is None:
+        return None
+    if isinstance(payload, int) or (isinstance(payload, str) and payload.strip().isdigit()):
+        return value / 1_000_000
+    return value
+
+
 def _find_live_balance_value(payload: Any, candidate_keys: tuple[str, ...]) -> float | None:
     direct_value = _parse_live_balance_value(payload)
     if direct_value is not None:
@@ -1700,14 +1709,37 @@ def _find_live_balance_value(payload: Any, candidate_keys: tuple[str, ...]) -> f
     return None
 
 
+def _find_live_balance_allowance_value(payload: Any) -> float | None:
+    if not isinstance(payload, dict):
+        return None
+
+    lowered = {str(key).strip().lower(): value for key, value in payload.items()}
+    balance = _parse_live_collateral_token_units(lowered.get("balance"))
+    if balance is None:
+        return None
+    if balance <= 0:
+        return 0.0
+
+    allowances = lowered.get("allowances")
+    allowance_values: list[float] = []
+    if isinstance(allowances, dict):
+        allowance_values = [
+            value
+            for value in (_parse_live_collateral_token_units(item) for item in allowances.values())
+            if value is not None
+        ]
+    else:
+        allowance_value = _parse_live_collateral_token_units(allowances)
+        if allowance_value is not None:
+            allowance_values.append(allowance_value)
+
+    if not allowance_values:
+        return None
+    return min(balance, max(allowance_values))
+
+
 def _read_available_live_balance(*, cfg: AppConfig, clob_client: Any | None) -> float:
     live_client = clob_client or _create_live_clob_client(cfg)
-    candidate_methods = (
-        "get_balance",
-        "get_balance_allowance",
-        "get_collateral_balance",
-        "get_usdc_balance",
-    )
     available_keys = (
         "available",
         "available_balance",
@@ -1718,6 +1750,26 @@ def _read_available_live_balance(*, cfg: AppConfig, clob_client: Any | None) -> 
         "available_allowance",
         "spendable",
         "spendable_balance",
+    )
+    get_balance_allowance = getattr(live_client, "get_balance_allowance", None)
+    if callable(get_balance_allowance):
+        try:
+            from py_clob_client_v2 import AssetType, BalanceAllowanceParams
+
+            payload = get_balance_allowance(BalanceAllowanceParams(asset_type=AssetType.COLLATERAL))
+        except TypeError:
+            payload = get_balance_allowance()
+        available_balance = _find_live_balance_value(payload, available_keys)
+        if available_balance is not None:
+            return available_balance
+        balance_allowance_value = _find_live_balance_allowance_value(payload)
+        if balance_allowance_value is not None:
+            return balance_allowance_value
+
+    candidate_methods = (
+        "get_balance",
+        "get_collateral_balance",
+        "get_usdc_balance",
     )
     for method_name in candidate_methods:
         read_balance = getattr(live_client, method_name, None)
@@ -1981,12 +2033,16 @@ def _create_live_clob_client(cfg: AppConfig):
     from py_clob_client_v2 import ApiCreds, ClobClient
 
     def _apply_derived_api_creds(client: Any):
-        create_or_derive = getattr(client, "create_or_derive_api_key", None)
-        if not callable(create_or_derive):
-            create_or_derive = getattr(client, "create_or_derive_api_creds", None)
-        if not callable(create_or_derive):
+        derive = getattr(client, "derive_api_key", None)
+        if not callable(derive):
+            derive = getattr(client, "derive_api_creds", None)
+        if not callable(derive):
+            derive = getattr(client, "create_or_derive_api_key", None)
+        if not callable(derive):
+            derive = getattr(client, "create_or_derive_api_creds", None)
+        if not callable(derive):
             raise RuntimeError("CLOB V2 client does not expose API credential derivation.")
-        client.set_api_creds(create_or_derive())
+        client.set_api_creds(derive())
 
     def _is_invalid_api_key_error(exc: Exception) -> bool:
         message = str(exc).lower()

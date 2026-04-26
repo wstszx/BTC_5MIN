@@ -298,6 +298,62 @@ def test_ws_subscribe_assets_uses_initial_market_subscription_for_first_assets()
     ]
 
 
+def test_ws_subscribe_assets_starts_ping_loop_after_initial_subscription():
+    class _StubApp:
+        def __init__(self):
+            self.sent = []
+            self.ping_started_when_sent_count = None
+
+        def send(self, payload):
+            self.sent.append(payload)
+
+    client = PolymarketClient(AppConfig(ws_enabled=True))
+    client._ws_app = _StubApp()
+    client._ws_opened_at = datetime.now(timezone.utc)
+    client._ensure_ws_connection = lambda: None  # type: ignore[method-assign]
+
+    def fake_start_ping_loop():
+        assert client._ws_app is not None
+        client._ws_app.ping_started_when_sent_count = len(client._ws_app.sent)
+
+    client._start_ws_ping_loop = fake_start_ping_loop  # type: ignore[method-assign]
+
+    client._ws_subscribe_assets(["first-b", "first-a"])
+
+    assert client._ws_app is not None
+    assert client._ws_app.ping_started_when_sent_count == 1
+
+
+def test_ws_subscribe_assets_resubscribes_same_assets_after_socket_reconnect():
+    class _StubApp:
+        def __init__(self):
+            self.sent = []
+
+        def send(self, payload):
+            self.sent.append(payload)
+
+    client = PolymarketClient(AppConfig(ws_enabled=True))
+    client._ws_app = _StubApp()
+    client._ws_opened_at = datetime.now(timezone.utc)
+    client._ws_subscribed_assets = {"same-a", "same-b"}
+    client._ensure_ws_connection = lambda: None  # type: ignore[method-assign]
+
+    client._handle_ws_close(None, None)
+    client._ws_app = _StubApp()
+    client._ws_opened_at = datetime.now(timezone.utc)
+
+    client._ws_subscribe_assets(["same-b", "same-a"])
+
+    assert client._ws_app is not None
+    assert [json.loads(item) for item in client._ws_app.sent] == [
+        {
+            "assets_ids": ["same-a", "same-b"],
+            "type": "market",
+            "custom_feature_enabled": True,
+        }
+    ]
+
+
 def test_ws_subscribe_assets_skips_duplicate_subscription_for_same_set():
     class _StubApp:
         def __init__(self):
