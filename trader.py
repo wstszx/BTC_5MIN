@@ -1905,10 +1905,11 @@ def _submit_live_strategy_order(
     plan: TradePlan,
 ) -> tuple[str, Any]:
     live_client = clob_client or _create_live_clob_client(cfg)
+    use_sdk = type(live_client).__name__ == "ClobClient"
     order_type = (
-        (cfg.live_order_type or "FOK").upper()
-        if clob_client is not None
-        else _resolve_live_order_type(cfg.live_order_type)
+        _resolve_live_order_type(cfg.live_order_type)
+        if use_sdk
+        else (cfg.live_order_type or "FOK").upper()
     )
     market_order_price = cfg.strategy7_max_entry_price if cfg.strategy_id == 7 else None
     order_args = _build_live_market_order_args(
@@ -1916,7 +1917,7 @@ def _submit_live_strategy_order(
         plan=plan,
         order_type=order_type,
         market_order_price=market_order_price,
-        use_sdk_types=clob_client is None,
+        use_sdk_types=use_sdk,
     )
     response = _post_live_market_order(live_client, order_args, order_type)
     return _validate_live_submission_response(response), response
@@ -2518,14 +2519,15 @@ def place_live_order(
         }
 
     live_client = live_client or _create_live_clob_client(cfg)
-    order_type = (cfg.live_order_type or 'FOK').upper() if clob_client is not None else _resolve_live_order_type(cfg.live_order_type)
+    use_sdk = type(live_client).__name__ == "ClobClient"
+    order_type = _resolve_live_order_type(cfg.live_order_type) if use_sdk else (cfg.live_order_type or 'FOK').upper()
     market_order_price = cfg.strategy7_max_entry_price if cfg.strategy_id == 7 else None
     order_args = _build_live_market_order_args(
         token_id=token_id,
         plan=plan,
         order_type=order_type,
         market_order_price=market_order_price,
-        use_sdk_types=clob_client is None,
+        use_sdk_types=use_sdk,
     )
     response = _post_live_market_order(live_client, order_args, order_type)
     order_id = _validate_live_submission_response(response)
