@@ -4,5 +4,5 @@ python-dateutil
 pytest
 websocket-client
 tenacity
-py-clob-client
+py-clob-client-v2
 web3

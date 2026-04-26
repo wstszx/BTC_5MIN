@@ -1,3 +1,4 @@
+import json
 import requests
 from datetime import datetime, timezone
 
@@ -84,6 +85,60 @@ def test_ws_message_handler_ingests_book_and_price_change():
     assert updated["last_price"] == 0.53
     assert updated["best_bid"] == 0.52
     assert updated["best_ask"] == 0.54
+
+
+def test_ws_message_handler_tracks_application_pong():
+    client = PolymarketClient(AppConfig(ws_enabled=True))
+
+    client._handle_ws_message("PONG")
+
+    stats = client.get_ws_runtime_stats()
+    assert stats["ws_last_pong_at"] is not None
+    assert stats["ws_last_message_at"] is not None
+
+
+def test_ws_send_ping_uses_official_text_ping():
+    class _StubApp:
+        def __init__(self):
+            self.sent = []
+
+        def send(self, payload):
+            self.sent.append(payload)
+
+    client = PolymarketClient(AppConfig(ws_enabled=True))
+    client._ws_app = _StubApp()
+    client._ws_opened_at = datetime.now(timezone.utc)
+
+    client._send_ws_ping_once()
+
+    assert client._ws_app.sent == ["PING"]
+    stats = client.get_ws_runtime_stats()
+    assert stats["ws_last_ping_at"] is not None
+
+
+def test_ws_message_handler_caches_market_resolved_winner_by_asset():
+    client = PolymarketClient(AppConfig(ws_enabled=True))
+    market = {
+        "slug": "btc-updown-5m-test",
+        "outcomes": '["Up", "Down"]',
+        "clobTokenIds": '["up-token", "down-token"]',
+    }
+
+    client._handle_ws_message(
+        json.dumps(
+            {
+                "event_type": "market_resolved",
+                "market": "condition-1",
+                "winning_asset_id": "up-token",
+                "winning_outcome": "Up",
+            }
+        )
+    )
+
+    resolution = client.get_ws_market_resolution(market)
+    assert resolution is not None
+    assert resolution["winning_asset_id"] == "up-token"
+    assert resolution["winning_outcome"] == "UP"
 
 
 def test_quote_from_market_falls_back_to_http_when_ws_empty():
@@ -182,7 +237,7 @@ def test_ws_message_handler_resets_on_invalid_operation():
 
 
 
-def test_ws_subscribe_assets_reconnects_when_asset_set_changes():
+def test_ws_subscribe_assets_uses_dynamic_subscribe_and_unsubscribe_when_asset_set_changes():
     class _StubApp:
         def __init__(self):
             self.sent = []
@@ -197,29 +252,50 @@ def test_ws_subscribe_assets_reconnects_when_asset_set_changes():
     client._ws_opened_at = datetime.now(timezone.utc)
     client._ws_subscribed_assets = {"old-a", "old-b"}
 
-    closed = {"count": 0}
-
-    def fake_close():
-        closed["count"] += 1
-        client._ws_app = None
-        client._ws_opened_at = None
-        client._ws_subscribed_assets.clear()
-
-    def fake_ensure():
-        if client._ws_app is None:
-            client._ws_app = _StubApp()
-            client._ws_opened_at = datetime.now(timezone.utc)
-
-    client.close = fake_close  # type: ignore[method-assign]
-    client._ensure_ws_connection = fake_ensure  # type: ignore[method-assign]
+    client._ensure_ws_connection = lambda: None  # type: ignore[method-assign]
 
     client._ws_subscribe_assets(["new-a", "new-b"])
 
-    assert closed["count"] == 1
     assert client._ws_subscribed_assets == {"new-a", "new-b"}
     assert client._ws_app is not None
-    assert len(client._ws_app.sent) == 1
-    assert "new-a" in client._ws_app.sent[0]
+    payloads = [json.loads(item) for item in client._ws_app.sent]
+    assert payloads == [
+        {
+            "assets_ids": ["old-a", "old-b"],
+            "operation": "unsubscribe",
+        },
+        {
+            "assets_ids": ["new-a", "new-b"],
+            "operation": "subscribe",
+            "custom_feature_enabled": True,
+        },
+    ]
+
+
+def test_ws_subscribe_assets_uses_initial_market_subscription_for_first_assets():
+    class _StubApp:
+        def __init__(self):
+            self.sent = []
+
+        def send(self, payload):
+            self.sent.append(payload)
+
+    client = PolymarketClient(AppConfig(ws_enabled=True))
+    client._ws_app = _StubApp()
+    client._ws_opened_at = datetime.now(timezone.utc)
+    client._ensure_ws_connection = lambda: None  # type: ignore[method-assign]
+
+    client._ws_subscribe_assets(["first-b", "first-a"])
+
+    assert client._ws_subscribed_assets == {"first-a", "first-b"}
+    assert client._ws_app is not None
+    assert [json.loads(item) for item in client._ws_app.sent] == [
+        {
+            "assets_ids": ["first-a", "first-b"],
+            "type": "market",
+            "custom_feature_enabled": True,
+        }
+    ]
 
 
 def test_ws_subscribe_assets_skips_duplicate_subscription_for_same_set():

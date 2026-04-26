@@ -4,7 +4,7 @@ import json
 import os
 import threading
 from pathlib import Path
-from dataclasses import asdict
+from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -13,7 +13,7 @@ import trader
 
 from binance_signal import BinanceDepth5SignalService
 from config import AppConfig
-from models import LiveStrategyState, MarketQuote, MarketWindow, PaperStrategyState, SessionState, TradePlan, TradeRecord
+from models import LiveStrategyState, MarketQuote, MarketWindow, PaperStrategyState, PendingPaperTrade, SessionState, TradePlan, TradeRecord
 from runtime_control import RuntimeControl
 from trader import (
     SideDecision,
@@ -36,6 +36,39 @@ from trader import (
     validate_live_runtime_config,
     _paper_experiment_id,
 )
+
+
+@dataclass(frozen=True)
+class _FakeApiCreds:
+    api_key: str
+    api_secret: str
+    api_passphrase: str
+
+
+def _install_fake_clob_v2(monkeypatch, fake_client_cls):
+    import sys
+    import types
+
+    fake_pkg = types.ModuleType('py_clob_client_v2')
+    fake_pkg.ClobClient = fake_client_cls
+    fake_pkg.ApiCreds = _FakeApiCreds
+
+    fake_client_module = types.ModuleType('py_clob_client_v2.client')
+    fake_client_module.ClobClient = fake_client_cls
+
+    fake_types_module = types.ModuleType('py_clob_client_v2.clob_types')
+    fake_types_module.ApiCreds = _FakeApiCreds
+
+    monkeypatch.setitem(sys.modules, 'py_clob_client_v2', fake_pkg)
+    monkeypatch.setitem(sys.modules, 'py_clob_client_v2.client', fake_client_module)
+    monkeypatch.setitem(sys.modules, 'py_clob_client_v2.clob_types', fake_types_module)
+
+
+def test_requirements_use_py_clob_client_v2_dependency():
+    requirements = Path('requirements.txt').read_text(encoding='utf-8').splitlines()
+
+    assert 'py-clob-client-v2' in requirements
+    assert 'py-clob-client' not in requirements
 
 
 class _TransientPaperClient:
@@ -112,8 +145,6 @@ class _MissedEntryNoNextLiveClient(_LiveMarketClient):
 def test_create_live_clob_client_prefers_explicit_api_credentials(monkeypatch):
     captured: dict[str, object] = {}
 
-    from py_clob_client.clob_types import ApiCreds
-
     class _FakeClobClient:
         def __init__(self, host, chain_id, key, signature_type, funder):
             captured['host'] = host
@@ -129,12 +160,7 @@ def test_create_live_clob_client_prefers_explicit_api_credentials(monkeypatch):
         def set_api_creds(self, creds):
             captured['creds'] = creds
 
-    import sys
-    import types
-
-    fake_module = types.ModuleType('py_clob_client.client')
-    fake_module.ClobClient = _FakeClobClient
-    monkeypatch.setitem(sys.modules, 'py_clob_client.client', fake_module)
+    _install_fake_clob_v2(monkeypatch, _FakeClobClient)
 
     client = _create_live_clob_client(
         AppConfig(
@@ -150,7 +176,7 @@ def test_create_live_clob_client_prefers_explicit_api_credentials(monkeypatch):
 
     assert client is not None
     assert captured['key'] == 'pk-live'
-    assert captured['creds'] == ApiCreds(
+    assert captured['creds'] == _FakeApiCreds(
         api_key='builder-key',
         api_secret='builder-secret',
         api_passphrase='builder-passphrase',
@@ -166,19 +192,14 @@ def test_create_live_clob_client_derives_api_credentials_when_explicit_values_mi
             captured['key'] = key
             captured['funder'] = funder
 
-        def create_or_derive_api_creds(self):
+        def create_or_derive_api_key(self):
             captured['derived'] = True
             return {'api_key': 'derived-key'}
 
         def set_api_creds(self, creds):
             captured['creds'] = creds
 
-    import sys
-    import types
-
-    fake_module = types.ModuleType('py_clob_client.client')
-    fake_module.ClobClient = _FakeClobClient
-    monkeypatch.setitem(sys.modules, 'py_clob_client.client', fake_module)
+    _install_fake_clob_v2(monkeypatch, _FakeClobClient)
 
     client = _create_live_clob_client(
         AppConfig(
@@ -214,8 +235,6 @@ def test_live_redeem_auth_mode_prefers_builder_then_relayer():
 def test_create_live_clob_client_falls_back_when_explicit_api_credentials_are_invalid(monkeypatch):
     captured: dict[str, object] = {"creds": []}
 
-    from py_clob_client.clob_types import ApiCreds
-
     class _FakeClobClient:
         def __init__(self, host, chain_id, key, signature_type, funder):
             captured['key'] = key
@@ -230,16 +249,11 @@ def test_create_live_clob_client_falls_back_when_explicit_api_credentials_are_in
             captured['validated_after_fallback'] = True
             return {'apiKeys': ['derived-key']}
 
-        def create_or_derive_api_creds(self):
+        def create_or_derive_api_key(self):
             captured['derived'] = True
             return {'api_key': 'derived-key'}
 
-    import sys
-    import types
-
-    fake_module = types.ModuleType('py_clob_client.client')
-    fake_module.ClobClient = _FakeClobClient
-    monkeypatch.setitem(sys.modules, 'py_clob_client.client', fake_module)
+    _install_fake_clob_v2(monkeypatch, _FakeClobClient)
 
     client = _create_live_clob_client(
         AppConfig(
@@ -257,13 +271,91 @@ def test_create_live_clob_client_falls_back_when_explicit_api_credentials_are_in
     assert captured['derived'] is True
     assert captured['validated_after_fallback'] is True
     assert captured['creds'] == [
-        ApiCreds(
+        _FakeApiCreds(
             api_key='builder-key',
             api_secret='builder-secret',
             api_passphrase='builder-passphrase',
         ),
         {'api_key': 'derived-key'},
     ]
+
+
+def test_live_redeem_default_collateral_uses_v2_pusd_token():
+    assert trader._LIVE_REDEEM_COLLATERAL_TOKEN == '0xC011a7E12a19f7B1f670d46F03B03f3342E82DFB'
+
+
+def test_submit_live_strategy_order_prefers_v2_create_and_post_market_order():
+    captured: dict[str, object] = {}
+
+    class _CreateAndPostClient:
+        def create_and_post_market_order(self, *, order_args, order_type):
+            captured['order_args'] = order_args
+            captured['order_type'] = order_type
+            return {'success': True, 'orderID': 'oid-v2'}
+
+        def create_market_order(self, _order_args):
+            raise AssertionError('legacy create/post path should not be used when v2 helper exists')
+
+        def post_order(self, _order, _order_type):
+            raise AssertionError('legacy create/post path should not be used when v2 helper exists')
+
+    order_id, response = trader._submit_live_strategy_order(
+        cfg=AppConfig(live_trading_enabled=True),
+        clob_client=_CreateAndPostClient(),
+        token_id='up-token',
+        plan=TradePlan(True, 'UP', price=0.55, order_size=2.0, order_cost=1.1, expected_profit=0.9),
+    )
+
+    assert order_id == 'oid-v2'
+    assert response == {'success': True, 'orderID': 'oid-v2'}
+    assert captured['order_type'] == 'FOK'
+    assert captured['order_args'].token_id == 'up-token'
+    assert not hasattr(captured['order_args'], 'fee_rate_bps')
+
+
+def test_settle_pending_paper_trade_uses_cached_ws_market_resolution():
+    class _WsResolvedClient:
+        def get_event_by_slug(self, slug: str):
+            return {
+                'slug': slug,
+                'eventMetadata': {},
+                'markets': [
+                    {
+                        'outcomes': '["Up", "Down"]',
+                        'outcomePrices': '["0.5", "0.5"]',
+                        'clobTokenIds': '["up-token", "down-token"]',
+                        'closed': False,
+                    }
+                ],
+            }
+
+        def get_ws_market_resolution(self, market):
+            return {'winning_outcome': 'Down', 'winning_asset_id': 'down-token'}
+
+    state = SessionState()
+    item = PendingPaperTrade(
+        round_index=0,
+        event_slug='btc-updown-5m-ws-resolved',
+        start_time='2026-04-26T00:00:00+00:00',
+        end_time='2026-04-26T00:05:00+00:00',
+        side='DOWN',
+        price=0.45,
+        order_size=2.0,
+        order_cost=0.9,
+        expected_profit=1.1,
+        strategy=2,
+        entry_timing='OPEN',
+    )
+
+    updated_state, result, trade_pnl = trader._settle_pending_paper_trade(
+        client=_WsResolvedClient(),
+        state=state,
+        item=item,
+    )
+
+    assert result == 'DOWN'
+    assert trade_pnl == pytest.approx(1.1)
+    assert updated_state.cash_pnl == pytest.approx(1.1)
 
 def test_redeemable_positions_filters_live_user_and_required_fields():
     class _RedeemablePositionsClient:
@@ -882,7 +974,9 @@ class _StubClobClient:
 class _StrictStubClobClient(_StubClobClient):
     def create_market_order(self, order_args):
         assert hasattr(order_args, "price")
-        assert hasattr(order_args, "fee_rate_bps")
+        assert not hasattr(order_args, "fee_rate_bps")
+        assert not hasattr(order_args, "nonce")
+        assert not hasattr(order_args, "taker")
         return super().create_market_order(order_args)
 
 

@@ -17,7 +17,7 @@ from config import AppConfig
 from binance_signal import BinanceDepth5SignalService
 from models import LiveStrategyState, MarketQuote, MarketWindow, PaperStrategyState, PendingPaperTrade, SessionState, TradePlan, TradeRecord
 from optimizer import load_optimizer_state, save_optimizer_state
-from polymarket_api import PolymarketClient, extract_token_ids, parse_iso_datetime, parse_outcome_prices
+from polymarket_api import PolymarketClient, extract_token_ids, normalize_outcome_label, parse_iso_datetime, parse_outcome_prices
 from risk_and_sizing import apply_round_outcome, build_trade_plan, reset_after_stop_loss
 from strategy import get_side_for_round, strategy7_signal_gap_ok, strategy7_strong_signal_allows_late_confirm
 from runtime_control import RuntimeControl
@@ -400,7 +400,7 @@ def save_live_redeem_state(path: Path, state: dict[str, Any]) -> None:
 
 
 _LIVE_REDEEM_CTF_CONTRACT = os.getenv("POLYMARKET_CTF_CONTRACT") or "0x4D97DCd97eC945f40cF65F87097ACe5EA0476045"
-_LIVE_REDEEM_COLLATERAL_TOKEN = os.getenv("POLYMARKET_COLLATERAL_TOKEN") or "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174"
+_LIVE_REDEEM_COLLATERAL_TOKEN = os.getenv("POLYMARKET_COLLATERAL_TOKEN") or "0xC011a7E12a19f7B1f670d46F03B03f3342E82DFB"
 _LIVE_REDEEM_PARENT_COLLECTION_ID = "0x" + ("00" * 32)
 _LIVE_REDEEM_RELAYER_URL = os.getenv("POLYMARKET_RELAYER_URL") or "https://relayer-v2.polymarket.com"
 _LIVE_REDEEM_INDEX_SETS = [1, 2]
@@ -1551,7 +1551,7 @@ def _runtime_backoff_seconds(cfg: AppConfig, consecutive_errors: int) -> int:
 
 
 def _resolve_live_order_type(raw_order_type: str):
-    from py_clob_client.clob_types import OrderType
+    from py_clob_client_v2 import OrderType
 
     normalized = (raw_order_type or "FOK").upper()
     return getattr(OrderType, normalized, OrderType.FOK)
@@ -1805,6 +1805,47 @@ def _build_verified_pending_live_trade_plan(
     )
 
 
+def _build_live_market_order_args(
+    *,
+    token_id: str,
+    plan: TradePlan,
+    order_type: Any,
+    market_order_price: float | None,
+    use_sdk_types: bool,
+):
+    if use_sdk_types:
+        from py_clob_client_v2 import MarketOrderArgs, Side
+
+        return MarketOrderArgs(
+            token_id=token_id,
+            amount=plan.order_cost,
+            side=Side.BUY,
+            price=market_order_price or 0,
+            order_type=order_type,
+        )
+
+    return type(
+        "InjectedMarketOrderArgs",
+        (),
+        {
+            "token_id": token_id,
+            "amount": plan.order_cost,
+            "side": "BUY",
+            "order_type": order_type,
+            "price": market_order_price,
+        },
+    )()
+
+
+def _post_live_market_order(live_client: Any, order_args: Any, order_type: Any) -> Any:
+    create_and_post = getattr(live_client, "create_and_post_market_order", None)
+    if callable(create_and_post):
+        return create_and_post(order_args=order_args, order_type=order_type)
+
+    signed_order = live_client.create_market_order(order_args)
+    return live_client.post_order(signed_order, order_type)
+
+
 def _submit_live_strategy_order(
     *,
     cfg: AppConfig,
@@ -1819,33 +1860,29 @@ def _submit_live_strategy_order(
         else _resolve_live_order_type(cfg.live_order_type)
     )
     market_order_price = cfg.strategy7_max_entry_price if cfg.strategy_id == 7 else None
-    if clob_client is None:
-        from py_clob_client.clob_types import MarketOrderArgs
-        from py_clob_client.order_builder.constants import BUY
-
-        order_args = MarketOrderArgs(
-            token_id=token_id,
-            amount=plan.order_cost,
-            side=BUY,
-            price=market_order_price or 0,
-            order_type=order_type,
-        )
-    else:
-        order_args = type(
-            "InjectedMarketOrderArgs",
-            (),
-            {
-                "token_id": token_id,
-                "amount": plan.order_cost,
-                "side": "BUY",
-                "order_type": order_type,
-                "price": market_order_price,
-                "fee_rate_bps": None,
-            },
-        )()
-    signed_order = live_client.create_market_order(order_args)
-    response = live_client.post_order(signed_order, order_type)
+    order_args = _build_live_market_order_args(
+        token_id=token_id,
+        plan=plan,
+        order_type=order_type,
+        market_order_price=market_order_price,
+        use_sdk_types=clob_client is None,
+    )
+    response = _post_live_market_order(live_client, order_args, order_type)
     return _validate_live_submission_response(response), response
+
+
+def _cached_ws_market_result(market_client: PolymarketClient | Any, market: dict[str, Any]) -> str:
+    get_resolution = getattr(market_client, "get_ws_market_resolution", None)
+    if not callable(get_resolution):
+        return ""
+    try:
+        resolution = get_resolution(market)
+    except Exception:
+        return ""
+    if not isinstance(resolution, dict):
+        return ""
+    outcome = normalize_outcome_label(str(resolution.get("winning_outcome") or ""))
+    return outcome if outcome in {"UP", "DOWN"} else ""
 
 
 def _settle_pending_live_trade_if_needed(
@@ -1896,28 +1933,32 @@ def _settle_pending_live_trade_if_needed(
     if metadata.get("priceToBeat") is not None and metadata.get("finalPrice") is not None:
         result = "UP" if float(metadata["finalPrice"]) >= float(metadata["priceToBeat"]) else "DOWN"
     else:
-        prices = parse_outcome_prices(market.get("outcomePrices"), market.get("outcomes"))
-        up_price = prices.get("UP")
-        down_price = prices.get("DOWN")
-        is_closed = bool(event.get("closed") or market.get("closed"))
-        if (
-            not is_closed
-            or up_price is None
-            or down_price is None
-            or {up_price, down_price} != {0.0, 1.0}
-        ):
-            return (
-                strategy_state,
-                {
-                    "status": "pending_settlement",
-                    "slug": strategy_state.pending_live_slug,
-                    "side": strategy_state.pending_live_side,
-                    "skip_reason": "round_unresolved",
-                    "pending_end_time": strategy_state.pending_live_end_time,
-                },
-                False,
-            )
-        result = "UP" if up_price > down_price else "DOWN"
+        cached_result = _cached_ws_market_result(market_client, market)
+        if cached_result:
+            result = cached_result
+        else:
+            prices = parse_outcome_prices(market.get("outcomePrices"), market.get("outcomes"))
+            up_price = prices.get("UP")
+            down_price = prices.get("DOWN")
+            is_closed = bool(event.get("closed") or market.get("closed"))
+            if (
+                not is_closed
+                or up_price is None
+                or down_price is None
+                or {up_price, down_price} != {0.0, 1.0}
+            ):
+                return (
+                    strategy_state,
+                    {
+                        "status": "pending_settlement",
+                        "slug": strategy_state.pending_live_slug,
+                        "side": strategy_state.pending_live_side,
+                        "skip_reason": "round_unresolved",
+                        "pending_end_time": strategy_state.pending_live_end_time,
+                    },
+                    False,
+                )
+            result = "UP" if up_price > down_price else "DOWN"
     updated_state = apply_round_outcome(strategy_state, plan, won=(result == plan.side))
     trade_pnl = updated_state.cash_pnl - strategy_state.cash_pnl
     _clear_pending_live_trade(updated_state)
@@ -1938,18 +1979,22 @@ def _create_live_clob_client(cfg: AppConfig):
     if not cfg.live_private_key:
         raise RuntimeError("Missing PRIVATE_KEY/POLYMARKET_PRIVATE_KEY for live trading.")
 
-    from py_clob_client.client import ClobClient
-    from py_clob_client.clob_types import ApiCreds
+    from py_clob_client_v2 import ApiCreds, ClobClient
 
     def _apply_derived_api_creds(client: Any):
-        client.set_api_creds(client.create_or_derive_api_creds())
+        create_or_derive = getattr(client, "create_or_derive_api_key", None)
+        if not callable(create_or_derive):
+            create_or_derive = getattr(client, "create_or_derive_api_creds", None)
+        if not callable(create_or_derive):
+            raise RuntimeError("CLOB V2 client does not expose API credential derivation.")
+        client.set_api_creds(create_or_derive())
 
     def _is_invalid_api_key_error(exc: Exception) -> bool:
         message = str(exc).lower()
         return "invalid api key" in message or "unauthorized" in message or "status_code=401" in message
 
     clob_client = ClobClient(
-        cfg.clob_api_base,
+        host=cfg.clob_api_base,
         chain_id=cfg.live_chain_id,
         key=cfg.live_private_key,
         signature_type=cfg.live_signature_type,
@@ -2420,32 +2465,14 @@ def place_live_order(
     live_client = live_client or _create_live_clob_client(cfg)
     order_type = (cfg.live_order_type or 'FOK').upper() if clob_client is not None else _resolve_live_order_type(cfg.live_order_type)
     market_order_price = cfg.strategy7_max_entry_price if cfg.strategy_id == 7 else None
-    if clob_client is None:
-        from py_clob_client.clob_types import MarketOrderArgs
-        from py_clob_client.order_builder.constants import BUY
-
-        order_args = MarketOrderArgs(
-            token_id=token_id,
-            amount=plan.order_cost,
-            side=BUY,
-            price=market_order_price or 0,
-            order_type=order_type,
-        )
-    else:
-        order_args = type(
-            'InjectedMarketOrderArgs',
-            (),
-            {
-                'token_id': token_id,
-                'amount': plan.order_cost,
-                'side': 'BUY',
-                'order_type': order_type,
-                'price': market_order_price,
-                'fee_rate_bps': None,
-            },
-        )()
-    signed_order = live_client.create_market_order(order_args)
-    response = live_client.post_order(signed_order, order_type)
+    order_args = _build_live_market_order_args(
+        token_id=token_id,
+        plan=plan,
+        order_type=order_type,
+        market_order_price=market_order_price,
+        use_sdk_types=clob_client is None,
+    )
+    response = _post_live_market_order(live_client, order_args, order_type)
     order_id = _validate_live_submission_response(response)
 
     append_trade_log(
@@ -2823,18 +2850,22 @@ def _settle_pending_paper_trade(
     if metadata.get('priceToBeat') is not None and metadata.get('finalPrice') is not None:
         result = 'UP' if float(metadata['finalPrice']) >= float(metadata['priceToBeat']) else 'DOWN'
     else:
-        prices = parse_outcome_prices(market.get('outcomePrices'), market.get('outcomes'))
-        up_price = prices.get('UP')
-        down_price = prices.get('DOWN')
-        is_closed = bool(event.get('closed') or market.get('closed'))
-        if (
-            not is_closed
-            or up_price is None
-            or down_price is None
-            or {up_price, down_price} != {0.0, 1.0}
-        ):
-            raise RuntimeError(f'Round {item.event_slug} is not resolved yet.')
-        result = 'UP' if up_price > down_price else 'DOWN'
+        cached_result = _cached_ws_market_result(client, market)
+        if cached_result:
+            result = cached_result
+        else:
+            prices = parse_outcome_prices(market.get('outcomePrices'), market.get('outcomes'))
+            up_price = prices.get('UP')
+            down_price = prices.get('DOWN')
+            is_closed = bool(event.get('closed') or market.get('closed'))
+            if (
+                not is_closed
+                or up_price is None
+                or down_price is None
+                or {up_price, down_price} != {0.0, 1.0}
+            ):
+                raise RuntimeError(f'Round {item.event_slug} is not resolved yet.')
+            result = 'UP' if up_price > down_price else 'DOWN'
     plan = _build_frozen_pending_paper_plan(item)
     updated_state = apply_round_outcome(state, plan, won=(result == item.side))
     trade_pnl = updated_state.cash_pnl - state.cash_pnl

@@ -215,23 +215,33 @@ class PolymarketClient:
         self._ws_thread: threading.Thread | None = None
         self._ws_lock = threading.Lock()
         self._ws_quotes_by_asset: dict[str, dict[str, Any]] = {}
+        self._ws_resolutions_by_asset: dict[str, dict[str, Any]] = {}
         self._ws_subscribed_assets: set[str] = set()
         self._ws_opened_at: datetime | None = None
         self._ws_last_message_at: datetime | None = None
+        self._ws_last_ping_at: datetime | None = None
+        self._ws_last_pong_at: datetime | None = None
         self._ws_connect_attempts: int = 0
         self._ws_reconnect_count: int = 0
         self._ws_last_error: str | None = None
         self._ws_invalid_operation_count: int = 0
+        self._ws_ping_thread: threading.Thread | None = None
+        self._ws_ping_stop = threading.Event()
 
 
     def close(self) -> None:
         with self._ws_lock:
             app = self._ws_app
             thread = self._ws_thread
+            ping_thread = self._ws_ping_thread
+            self._ws_ping_stop.set()
             self._ws_app = None
             self._ws_thread = None
+            self._ws_ping_thread = None
             self._ws_opened_at = None
             self._ws_last_message_at = None
+            self._ws_last_ping_at = None
+            self._ws_last_pong_at = None
             self._ws_last_error = None
             self._ws_invalid_operation_count = 0
             self._ws_subscribed_assets.clear()
@@ -243,15 +253,27 @@ class PolymarketClient:
                 pass
         if thread is not None and thread.is_alive():
             thread.join(timeout=2)
+        if ping_thread is not None and ping_thread.is_alive():
+            ping_thread.join(timeout=2)
 
     def _handle_ws_message(self, raw_message: str) -> None:
-        if isinstance(raw_message, str) and raw_message.strip().upper() == "INVALID OPERATION":
+        normalized_message = raw_message.strip().upper() if isinstance(raw_message, str) else ""
+        if normalized_message == "PONG":
+            now = datetime.now(timezone.utc)
+            with self._ws_lock:
+                self._ws_last_message_at = now
+                self._ws_last_pong_at = now
+            return
+
+        if normalized_message == "INVALID OPERATION":
             with self._ws_lock:
                 self._ws_invalid_operation_count += 1
                 self._ws_last_error = "INVALID OPERATION"
                 app = self._ws_app
                 self._ws_app = None
                 self._ws_thread = None
+                self._ws_ping_stop.set()
+                self._ws_ping_thread = None
                 self._ws_opened_at = None
                 self._ws_subscribed_assets.clear()
                 self._ws_quotes_by_asset.clear()
@@ -283,6 +305,9 @@ class PolymarketClient:
         with self._ws_lock:
             self._ws_last_message_at = now
             for item in updates:
+                if item.get("event_type") == "market_resolved":
+                    self._cache_ws_market_resolution_locked(item, now=now)
+                    continue
                 asset_id = item.get("asset_id")
                 if not asset_id:
                     continue
@@ -306,6 +331,82 @@ class PolymarketClient:
                 if ask_price is not None:
                     quote["best_ask"] = ask_price
 
+    def _cache_ws_market_resolution_locked(self, item: dict[str, Any], *, now: datetime) -> None:
+        winning_asset_id = str(
+            item.get("winning_asset_id")
+            or item.get("winningAssetId")
+            or item.get("asset_id")
+            or item.get("assetId")
+            or ""
+        ).strip()
+        winning_outcome_raw = (
+            item.get("winning_outcome")
+            or item.get("winningOutcome")
+            or item.get("outcome")
+            or item.get("winner")
+            or ""
+        )
+        winning_outcome = normalize_outcome_label(str(winning_outcome_raw)) if winning_outcome_raw else ""
+        if not winning_asset_id and not winning_outcome:
+            return
+        resolution = {
+            "event_type": "market_resolved",
+            "market": item.get("market") or item.get("condition_id") or item.get("conditionId"),
+            "winning_asset_id": winning_asset_id,
+            "winning_outcome": winning_outcome,
+            "updated_at": now,
+        }
+        if winning_asset_id:
+            self._ws_resolutions_by_asset[winning_asset_id] = resolution
+
+    def get_ws_market_resolution(self, market: dict[str, Any]) -> dict[str, Any] | None:
+        token_ids = extract_token_ids(market.get("clobTokenIds"), market.get("outcomes"))
+        with self._ws_lock:
+            for outcome, token_id in token_ids.items():
+                if not token_id:
+                    continue
+                resolution = self._ws_resolutions_by_asset.get(str(token_id))
+                if not resolution:
+                    continue
+                out = dict(resolution)
+                if not out.get("winning_outcome"):
+                    out["winning_outcome"] = outcome
+                return out
+        return None
+
+    def _send_ws_ping_once(self) -> bool:
+        with self._ws_lock:
+            app = self._ws_app
+            opened = self._ws_opened_at is not None
+        if app is None or not opened:
+            return False
+        try:
+            app.send("PING")
+        except Exception as exc:
+            with self._ws_lock:
+                self._ws_last_error = str(exc)
+            return False
+        with self._ws_lock:
+            self._ws_last_ping_at = datetime.now(timezone.utc)
+        return True
+
+    def _start_ws_ping_loop(self) -> None:
+        with self._ws_lock:
+            if self._ws_ping_thread is not None and self._ws_ping_thread.is_alive():
+                return
+            self._ws_ping_stop.clear()
+
+        def run_ping_loop() -> None:
+            interval = max(1.0, float(getattr(self.config, "ws_ping_interval_seconds", 10)))
+            while not self._ws_ping_stop.is_set():
+                self._send_ws_ping_once()
+                self._ws_ping_stop.wait(interval)
+
+        thread = threading.Thread(target=run_ping_loop, daemon=True)
+        with self._ws_lock:
+            self._ws_ping_thread = thread
+        thread.start()
+
     def _ensure_ws_connection(self) -> None:
         if not self.config.ws_enabled:
             return
@@ -324,6 +425,7 @@ class PolymarketClient:
             def on_open(_ws: websocket.WebSocketApp) -> None:
                 with self._ws_lock:
                     self._ws_opened_at = datetime.now(timezone.utc)
+                self._start_ws_ping_loop()
 
             def on_message(_ws: websocket.WebSocketApp, message: str) -> None:
                 self._handle_ws_message(message)
@@ -334,6 +436,9 @@ class PolymarketClient:
                 return
 
             def on_close(_ws: websocket.WebSocketApp, _status_code: Any, _msg: Any) -> None:
+                self._ws_ping_stop.set()
+                with self._ws_lock:
+                    self._ws_opened_at = None
                 return
 
             self._ws_app = websocket.WebSocketApp(
@@ -347,7 +452,7 @@ class PolymarketClient:
             def run() -> None:
                 if self._ws_app is None:
                     return
-                self._ws_app.run_forever(ping_interval=20, ping_timeout=10)
+                self._ws_app.run_forever(ping_interval=0)
 
             self._ws_thread = threading.Thread(target=run, daemon=True)
             self._ws_thread.start()
@@ -374,29 +479,49 @@ class PolymarketClient:
         if not opened or app is None:
             return
 
-        if current_assets and current_assets != desired_assets:
-            # Market channel may reject incremental changes; reconnect and subscribe exact set.
-            self.close()
-            self._ensure_ws_connection()
-            with self._ws_lock:
-                app = self._ws_app
-                opened = self._ws_opened_at is not None
-                current_assets = sorted(self._ws_subscribed_assets)
-            if not opened or app is None:
-                return
-
         # Avoid duplicate subscribe messages for unchanged asset set; server may return INVALID OPERATION.
         if current_assets == desired_assets:
             return
 
-        message = {
-            "assets_ids": desired_assets,
-            "type": "market",
-            "custom_feature_enabled": True,
-        }
+        current_set = set(current_assets)
+        desired_set = set(desired_assets)
+        to_unsubscribe = sorted(current_set - desired_set)
+        to_subscribe = sorted(desired_set - current_set)
+
         try:
-            app.send(json.dumps(message))
-        except Exception:
+            if not current_set:
+                app.send(
+                    json.dumps(
+                        {
+                            "assets_ids": desired_assets,
+                            "type": "market",
+                            "custom_feature_enabled": True,
+                        }
+                    )
+                )
+            else:
+                if to_unsubscribe:
+                    app.send(
+                        json.dumps(
+                            {
+                                "assets_ids": to_unsubscribe,
+                                "operation": "unsubscribe",
+                            }
+                        )
+                    )
+                if to_subscribe:
+                    app.send(
+                        json.dumps(
+                            {
+                                "assets_ids": to_subscribe,
+                                "operation": "subscribe",
+                                "custom_feature_enabled": True,
+                            }
+                        )
+                    )
+        except Exception as exc:
+            with self._ws_lock:
+                self._ws_last_error = str(exc)
             return
 
         with self._ws_lock:
@@ -437,8 +562,11 @@ class PolymarketClient:
                 "ws_invalid_operation_count": self._ws_invalid_operation_count,
                 "ws_subscribed_asset_count": len(self._ws_subscribed_assets),
                 "ws_cached_asset_count": len(self._ws_quotes_by_asset),
+                "ws_cached_resolution_count": len(self._ws_resolutions_by_asset),
                 "ws_opened_at": opened,
                 "ws_last_message_at": last_message,
+                "ws_last_ping_at": self._ws_last_ping_at,
+                "ws_last_pong_at": self._ws_last_pong_at,
                 "ws_last_message_age_seconds": (
                     (now - last_message).total_seconds() if isinstance(last_message, datetime) else None
                 ),

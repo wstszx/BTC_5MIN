@@ -1701,6 +1701,158 @@ def test_recent_trades_payload_includes_result_validation_fields(tmp_path: Path,
         os.chdir(old_cwd)
 
 
+def test_recent_trades_payload_validates_from_official_winning_outcome_when_final_price_missing(tmp_path: Path, monkeypatch):
+    old_cwd = Path.cwd()
+    os.chdir(tmp_path)
+
+    class StubClient:
+        def __init__(self, cfg):
+            self.config = cfg
+
+        def close(self) -> None:
+            return
+
+        def get_event_by_slug(self, slug: str):
+            return {
+                'id': 'evt-1',
+                'slug': slug,
+                'title': 'Bitcoin Up or Down - April 25, 11:15AM-11:30AM ET',
+                'startTime': '2026-04-25T15:15:00+00:00',
+                'endDate': '2026-04-25T15:30:00+00:00',
+                'eventMetadata': {
+                    'priceToBeat': 77688.48419,
+                },
+                'markets': [
+                    {
+                        'id': 'mkt-1',
+                        'conditionId': 'condition-1',
+                        'outcomes': '["Up", "Down"]',
+                        'outcomePrices': '["1", "0"]',
+                        'clobTokenIds': '["up-token", "down-token"]',
+                        'closed': True,
+                    }
+                ],
+            }
+
+    monkeypatch.setattr(dashboard, 'PolymarketClient', StubClient)
+
+    state = DashboardState(env_file=tmp_path / '.env.dashboard')
+    try:
+        logs_dir = tmp_path / 'logs'
+        logs_dir.mkdir(parents=True, exist_ok=True)
+        (logs_dir / 'paper_trades.csv').write_text(
+            'timestamp,mode,round_index,strategy,entry_timing,event_slug,start_time,end_time,side,price,order_size,order_cost,expected_profit,result,trade_pnl,cash_pnl,recovery_loss,consecutive_losses,stop_loss_triggered,skip_reason,signal_open_up_price,signal_current_up_price,signal_threshold,signal_delta,signal_locked,signal_reason\n'
+            '2026-04-25T15:38:15+00:00,paper,33,4,OPEN,btc-updown-15m-1777130100,2026-04-25T15:15:00+00:00,2026-04-25T15:30:00+00:00,UP,0.52,1.9230,1.0,0.9230,UP,0.9230,11.7695,0.0,0,False,,,,,,False,\n',
+            encoding='utf-8',
+        )
+
+        payload = state.get_recent_trades_payload(limit=10)
+        row = payload['rows'][0]
+        assert row['resolved_price_to_beat'] == '77688.48419'
+        assert row['resolved_final_price'] == ''
+        assert row['resolved_expected_result'] == 'UP'
+        assert row['result_check_status'] == 'match'
+    finally:
+        state.close()
+        os.chdir(old_cwd)
+
+
+def test_recent_trades_payload_marks_official_result_pending_when_winner_unavailable(tmp_path: Path, monkeypatch):
+    old_cwd = Path.cwd()
+    os.chdir(tmp_path)
+
+    class StubClient:
+        def __init__(self, cfg):
+            self.config = cfg
+
+        def close(self) -> None:
+            return
+
+        def get_event_by_slug(self, slug: str):
+            return {
+                'id': 'evt-1',
+                'slug': slug,
+                'eventMetadata': {'priceToBeat': 77688.48419},
+                'markets': [
+                    {
+                        'id': 'mkt-1',
+                        'outcomes': '["Up", "Down"]',
+                        'outcomePrices': '["0.5", "0.5"]',
+                        'clobTokenIds': '["up-token", "down-token"]',
+                        'closed': False,
+                    }
+                ],
+            }
+
+    monkeypatch.setattr(dashboard, 'PolymarketClient', StubClient)
+
+    state = DashboardState(env_file=tmp_path / '.env.dashboard')
+    try:
+        logs_dir = tmp_path / 'logs'
+        logs_dir.mkdir(parents=True, exist_ok=True)
+        (logs_dir / 'paper_trades.csv').write_text(
+            'timestamp,mode,round_index,strategy,entry_timing,event_slug,start_time,end_time,side,price,order_size,order_cost,expected_profit,result,trade_pnl,cash_pnl,recovery_loss,consecutive_losses,stop_loss_triggered,skip_reason,signal_open_up_price,signal_current_up_price,signal_threshold,signal_delta,signal_locked,signal_reason\n'
+            '2026-04-25T15:38:15+00:00,paper,33,4,OPEN,btc-updown-15m-1777130100,2026-04-25T15:15:00+00:00,2026-04-25T15:30:00+00:00,UP,0.52,1.9230,1.0,0.9230,UP,0.9230,11.7695,0.0,0,False,,,,,,False,\n',
+            encoding='utf-8',
+        )
+
+        payload = state.get_recent_trades_payload(limit=10)
+        row = payload['rows'][0]
+        assert row['resolved_expected_result'] == ''
+        assert row['result_check_status'] == 'official_pending'
+    finally:
+        state.close()
+        os.chdir(old_cwd)
+
+
+def test_recent_trades_payload_validates_from_official_token_winner(tmp_path: Path, monkeypatch):
+    old_cwd = Path.cwd()
+    os.chdir(tmp_path)
+
+    class StubClient:
+        def __init__(self, cfg):
+            self.config = cfg
+
+        def close(self) -> None:
+            return
+
+        def get_event_by_slug(self, slug: str):
+            return {
+                'id': 'evt-1',
+                'slug': slug,
+                'eventMetadata': {},
+                'markets': [
+                    {
+                        'id': 'mkt-1',
+                        'tokens': [
+                            {'token_id': 'up-token', 'outcome': 'Up', 'winner': True},
+                            {'token_id': 'down-token', 'outcome': 'Down', 'winner': False},
+                        ],
+                    }
+                ],
+            }
+
+    monkeypatch.setattr(dashboard, 'PolymarketClient', StubClient)
+
+    state = DashboardState(env_file=tmp_path / '.env.dashboard')
+    try:
+        logs_dir = tmp_path / 'logs'
+        logs_dir.mkdir(parents=True, exist_ok=True)
+        (logs_dir / 'paper_trades.csv').write_text(
+            'timestamp,mode,round_index,strategy,entry_timing,event_slug,start_time,end_time,side,price,order_size,order_cost,expected_profit,result,trade_pnl,cash_pnl,recovery_loss,consecutive_losses,stop_loss_triggered,skip_reason,signal_open_up_price,signal_current_up_price,signal_threshold,signal_delta,signal_locked,signal_reason\n'
+            '2026-04-25T15:38:15+00:00,paper,33,4,OPEN,btc-updown-15m-1777130100,2026-04-25T15:15:00+00:00,2026-04-25T15:30:00+00:00,UP,0.52,1.9230,1.0,0.9230,UP,0.9230,11.7695,0.0,0,False,,,,,,False,\n',
+            encoding='utf-8',
+        )
+
+        payload = state.get_recent_trades_payload(limit=10)
+        row = payload['rows'][0]
+        assert row['resolved_expected_result'] == 'UP'
+        assert row['result_check_status'] == 'match'
+    finally:
+        state.close()
+        os.chdir(old_cwd)
+
+
 def test_dashboard_assets_include_recent_result_validation_column():
     html = _dashboard_html()
     js = _dashboard_js()
@@ -1708,6 +1860,8 @@ def test_dashboard_assets_include_recent_result_validation_column():
     assert '<th>校验</th>' in html
     assert 'function resultCheckText(' in js
     assert "row.result_check_status" in js
+    assert "if (status === 'official_pending') return '待官方结算';" in js
+    assert "if (status === 'error') return '校验异常';" in js
     assert "resolved_price_to_beat" in js
     assert "resolved_final_price" in js
 

@@ -4,6 +4,7 @@ __pycache__/
 .mypy_cache/
 .ruff_cache/
 .worktrees/
+.tmp_py_clob_v2/
 .coverage
 .coverage.*
 coverage.xml

@@ -18,7 +18,12 @@ from config import AppConfig, build_config_from_env_values, load_env_file_values
 from binance_signal import BinanceDepth5SignalService
 from models import MarketWindow, PendingPaperTrade
 from paper_report import summarize_paper_trades
-from polymarket_api import PolymarketClient, build_resolved_round
+from polymarket_api import (
+    PolymarketClient,
+    extract_token_ids,
+    normalize_outcome_label,
+    parse_outcome_prices,
+)
 from risk_and_sizing import build_trade_plan
 from strategy import get_side_for_round
 from runtime_control import RuntimeControl
@@ -257,6 +262,98 @@ def _iso(dt: datetime | None) -> str | None:
     return dt.astimezone(timezone.utc).isoformat()
 
 
+def _optional_float(value: Any) -> float | None:
+    if value in (None, ""):
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _terminal_outcome_price(value: float | None, target: float) -> bool:
+    return value is not None and abs(value - target) <= 1e-9
+
+
+def _normalize_validation_outcome(value: Any) -> str:
+    normalized = normalize_outcome_label(str(value or ""))
+    return normalized if normalized in {"UP", "DOWN"} else ""
+
+
+def _first_value(payload: dict[str, Any], keys: tuple[str, ...]) -> Any:
+    for key in keys:
+        value = payload.get(key)
+        if value not in (None, ""):
+            return value
+    return None
+
+
+def _truthy_official_value(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value == 1
+    if isinstance(value, str):
+        return value.strip().lower() in {"true", "1", "yes", "winner"}
+    return False
+
+
+def _token_outcome(token: dict[str, Any]) -> str:
+    return _normalize_validation_outcome(
+        _first_value(token, ("outcome", "name", "label", "side"))
+    )
+
+
+def _official_winning_outcome(event_payload: dict[str, Any]) -> str:
+    market = (event_payload.get("markets") or [{}])[0]
+    outcome_keys = (
+        "winning_outcome",
+        "winningOutcome",
+        "winningOutcomeName",
+        "winner",
+        "resolvedOutcome",
+    )
+    for payload in (market, event_payload):
+        direct = _normalize_validation_outcome(_first_value(payload, outcome_keys))
+        if direct:
+            return direct
+
+    token_keys = ("winning_asset_id", "winningAssetId", "winningTokenId", "winning_token_id")
+    winning_asset_id = str(_first_value(market, token_keys) or _first_value(event_payload, token_keys) or "").strip()
+    if winning_asset_id:
+        token_ids = extract_token_ids(market.get("clobTokenIds"), market.get("outcomes"))
+        if winning_asset_id == str(token_ids.get("UP") or "").strip():
+            return "UP"
+        if winning_asset_id == str(token_ids.get("DOWN") or "").strip():
+            return "DOWN"
+
+    tokens = market.get("tokens")
+    if isinstance(tokens, list):
+        for token in tokens:
+            if isinstance(token, dict) and _truthy_official_value(token.get("winner")):
+                outcome = _token_outcome(token)
+                if outcome:
+                    return outcome
+        if winning_asset_id:
+            for token in tokens:
+                if not isinstance(token, dict):
+                    continue
+                token_id = str(_first_value(token, ("token_id", "tokenId", "asset_id", "assetId", "id")) or "").strip()
+                if token_id == winning_asset_id:
+                    outcome = _token_outcome(token)
+                    if outcome:
+                        return outcome
+
+    prices = parse_outcome_prices(market.get("outcomePrices"), market.get("outcomes"))
+    up_price = prices.get("UP")
+    down_price = prices.get("DOWN")
+    if _terminal_outcome_price(up_price, 1.0) and _terminal_outcome_price(down_price, 0.0):
+        return "UP"
+    if _terminal_outcome_price(down_price, 1.0) and _terminal_outcome_price(up_price, 0.0):
+        return "DOWN"
+    return ""
+
+
 def _validate_recent_trade_row(
     row: dict[str, str],
     *,
@@ -278,15 +375,29 @@ def _validate_recent_trade_row(
         return validated
 
     try:
-        resolved = build_resolved_round(client.get_event_by_slug(slug))
+        event_payload = client.get_event_by_slug(slug)
     except Exception:
         validated['result_check_status'] = 'error'
         return validated
 
-    validated['resolved_price_to_beat'] = str(resolved.price_to_beat)
-    validated['resolved_final_price'] = str(resolved.final_price)
-    validated['resolved_expected_result'] = resolved.result
-    validated['result_check_status'] = 'match' if result == resolved.result else 'mismatch'
+    metadata = event_payload.get("eventMetadata") or {}
+    price_to_beat = _optional_float(metadata.get("priceToBeat"))
+    final_price = _optional_float(metadata.get("finalPrice"))
+    if price_to_beat is not None:
+        validated['resolved_price_to_beat'] = str(price_to_beat)
+    if final_price is not None:
+        validated['resolved_final_price'] = str(final_price)
+
+    official_result = _official_winning_outcome(event_payload)
+    if not official_result and price_to_beat is not None and final_price is not None:
+        official_result = "UP" if final_price >= price_to_beat else "DOWN"
+
+    if not official_result:
+        validated['result_check_status'] = 'official_pending'
+        return validated
+
+    validated['resolved_expected_result'] = official_result
+    validated['result_check_status'] = 'match' if result == official_result else 'mismatch'
     return validated
 
 
@@ -3865,7 +3976,8 @@ function resultCheckText(status) {
   if (status === 'match') return '一致';
   if (status === 'mismatch') return '不一致';
   if (status === 'pending') return '待结算';
-  if (status === 'error') return '校验失败';
+  if (status === 'official_pending') return '待官方结算';
+  if (status === 'error') return '校验异常';
   return '--';
 }
 
