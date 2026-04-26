@@ -4115,6 +4115,7 @@ function refreshStrategyPanelDependentUi() {
   const liveValues = expandLiveToggleValues(collectConfigValues());
   renderStrategyGuide(state.config, liveValues);
   applyConfigFieldVisibility(liveValues);
+  renderSharedPaperReportStrategySelector();
 }
 
 function renderStrategyPanel(payload, values) {
@@ -4279,27 +4280,60 @@ function renderUnifiedStrategyToolbar(payload, values) {
   state.marketStrategyFilter = focusStrategy;
 }
 
+function currentUnifiedStrategyDraftForReport() {
+  const focusNode = el('cfg_STRATEGY_ID');
+  const multiNode = el('cfg_PAPER_STRATEGY_IDS');
+  if (!focusNode || !multiNode) {
+    return null;
+  }
+  return currentUnifiedStrategyDraftValues();
+}
+
 function configuredPaperReportStrategyOptions() {
   const payload = state.config || {};
   const envValues = (payload && payload.env_values) || {};
+  const strategyOptions = ((((payload || {}).select_options || {}).PAPER_STRATEGY_IDS) || []).map((item) => String(item));
+  const draftValues = currentUnifiedStrategyDraftForReport();
+  const baseStrategyIds = String((draftValues && draftValues.PAPER_STRATEGY_IDS) || envValues.PAPER_STRATEGY_IDS || '').trim();
+  const baseStrategyId = (draftValues && draftValues.STRATEGY_ID) ?? envValues.STRATEGY_ID ?? '';
+  if (baseStrategyIds) {
+    return resolveUnifiedStrategySelection(payload, {
+      STRATEGY_ID: baseStrategyId,
+      PAPER_STRATEGY_IDS: baseStrategyIds,
+    }).selected;
+  }
   const timeframe = effectivePaperTimeframeFilter();
   const profiles = (payload && payload.paper_profiles) || {};
   const profile = profiles[timeframe] || {};
   const profileStrategyIds = Array.isArray(profile.paper_strategy_ids)
     ? profile.paper_strategy_ids.map((item) => String(item)).join(',')
     : '';
-  return resolveUnifiedStrategySelection(payload, {
+  const profileSelected = resolveUnifiedStrategySelection(payload, {
     STRATEGY_ID: profile.strategy_id ?? envValues.STRATEGY_ID ?? '',
-    PAPER_STRATEGY_IDS: profileStrategyIds || envValues.PAPER_STRATEGY_IDS || '',
+    PAPER_STRATEGY_IDS: profileStrategyIds,
   }).selected;
+  const selectedSet = new Set(profileSelected.map((item) => String(item)));
+  const ordered = strategyOptions.filter((item) => selectedSet.has(String(item)));
+  const extras = [...selectedSet].filter((item) => ordered.indexOf(item) < 0);
+  return [...ordered, ...extras];
+}
+
+function normalizePaperReportStrategyFilter(value, options) {
+  const raw = String(value || 'all');
+  return options.indexOf(raw) >= 0 ? raw : 'all';
 }
 
 function paperReportStrategyOptions() {
+  const payload = state.config || {};
+  const strategyOptions = ((((payload || {}).select_options || {}).PAPER_STRATEGY_IDS) || []).map((item) => String(item));
   const strategyView = ((state.market || {}).strategy_view) || {};
   const available = Array.isArray(strategyView.available) ? strategyView.available.map((item) => String(item)) : [];
   const configured = configuredPaperReportStrategyOptions();
-  const merged = [...available, ...configured];
-  return ['all', ...merged.filter((item, index, arr) => item && item !== 'all' && arr.indexOf(item) === index)];
+  const merged = configured.length > 0 ? configured : available;
+  const selectedSet = new Set(merged.filter((item) => item && item !== 'all').map((item) => String(item)));
+  const ordered = strategyOptions.filter((item) => selectedSet.has(String(item)));
+  const extras = [...selectedSet].filter((item) => ordered.indexOf(item) < 0);
+  return ['all', ...ordered, ...extras];
 }
 
 function effectivePaperReportStrategyFilter() {
@@ -4331,9 +4365,16 @@ function recentStrategyHeaderText() {
 
 function renderSharedPaperReportStrategySelector() {
   const options = paperReportStrategyOptions();
-  const current = effectivePaperReportStrategyFilter();
-  const summaryCurrent = effectivePaperSummaryStrategyFilter();
-  const recentCurrent = effectivePaperRecentStrategyFilter();
+  const current = normalizePaperReportStrategyFilter(effectivePaperReportStrategyFilter(), options);
+  const summaryCurrent = normalizePaperReportStrategyFilter(effectivePaperSummaryStrategyFilter(), options);
+  const recentCurrent = normalizePaperReportStrategyFilter(effectivePaperRecentStrategyFilter(), options);
+  state.paperReportStrategyFilter = current;
+  if (state.paperSummaryStrategyFilter !== null && state.paperSummaryStrategyFilter !== undefined && state.paperSummaryStrategyFilter !== '') {
+    state.paperSummaryStrategyFilter = summaryCurrent;
+  }
+  if (state.paperRecentStrategyFilter !== null && state.paperRecentStrategyFilter !== undefined && state.paperRecentStrategyFilter !== '') {
+    state.paperRecentStrategyFilter = recentCurrent;
+  }
   const node = el('paperReportStrategy');
   el('recentPanelDesc').textContent = recentStrategyHeaderText();
   if (!node) {

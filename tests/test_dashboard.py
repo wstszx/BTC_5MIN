@@ -1350,8 +1350,8 @@ def test_dashboard_assets_keep_summary_and_recent_filters_independent():
     assert "paperRecentStrategyFilter: null" in js
     assert 'function effectivePaperSummaryStrategyFilter()' in js
     assert 'function effectivePaperRecentStrategyFilter()' in js
-    assert "const summaryCurrent = effectivePaperSummaryStrategyFilter();" in js
-    assert "const recentCurrent = effectivePaperRecentStrategyFilter();" in js
+    assert "const summaryCurrent = normalizePaperReportStrategyFilter(effectivePaperSummaryStrategyFilter(), options);" in js
+    assert "const recentCurrent = normalizePaperReportStrategyFilter(effectivePaperRecentStrategyFilter(), options);" in js
     assert "state.paperSummaryStrategyFilter = summaryNode.value || 'all';" in js
     assert "await refreshSummary();" in js
     assert "state.paperRecentStrategyFilter = recentNode.value || 'all';" in js
@@ -2699,6 +2699,8 @@ def test_dashboard_report_strategy_selector_reflects_saved_paper_strategy_ids_br
         'STRATEGY_ID': '1',
         'PAPER_STRATEGY_IDS': '1',
         'PAPER_TIMEFRAMES': '15m',
+        'PAPER_15M_STRATEGY_ID': '4',
+        'PAPER_15M_STRATEGY_IDS': '4',
     }
 
     def fake_get_config_payload(self):
@@ -2706,7 +2708,15 @@ def test_dashboard_report_strategy_selector_reflects_saved_paper_strategy_ids_br
             'env_file': str(tmp_path / '.env.dashboard'),
             'env_values': dict(current_env_values),
             'timeframe_presets': {'5m': {}, '15m': {}},
-            'editable_keys': ['TRADE_MODE', 'MARKET_TIMEFRAME', 'STRATEGY_ID', 'PAPER_STRATEGY_IDS'],
+            'editable_keys': [
+                'TRADE_MODE',
+                'MARKET_TIMEFRAME',
+                'STRATEGY_ID',
+                'PAPER_STRATEGY_IDS',
+                'PAPER_TIMEFRAMES',
+                'PAPER_15M_STRATEGY_ID',
+                'PAPER_15M_STRATEGY_IDS',
+            ],
             'labels': DashboardState.CONFIG_LABELS,
             'select_options': {
                 'TRADE_MODE': ['paper', 'live'],
@@ -2752,8 +2762,8 @@ def test_dashboard_report_strategy_selector_reflects_saved_paper_strategy_ids_br
             'paper_timeframes': ['15m'],
             'paper_profiles': {
                 '15m': {
-                    'strategy_id': current_env_values['STRATEGY_ID'],
-                    'paper_strategy_ids': current_env_values['PAPER_STRATEGY_IDS'].split(','),
+                    'strategy_id': current_env_values['PAPER_15M_STRATEGY_ID'],
+                    'paper_strategy_ids': current_env_values['PAPER_15M_STRATEGY_IDS'].split(','),
                     'target_profit': '1.0',
                     'bet_sizing_mode': 'FIXED_BASE_COST',
                     'base_order_cost': '1.0',
@@ -2788,7 +2798,7 @@ def test_dashboard_report_strategy_selector_reflects_saved_paper_strategy_ids_br
             'message': 'no round',
             'strategy6': {'enabled': False},
             'strategy7': {'enabled': False},
-            'strategy_view': {'selected': '1', 'paper_strategy_ids': ['1'], 'available': ['1'], 'timeframe': '15m'},
+            'strategy_view': {'selected': '4', 'paper_strategy_ids': ['4'], 'available': ['4'], 'timeframe': '15m'},
         }
 
     def fake_get_paper_summary_payload(self, *, strategy=None, timeframe=None):
@@ -2837,6 +2847,15 @@ def test_dashboard_report_strategy_selector_reflects_saved_paper_strategy_ids_br
             time.sleep(0.5)
         assert ready and ready.get('ready') is True
 
+        after_edit_add = pw_eval(
+            "() => {"
+            "selectAllPaperStrategiesInPanel();"
+            "const node = document.getElementById('paperReportStrategy');"
+            "return { options: Array.from(node.options).map((option) => option.value) };"
+            "}"
+        )
+        assert after_edit_add['options'] == ['all', '1', '2', '3', '4', '5', '6', '7']
+
         after_save = pw_eval(
             "async () => {"
             "selectAllPaperStrategiesInPanel();"
@@ -2847,7 +2866,47 @@ def test_dashboard_report_strategy_selector_reflects_saved_paper_strategy_ids_br
         )
 
         assert after_save['env'] == '1,2,3,4,5,6,7'
+        assert current_env_values['PAPER_15M_STRATEGY_IDS'] == '4'
         assert after_save['options'] == ['all', '1', '2', '3', '4', '5', '6', '7']
+
+        after_edit_remove = pw_eval(
+            "() => {"
+            "const node = document.getElementById('paperReportStrategy');"
+            "node.value = '4';"
+            "node.dispatchEvent(new Event('change', { bubbles: true }));"
+            "togglePaperStrategySelection('4', false);"
+            "const nextNode = document.getElementById('paperReportStrategy');"
+            "return {"
+            "options: Array.from(nextNode.options).map((option) => option.value),"
+            "selected: nextNode.value,"
+            "filter: state.paperReportStrategyFilter"
+            "};"
+            "}"
+        )
+        assert after_edit_remove['options'] == ['all', '1', '2', '3', '5', '6', '7']
+        assert after_edit_remove['selected'] == 'all'
+        assert after_edit_remove['filter'] == 'all'
+
+        after_remove = pw_eval(
+            "async () => {"
+            "const node = document.getElementById('paperReportStrategy');"
+            "togglePaperStrategySelection('4', false);"
+            "await saveConfig();"
+            "const nextNode = document.getElementById('paperReportStrategy');"
+            "return {"
+            "options: Array.from(nextNode.options).map((option) => option.value),"
+            "selected: nextNode.value,"
+            "filter: state.paperReportStrategyFilter,"
+            "env: state.config.env_values.PAPER_STRATEGY_IDS"
+            "};"
+            "}"
+        )
+
+        assert after_remove['env'] == '1,2,3,5,6,7'
+        assert current_env_values['PAPER_15M_STRATEGY_IDS'] == '4'
+        assert after_remove['options'] == ['all', '1', '2', '3', '5', '6', '7']
+        assert after_remove['selected'] == 'all'
+        assert after_remove['filter'] == 'all'
     finally:
         try:
             subprocess.run(
