@@ -452,6 +452,8 @@ def test_dashboard_assets_hide_paper_and_live_sections_by_active_mode():
     assert "const hiddenModeField = el('cfg_ENABLE_LIVE_TRADING');" in js
     assert "hiddenModeField.value = nextMode === 'live' ? 'true' : 'false';" in js
     assert "renderUnifiedStrategyToolbar(state.config || {}, currentUnifiedStrategyDraftValues());" in js
+    assert "renderSharedPaperReportStrategySelector();" in js
+    assert "void Promise.allSettled([refreshSummary(), refreshRecent()]);" in js
     assert "if (form && typeof form.oninput === 'function') {" in js
     assert "form.oninput();" in js
     assert "renderConfigModeShell(state.config || {});" in js
@@ -869,6 +871,35 @@ def test_dashboard_live_recent_orders_filters_by_strategy(tmp_path: Path):
         os.chdir(old_cwd)
 
 
+def test_dashboard_live_summary_reads_live_orders_and_filters_by_strategy(tmp_path: Path):
+    old_cwd = Path.cwd()
+    os.chdir(tmp_path)
+    state = DashboardState(env_file=tmp_path / '.env.dashboard')
+    try:
+        live_csv = tmp_path / 'logs' / 'live_orders.csv'
+        live_csv.parent.mkdir(parents=True, exist_ok=True)
+        live_csv.write_text(
+            'timestamp,mode,round_index,strategy,event_slug,start_time,end_time,side,price,order_size,order_cost,expected_profit,result,trade_pnl,cash_pnl,recovery_loss,consecutive_losses,stop_loss_triggered,skip_reason,signal_delta,signal_threshold,signal_locked\n'
+            '2026-04-05T00:00:00+00:00,live,1,2,slug-one,2026-04-04T23:55:00+00:00,2026-04-05T00:00:00+00:00,UP,0.51,10,5,1,UP,1.5,1.5,0,0,False,,0.02,0.01,True\n'
+            '2026-04-05T00:05:00+00:00,live,2,7,slug-seven,2026-04-05T00:00:00+00:00,2026-04-05T00:05:00+00:00,DOWN,0.49,10,5,1,UP,-2.0,-0.5,0,1,False,,0.03,0.01,True\n',
+            encoding='utf-8',
+        )
+
+        summary_all = state.get_live_summary_payload()
+        summary_seven = state.get_live_summary_payload(strategy='7')
+
+        assert summary_all['mode'] == 'live'
+        assert summary_all['csv_path'].endswith('live_orders.csv')
+        assert summary_all['latest']['trade_rows'] == 2
+        assert summary_all['latest']['total_pnl'] == -0.5
+        assert summary_seven['strategy'] == '7'
+        assert summary_seven['latest']['trade_rows'] == 1
+        assert summary_seven['latest']['total_pnl'] == -2.0
+    finally:
+        state.close()
+        os.chdir(old_cwd)
+
+
 
 def test_dashboard_runtime_factory_accepts_running_trade_mode(tmp_path: Path):
     runtime = create_dashboard_runtime(
@@ -1037,13 +1068,15 @@ def test_dashboard_runtime_mode_labels_are_localized(tmp_path: Path):
     finally:
         state.close()
 
-def test_dashboard_assets_switch_recent_endpoint_by_running_mode():
+def test_dashboard_assets_switch_report_endpoints_by_selected_mode():
     js = _dashboard_js()
 
-    assert "const runningMode = String((((state.config || {}).runtime_status || {}).active_mode || (((state.config || {}).runtime_status || {}).running_mode) || 'paper')).toLowerCase();" in js
+    assert "function effectiveReportMode()" in js
+    assert "const reportMode = effectiveReportMode();" in js
     assert "const strategy = encodeURIComponent(effectivePaperRecentStrategyFilter());" in js
     assert "const timeframe = encodeURIComponent(effectivePaperTimeframeFilter());" in js
-    assert "const recentEndpoint = runningMode === 'live' ? '/api/live/recent?limit=80&strategy=' + strategy : '/api/paper/recent?limit=80&strategy=' + strategy + '&timeframe=' + timeframe;" in js
+    assert "const recentEndpoint = reportMode === 'live' ? '/api/live/recent?limit=80&strategy=' + strategy : '/api/paper/recent?limit=80&strategy=' + strategy + '&timeframe=' + timeframe;" in js
+    assert "const summaryEndpoint = reportMode === 'live' ? '/api/live/summary?strategy=' + strategy : '/api/paper/summary?strategy=' + strategy + '&timeframe=' + timeframe;" in js
 
 
 def test_dashboard_assets_localize_recent_panel_by_running_mode():
@@ -1051,7 +1084,8 @@ def test_dashboard_assets_localize_recent_panel_by_running_mode():
 
     assert "const runningMode = String((((state.config || {}).runtime_status || {}).active_mode || (((state.config || {}).runtime_status || {}).running_mode) || 'paper')).toLowerCase();" in js
     assert "tbody.innerHTML = '<tr><td colspan=14 class=empty>' + (runningMode === 'live' ? '最近没有实盘交易记录' : '最近没有纸面交易记录') + '</td></tr>';" in js
-    assert "setReportStatus('recentStatus', '明细', rows.length + ' 行' + (runningMode === 'live' ? ' · 实盘' : ''), pendingCount > 0 ? 'warn' : 'ok');" in js
+    assert "const reportMode = effectiveReportMode();" in js
+    assert "setReportStatus('recentStatus', '明细', rows.length + ' 行' + (reportMode === 'live' ? ' · 实盘' : ''), pendingCount > 0 ? 'warn' : 'ok');" in js
 
 
 
@@ -1304,7 +1338,7 @@ def test_dashboard_assets_render_unified_report_header_status_and_recent_copy():
     assert 'function recentStrategyHeaderText()' in js
     assert 'function setReportStatus(' in js
     assert "setReportStatus('paperStatus', '汇总', '已更新', 'ok');" in js
-    assert "setReportStatus('recentStatus', '明细', rows.length + ' 行' + (runningMode === 'live' ? ' · 实盘' : ''), pendingCount > 0 ? 'warn' : 'ok');" in js
+    assert "setReportStatus('recentStatus', '明细', rows.length + ' 行' + (reportMode === 'live' ? ' · 实盘' : ''), pendingCount > 0 ? 'warn' : 'ok');" in js
     assert "el('recentPanelDesc').textContent = recentStrategyHeaderText();" in js
 
 
@@ -1317,6 +1351,7 @@ def test_dashboard_assets_refresh_shared_selector_still_updates_summary_and_rece
     assert "await Promise.allSettled([refreshSummary(), refreshRecent()]);" in js
     assert "const strategy = encodeURIComponent(effectivePaperSummaryStrategyFilter());" in js
     assert "const strategy = encodeURIComponent(effectivePaperRecentStrategyFilter());" in js
+    assert "const multiKey = activeStrategyListKey(payload, (payload && payload.env_values) || {});" in js
 
 
 def test_dashboard_assets_use_strategy_panel_for_unified_strategy_selection():
@@ -1336,7 +1371,7 @@ def test_dashboard_assets_use_strategy_panel_for_unified_strategy_selection():
     assert 'function togglePaperStrategySelection(' in js
     assert 'function setPrimaryStrategy(' in js
     assert "state.marketStrategyFilter = focusStrategy;" in js
-    assert "const summaryEndpoint = '/api/paper/summary?strategy=' + strategy + '&timeframe=' + timeframe;" in js
+    assert "const summaryEndpoint = reportMode === 'live' ? '/api/live/summary?strategy=' + strategy : '/api/paper/summary?strategy=' + strategy + '&timeframe=' + timeframe;" in js
     assert 'function resolveUnifiedStrategySelection(' in js
     assert 'function renderUnifiedStrategyToolbar(' in js
     assert 'function collectUnifiedStrategyValues(' in js

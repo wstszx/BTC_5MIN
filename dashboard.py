@@ -1639,9 +1639,44 @@ class DashboardState:
         days = [asdict(item) for item in daily[-14:]]
         return {
             "csv_path": str(paper_csv),
+            "mode": "paper",
             "tz_offset": "+08:00",
             "strategy": strategy_filter or "all",
             "timeframe": target_timeframe,
+            "days": days,
+            "latest": days[-1] if days else None,
+        }
+
+    def get_live_summary_payload(self, *, strategy: int | str | None = None) -> dict[str, Any]:
+        with self._lock:
+            live_csv = self._cfg.logs_dir / "live_orders.csv"
+        strategy_filter = _normalize_strategy_filter(strategy)
+        try:
+            if strategy_filter is None:
+                daily = summarize_paper_trades(live_csv, tz_offset="+08:00")
+            else:
+                filtered_rows = list(reversed(_filter_trade_rows_by_strategy(_tail_csv_rows(live_csv, limit=1000000), strategy_filter)))
+                if not filtered_rows:
+                    daily = []
+                else:
+                    filtered_csv = live_csv.with_name(f"{live_csv.stem}_strategy_{strategy_filter}_summary{live_csv.suffix}")
+                    with filtered_csv.open("w", newline="", encoding="utf-8") as handle:
+                        writer = csv.DictWriter(handle, fieldnames=list(filtered_rows[0].keys()))
+                        writer.writeheader()
+                        writer.writerows(filtered_rows)
+                    try:
+                        daily = summarize_paper_trades(filtered_csv, tz_offset="+08:00")
+                    finally:
+                        if filtered_csv.exists():
+                            filtered_csv.unlink()
+        except (FileNotFoundError, ValueError):
+            daily = []
+        days = [asdict(item) for item in daily[-14:]]
+        return {
+            "csv_path": str(live_csv),
+            "mode": "live",
+            "tz_offset": "+08:00",
+            "strategy": strategy_filter or "all",
             "days": days,
             "latest": days[-1] if days else None,
         }
@@ -1783,6 +1818,11 @@ class _DashboardRequestHandler(BaseHTTPRequestHandler):
                 strategy = (query.get("strategy") or [None])[0]
                 timeframe = (query.get("timeframe") or [None])[0]
                 self._send_json(self.dashboard_state.get_paper_summary_payload(strategy=strategy, timeframe=timeframe))
+                return
+            if parsed.path == "/api/live/summary":
+                query = parse_qs(parsed.query)
+                strategy = (query.get("strategy") or [None])[0]
+                self._send_json(self.dashboard_state.get_live_summary_payload(strategy=strategy))
                 return
             if parsed.path == "/api/paper/recent":
                 query = parse_qs(parsed.query)
@@ -4363,18 +4403,31 @@ function currentUnifiedStrategyDraftForReport() {
   return currentUnifiedStrategyDraftValues();
 }
 
+function effectiveReportMode() {
+  return effectiveConfigMode(state.config || {});
+}
+
 function configuredPaperReportStrategyOptions() {
   const payload = state.config || {};
   const envValues = (payload && payload.env_values) || {};
-  const strategyOptions = ((((payload || {}).select_options || {}).PAPER_STRATEGY_IDS) || []).map((item) => String(item));
+  const multiKey = activeStrategyListKey(payload, (payload && payload.env_values) || {});
+  const selectOptions = ((payload || {}).select_options) || {};
+  const strategyOptions = ((selectOptions[multiKey] || selectOptions.STRATEGY_ID || selectOptions.PAPER_STRATEGY_IDS || [])).map((item) => String(item));
   const draftValues = currentUnifiedStrategyDraftForReport();
-  const baseStrategyIds = String((draftValues && draftValues.PAPER_STRATEGY_IDS) || envValues.PAPER_STRATEGY_IDS || '').trim();
+  const baseStrategyIds = String((draftValues && draftValues[multiKey]) || envValues[multiKey] || '').trim();
   const baseStrategyId = (draftValues && draftValues.STRATEGY_ID) ?? envValues.STRATEGY_ID ?? '';
   if (baseStrategyIds) {
     return resolveUnifiedStrategySelection(payload, {
       STRATEGY_ID: baseStrategyId,
-      PAPER_STRATEGY_IDS: baseStrategyIds,
+      [multiKey]: baseStrategyIds,
     }).selected;
+  }
+  if (multiKey === 'LIVE_STRATEGY_IDS') {
+    const runtimeStrategyIds = (((payload || {}).runtime_status || {}).live_strategy_ids || []).map((item) => String(item));
+    if (runtimeStrategyIds.length > 0) {
+      return runtimeStrategyIds;
+    }
+    return baseStrategyId ? [String(baseStrategyId)] : [];
   }
   const timeframe = effectivePaperTimeframeFilter();
   const profiles = (payload && payload.paper_profiles) || {};
@@ -4399,7 +4452,9 @@ function normalizePaperReportStrategyFilter(value, options) {
 
 function paperReportStrategyOptions() {
   const payload = state.config || {};
-  const strategyOptions = ((((payload || {}).select_options || {}).PAPER_STRATEGY_IDS) || []).map((item) => String(item));
+  const multiKey = activeStrategyListKey(payload, (payload && payload.env_values) || {});
+  const selectOptions = ((payload || {}).select_options) || {};
+  const strategyOptions = ((selectOptions[multiKey] || selectOptions.STRATEGY_ID || selectOptions.PAPER_STRATEGY_IDS || [])).map((item) => String(item));
   const strategyView = ((state.market || {}).strategy_view) || {};
   const available = Array.isArray(strategyView.available) ? strategyView.available.map((item) => String(item)) : [];
   const configured = configuredPaperReportStrategyOptions();
@@ -4431,6 +4486,13 @@ function effectivePaperRecentStrategyFilter() {
 function recentStrategyHeaderText() {
   const timeframe = effectivePaperTimeframeFilter();
   const strategy = effectivePaperRecentStrategyFilter();
+  const reportMode = effectiveReportMode();
+  const modeText = reportMode === 'live' ? '\u5b9e\u76d8' : '\u7eb8\u9762';
+  const timeframeText = reportMode === 'live' ? '' : (' \u00b7 \u5f53\u524d\u9891\u6b21\uff1a' + timeframe);
+  if (!strategy || strategy === 'all') {
+    return '\u6309\u65f6\u95f4\u5012\u5e8f\u663e\u793a\u6700\u8fd1 80 \u6761\u8bb0\u5f55 \u00b7 \u5f53\u524d\u6a21\u5f0f\uff1a' + modeText + timeframeText + ' \u00b7 \u5f53\u524d\u7b56\u7565\uff1a\u5168\u90e8';
+  }
+  return '\u6309\u65f6\u95f4\u5012\u5e8f\u663e\u793a\u6700\u8fd1 80 \u6761\u8bb0\u5f55 \u00b7 \u5f53\u524d\u6a21\u5f0f\uff1a' + modeText + timeframeText + ' \u00b7 \u5f53\u524d\u7b56\u7565\uff1a\u7b56\u7565 ' + strategy;
   if (!strategy || strategy === 'all') {
     return '按时间倒序显示最近 80 条记录 · 当前频次：' + timeframe + ' · 当前策略：全部';
   }
@@ -5208,6 +5270,8 @@ function renderConfigModeShell(payload) {
       form.oninput();
     }
     renderUnifiedStrategyToolbar(state.config || {}, currentUnifiedStrategyDraftValues());
+    renderSharedPaperReportStrategySelector();
+    void Promise.allSettled([refreshSummary(), refreshRecent()]);
     renderConfigModeShell(state.config || {});
   });
 }
@@ -5851,6 +5915,7 @@ function renderRecent(payload) {
   const rows = payload.rows || [];
   const tbody = el('recentTbody');
   const runningMode = String((((state.config || {}).runtime_status || {}).active_mode || (((state.config || {}).runtime_status || {}).running_mode) || 'paper')).toLowerCase();
+  const reportMode = effectiveReportMode();
   el('recentPanelDesc').textContent = recentStrategyHeaderText();
   if (rows.length === 0) {
     tbody.innerHTML = '<tr><td colspan=14 class=empty>' + (runningMode === 'live' ? '最近没有实盘交易记录' : '最近没有纸面交易记录') + '</td></tr>';
@@ -5902,7 +5967,7 @@ function renderRecent(payload) {
   tbody.innerHTML = html;
   setReportStatus('recentStatus', '明细', pendingCount > 0 ? (rows.length + ' 行 · ' + pendingCount + ' 待结算') : (rows.length + ' 行'), pendingCount > 0 ? 'warn' : 'ok');
   if (pendingCount === 0) {
-    setReportStatus('recentStatus', '明细', rows.length + ' 行' + (runningMode === 'live' ? ' · 实盘' : ''), pendingCount > 0 ? 'warn' : 'ok');
+    setReportStatus('recentStatus', '明细', rows.length + ' 行' + (reportMode === 'live' ? ' · 实盘' : ''), pendingCount > 0 ? 'warn' : 'ok');
   }
 }
 
@@ -5921,9 +5986,10 @@ async function refreshMarket() {
 async function refreshSummary() {
   const requestSeq = nextReportRequestSeq('summary');
   try {
+    const reportMode = effectiveReportMode();
     const strategy = encodeURIComponent(effectivePaperSummaryStrategyFilter());
     const timeframe = encodeURIComponent(effectivePaperTimeframeFilter());
-    const summaryEndpoint = '/api/paper/summary?strategy=' + strategy + '&timeframe=' + timeframe;
+    const summaryEndpoint = reportMode === 'live' ? '/api/live/summary?strategy=' + strategy : '/api/paper/summary?strategy=' + strategy + '&timeframe=' + timeframe;
     const data = await apiGet(summaryEndpoint);
     if (!isCurrentReportRequest('summary', requestSeq)) {
       return;
@@ -5941,10 +6007,10 @@ async function refreshSummary() {
 async function refreshRecent() {
   const requestSeq = nextReportRequestSeq('recent');
   try {
-    const runningMode = String((((state.config || {}).runtime_status || {}).active_mode || (((state.config || {}).runtime_status || {}).running_mode) || 'paper')).toLowerCase();
+    const reportMode = effectiveReportMode();
     const strategy = encodeURIComponent(effectivePaperRecentStrategyFilter());
     const timeframe = encodeURIComponent(effectivePaperTimeframeFilter());
-    const recentEndpoint = runningMode === 'live' ? '/api/live/recent?limit=80&strategy=' + strategy : '/api/paper/recent?limit=80&strategy=' + strategy + '&timeframe=' + timeframe;
+    const recentEndpoint = reportMode === 'live' ? '/api/live/recent?limit=80&strategy=' + strategy : '/api/paper/recent?limit=80&strategy=' + strategy + '&timeframe=' + timeframe;
     const data = await apiGet(recentEndpoint);
     if (!isCurrentReportRequest('recent', requestSeq)) {
       return;
