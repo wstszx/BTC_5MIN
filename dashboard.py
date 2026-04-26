@@ -2066,10 +2066,20 @@ def _dashboard_html() -> str:
               <div class="strategy-guide-title">模式任务流</div>
               <div id="configContextSummary" class="strategy-guide-subtitle">当前按模拟盘配置展示。</div>
             </div>
-            <select id="configModeSelect" class="input-compact" aria-label="左侧配置模式选择">
-              <option value="paper">模拟盘</option>
-              <option value="live">实盘</option>
-            </select>
+            <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+              <select id="configModeSelect" class="input-compact" aria-label="左侧配置模式选择" title="配置模式">
+                <option value="paper">模拟盘模式</option>
+                <option value="live">实盘模式</option>
+              </select>
+              <select id="cfg_MARKET_TIMEFRAME" class="input-compact" aria-label="市场频次" title="市场频次">
+                <option value="5m">频次 5m</option>
+                <option value="15m">频次 15m</option>
+              </select>
+              <select id="cfg_ENABLE_LIVE_TRADING" class="input-compact" aria-label="启用实盘" title="实盘开关">
+                <option value="false">实盘关闭</option>
+                <option value="true">实盘开启</option>
+              </select>
+            </div>
           </div>
           <div id="paperTaskflowRoot" class="rows">
             <div class="field-help">模拟盘任务流区域预留中，当前先显示模式摘要与可见性壳层。</div>
@@ -3033,7 +3043,9 @@ body::before {
 }
 
 .field input,
-.field select {
+.field select,
+select.input-compact,
+input.input-compact {
   width: 100%;
   min-height: 32px;
   box-sizing: border-box;
@@ -3047,7 +3059,9 @@ body::before {
 }
 
 .field input.input-compact,
-.field select.input-compact {
+.field select.input-compact,
+select.input-compact,
+input.input-compact {
   width: min(100%, 156px);
 }
 
@@ -5409,7 +5423,7 @@ function renderConfig(payload) {
     ? payload.field_groups
     : [{ title: '\u5168\u90e8\u53c2\u6570', description: '', keys }];
   const editableKeySet = new Set(['ENABLE_LIVE_TRADING', ...keys.filter((key) => !isSingleLiveToggleKey(key))]);
-  const hiddenKeys = new Set(['PAPER_STRATEGY_IDS', 'LIVE_STRATEGY_IDS', 'PAPER_TIMEFRAMES']);
+  const hiddenKeys = new Set(['PAPER_STRATEGY_IDS', 'LIVE_STRATEGY_IDS', 'PAPER_TIMEFRAMES', 'MARKET_TIMEFRAME', 'ENABLE_LIVE_TRADING']);
   const advancedPanel = el('advancedConfigPanel');
   if (advancedPanel) {
     advancedPanel.innerHTML = '';
@@ -5588,9 +5602,25 @@ function renderConfig(payload) {
   applyAdvancedConfigVisibility(expandLiveToggleValues(displayValues));
   const timeframeNode = el('cfg_MARKET_TIMEFRAME');
   if (timeframeNode) {
-    timeframeNode.addEventListener('change', () => {
-      applyTimeframePreset(timeframeNode.value);
-    });
+    timeframeNode.value = String(displayValues['MARKET_TIMEFRAME'] || '5m');
+    if (timeframeNode.dataset.bound !== 'true') {
+      timeframeNode.dataset.bound = 'true';
+      timeframeNode.addEventListener('change', () => {
+        if (form.oninput) form.oninput();
+        applyTimeframePreset(timeframeNode.value);
+      });
+    }
+  }
+
+  const liveNode = el('cfg_ENABLE_LIVE_TRADING');
+  if (liveNode) {
+    liveNode.value = String(displayValues['ENABLE_LIVE_TRADING'] || 'false');
+    if (liveNode.dataset.bound !== 'true') {
+      liveNode.dataset.bound = 'true';
+      liveNode.addEventListener('change', () => {
+        if (form.oninput) form.oninput();
+      });
+    }
   }
   setConfigError('--');
   setChip('cfgStatus', '\u5df2\u52a0\u8f7d', 'ok');
@@ -5946,9 +5976,10 @@ function renderRecent(payload) {
       ? ('<span class="skip-reason-badge missed-entry">' + esc(reasonText(row.skip_reason)) + '</span>')
       : esc(reasonText(row.skip_reason));
 
+    const roundDisplay = row.end_time ? fmtIso(row.end_time) : (row.round_index ? String(row.round_index) : formatRoundSlug(row.event_slug));
     return '<tr class="' + esc(rowClass) + '">' +
       '<td>' + esc(fmtIso(row.timestamp)) + '</td>' +
-      '<td title="' + esc(row.event_slug || '--') + '">' + esc(formatRoundSlug(row.event_slug)) + '</td>' +
+      '<td title="' + esc(row.event_slug || '--') + '">' + esc(roundDisplay) + '</td>' +
       '<td>' + esc(row.strategy || '--') + '</td>' +
       '<td class="' + esc(sideCls) + '">' + esc(sideText(side)) + '</td>' +
       '<td>' + esc(fmtNum(row.price, 4)) + '</td>' +

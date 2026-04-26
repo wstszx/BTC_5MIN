@@ -468,7 +468,7 @@ def test_dashboard_assets_mode_selector_propagates_into_save_payload_path():
     assert "payload[key] = node.value;" in js
     assert "expanded.TRADE_MODE = normalized === 'true' ? 'live' : 'paper';" in js
     assert "expanded.LIVE_TRADING_ENABLED = normalized;" in js
-    assert "const hiddenKeys = new Set(['PAPER_STRATEGY_IDS', 'LIVE_STRATEGY_IDS', 'PAPER_TIMEFRAMES']);" in js
+    assert "const hiddenKeys = new Set(['PAPER_STRATEGY_IDS', 'LIVE_STRATEGY_IDS', 'PAPER_TIMEFRAMES', 'MARKET_TIMEFRAME', 'ENABLE_LIVE_TRADING']);" in js
     assert "const unifiedStrategyKeys = ['STRATEGY_ID', 'PAPER_STRATEGY_IDS', 'LIVE_STRATEGY_IDS'];" in js
     assert "payload[multiKey] = unifiedValues[multiKey];" in js
 
@@ -1713,7 +1713,7 @@ def test_dashboard_assets_format_recent_trade_round_slug_as_datetime():
     assert 'function formatRoundSlug(' in js
     assert "const match = raw.match(/-(\\d{10})(?:$|\\D)/);" in js
     assert "return dt.toLocaleString('zh-CN', { hour12: false });" in js
-    assert "'<td title=\"' + esc(row.event_slug || '--') + '\">' + esc(formatRoundSlug(row.event_slug)) + '</td>' +" in js
+    assert "'<td title=\"' + esc(row.event_slug || '--') + '\">' + esc(roundDisplay) + '</td>' +" in js
 
 def test_recent_trades_payload_includes_result_validation_fields(tmp_path: Path, monkeypatch):
     old_cwd = Path.cwd()
