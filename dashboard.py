@@ -570,8 +570,6 @@ def _field_groups() -> list[dict[str, Any]]:
             "description": "决定方向节奏、下注模式和主要风险边界。",
             "keys": [
                 "STRATEGY_ID",
-                "LIVE_STRATEGY_IDS",
-                "PAPER_STRATEGY_IDS",
                 "OPEN_DELAY_SECONDS",
                 "TARGET_PROFIT",
                 "BET_SIZING_MODE",
@@ -1130,6 +1128,7 @@ class DashboardState:
 
     def _build_binance_signal_service(self, cfg: AppConfig) -> BinanceDepth5SignalService | None:
         strategy_ids = list(getattr(cfg, "paper_strategy_ids", []) or [])
+        strategy_ids.extend(getattr(cfg, "live_strategy_ids", []) or [])
         if cfg.strategy_id not in {6, 7} and not any(strategy_id in {6, 7} for strategy_id in strategy_ids):
             return None
         service = BinanceDepth5SignalService(ws_url=cfg.binance_ws_url, stream=cfg.binance_depth_stream)
@@ -4046,7 +4045,7 @@ function strategyShortLabel(payload, strategyId) {
 }
 
 function strategyOptionLabel(key, opt, payload) {
-  if (key === 'STRATEGY_ID' || key === 'PAPER_STRATEGY_IDS' || key === 'SIGNAL_FALLBACK_STRATEGY_ID') {
+  if (key === 'STRATEGY_ID' || key === 'PAPER_STRATEGY_IDS' || key === 'LIVE_STRATEGY_IDS' || key === 'SIGNAL_FALLBACK_STRATEGY_ID') {
     return String(opt) + ' | ' + strategyShortLabel(payload, opt);
   }
   const optMap = OPTION_LABELS[key] || {};
@@ -4119,13 +4118,31 @@ function isPaperProfileConfigKey(key) {
   return raw === 'PAPER_TIMEFRAMES' || /^PAPER_(5M|15M)_/.test(raw);
 }
 
+function activeConfigModeFromValues(payload, values) {
+  const envValues = (payload && payload.env_values) || {};
+  const mergedValues = {
+    ...envValues,
+    ...(values || {}),
+  };
+  return buildLiveToggleValue(mergedValues) === 'true' ? 'live' : 'paper';
+}
+
+function activeStrategyListKey(payload, values) {
+  const mode = activeConfigModeFromValues(payload, values);
+  return mode === 'live' ? 'LIVE_STRATEGY_IDS' : 'PAPER_STRATEGY_IDS';
+}
+
 function resolveUnifiedStrategySelection(payload, values) {
   const envValues = (payload && payload.env_values) || {};
-  const options = (((payload || {}).select_options || {}).PAPER_STRATEGY_IDS || []).map((item) => String(item));
+  const multiKey = activeStrategyListKey(payload, values);
+  const selectOptions = ((payload || {}).select_options || {});
+  const options = (selectOptions[multiKey] || selectOptions.STRATEGY_ID || selectOptions.PAPER_STRATEGY_IDS || []).map((item) => String(item));
   const focusRaw = String((values && values.STRATEGY_ID) ?? envValues.STRATEGY_ID ?? options[0] ?? '');
-  const selectedRaw = parseStrategyIdList((values && values.PAPER_STRATEGY_IDS) ?? envValues.PAPER_STRATEGY_IDS ?? '');
+  const selectedRaw = parseStrategyIdList((values && values[multiKey]) ?? envValues[multiKey] ?? '');
   const selected = selectedRaw.filter((item) => options.indexOf(item) >= 0);
-  const focus = options.indexOf(focusRaw) >= 0 ? focusRaw : (selected[0] || options[0] || '');
+  const focus = selected.length > 0
+    ? (selected.indexOf(focusRaw) >= 0 ? focusRaw : selected[0])
+    : (options.indexOf(focusRaw) >= 0 ? focusRaw : (options[0] || ''));
   const mergedSelected = selected.slice();
   if (focus && mergedSelected.indexOf(focus) < 0) {
     mergedSelected.unshift(focus);
@@ -4134,6 +4151,7 @@ function resolveUnifiedStrategySelection(payload, values) {
     focus,
     selected: mergedSelected,
     options,
+    multiKey,
   };
 }
 
@@ -4141,18 +4159,25 @@ function collectUnifiedStrategyValues(payload, currentValues) {
   const unified = resolveUnifiedStrategySelection(payload || state.config || {}, currentValues || {});
   return {
     STRATEGY_ID: unified.focus,
-    PAPER_STRATEGY_IDS: unified.selected.join(','),
+    [unified.multiKey]: unified.selected.join(','),
   };
 }
 
 function currentUnifiedStrategyDraftValues() {
+  const payload = state.config || {};
+  const envValues = (payload && payload.env_values) || {};
   const focusNode = el('cfg_STRATEGY_ID');
   const multiNode = el('cfg_PAPER_STRATEGY_IDS');
+  const multiKey = activeStrategyListKey(payload, {});
+  const domStrategyListKey = multiNode ? String(multiNode.dataset.strategyListKey || '') : '';
+  const domSelected = multiNode
+    ? Array.from(multiNode.options || []).filter((option) => option.selected).map((option) => option.value).join(',')
+    : '';
+  const selectedValue = domStrategyListKey === multiKey ? domSelected : String(envValues[multiKey] || '');
   return {
-    STRATEGY_ID: focusNode ? focusNode.value : '',
-    PAPER_STRATEGY_IDS: multiNode
-      ? Array.from(multiNode.options || []).filter((option) => option.selected).map((option) => option.value).join(',')
-      : '',
+    STRATEGY_ID: focusNode ? focusNode.value : String(envValues.STRATEGY_ID || ''),
+    PAPER_STRATEGY_IDS: multiKey === 'PAPER_STRATEGY_IDS' ? selectedValue : String(envValues.PAPER_STRATEGY_IDS || ''),
+    LIVE_STRATEGY_IDS: multiKey === 'LIVE_STRATEGY_IDS' ? selectedValue : String(envValues.LIVE_STRATEGY_IDS || ''),
   };
 }
 
@@ -4192,7 +4217,7 @@ function renderStrategyPanel(payload, values) {
 
   const summary = document.createElement('div');
   summary.className = 'strategy-panel-summary';
-  summary.textContent = '勾选纸面运行策略，并指定一个主策略用于当前页面查看与策略说明。';
+  summary.textContent = '\u52fe\u9009' + formatModeLabel(activeConfigModeFromValues(payload, values)) + '\u8fd0\u884c\u7b56\u7565\uff0c\u5e76\u6307\u5b9a\u4e00\u4e2a\u4e3b\u7b56\u7565\u7528\u4e8e\u5f53\u524d\u9875\u9762\u67e5\u770b\u4e0e\u7b56\u7565\u8bf4\u660e\u3002';
   panelNode.appendChild(summary);
 
   const list = document.createElement('div');
@@ -4255,33 +4280,35 @@ function renderStrategyPanel(payload, values) {
 
 function selectAllPaperStrategiesInPanel() {
   const draft = currentUnifiedStrategyDraftValues();
-  const options = resolveUnifiedStrategySelection(state.config || {}, draft).options;
+  const unified = resolveUnifiedStrategySelection(state.config || {}, draft);
   renderUnifiedStrategyToolbar(state.config || {}, {
     ...draft,
-    PAPER_STRATEGY_IDS: options.join(','),
+    [unified.multiKey]: unified.options.join(','),
   });
   refreshStrategyPanelDependentUi();
 }
 
 function clearPaperStrategies() {
   const draft = currentUnifiedStrategyDraftValues();
+  const multiKey = activeStrategyListKey(state.config || {}, draft);
   renderUnifiedStrategyToolbar(state.config || {}, {
     ...draft,
-    PAPER_STRATEGY_IDS: '',
+    [multiKey]: '',
   });
   refreshStrategyPanelDependentUi();
 }
 
 function togglePaperStrategySelection(strategyId, selected) {
   const draft = currentUnifiedStrategyDraftValues();
-  const values = parseStrategyIdList(draft.PAPER_STRATEGY_IDS);
+  const multiKey = activeStrategyListKey(state.config || {}, draft);
+  const values = parseStrategyIdList(draft[multiKey]);
   const target = String(strategyId);
   const nextSelected = selected
     ? [...values, target]
     : values.filter((item) => String(item) !== target);
   renderUnifiedStrategyToolbar(state.config || {}, {
     ...draft,
-    PAPER_STRATEGY_IDS: nextSelected.join(','),
+    [multiKey]: nextSelected.join(','),
   });
   refreshStrategyPanelDependentUi();
 }
@@ -4302,6 +4329,7 @@ function renderUnifiedStrategyToolbar(payload, values) {
     return;
   }
   const unified = resolveUnifiedStrategySelection(payload, values);
+  const multiKey = unified.multiKey;
   const focusStrategy = unified.focus || 'all';
   focusNode.innerHTML = '';
   unified.options.forEach((opt) => {
@@ -4314,10 +4342,11 @@ function renderUnifiedStrategyToolbar(payload, values) {
   multiNode.innerHTML = '';
   multiNode.multiple = true;
   multiNode.size = Math.max(4, unified.options.length);
+  multiNode.dataset.strategyListKey = multiKey;
   unified.options.forEach((opt) => {
     const option = document.createElement('option');
     option.value = opt;
-    option.textContent = strategyOptionLabel('PAPER_STRATEGY_IDS', opt, payload);
+    option.textContent = strategyOptionLabel(multiKey, opt, payload);
     option.selected = unified.selected.indexOf(String(opt)) >= 0;
     multiNode.appendChild(option);
   });
@@ -4469,6 +4498,7 @@ function renderStrategyGuide(payload, values) {
   const currentValues = values || {};
   const unified = resolveUnifiedStrategySelection(payload, currentValues);
   const strategyId = String(unified.focus || '');
+  const modeLabel = formatModeLabel(activeConfigModeFromValues(payload, currentValues));
   const meta = strategyMeta(payload, strategyId);
   if (!meta) {
     node.innerHTML = '<div class="empty">\u6682\u65e0\u7b56\u7565\u8bf4\u660e</div>';
@@ -4492,7 +4522,7 @@ function renderStrategyGuide(payload, values) {
       '<span class="chip ok">\u7edf\u4e00\u7b56\u7565</span>' +
     '</div>' +
     '<div class="strategy-guide-preview">' + renderStrategyPills(meta.preview || []) + '</div>' +
-    '<div class="strategy-guide-note">\u67e5\u770b\u7b56\u7565\uff1a' + esc(strategyId) + '\uff1b\u7eb8\u9762\u8fd0\u884c\uff1a' + esc(unified.selected.join(',') || '--') + '</div>' +
+    '<div class="strategy-guide-note">\u67e5\u770b\u7b56\u7565\uff1a' + esc(strategyId) + '\uff1b' + esc(modeLabel) + '\u8fd0\u884c\uff1a' + esc(unified.selected.join(',') || '--') + '</div>' +
     '<div class="strategy-guide-note">' + esc(meta.detail || '') + '</div>' +
     extra;
 }
@@ -4502,6 +4532,8 @@ function renderPaperProfiles(payload) {
   if (!node) {
     return;
   }
+  node.innerHTML = '';
+  return;
   const timeframes = Array.isArray((payload || {}).paper_timeframes) ? payload.paper_timeframes : [];
   const profiles = ((payload || {}).paper_profiles) || {};
   const envValues = ((payload || {}).env_values) || {};
@@ -5175,6 +5207,7 @@ function renderConfigModeShell(payload) {
     if (form && typeof form.oninput === 'function') {
       form.oninput();
     }
+    renderUnifiedStrategyToolbar(state.config || {}, currentUnifiedStrategyDraftValues());
     renderConfigModeShell(state.config || {});
   });
 }
@@ -5312,7 +5345,7 @@ function renderConfig(payload) {
     ? payload.field_groups
     : [{ title: '\u5168\u90e8\u53c2\u6570', description: '', keys }];
   const editableKeySet = new Set(['ENABLE_LIVE_TRADING', ...keys.filter((key) => !isSingleLiveToggleKey(key))]);
-  const hiddenKeys = new Set(['PAPER_STRATEGY_IDS', 'PAPER_TIMEFRAMES']);
+  const hiddenKeys = new Set(['PAPER_STRATEGY_IDS', 'LIVE_STRATEGY_IDS', 'PAPER_TIMEFRAMES']);
   const advancedPanel = el('advancedConfigPanel');
   if (advancedPanel) {
     advancedPanel.innerHTML = '';
@@ -5373,7 +5406,7 @@ function renderConfig(payload) {
 
         const focusLabel = document.createElement('div');
         focusLabel.className = 'field-help';
-        focusLabel.textContent = '策略面板：勾选模拟盘策略，并单独指定一个当前主策略。';
+        focusLabel.textContent = '\u7b56\u7565\u9762\u677f\uff1a\u6839\u636e\u4e0a\u65b9\u4ea4\u6613\u6a21\u5f0f\uff0c\u81ea\u52a8\u5c55\u793a\u7eb8\u9762\u6216\u5b9e\u76d8\u5df2\u9009\u7684\u57fa\u7840\u7b56\u7565\u3002';
         unifiedWrap.appendChild(focusLabel);
 
         const panel = document.createElement('div');
@@ -5388,7 +5421,7 @@ function renderConfig(payload) {
 
         const multiLabel = document.createElement('div');
         multiLabel.className = 'field-help';
-        multiLabel.textContent = '保存时会自动确保主策略包含在模拟盘策略里。';
+        multiLabel.textContent = '\u4fdd\u5b58\u65f6\u53ea\u66f4\u65b0\u5f53\u524d\u6a21\u5f0f\u5bf9\u5e94\u7684\u7b56\u7565\u5217\u8868\u3002';
         unifiedWrap.appendChild(multiLabel);
 
         const multiSelect = document.createElement('select');
@@ -5447,6 +5480,12 @@ function renderConfig(payload) {
         err.textContent = validationErrors.PAPER_STRATEGY_IDS;
         wrap.appendChild(err);
       }
+      if (key === 'STRATEGY_ID' && validationErrors.LIVE_STRATEGY_IDS) {
+        const err = document.createElement('div');
+        err.className = 'field-error';
+        err.textContent = validationErrors.LIVE_STRATEGY_IDS;
+        wrap.appendChild(err);
+      }
 
       grid.appendChild(wrap);
     }
@@ -5497,7 +5536,7 @@ function renderConfig(payload) {
 function collectConfigValues(options) {
   const settings = options || {};
   const payload = {};
-  const unifiedStrategyKeys = ['STRATEGY_ID', 'PAPER_STRATEGY_IDS'];
+  const unifiedStrategyKeys = ['STRATEGY_ID', 'PAPER_STRATEGY_IDS', 'LIVE_STRATEGY_IDS'];
   const keys = ['ENABLE_LIVE_TRADING', ...(((state.config && state.config.editable_keys) || []).filter((key) => !isSingleLiveToggleKey(key)))];
   for (const key of keys) {
     if (unifiedStrategyKeys.indexOf(key) >= 0) {
@@ -5514,23 +5553,27 @@ function collectConfigValues(options) {
   }
   const focusNode = el('cfg_STRATEGY_ID');
   const multiNode = el('cfg_PAPER_STRATEGY_IDS');
-  const rawValues = {
+  const baseValues = {
+    ...(((state.config || {}).env_values) || {}),
     ...payload,
+  };
+  const multiKey = activeStrategyListKey(state.config || {}, baseValues);
+  const domStrategyListKey = multiNode ? String(multiNode.dataset.strategyListKey || '') : '';
+  const selectedStrategyList = domStrategyListKey === multiKey
+    ? Array.from(multiNode.options || []).filter((option) => option.selected).map((option) => option.value).join(',')
+    : String(baseValues[multiKey] || '');
+  const rawValues = {
+    ...baseValues,
     STRATEGY_ID: focusNode ? focusNode.value : '',
-    PAPER_STRATEGY_IDS: multiNode
-      ? Array.from(multiNode.options || []).filter((option) => option.selected).map((option) => option.value).join(',')
-      : '',
+    [multiKey]: selectedStrategyList,
   };
   const unifiedValues = collectUnifiedStrategyValues(state.config || {}, rawValues);
   payload.STRATEGY_ID = unifiedValues.STRATEGY_ID;
-  payload.PAPER_STRATEGY_IDS = unifiedValues.PAPER_STRATEGY_IDS;
+  payload[multiKey] = unifiedValues[multiKey];
   return payload;
 }
 function areConfigValuesEqual(left, right) {
-  const keys = new Set([
-    ...Object.keys(left || {}),
-    ...Object.keys(right || {}),
-  ]);
+  const keys = new Set(Object.keys(left || {}));
   for (const key of keys) {
     if (String((left || {})[key] ?? '') !== String((right || {})[key] ?? '')) {
       return false;

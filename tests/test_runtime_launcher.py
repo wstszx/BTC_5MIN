@@ -653,10 +653,10 @@ def test_runtime_manager_keeps_dashboard_online_while_switch_pending(tmp_path):
     assert snapshot.switch_state == 'pending'
 
 
-def test_readme_mentions_paper_timeframe_profiles():
+def test_readme_mentions_unified_strategy_selection():
     text = Path('README.md').read_text(encoding='utf-8')
 
-    assert 'PAPER_TIMEFRAMES' in text
-    assert 'PAPER_5M_STRATEGY_IDS' in text
-    assert 'PAPER_15M_STRATEGY_IDS' in text
-    assert 'Live mode remains single-timeframe and continues to use `MARKET_TIMEFRAME`.' in text
+    assert 'Unified strategy selection' in text
+    assert 'PAPER_STRATEGY_IDS' in text
+    assert 'LIVE_STRATEGY_IDS' in text
+    assert 'Legacy paper timeframe/profile keys are still parsed for compatibility' in text

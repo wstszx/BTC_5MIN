@@ -436,6 +436,7 @@ def test_dashboard_assets_include_left_panel_mode_selector_shell():
     assert "function effectiveConfigMode(payload)" in js
     assert "function renderConfigModeShell(payload)" in js
     assert "function renderTaskflowVisibility(mode)" in js
+    assert "function activeStrategyListKey(payload, values)" in js
     assert "const envValues = (payload && payload.env_values) || {};" in js
     assert "return buildLiveToggleValue(envValues) === 'true' ? 'live' : 'paper';" in js
 
@@ -450,6 +451,7 @@ def test_dashboard_assets_hide_paper_and_live_sections_by_active_mode():
     assert "state.config = {" in js
     assert "const hiddenModeField = el('cfg_ENABLE_LIVE_TRADING');" in js
     assert "hiddenModeField.value = nextMode === 'live' ? 'true' : 'false';" in js
+    assert "renderUnifiedStrategyToolbar(state.config || {}, currentUnifiedStrategyDraftValues());" in js
     assert "if (form && typeof form.oninput === 'function') {" in js
     assert "form.oninput();" in js
     assert "renderConfigModeShell(state.config || {});" in js
@@ -464,7 +466,19 @@ def test_dashboard_assets_mode_selector_propagates_into_save_payload_path():
     assert "payload[key] = node.value;" in js
     assert "expanded.TRADE_MODE = normalized === 'true' ? 'live' : 'paper';" in js
     assert "expanded.LIVE_TRADING_ENABLED = normalized;" in js
-    assert "const hiddenKeys = new Set(['PAPER_STRATEGY_IDS', 'PAPER_TIMEFRAMES']);" in js
+    assert "const hiddenKeys = new Set(['PAPER_STRATEGY_IDS', 'LIVE_STRATEGY_IDS', 'PAPER_TIMEFRAMES']);" in js
+    assert "const unifiedStrategyKeys = ['STRATEGY_ID', 'PAPER_STRATEGY_IDS', 'LIVE_STRATEGY_IDS'];" in js
+    assert "payload[multiKey] = unifiedValues[multiKey];" in js
+
+
+def test_dashboard_assets_use_mode_specific_strategy_selection():
+    js = _dashboard_js()
+
+    assert "return mode === 'live' ? 'LIVE_STRATEGY_IDS' : 'PAPER_STRATEGY_IDS';" in js
+    assert "const multiKey = activeStrategyListKey(payload, values);" in js
+    assert "const selectedRaw = parseStrategyIdList((values && values[multiKey]) ?? envValues[multiKey] ?? '');" in js
+    assert "strategyOptionLabel(multiKey, opt, payload)" in js
+    assert "const selectedStrategyList = domStrategyListKey === multiKey" in js
 
 
 
@@ -506,7 +520,7 @@ def test_dashboard_config_payload_exposes_live_strategy_ids(tmp_path: Path):
         assert payload['labels'][LIVE_STRATEGY_IDS] == '实盘策略组合'
         assert payload['field_help'][LIVE_STRATEGY_IDS].startswith('实盘模式下可轮询的策略列表')
         assert payload['select_options'][LIVE_STRATEGY_IDS] == ['1', '2', '3', '4', '5', '6', '7']
-        assert LIVE_STRATEGY_IDS in payload['field_groups'][1]['keys']
+        assert LIVE_STRATEGY_IDS not in payload['field_groups'][1]['keys']
     finally:
         state.close()
 
@@ -2054,7 +2068,7 @@ def test_dashboard_assets_merge_structured_timeframe_presets():
     assert "preset.strategy7" in js
 
 
-def test_dashboard_assets_include_paper_profile_editor_hooks():
+def test_dashboard_assets_keep_paper_profile_data_without_editor_copy():
     html = _dashboard_html()
     js = _dashboard_js()
 
@@ -2062,6 +2076,7 @@ def test_dashboard_assets_include_paper_profile_editor_hooks():
     assert "function renderPaperProfiles(" in js
     assert "paper_timeframes" in js
     assert "paper_profiles" in js
+    assert "node.innerHTML = '';" in js
 
 
 def test_dashboard_assets_include_multi_timeframe_paper_runtime_cards():
@@ -3323,6 +3338,22 @@ def test_dashboard_market_payload_can_switch_timeframe_view(tmp_path: Path, monk
 def test_dashboard_starts_binance_signal_service_when_paper_strategies_include_6(tmp_path: Path):
     env_file = tmp_path / '.env.dashboard'
     env_file.write_text('STRATEGY_ID=1\nPAPER_STRATEGY_IDS=1,6\n', encoding='utf-8')
+    old_cwd = Path.cwd()
+    os.chdir(tmp_path)
+    state = DashboardState(env_file=env_file)
+    try:
+        assert state._binance_signal_service is not None
+    finally:
+        state.close()
+        os.chdir(old_cwd)
+
+
+def test_dashboard_starts_binance_signal_service_when_live_strategies_include_7(tmp_path: Path):
+    env_file = tmp_path / '.env.dashboard'
+    env_file.write_text(
+        'TRADE_MODE=live\nLIVE_TRADING_ENABLED=true\nSTRATEGY_ID=1\nPAPER_STRATEGY_IDS=1\nLIVE_STRATEGY_IDS=7\n',
+        encoding='utf-8',
+    )
     old_cwd = Path.cwd()
     os.chdir(tmp_path)
     state = DashboardState(env_file=env_file)

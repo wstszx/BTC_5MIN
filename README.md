@@ -18,6 +18,8 @@ python -m pip install -r requirements.txt
 Dashboard saves write back to `.env.dashboard`, and mode changes also update the running `RuntimeManager` target mode. Common fields include:
 
 - `STRATEGY_ID`
+- `PAPER_STRATEGY_IDS`
+- `LIVE_STRATEGY_IDS`
 - `TARGET_PROFIT`
 - `MAX_STAKE`
 - `MAX_CONSECUTIVE_LOSSES`
@@ -49,43 +51,15 @@ Credential split:
 - `POLYMARKET_BUILDER_*` and `POLYMARKET_RELAYER_*` are for official gasless live redeem only.
 - Direct Polygon `web3` redeem is not a supported runtime path.
 
-### Paper multi-timeframe profiles
+### Unified strategy selection
 
-Paper mode can now enable more than one timeframe at once with:
+The dashboard now exposes one visible strategy selector: **基础策略**. It supports selecting one or more strategies. Switching between paper and live mode automatically shows the strategy list saved for that mode:
 
-- `PAPER_TIMEFRAMES=5m,15m`
+- Paper mode reads and saves `PAPER_STRATEGY_IDS`.
+- Live mode reads and saves `LIVE_STRATEGY_IDS`.
+- `STRATEGY_ID` tracks the primary strategy used for the current dashboard view.
 
-Each timeframe can keep its own paper strategy list and thresholds. Example fields:
-
-- `PAPER_5M_STRATEGY_ID=5`
-- `PAPER_5M_STRATEGY_IDS=5,6`
-- `PAPER_5M_TARGET_PROFIT=0.8`
-- `PAPER_15M_STRATEGY_ID=2`
-- `PAPER_15M_STRATEGY_IDS=1,2,7`
-- `PAPER_15M_TARGET_PROFIT=1.0`
-
-Paper runtime files are isolated by timeframe under `logs/paper/<timeframe>/`.
-
-Live mode remains single-timeframe and continues to use `MARKET_TIMEFRAME`.
-
-### Live multi-strategy profiles
-
-Live mode can run more than one strategy in the same session with:
-
-- `LIVE_STRATEGY_IDS=5,7`
-
-When `LIVE_STRATEGY_IDS` is empty, live mode falls back to `STRATEGY_ID` and behaves like the original single-strategy setup.
-
-Each live strategy can keep its own parameter overrides with `LIVE_STRATEGY_<id>_<FIELD>` keys. Example fields:
-
-- `LIVE_STRATEGY_5_BASE_ORDER_COST=1.5`
-- `LIVE_STRATEGY_5_TARGET_PROFIT=0.8`
-- `LIVE_STRATEGY_7_BASE_ORDER_COST=2.0`
-- `LIVE_STRATEGY_7_STRATEGY7_MAX_ENTRY_PRICE=0.53`
-
-Live multi-strategy mode still uses one `MARKET_TIMEFRAME`, one wallet, one live session state file, and one shared `live_orders.csv`.
-
-Strategy ledger state and pending live orders remain isolated per strategy inside that shared live session.
+Legacy paper timeframe/profile keys are still parsed for compatibility, but they are no longer the primary dashboard editing path. Use `MARKET_TIMEFRAME` for the active 5m/15m market and the unified strategy selector for strategy changes.
 
 ## 3. Run the supported runtime
 
