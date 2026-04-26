@@ -4279,10 +4279,27 @@ function renderUnifiedStrategyToolbar(payload, values) {
   state.marketStrategyFilter = focusStrategy;
 }
 
+function configuredPaperReportStrategyOptions() {
+  const payload = state.config || {};
+  const envValues = (payload && payload.env_values) || {};
+  const timeframe = effectivePaperTimeframeFilter();
+  const profiles = (payload && payload.paper_profiles) || {};
+  const profile = profiles[timeframe] || {};
+  const profileStrategyIds = Array.isArray(profile.paper_strategy_ids)
+    ? profile.paper_strategy_ids.map((item) => String(item)).join(',')
+    : '';
+  return resolveUnifiedStrategySelection(payload, {
+    STRATEGY_ID: profile.strategy_id ?? envValues.STRATEGY_ID ?? '',
+    PAPER_STRATEGY_IDS: profileStrategyIds || envValues.PAPER_STRATEGY_IDS || '',
+  }).selected;
+}
+
 function paperReportStrategyOptions() {
   const strategyView = ((state.market || {}).strategy_view) || {};
   const available = Array.isArray(strategyView.available) ? strategyView.available.map((item) => String(item)) : [];
-  return ['all', ...available.filter((item, index, arr) => item && arr.indexOf(item) === index)];
+  const configured = configuredPaperReportStrategyOptions();
+  const merged = [...available, ...configured];
+  return ['all', ...merged.filter((item, index, arr) => item && item !== 'all' && arr.indexOf(item) === index)];
 }
 
 function effectivePaperReportStrategyFilter() {
@@ -5377,6 +5394,7 @@ function renderConfig(payload) {
   renderStrategyGuide(payload, displayValues);
   renderPaperProfiles(payload);
   renderPaperRuntimeCards(payload);
+  renderSharedPaperReportStrategySelector();
   applyConfigFieldVisibility(expandLiveToggleValues(displayValues));
   applyAdvancedConfigVisibility(expandLiveToggleValues(displayValues));
   const timeframeNode = el('cfg_MARKET_TIMEFRAME');
