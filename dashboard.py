@@ -437,6 +437,7 @@ def _validate_recent_trade_row(
     *,
     client: PolymarketClient | Any,
     validation_cache: dict[str, dict[str, str]] | None = None,
+    fill_missing_result: bool = False,
 ) -> dict[str, str]:
     validated = dict(row)
     validated.setdefault('resolved_price_to_beat', '')
@@ -450,7 +451,8 @@ def _validate_recent_trade_row(
 
     slug = str(validated.get('event_slug') or '').strip()
     result = str(validated.get('result') or '').strip().upper()
-    if not slug or not result or result == '--':
+    missing_result = not result or result == '--'
+    if not slug or (missing_result and not fill_missing_result):
         return validated
     if not _slug_matches_client_series(slug, client):
         return validated
@@ -497,6 +499,10 @@ def _validate_recent_trade_row(
         return validated
 
     validated['resolved_expected_result'] = official_result
+    if missing_result:
+        validated['result'] = official_result
+        validated['result_check_status'] = 'official'
+        return validated
     validated['result_check_status'] = 'match' if result == official_result else 'mismatch'
     return validated
 
@@ -1795,12 +1801,29 @@ class DashboardState:
 
     def get_live_recent_orders_payload(self, *, limit: int, strategy: int | str | None = None) -> dict[str, Any]:
         with self._lock:
+            cfg = self._cfg
             live_csv = self._cfg.logs_dir / "live_orders.csv"
             target_timeframe = self._cfg.market_timeframe
+            validation_cache = self._result_validation_cache
         capped_limit = max(1, min(300, int(limit)))
         strategy_filter = _normalize_strategy_filter(strategy)
         rows = _filter_trade_rows_by_strategy(_tail_csv_rows(live_csv, limit=capped_limit * 4), strategy_filter)
         rows = rows[:capped_limit]
+        client = PolymarketClient(cfg)
+        try:
+            rows = [
+                _validate_recent_trade_row(
+                    row,
+                    client=client,
+                    validation_cache=validation_cache,
+                    fill_missing_result=True,
+                )
+                for row in rows
+            ]
+        finally:
+            close = getattr(client, "close", None)
+            if callable(close):
+                close()
         rows = [_with_recent_round_display_time(row, target_timeframe) for row in rows]
         return {
             "csv_path": str(live_csv),
@@ -4147,6 +4170,7 @@ function resultCheckText(status) {
   if (status === 'match') return '一致';
   if (status === 'mismatch') return '不一致';
   if (status === 'pending') return '待结算';
+  if (status === 'official') return '官方结果';
   if (status === 'official_pending') return '待官方结算';
   if (status === 'error') return '校验异常';
   return '--';

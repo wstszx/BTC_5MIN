@@ -897,6 +897,58 @@ def test_dashboard_live_recent_orders_exposes_timeframe_round_display_time(tmp_p
         os.chdir(old_cwd)
 
 
+def test_dashboard_live_recent_orders_resolves_official_result_fields(tmp_path: Path, monkeypatch):
+    old_cwd = Path.cwd()
+    os.chdir(tmp_path)
+
+    class StubClient:
+        def __init__(self, cfg):
+            self.config = cfg
+
+        def close(self) -> None:
+            return
+
+        def get_event_by_slug(self, slug: str):
+            return {
+                "id": "evt-live",
+                "slug": slug,
+                "eventMetadata": {
+                    "priceToBeat": 68420.5,
+                    "finalPrice": 68501.25,
+                },
+                "markets": [
+                    {
+                        "id": "mkt-live",
+                        "outcomes": '["Up", "Down"]',
+                        "outcomePrices": '["1", "0"]',
+                    }
+                ],
+            }
+
+    monkeypatch.setattr(dashboard, "PolymarketClient", StubClient)
+    state = DashboardState(env_file=tmp_path / ".env.dashboard")
+    try:
+        live_csv = tmp_path / "logs" / "live_orders.csv"
+        live_csv.parent.mkdir(parents=True, exist_ok=True)
+        live_csv.write_text(
+            "timestamp,mode,round_index,strategy,entry_timing,event_slug,start_time,end_time,side,price,order_size,order_cost,expected_profit,result,trade_pnl,cash_pnl,recovery_loss,consecutive_losses,stop_loss_triggered,skip_reason,signal_open_up_price,signal_current_up_price,signal_threshold,signal_delta,signal_locked,signal_reason\n"
+            "2026-04-27T08:10:00+00:00,live,4,2,OPEN,btc-updown-5m-live,2026-04-27T08:05:00+00:00,2026-04-27T08:10:00+00:00,UP,0.56,2.0,1.12,0.88,,0.0,0.0,0.0,0,False,,,,,,False,\n",
+            encoding="utf-8",
+        )
+
+        payload = state.get_live_recent_orders_payload(limit=10)
+        row = payload["rows"][0]
+
+        assert row["result"] == "UP"
+        assert row["resolved_price_to_beat"] == "68420.5"
+        assert row["resolved_final_price"] == "68501.25"
+        assert row["resolved_expected_result"] == "UP"
+        assert row["result_check_status"] == "official"
+    finally:
+        state.close()
+        os.chdir(old_cwd)
+
+
 def test_dashboard_live_summary_reads_live_orders_and_filters_by_strategy(tmp_path: Path):
     old_cwd = Path.cwd()
     os.chdir(tmp_path)
