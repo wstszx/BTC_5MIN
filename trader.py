@@ -2137,6 +2137,20 @@ def _create_live_clob_client(cfg: AppConfig):
     _apply_derived_api_creds(clob_client)
     return clob_client
 
+
+def _live_clob_client_config_key(cfg: AppConfig) -> tuple[Any, ...]:
+    return (
+        cfg.clob_api_base,
+        cfg.live_chain_id,
+        cfg.live_private_key,
+        cfg.live_signature_type,
+        cfg.live_funder,
+        cfg.live_api_key,
+        cfg.live_api_secret,
+        cfg.live_api_passphrase,
+    )
+
+
 def place_live_order(
     cfg: AppConfig | None = None,
     *,
@@ -3129,6 +3143,8 @@ def run_live_trading(
     )
     state_path = state_path or cfg.logs_dir / 'live_session_state.json'
     log_path = log_path or cfg.logs_dir / 'live_orders.csv'
+    cached_live_client = clob_client
+    cached_live_client_key = _live_clob_client_config_key(cfg) if clob_client is None else None
     initial_state = _load_session_state_for_live_runtime(state_path, configured_strategy_ids)
     _ensure_live_strategy_state_map(initial_state, configured_strategy_ids)
     managed_strategy_ids = _managed_live_strategy_ids(configured_strategy_ids, initial_state)
@@ -3180,7 +3196,14 @@ def run_live_trading(
                         log_path = cfg.logs_dir / 'live_orders.csv'
             now = datetime.now(timezone.utc)
             try:
-                live_client = clob_client or _create_live_clob_client(cfg)
+                if clob_client is not None:
+                    live_client = clob_client
+                else:
+                    candidate_live_client_key = _live_clob_client_config_key(cfg)
+                    if cached_live_client is None or cached_live_client_key != candidate_live_client_key:
+                        cached_live_client = _create_live_clob_client(cfg)
+                        cached_live_client_key = candidate_live_client_key
+                    live_client = cached_live_client
                 consecutive_errors = 0
             except Exception as exc:
                 message = str(exc).lower()

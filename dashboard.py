@@ -50,6 +50,9 @@ from trader import (
 )
 
 
+_POLYMARKET_CLIENT_CLASS = PolymarketClient
+
+
 def _select_display_round(
     *,
     current_round: MarketWindow | None,
@@ -429,7 +432,14 @@ def _slug_matches_client_series(slug: str, client: PolymarketClient | Any) -> bo
     )
     if not supported_prefixes:
         return True
-    return any(slug.startswith(prefix) for prefix in supported_prefixes)
+    for prefix in supported_prefixes:
+        if not slug.startswith(prefix):
+            continue
+        suffix = slug[len(prefix):]
+        if type(client) is _POLYMARKET_CLIENT_CLASS and not suffix.isdigit():
+            return False
+        return True
+    return False
 
 
 def _validate_recent_trade_row(

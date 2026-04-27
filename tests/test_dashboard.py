@@ -897,6 +897,25 @@ def test_dashboard_live_recent_orders_exposes_timeframe_round_display_time(tmp_p
         os.chdir(old_cwd)
 
 
+def test_dashboard_live_recent_orders_skips_official_lookup_for_synthetic_live_slug(tmp_path: Path, monkeypatch):
+    client = dashboard.PolymarketClient(dashboard.AppConfig())
+
+    def fail_lookup(slug: str):
+        raise AssertionError(f"Unexpected official lookup for {slug}")
+
+    monkeypatch.setattr(client, "get_event_by_slug", fail_lookup)
+
+    try:
+        row = dashboard._validate_recent_trade_row(
+            {"event_slug": "btc-updown-5m-test", "result": "UP"},
+            client=client,
+            fill_missing_result=True,
+        )
+        assert row["result_check_status"] == ""
+    finally:
+        client.close()
+
+
 def test_dashboard_live_recent_orders_resolves_official_result_fields(tmp_path: Path, monkeypatch):
     old_cwd = Path.cwd()
     os.chdir(tmp_path)
