@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import csv
+import html
 import json
 import random
+import re
 import threading
 import time
 from dataclasses import asdict
@@ -646,6 +648,25 @@ class PolymarketClient:
 
     def get_event_by_slug(self, slug: str) -> dict[str, Any]:
         return self._get_json(f"/events/slug/{slug}", base_url=self.config.gamma_api_base)
+
+    def get_market_ahead_event_metadata(self, slug: str) -> dict[str, Any]:
+        response = self.session.get(
+            f"https://www.marketahead.com/prediction/market/{slug}",
+            timeout=15,
+        )
+        response.raise_for_status()
+        normalized = html.unescape(response.text).replace('\\"', '"')
+        for match in re.finditer(r'"eventMetadata"\s*:\s*(\{[^{}]*\})', normalized):
+            try:
+                metadata = json.loads(match.group(1))
+            except json.JSONDecodeError:
+                continue
+            if isinstance(metadata, dict) and (
+                metadata.get("finalPrice") is not None
+                or metadata.get("priceToBeat") is not None
+            ):
+                return metadata
+        return {}
 
     def get_market_by_slug(self, slug: str) -> dict[str, Any]:
         payload = self._get_json("/markets", base_url=self.config.gamma_api_base, params={"slug": slug})

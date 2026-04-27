@@ -485,6 +485,16 @@ def _validate_recent_trade_row(
         metadata = event_payload.get("eventMetadata") or {}
         price_to_beat = _optional_float(metadata.get("priceToBeat"))
         final_price = _optional_float(metadata.get("finalPrice"))
+        if final_price is None:
+            read_fallback_metadata = getattr(client, "get_market_ahead_event_metadata", None)
+            if callable(read_fallback_metadata):
+                try:
+                    fallback_metadata = read_fallback_metadata(slug)
+                except Exception:
+                    fallback_metadata = {}
+                if isinstance(fallback_metadata, dict):
+                    price_to_beat = price_to_beat if price_to_beat is not None else _optional_float(fallback_metadata.get("priceToBeat"))
+                    final_price = _optional_float(fallback_metadata.get("finalPrice"))
         if price_to_beat is not None:
             resolved['resolved_price_to_beat'] = str(price_to_beat)
         if final_price is not None:

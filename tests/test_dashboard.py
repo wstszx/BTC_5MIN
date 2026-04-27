@@ -2025,6 +2025,64 @@ def test_recent_trades_payload_validates_from_official_winning_outcome_when_fina
         os.chdir(old_cwd)
 
 
+def test_recent_trades_payload_backfills_final_price_from_client_fallback_when_gamma_metadata_missing(tmp_path: Path, monkeypatch):
+    old_cwd = Path.cwd()
+    os.chdir(tmp_path)
+
+    class StubClient:
+        def __init__(self, cfg):
+            self.config = cfg
+
+        def close(self) -> None:
+            return
+
+        def get_event_by_slug(self, slug: str):
+            return {
+                'id': 'evt-1',
+                'slug': slug,
+                'eventMetadata': {
+                    'priceToBeat': 77754.09567100879,
+                },
+                'markets': [
+                    {
+                        'id': 'mkt-1',
+                        'outcomes': '["Up", "Down"]',
+                        'outcomePrices': '["0", "1"]',
+                        'closed': True,
+                    }
+                ],
+            }
+
+        def get_market_ahead_event_metadata(self, slug: str):
+            assert slug == 'btc-updown-15m-1777293000'
+            return {
+                'finalPrice': 77745.88167854065,
+                'priceToBeat': 77754.09567100879,
+            }
+
+    monkeypatch.setattr(dashboard, 'PolymarketClient', StubClient)
+
+    state = DashboardState(env_file=tmp_path / '.env.dashboard')
+    try:
+        logs_dir = tmp_path / 'logs'
+        logs_dir.mkdir(parents=True, exist_ok=True)
+        (logs_dir / 'paper_trades.csv').write_text(
+            'timestamp,mode,round_index,strategy,entry_timing,event_slug,start_time,end_time,side,price,order_size,order_cost,expected_profit,result,trade_pnl,cash_pnl,recovery_loss,consecutive_losses,stop_loss_triggered,skip_reason,signal_open_up_price,signal_current_up_price,signal_threshold,signal_delta,signal_locked,signal_reason\n'
+            '2026-04-27T12:48:40+00:00,paper,2,7,OPEN,btc-updown-15m-1777293000,2026-04-27T12:30:00+00:00,2026-04-27T12:45:00+00:00,UP,0.55,2.0,1.1,0.9,DOWN,-1.1,-0.2667,1.1,1,False,,,,,,False,\n',
+            encoding='utf-8',
+        )
+
+        payload = state.get_recent_trades_payload(limit=10)
+        row = payload['rows'][0]
+        assert row['resolved_price_to_beat'] == '77754.09567100879'
+        assert row['resolved_final_price'] == '77745.88167854065'
+        assert row['resolved_expected_result'] == 'DOWN'
+        assert row['result_check_status'] == 'match'
+    finally:
+        state.close()
+        os.chdir(old_cwd)
+
+
 def test_recent_trades_payload_marks_official_result_pending_when_winner_unavailable(tmp_path: Path, monkeypatch):
     old_cwd = Path.cwd()
     os.chdir(tmp_path)
