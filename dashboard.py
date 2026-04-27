@@ -4,6 +4,7 @@ import csv
 import errno
 import json
 import os
+import re
 import threading
 from collections import deque
 from dataclasses import asdict, dataclass, field, replace
@@ -259,6 +260,65 @@ def _pending_paper_trade_to_recent_row(item: PendingPaperTrade) -> dict[str, str
         'signal_reason': item.signal_reason or '',
         'pending_status': 'pending_settlement',
     }
+
+
+def _parse_recent_row_datetime(value: Any) -> datetime | None:
+    if value in (None, ""):
+        return None
+    raw = str(value).strip()
+    if not raw:
+        return None
+    if raw.endswith("Z"):
+        raw = raw[:-1] + "+00:00"
+    try:
+        dt = datetime.fromisoformat(raw)
+    except ValueError:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+
+def _round_start_from_slug(slug: Any) -> datetime | None:
+    match = re.search(r"-(\d{10})(?:$|\D)", str(slug or ""))
+    if not match:
+        return None
+    try:
+        return datetime.fromtimestamp(int(match.group(1)), timezone.utc)
+    except (OverflowError, OSError, ValueError):
+        return None
+
+
+def _timeframe_seconds(timeframe: str | None) -> int:
+    normalized = _normalize_timeframe_filter(timeframe, fallback="5m")
+    return 900 if normalized == "15m" else 300
+
+
+def _floor_to_timeframe(dt: datetime, timeframe: str | None) -> datetime:
+    seconds = _timeframe_seconds(timeframe)
+    timestamp = int(dt.timestamp())
+    return datetime.fromtimestamp(timestamp - (timestamp % seconds), timezone.utc)
+
+
+def _recent_row_round_display_time(row: dict[str, str], timeframe: str | None) -> str:
+    slug_round = _round_start_from_slug(row.get("event_slug"))
+    if slug_round is not None:
+        return _iso(slug_round) or ""
+
+    anchor = (
+        _parse_recent_row_datetime(row.get("start_time"))
+        or _parse_recent_row_datetime(row.get("timestamp"))
+        or _parse_recent_row_datetime(row.get("end_time"))
+    )
+    if anchor is None:
+        return ""
+    return _iso(_floor_to_timeframe(anchor, timeframe)) or ""
+
+
+def _with_recent_round_display_time(row: dict[str, str], timeframe: str | None) -> dict[str, str]:
+    enriched = dict(row)
+    enriched["round_display_time"] = _recent_row_round_display_time(enriched, timeframe)
+    return enriched
 
 
 def _iso(dt: datetime | None) -> str | None:
@@ -1720,6 +1780,10 @@ class DashboardState:
             close = getattr(client, "close", None)
             if callable(close):
                 close()
+        validated_rows = [
+            _with_recent_round_display_time(row, target_timeframe)
+            for row in validated_rows
+        ]
 
         return {
             "csv_path": str(paper_csv),
@@ -1732,11 +1796,19 @@ class DashboardState:
     def get_live_recent_orders_payload(self, *, limit: int, strategy: int | str | None = None) -> dict[str, Any]:
         with self._lock:
             live_csv = self._cfg.logs_dir / "live_orders.csv"
+            target_timeframe = self._cfg.market_timeframe
         capped_limit = max(1, min(300, int(limit)))
         strategy_filter = _normalize_strategy_filter(strategy)
         rows = _filter_trade_rows_by_strategy(_tail_csv_rows(live_csv, limit=capped_limit * 4), strategy_filter)
         rows = rows[:capped_limit]
-        return {"csv_path": str(live_csv), "strategy": strategy_filter or "all", "count": len(rows), "rows": rows}
+        rows = [_with_recent_round_display_time(row, target_timeframe) for row in rows]
+        return {
+            "csv_path": str(live_csv),
+            "strategy": strategy_filter or "all",
+            "timeframe": target_timeframe,
+            "count": len(rows),
+            "rows": rows,
+        }
 
 
 class _DashboardRequestHandler(BaseHTTPRequestHandler):
@@ -5976,7 +6048,7 @@ function renderRecent(payload) {
       ? ('<span class="skip-reason-badge missed-entry">' + esc(reasonText(row.skip_reason)) + '</span>')
       : esc(reasonText(row.skip_reason));
 
-    const roundDisplay = row.end_time ? fmtIso(row.end_time) : (row.round_index ? String(row.round_index) : formatRoundSlug(row.event_slug));
+    const roundDisplay = row.round_display_time ? fmtIso(row.round_display_time) : (row.end_time ? fmtIso(row.end_time) : (row.round_index ? String(row.round_index) : formatRoundSlug(row.event_slug)));
     return '<tr class="' + esc(rowClass) + '">' +
       '<td>' + esc(fmtIso(row.timestamp)) + '</td>' +
       '<td title="' + esc(row.event_slug || '--') + '">' + esc(roundDisplay) + '</td>' +

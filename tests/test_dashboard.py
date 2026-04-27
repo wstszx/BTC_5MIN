@@ -871,6 +871,30 @@ def test_dashboard_live_recent_orders_filters_by_strategy(tmp_path: Path):
         os.chdir(old_cwd)
 
 
+def test_dashboard_live_recent_orders_exposes_timeframe_round_display_time(tmp_path: Path):
+    old_cwd = Path.cwd()
+    os.chdir(tmp_path)
+    env_file = tmp_path / ".env.dashboard"
+    env_file.write_text("MARKET_TIMEFRAME=15m\n", encoding="utf-8")
+    state = DashboardState(env_file=env_file)
+    try:
+        live_csv = tmp_path / "logs" / "live_orders.csv"
+        live_csv.parent.mkdir(parents=True, exist_ok=True)
+        live_csv.write_text(
+            "timestamp,mode,round_index,strategy,entry_timing,event_slug,start_time,end_time,side,price,order_size,order_cost,expected_profit,result,trade_pnl,cash_pnl,recovery_loss,consecutive_losses,stop_loss_triggered,skip_reason,signal_open_up_price,signal_current_up_price,signal_threshold,signal_delta,signal_locked,signal_reason\n"
+            "2026-04-24T11:41:04.611595+00:00,live,0,2,OPEN,btc-updown-5m-test,2026-04-24T11:40:04.611595+00:00,2026-04-24T11:45:04.611595+00:00,UP,0.56,1.7857142857142856,1.0,0.7857142857142856,,0.0,0.0,0.0,0,False,,,,,,False,\n",
+            encoding="utf-8",
+        )
+
+        payload = state.get_live_recent_orders_payload(limit=10)
+
+        assert payload["timeframe"] == "15m"
+        assert payload["rows"][0]["round_display_time"] == "2026-04-24T11:30:00+00:00"
+    finally:
+        state.close()
+        os.chdir(old_cwd)
+
+
 def test_dashboard_live_summary_reads_live_orders_and_filters_by_strategy(tmp_path: Path):
     old_cwd = Path.cwd()
     os.chdir(tmp_path)
@@ -1713,6 +1737,7 @@ def test_dashboard_assets_format_recent_trade_round_slug_as_datetime():
     assert 'function formatRoundSlug(' in js
     assert "const match = raw.match(/-(\\d{10})(?:$|\\D)/);" in js
     assert "return dt.toLocaleString('zh-CN', { hour12: false });" in js
+    assert "const roundDisplay = row.round_display_time ? fmtIso(row.round_display_time)" in js
     assert "'<td title=\"' + esc(row.event_slug || '--') + '\">' + esc(roundDisplay) + '</td>' +" in js
 
 def test_recent_trades_payload_includes_result_validation_fields(tmp_path: Path, monkeypatch):
