@@ -978,6 +978,47 @@ def test_dashboard_live_summary_reads_live_orders_and_filters_by_strategy(tmp_pa
         os.chdir(old_cwd)
 
 
+def test_dashboard_live_summary_backfills_settled_submitted_rows(tmp_path: Path, monkeypatch):
+    old_cwd = Path.cwd()
+    os.chdir(tmp_path)
+
+    class StubClient:
+        def __init__(self, cfg):
+            self.config = cfg
+
+        def close(self) -> None:
+            return
+
+        def get_event_by_slug(self, slug: str):
+            return {
+                'id': 'evt-live',
+                'slug': slug,
+                'eventMetadata': {'priceToBeat': 100.0, 'finalPrice': 90.0},
+                'markets': [{'id': 'mkt-live'}],
+            }
+
+    monkeypatch.setattr(dashboard, 'PolymarketClient', StubClient)
+    state = DashboardState(env_file=tmp_path / '.env.dashboard')
+    try:
+        live_csv = tmp_path / 'logs' / 'live_orders.csv'
+        live_csv.parent.mkdir(parents=True, exist_ok=True)
+        live_csv.write_text(
+            'timestamp,mode,round_index,strategy,event_slug,start_time,end_time,side,price,order_size,order_cost,expected_profit,result,trade_pnl,cash_pnl,recovery_loss,consecutive_losses,stop_loss_triggered,skip_reason,signal_delta,signal_threshold,signal_locked\n'
+            '2026-04-05T00:00:00+00:00,live,1,2,btc-updown-5m-one,2026-04-04T23:55:00+00:00,2026-04-05T00:00:00+00:00,UP,0.50,2,1,1,,0.0,0.0,0,0,False,,0.02,0.01,True\n'
+            '2026-04-05T00:05:00+00:00,live,2,2,btc-updown-5m-skip,2026-04-05T00:00:00+00:00,2026-04-05T00:05:00+00:00,UP,0.50,0,0,0,,0.0,0.0,0,0,False,insufficient_live_wallet_balance,0.02,0.01,True\n',
+            encoding='utf-8',
+        )
+
+        summary = state.get_live_summary_payload(strategy='2')
+
+        assert summary['latest']['trade_rows'] == 1
+        assert summary['latest']['hit_rate'] == 0.0
+        assert summary['latest']['total_pnl'] == -1.0
+    finally:
+        state.close()
+        os.chdir(old_cwd)
+
+
 
 def test_dashboard_runtime_factory_accepts_running_trade_mode(tmp_path: Path):
     runtime = create_dashboard_runtime(
@@ -1155,6 +1196,8 @@ def test_dashboard_assets_switch_report_endpoints_by_selected_mode():
     assert "const timeframe = encodeURIComponent(effectivePaperTimeframeFilter());" in js
     assert "const recentEndpoint = reportMode === 'live' ? '/api/live/recent?limit=80&strategy=' + strategy : '/api/paper/recent?limit=80&strategy=' + strategy + '&timeframe=' + timeframe;" in js
     assert "const summaryEndpoint = reportMode === 'live' ? '/api/live/summary?strategy=' + strategy : '/api/paper/summary?strategy=' + strategy + '&timeframe=' + timeframe;" in js
+    assert "renderReportModeCopy();" in js
+    assert "renderSharedPaperReportStrategySelector();" in js
 
 
 def test_dashboard_assets_localize_recent_panel_by_running_mode():
@@ -1412,7 +1455,12 @@ def test_dashboard_assets_render_unified_report_header_status_and_recent_copy():
     assert 'id="paperStatus"' in html
     assert 'id="recentStatus"' in html
     assert 'class="report-status-group"' in html
+    assert 'id="reportCardDesc"' in html
+    assert 'id="reportSummaryTitle"' in html
     assert 'id="recentPanelDesc"' in html
+    assert 'function renderReportModeCopy()' in js
+    assert "reportMode === 'live' ? '实盘交易汇总' : '纸面交易汇总'" in js
+    assert "reportMode === 'live' ? '暂无实盘数据' : '暂无纸面数据'" in js
     assert 'function recentStrategyHeaderText()' in js
     assert 'function setReportStatus(' in js
     assert "setReportStatus('paperStatus', '汇总', '已更新', 'ok');" in js

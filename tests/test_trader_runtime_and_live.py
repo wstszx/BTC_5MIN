@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import csv
 import json
 import os
 import threading
@@ -14,6 +15,7 @@ import trader
 from binance_signal import BinanceDepth5SignalService
 from config import AppConfig
 from models import LiveStrategyState, MarketQuote, MarketWindow, PaperStrategyState, PendingPaperTrade, SessionState, TradePlan, TradeRecord
+from paper_report import summarize_paper_trades
 from runtime_control import RuntimeControl
 from trader import (
     SideDecision,
@@ -2083,6 +2085,16 @@ def test_place_live_order_settles_previous_pending_trade_before_new_submission(t
     assert state.recovery_loss == pytest.approx(1.0)
     assert state.consecutive_losses == 1
     assert state.round_index == 2
+    rows = list(csv.DictReader((tmp_path / "live.csv").open(newline="", encoding="utf-8")))
+    settled_rows = [row for row in rows if row["event_slug"] == "btc-updown-5m-prev" and row["result"]]
+    assert len(settled_rows) == 1
+    assert settled_rows[0]["result"] == "DOWN"
+    assert float(settled_rows[0]["trade_pnl"]) == pytest.approx(-1.0)
+    assert float(settled_rows[0]["cash_pnl"]) == pytest.approx(-1.0)
+    summary = summarize_paper_trades(tmp_path / "live.csv", tz_offset="+00:00")[-1]
+    assert summary.trade_rows == 1
+    assert summary.hit_rate == 0.0
+    assert summary.total_pnl == pytest.approx(-1.0)
 
 
 def test_place_live_order_settles_previous_pending_trade_from_terminal_outcome_prices_when_metadata_missing(tmp_path):
@@ -2647,6 +2659,10 @@ def test_settle_pending_live_trade_operates_on_single_strategy_state():
         "status": "settled",
         "slug": "btc-updown-5m-prev",
         "side": "UP",
+        "price": 0.5,
+        "order_size": 2.0,
+        "order_cost": 1.0,
+        "expected_profit": 1.0,
         "result": "DOWN",
         "trade_pnl": -1.0,
     }

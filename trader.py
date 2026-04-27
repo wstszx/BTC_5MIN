@@ -1594,6 +1594,61 @@ def _clear_pending_live_trade(strategy_state: LiveStrategyState) -> None:
     strategy_state.pending_live_end_time = None
 
 
+def _timeframe_duration_seconds(timeframe: str | None) -> int:
+    return 900 if str(timeframe or "").strip().lower() == "15m" else 300
+
+
+def _append_settled_live_trade_log(
+    *,
+    log_path: Path,
+    cfg: AppConfig,
+    strategy_id: int,
+    prior_state: LiveStrategyState,
+    updated_state: LiveStrategyState,
+    settlement_status: dict[str, Any] | None,
+) -> None:
+    if not settlement_status or settlement_status.get("status") != "settled":
+        return
+
+    end_time = parse_iso_datetime(prior_state.pending_live_end_time) or datetime.now(timezone.utc)
+    start_time = end_time - timedelta(seconds=_timeframe_duration_seconds(getattr(cfg, "market_timeframe", None)))
+    append_trade_log(
+        log_path,
+        TradeRecord(
+            timestamp=datetime.now(timezone.utc),
+            mode="live",
+            round_index=prior_state.round_index,
+            strategy=strategy_id,
+            entry_timing=cfg.entry_timing,
+            event_slug=str(prior_state.pending_live_slug or settlement_status.get("slug") or ""),
+            start_time=start_time,
+            end_time=end_time,
+            side=str(settlement_status.get("side") or prior_state.pending_live_side or ""),
+            price=settlement_status.get("price") if settlement_status.get("price") is not None else prior_state.pending_live_price,
+            order_size=float(
+                settlement_status.get("order_size")
+                if settlement_status.get("order_size") is not None
+                else (prior_state.pending_live_order_size or 0.0)
+            ),
+            order_cost=float(
+                settlement_status.get("order_cost")
+                if settlement_status.get("order_cost") is not None
+                else (prior_state.pending_live_order_cost or 0.0)
+            ),
+            expected_profit=float(
+                settlement_status.get("expected_profit")
+                if settlement_status.get("expected_profit") is not None
+                else (prior_state.pending_live_expected_profit or 0.0)
+            ),
+            result=str(settlement_status.get("result") or ""),
+            trade_pnl=float(settlement_status.get("trade_pnl") or 0.0),
+            cash_pnl=updated_state.cash_pnl,
+            recovery_loss=updated_state.recovery_loss,
+            consecutive_losses=updated_state.consecutive_losses,
+        ),
+    )
+
+
 def _build_pending_live_trade_plan(state: SessionState) -> TradePlan:
     if state.pending_live_side not in {"UP", "DOWN"}:
         raise RuntimeError("Pending live trade is missing a valid side.")
@@ -2020,6 +2075,10 @@ def _settle_pending_live_trade_if_needed(
             "status": "settled",
             "slug": strategy_state.pending_live_slug,
             "side": plan.side,
+            "price": plan.price,
+            "order_size": plan.order_size,
+            "order_cost": plan.order_cost,
+            "expected_profit": plan.expected_profit,
             "result": result,
             "trade_pnl": trade_pnl,
         },
@@ -2101,6 +2160,7 @@ def place_live_order(
     if state.pending_live_slug and live_client is None and state.pending_live_order_id and cfg.live_private_key:
         live_client = _create_live_clob_client(cfg)
     strategy_state = _live_strategy_state_from_payload(asdict(state))
+    prior_strategy_state = replace(strategy_state)
     strategy_state, pending_status, settled_previous_trade = _settle_pending_live_trade_if_needed(
         market_client=market_client,
         clob_client=live_client,
@@ -2114,6 +2174,14 @@ def place_live_order(
             save_session_state(state_path, state)
         return pending_status
     if settled_previous_trade and persist_state:
+        _append_settled_live_trade_log(
+            log_path=log_path,
+            cfg=cfg,
+            strategy_id=cfg.strategy_id,
+            prior_state=prior_strategy_state,
+            updated_state=strategy_state,
+            settlement_status=pending_status,
+        )
         _sync_current_live_strategy_state(state, cfg.strategy_id)
         save_session_state(state_path, state)
 
@@ -3121,12 +3189,23 @@ def run_live_trading(
                 strategy_state = state.live_strategies.setdefault(strategy_id, LiveStrategyState())
                 try:
                     _refresh_daily_session_state(strategy_state, now)
+                    prior_strategy_state = replace(strategy_state)
                     strategy_state, pending_status, _ = _settle_pending_live_trade_if_needed(
                         market_client=market_client,
                         clob_client=live_client,
                         strategy_state=strategy_state,
                         now=now,
                     )
+                    if pending_status is not None and pending_status.get("status") == "settled":
+                        _append_settled_live_trade_log(
+                            log_path=log_path,
+                            cfg=_cfg_for_live_strategy(cfg, strategy_id),
+                            strategy_id=strategy_id,
+                            prior_state=prior_strategy_state,
+                            updated_state=strategy_state,
+                            settlement_status=pending_status,
+                        )
+                        strategy_results.append({"strategy_id": strategy_id, **pending_status})
                     state.live_strategies[strategy_id] = strategy_state
                     if pending_status is not None and pending_status.get("status") == "pending_settlement":
                         pending_strategy_ids.append(strategy_id)

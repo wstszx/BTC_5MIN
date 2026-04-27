@@ -507,6 +507,67 @@ def _validate_recent_trade_row(
     return validated
 
 
+def _live_summary_row_key(row: dict[str, str]) -> tuple[str, str, str]:
+    return (
+        str(row.get("strategy") or "").strip(),
+        str(row.get("event_slug") or "").strip(),
+        str(row.get("side") or "").strip().upper(),
+    )
+
+
+def _is_live_summary_backfill_candidate(row: dict[str, str], settled_keys: set[tuple[str, str, str]]) -> bool:
+    result = str(row.get("result") or "").strip().upper()
+    side = str(row.get("side") or "").strip().upper()
+    if result in {"UP", "DOWN"} or side not in {"UP", "DOWN"}:
+        return False
+    if _live_summary_row_key(row) in settled_keys:
+        return False
+    if str(row.get("skip_reason") or "").strip():
+        return False
+    return (_optional_float(row.get("order_cost")) or 0.0) > 0.0
+
+
+def _backfill_live_summary_rows(
+    rows: list[dict[str, str]],
+    *,
+    client: PolymarketClient | Any,
+    validation_cache: dict[str, dict[str, str]] | None = None,
+) -> list[dict[str, str]]:
+    settled_keys = {
+        _live_summary_row_key(row)
+        for row in rows
+        if str(row.get("result") or "").strip().upper() in {"UP", "DOWN"}
+    }
+    backfilled: list[dict[str, str]] = []
+    for row in rows:
+        if not _is_live_summary_backfill_candidate(row, settled_keys):
+            backfilled.append(dict(row))
+            continue
+        validated = _validate_recent_trade_row(
+            row,
+            client=client,
+            validation_cache=validation_cache,
+            fill_missing_result=True,
+        )
+        result = str(validated.get("result") or "").strip().upper()
+        side = str(validated.get("side") or "").strip().upper()
+        if result in {"UP", "DOWN"}:
+            order_cost = _optional_float(validated.get("order_cost")) or 0.0
+            expected_profit = _optional_float(validated.get("expected_profit")) or 0.0
+            validated["trade_pnl"] = str(expected_profit if result == side else -order_cost)
+        backfilled.append(validated)
+    return backfilled
+
+
+def _csv_fieldnames_for_rows(rows: list[dict[str, str]]) -> list[str]:
+    fieldnames: list[str] = []
+    for row in rows:
+        for key in row.keys():
+            if key not in fieldnames:
+                fieldnames.append(key)
+    return fieldnames
+
+
 
 def _localize_runtime_message(message: str | None) -> str | None:
     if not message:
@@ -1715,26 +1776,37 @@ class DashboardState:
 
     def get_live_summary_payload(self, *, strategy: int | str | None = None) -> dict[str, Any]:
         with self._lock:
-            live_csv = self._cfg.logs_dir / "live_orders.csv"
+            cfg = self._cfg
+            live_csv = cfg.logs_dir / "live_orders.csv"
+            validation_cache = self._result_validation_cache
         strategy_filter = _normalize_strategy_filter(strategy)
         try:
-            if strategy_filter is None:
-                daily = summarize_paper_trades(live_csv, tz_offset="+08:00")
+            live_rows = list(reversed(_tail_csv_rows(live_csv, limit=1000000)))
+            filtered_rows = _filter_trade_rows_by_strategy(live_rows, strategy_filter)
+            if not filtered_rows:
+                daily = []
             else:
-                filtered_rows = list(reversed(_filter_trade_rows_by_strategy(_tail_csv_rows(live_csv, limit=1000000), strategy_filter)))
-                if not filtered_rows:
-                    daily = []
-                else:
-                    filtered_csv = live_csv.with_name(f"{live_csv.stem}_strategy_{strategy_filter}_summary{live_csv.suffix}")
-                    with filtered_csv.open("w", newline="", encoding="utf-8") as handle:
-                        writer = csv.DictWriter(handle, fieldnames=list(filtered_rows[0].keys()))
-                        writer.writeheader()
-                        writer.writerows(filtered_rows)
-                    try:
-                        daily = summarize_paper_trades(filtered_csv, tz_offset="+08:00")
-                    finally:
-                        if filtered_csv.exists():
-                            filtered_csv.unlink()
+                client = PolymarketClient(cfg)
+                try:
+                    summary_rows = _backfill_live_summary_rows(
+                        filtered_rows,
+                        client=client,
+                        validation_cache=validation_cache,
+                    )
+                finally:
+                    close = getattr(client, "close", None)
+                    if callable(close):
+                        close()
+                filtered_csv = live_csv.with_name(f"{live_csv.stem}_summary_work{live_csv.suffix}")
+                with filtered_csv.open("w", newline="", encoding="utf-8") as handle:
+                    writer = csv.DictWriter(handle, fieldnames=_csv_fieldnames_for_rows(summary_rows), extrasaction="ignore")
+                    writer.writeheader()
+                    writer.writerows(summary_rows)
+                try:
+                    daily = summarize_paper_trades(filtered_csv, tz_offset="+08:00")
+                finally:
+                    if filtered_csv.exists():
+                        filtered_csv.unlink()
         except (FileNotFoundError, ValueError):
             daily = []
         days = [asdict(item) for item in daily[-14:]]
@@ -2438,7 +2510,7 @@ def _dashboard_html() -> str:
       <div class="report-card-head">
         <div>
           <div class="head-title">交易报告</div>
-          <div class="head-desc">策略筛选同时作用于纸面交易汇总与最近交易明细</div>
+          <div id="reportCardDesc" class="head-desc">策略筛选同时作用于纸面交易汇总与最近交易明细</div>
         </div>
         <div class="top-actions report-card-actions">
           <select id="paperReportStrategy" class="btn btn-ghost"></select>
@@ -2450,7 +2522,7 @@ def _dashboard_html() -> str:
       </div>
       <div class="report-card-body">
         <section id="reportSummarySection" class="report-section">
-          <div class="section-title">纸面交易汇总</div>
+          <div id="reportSummaryTitle" class="section-title">纸面交易汇总</div>
           <div class=\"kv-grid\" style=\"margin-bottom: 10px;\">
             <div class=\"kv\"><div class=\"k\">日期</div><div id=\"sumDate\" class=\"v\">--</div></div>
             <div class=\"kv\"><div class=\"k\">交易笔数</div><div id=\"sumTrades\" class=\"v\">--</div></div>
@@ -4610,7 +4682,22 @@ function recentStrategyHeaderText() {
   return '按时间倒序显示最近 80 条记录 · 当前频次：' + timeframe + ' · 当前策略：策略 ' + strategy;
 }
 
+function renderReportModeCopy() {
+  const reportMode = effectiveReportMode();
+  const title = reportMode === 'live' ? '实盘交易汇总' : '纸面交易汇总';
+  const desc = '策略筛选同时作用于' + title + '与最近交易明细';
+  const titleNode = el('reportSummaryTitle');
+  const descNode = el('reportCardDesc');
+  if (titleNode) {
+    titleNode.textContent = title;
+  }
+  if (descNode) {
+    descNode.textContent = desc;
+  }
+}
+
 function renderSharedPaperReportStrategySelector() {
+  renderReportModeCopy();
   const options = paperReportStrategyOptions();
   const current = normalizePaperReportStrategyFilter(effectivePaperReportStrategyFilter(), options);
   const summaryCurrent = normalizePaperReportStrategyFilter(effectivePaperSummaryStrategyFilter(), options);
@@ -5994,6 +6081,8 @@ function renderMarket(payload) {
 function renderSummary(payload) {
   state.summary = payload;
   const latest = payload.latest || null;
+  const reportMode = effectiveReportMode();
+  renderReportModeCopy();
 
   if (!latest) {
     el('sumDate').textContent = '--';
@@ -6002,7 +6091,8 @@ function renderSummary(payload) {
     el('sumTotalPnl').textContent = '--';
     el('sumDrawdown').textContent = '--';
     el('sumStrongRate').textContent = '--';
-    el('daysTbody').innerHTML = '<tr><td colspan=\"5\" class=\"empty\">暂无纸面数据</td></tr>';
+    const emptyText = reportMode === 'live' ? '暂无实盘数据' : '暂无纸面数据';
+    el('daysTbody').innerHTML = '<tr><td colspan=\"5\" class=\"empty\">' + emptyText + '</td></tr>';
     setReportStatus('paperStatus', '汇总', '暂无数据', 'warn');
     return;
   }
@@ -6033,7 +6123,8 @@ function renderSummary(payload) {
       '</tr>';
   }).join('');
 
-  el('daysTbody').innerHTML = rows || '<tr><td colspan=\"5\" class=\"empty\">暂无纸面数据</td></tr>';
+  const emptyText = reportMode === 'live' ? '暂无实盘数据' : '暂无纸面数据';
+  el('daysTbody').innerHTML = rows || '<tr><td colspan=\"5\" class=\"empty\">' + emptyText + '</td></tr>';
   setReportStatus('paperStatus', '汇总', '已更新', 'ok');
 }
 
