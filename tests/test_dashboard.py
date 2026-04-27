@@ -632,6 +632,8 @@ def test_dashboard_reason_fallback_is_human_friendly():
     assert "ofi_stale" in js
     assert "ofi_too_weak" in js
     assert "awaiting_fill_confirmation" in js
+    assert "insufficient_live_wallet_balance" in js
+    assert "实盘钱包余额不足" in js
     assert "market_timeframe" in js
     assert "INVALID OPERATION" in js
     assert "return String(reason);" in js

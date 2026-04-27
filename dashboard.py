@@ -3877,6 +3877,7 @@ const REASON_LABELS = {
   strategy7_price_too_high: '策略7 入场价格过高',
   strategy7_confidence_too_low: '策略7 信号优势不足',
   awaiting_fill_confirmation: '等待成交确认',
+  insufficient_live_wallet_balance: '实盘钱包余额不足',
   market_timeframe: '市场频次切换待生效',
   'INVALID OPERATION': '实时连接订阅请求无效',
 };
