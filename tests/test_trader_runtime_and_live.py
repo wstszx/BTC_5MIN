@@ -955,6 +955,44 @@ def test_run_live_trading_stops_when_stop_event_is_set(tmp_path, monkeypatch):
     assert result['status'] == 'stopped'
 
 
+def test_run_live_trading_retries_transient_clob_client_timeout(tmp_path, monkeypatch):
+    attempts = {"create_client": 0, "sleeps": []}
+
+    def fake_create_client(_cfg):
+        attempts["create_client"] += 1
+        if attempts["create_client"] == 1:
+            raise Exception(
+                "[py_clob_client_v2] request error: The read operation timed out "
+                "PolyApiException[status_code=None, error_message=Request exception!]"
+            )
+        return _StubClobClient()
+
+    def fake_sleep_if_not_stopped(_stop_event, seconds):
+        attempts["sleeps"].append(seconds)
+        return len(attempts["sleeps"]) == 1
+
+    monkeypatch.setattr("trader._create_live_clob_client", fake_create_client)
+    monkeypatch.setattr("trader._sleep_if_not_stopped", fake_sleep_if_not_stopped)
+
+    result = run_live_trading(
+        AppConfig(
+            trade_mode="live",
+            live_trading_enabled=True,
+            live_private_key="pk",
+            live_funder="0xfunder",
+            poll_interval_seconds=1,
+            runtime_error_backoff_base_seconds=1,
+        ),
+        market_client=_NoTradeLiveMarketClient(),
+        state_path=tmp_path / "live_state.json",
+        log_path=tmp_path / "live_orders.csv",
+    )
+
+    assert result["status"] == "stopped"
+    assert attempts["create_client"] == 2
+    assert attempts["sleeps"] == [1, 1]
+
+
 def test_run_live_trading_reports_pending_live_order_blocks_switch(tmp_path):
     control = RuntimeControl(initial_mode='live')
     state_path = tmp_path / 'live_state.json'

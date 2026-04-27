@@ -3153,6 +3153,7 @@ def run_live_trading(
     )
 
     try:
+        consecutive_errors = 0
         while True:
             if _is_stop_requested(stop_event):
                 return {'status': 'stopped'}
@@ -3178,7 +3179,45 @@ def run_live_trading(
                     if not log_path_provided:
                         log_path = cfg.logs_dir / 'live_orders.csv'
             now = datetime.now(timezone.utc)
-            live_client = clob_client or _create_live_clob_client(cfg)
+            try:
+                live_client = clob_client or _create_live_clob_client(cfg)
+                consecutive_errors = 0
+            except Exception as exc:
+                message = str(exc).lower()
+                if any(marker in message for marker in ("status_code=401", "status_code=403", "unauthorized", "forbidden")):
+                    raise
+                retryable_markers = (
+                    "timeout",
+                    "timed out",
+                    "request exception",
+                    "status_code=none",
+                    "status_code=5",
+                    "connection",
+                    "temporar",
+                )
+                if not any(marker in message for marker in retryable_markers):
+                    raise
+                consecutive_errors += 1
+                backoff = _runtime_backoff_seconds(cfg, consecutive_errors)
+                _runtime_log(
+                    "live CLOB client transient error #"
+                    + str(consecutive_errors)
+                    + ": "
+                    + str(exc)
+                    + " | backoff="
+                    + str(backoff)
+                    + "s"
+                )
+                _update_runtime_control(
+                    runtime_control,
+                    current_round_slug=None,
+                    round_in_progress=False,
+                    safe_to_switch=True,
+                    pending_live_order=False,
+                )
+                if not _sleep_if_not_stopped(stop_event, backoff):
+                    return {"status": "stopped"}
+                continue
             state = _load_session_state_for_live_runtime(state_path, configured_strategy_ids)
             _ensure_live_strategy_state_map(state, configured_strategy_ids)
             managed_strategy_ids = _managed_live_strategy_ids(configured_strategy_ids, state)
