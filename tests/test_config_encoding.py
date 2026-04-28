@@ -33,6 +33,22 @@ def test_build_config_uses_paper_strategy_ids_when_present():
     assert cfg.paper_strategy_ids == [6, 2, 1]
 
 
+def test_build_config_uses_strategy_ids_as_canonical_paper_and_live_list():
+    cfg = build_config_from_env_values(
+        {
+            'STRATEGY_ID': '2',
+            'STRATEGY_IDS': '8,7,8,3',
+            'PAPER_STRATEGY_IDS': '1,2',
+            'LIVE_STRATEGY_IDS': '6',
+        }
+    )
+
+    assert cfg.strategy_ids == [8, 7, 3]
+    assert cfg.paper_strategy_ids == [8, 7, 3]
+    assert cfg.live_strategy_ids == [8, 7, 3]
+    assert list(cfg.live_profiles) == [8, 7, 3]
+
+
 def test_build_config_falls_back_to_strategy_id_for_paper():
     cfg = build_config_from_env_values({'STRATEGY_ID': '5'})
 
@@ -81,6 +97,13 @@ def test_build_config_ignores_invalid_paper_strategy_entries():
     cfg = build_config_from_env_values({'STRATEGY_ID': '3', 'PAPER_STRATEGY_IDS': '6,x,9,2,6'})
 
     assert cfg.paper_strategy_ids == [6, 2]
+
+
+def test_build_config_accepts_strategy_8_in_legacy_strategy_lists():
+    cfg = build_config_from_env_values({'STRATEGY_ID': '3', 'PAPER_STRATEGY_IDS': '8,6', 'LIVE_STRATEGY_IDS': '8'})
+
+    assert cfg.paper_strategy_ids == [8, 6]
+    assert cfg.live_strategy_ids == [8]
 
 
 def test_build_config_supports_btc_15m_market_timeframe():

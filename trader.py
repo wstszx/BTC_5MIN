@@ -802,6 +802,9 @@ def run_live_redeem_worker(
 
 
 def _paper_strategy_ids_for_runtime(cfg: AppConfig) -> list[int]:
+    strategy_ids = list(getattr(cfg, "strategy_ids", []) or [])
+    if strategy_ids:
+        return strategy_ids
     strategy_ids = list(getattr(cfg, "paper_strategy_ids", []) or [])
     if strategy_ids:
         return strategy_ids
@@ -809,6 +812,9 @@ def _paper_strategy_ids_for_runtime(cfg: AppConfig) -> list[int]:
 
 
 def _live_strategy_ids_for_runtime(cfg: AppConfig) -> list[int]:
+    strategy_ids = list(getattr(cfg, "strategy_ids", []) or [])
+    if strategy_ids:
+        return strategy_ids
     strategy_ids = list(getattr(cfg, "live_strategy_ids", []) or [])
     if strategy_ids:
         return strategy_ids
@@ -833,6 +839,8 @@ def _managed_live_strategy_ids(
 
 
 def _cfg_for_live_strategy(cfg: AppConfig, strategy_id: int) -> AppConfig:
+    if getattr(cfg, "strategy_ids", None):
+        return replace(cfg, strategy_id=strategy_id)
     profile = getattr(cfg, "live_profiles", {}).get(strategy_id)
     if profile is None:
         return replace(cfg, strategy_id=strategy_id)
@@ -851,7 +859,7 @@ def _sync_paper_binance_signal_service(
     strategy_ids: list[int],
     service: BinanceDepth5SignalService | None,
 ) -> BinanceDepth5SignalService | None:
-    needs_service = any(strategy_id in {6, 7} for strategy_id in strategy_ids)
+    needs_service = any(strategy_id in {6, 7, 8} for strategy_id in strategy_ids)
     expected_url = _binance_signal_service_url(cfg)
 
     if not needs_service:
@@ -1257,7 +1265,7 @@ def _resolve_side_from_strategy(
             return SideDecision(side='DOWN', signal_threshold=cfg.ofi_threshold, signal_delta=ofi_score)
         return SideDecision(side=None, reason='ofi_too_weak', signal_threshold=cfg.ofi_threshold, signal_delta=ofi_score)
 
-    if cfg.strategy_id not in {5, 7}:
+    if cfg.strategy_id not in {5, 7, 8}:
         return SideDecision(side=get_side_for_round(cfg.strategy_id, state.round_index))
 
     if state.signal_round_slug != slug:
@@ -1270,12 +1278,12 @@ def _resolve_side_from_strategy(
         signal_delta = None
         if _is_valid_signal_price(state.signal_round_open_up_price) and _is_valid_signal_price(signal_current_up_price):
             signal_delta = signal_current_up_price - state.signal_round_open_up_price
-        if cfg.strategy_id == 7:
+        if cfg.strategy_id in {7, 8}:
             candidate_price = resolve_quote_price(state.signal_round_locked_side, quote)
             if candidate_price is not None and candidate_price > cfg.strategy7_max_entry_price:
                 return SideDecision(
                     side=None,
-                    reason='strategy7_price_too_high',
+                    reason='strategy7_price_too_high' if cfg.strategy_id == 7 else 'strategy8_price_too_high',
                     signal_open_up_price=state.signal_round_open_up_price,
                     signal_current_up_price=signal_current_up_price,
                     signal_threshold=cfg.strategy7_momentum_threshold,
@@ -1307,20 +1315,21 @@ def _resolve_side_from_strategy(
         now=now,
     )
 
-    if cfg.strategy_id == 7:
+    if cfg.strategy_id in {7, 8}:
+        strategy_prefix = 'strategy7' if cfg.strategy_id == 7 else 'strategy8'
         ofi_score = _resolve_strategy6_ofi_score(quote)
         state.strategy6_last_ofi_score = ofi_score
         if ofi_score is None:
             return SideDecision(
                 side=None,
-                reason='strategy7_ofi_unavailable',
+                reason=f'{strategy_prefix}_ofi_unavailable',
                 signal_open_up_price=signal_open_up_price,
                 signal_current_up_price=signal_current_up_price,
             )
         if _is_strategy6_signal_stale(quote=quote, now=now, stale_seconds=cfg.binance_signal_stale_seconds):
             return SideDecision(
                 side=None,
-                reason='strategy7_ofi_stale',
+                reason=f'{strategy_prefix}_ofi_stale',
                 signal_open_up_price=signal_open_up_price,
                 signal_current_up_price=signal_current_up_price,
                 signal_threshold=cfg.strategy7_ofi_threshold,
@@ -1329,7 +1338,7 @@ def _resolve_side_from_strategy(
         if abs(ofi_score) < cfg.strategy7_ofi_threshold:
             return SideDecision(
                 side=None,
-                reason='strategy7_ofi_too_weak',
+                reason='strategy7_ofi_too_weak' if cfg.strategy_id == 7 else 'strategy8_market_state_weak',
                 signal_open_up_price=signal_open_up_price,
                 signal_current_up_price=signal_current_up_price,
                 signal_threshold=cfg.strategy7_ofi_threshold,
@@ -1338,7 +1347,7 @@ def _resolve_side_from_strategy(
         if not (_is_valid_signal_price(signal_open_up_price) and _is_valid_signal_price(signal_current_up_price)):
             return SideDecision(
                 side=None,
-                reason='strategy7_momentum_unavailable',
+                reason=f'{strategy_prefix}_momentum_unavailable',
                 signal_open_up_price=signal_open_up_price,
                 signal_current_up_price=signal_current_up_price,
                 signal_threshold=cfg.strategy7_momentum_threshold,
@@ -1348,16 +1357,32 @@ def _resolve_side_from_strategy(
         if abs(momentum_delta) < cfg.strategy7_momentum_threshold:
             return SideDecision(
                 side=None,
-                reason='strategy7_momentum_too_weak',
+                reason='strategy7_momentum_too_weak' if cfg.strategy_id == 7 else 'strategy8_market_state_weak',
                 signal_open_up_price=signal_open_up_price,
                 signal_current_up_price=signal_current_up_price,
                 signal_threshold=cfg.strategy7_momentum_threshold,
                 signal_delta=momentum_delta,
             )
-        if ofi_score * momentum_delta <= 0:
+        signal_gap_ok = strategy7_signal_gap_ok(
+            ofi_score=ofi_score,
+            momentum_delta=momentum_delta,
+            ofi_threshold=cfg.strategy7_ofi_threshold,
+            momentum_threshold=cfg.strategy7_momentum_threshold,
+            signal_min_gap=cfg.strategy7_min_signal_gap,
+        )
+        if cfg.strategy_id == 7 and ofi_score * momentum_delta <= 0:
             return SideDecision(
                 side=None,
                 reason='strategy7_signal_conflict',
+                signal_open_up_price=signal_open_up_price,
+                signal_current_up_price=signal_current_up_price,
+                signal_threshold=cfg.strategy7_momentum_threshold,
+                signal_delta=momentum_delta,
+            )
+        if cfg.strategy_id == 8 and not signal_gap_ok:
+            return SideDecision(
+                side=None,
+                reason='strategy8_market_state_weak',
                 signal_open_up_price=signal_open_up_price,
                 signal_current_up_price=signal_current_up_price,
                 signal_threshold=cfg.strategy7_momentum_threshold,
@@ -1383,31 +1408,30 @@ def _resolve_side_from_strategy(
         if entry_time is not None and (entry_time - now).total_seconds() < effective_confirm_before_entry_seconds:
             return SideDecision(
                 side=None,
-                reason='strategy7_entry_too_late',
+                reason=f'{strategy_prefix}_entry_too_late',
                 signal_open_up_price=signal_open_up_price,
                 signal_current_up_price=signal_current_up_price,
                 signal_threshold=cfg.strategy7_momentum_threshold,
                 signal_delta=momentum_delta,
             )
 
-        resolved_side = 'UP' if momentum_delta > 0 else 'DOWN'
+        if cfg.strategy_id == 8 and ofi_score * momentum_delta <= 0:
+            resolved_side = 'UP' if ofi_score > 0 else 'DOWN'
+            decision_reason = 'strategy8_conflict_reversal'
+        else:
+            resolved_side = 'UP' if momentum_delta > 0 else 'DOWN'
+            decision_reason = None
         candidate_price = resolve_quote_price(resolved_side, quote)
         if candidate_price is not None and candidate_price > cfg.strategy7_max_entry_price:
             return SideDecision(
                 side=None,
-                reason='strategy7_price_too_high',
+                reason=f'{strategy_prefix}_price_too_high',
                 signal_open_up_price=signal_open_up_price,
                 signal_current_up_price=signal_current_up_price,
                 signal_threshold=cfg.strategy7_momentum_threshold,
                 signal_delta=momentum_delta,
             )
-        if not strategy7_signal_gap_ok(
-            ofi_score=ofi_score,
-            momentum_delta=momentum_delta,
-            ofi_threshold=cfg.strategy7_ofi_threshold,
-            momentum_threshold=cfg.strategy7_momentum_threshold,
-            signal_min_gap=cfg.strategy7_min_signal_gap,
-        ):
+        if cfg.strategy_id == 7 and not signal_gap_ok:
             return SideDecision(
                 side=None,
                 reason='strategy7_confidence_too_low',
@@ -1419,6 +1443,7 @@ def _resolve_side_from_strategy(
         state.signal_round_locked_side = resolved_side
         return SideDecision(
             side=resolved_side,
+            reason=decision_reason,
             signal_open_up_price=signal_open_up_price,
             signal_current_up_price=signal_current_up_price,
             signal_threshold=cfg.strategy7_momentum_threshold,
@@ -1995,7 +2020,7 @@ def _submit_live_strategy_order(
         if use_sdk
         else (cfg.live_order_type or "FOK").upper()
     )
-    market_order_price = cfg.strategy7_max_entry_price if cfg.strategy_id == 7 else None
+    market_order_price = cfg.strategy7_max_entry_price if cfg.strategy_id in {7, 8} else None
     order_args = _build_live_market_order_args(
         token_id=token_id,
         plan=plan,
@@ -2681,7 +2706,7 @@ def place_live_order(
     live_client = live_client or _create_live_clob_client(cfg)
     use_sdk = type(live_client).__name__ == "ClobClient"
     order_type = _resolve_live_order_type(cfg.live_order_type) if use_sdk else (cfg.live_order_type or 'FOK').upper()
-    market_order_price = cfg.strategy7_max_entry_price if cfg.strategy_id == 7 else None
+    market_order_price = cfg.strategy7_max_entry_price if cfg.strategy_id in {7, 8} else None
     order_args = _build_live_market_order_args(
         token_id=token_id,
         plan=plan,

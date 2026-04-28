@@ -79,3 +79,47 @@ def test_strategy_6_chooses_up_for_strong_positive_ofi():
 def test_strategy_6_requires_ofi_signal_context():
     with pytest.raises(ValueError, match='ofi_score'):
         get_side_for_round(6, 0)
+
+
+def test_strategy_8_chooses_trend_when_ofi_and_momentum_agree():
+    side = get_side_for_round(
+        8,
+        0,
+        signal_open_up_price=0.50,
+        signal_current_up_price=0.54,
+        signal_threshold=0.02,
+        ofi_score=0.75,
+        ofi_threshold=0.65,
+        signal_min_gap=0.01,
+    )
+
+    assert side == 'UP'
+
+
+def test_strategy_8_chooses_reversal_when_conflict_is_extended():
+    side = get_side_for_round(
+        8,
+        0,
+        signal_open_up_price=0.50,
+        signal_current_up_price=0.46,
+        signal_threshold=0.02,
+        ofi_score=0.75,
+        ofi_threshold=0.65,
+        signal_min_gap=0.01,
+    )
+
+    assert side == 'UP'
+
+
+def test_strategy_8_rejects_weak_market_state():
+    with pytest.raises(ValueError, match='market state'):
+        get_side_for_round(
+            8,
+            0,
+            signal_open_up_price=0.50,
+            signal_current_up_price=0.51,
+            signal_threshold=0.02,
+            ofi_score=0.66,
+            ofi_threshold=0.65,
+            signal_min_gap=0.01,
+        )

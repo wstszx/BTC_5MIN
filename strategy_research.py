@@ -205,19 +205,19 @@ def _simulate_segment(
                 round_index,
                 signal_open_up_price=signal_open_up_price,
                 signal_current_up_price=signal_current_up_price,
-                signal_threshold=cfg.strategy7_momentum_threshold if strategy_id == 7 else cfg.signal_momentum_threshold,
+                signal_threshold=cfg.strategy7_momentum_threshold if strategy_id in {7, 8} else cfg.signal_momentum_threshold,
                 signal_fallback_strategy_id=cfg.signal_fallback_strategy_id,
                 ofi_score=ofi_score,
-                ofi_threshold=cfg.strategy7_ofi_threshold if strategy_id == 7 else cfg.ofi_threshold,
-                signal_min_gap=cfg.strategy7_min_signal_gap if strategy_id == 7 else 0.0,
+                ofi_threshold=cfg.strategy7_ofi_threshold if strategy_id in {7, 8} else cfg.ofi_threshold,
+                signal_min_gap=cfg.strategy7_min_signal_gap if strategy_id in {7, 8} else 0.0,
             )
         except ValueError:
-            if strategy_id != 7:
+            if strategy_id not in {7, 8}:
                 raise
             skipped += 1
             round_index += 1
             continue
-        if strategy_id == 7:
+        if strategy_id in {7, 8}:
             quote_fetched_at = _select_quote_fetched_at(row)
             strategy6_signal_at = _select_strategy6_signal_at(row)
             if (
@@ -261,7 +261,7 @@ def _simulate_segment(
         if price is None or price <= 0 or price >= 1:
             skipped += 1
             continue
-        if strategy_id == 7 and price > cfg.strategy7_max_entry_price:
+        if strategy_id in {7, 8} and price > cfg.strategy7_max_entry_price:
             skipped += 1
             continue
         if price > cfg.max_price_threshold:

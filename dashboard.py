@@ -23,6 +23,7 @@ from config import (
     load_env_file_values,
     LIVE_STRATEGY_IDS,
     PAPER_STRATEGY_IDS,
+    STRATEGY_IDS,
 )
 from binance_signal import BinanceDepth5SignalService
 from models import MarketWindow, PendingPaperTrade
@@ -77,30 +78,34 @@ def _write_env_file(path: Path, values: dict[str, str]) -> None:
     atomic_write_text(path, text, encoding="utf-8")
 
 
-def _normalize_strategy_id_list_value(value: str) -> str:
-    cfg = build_config_from_env_values({PAPER_STRATEGY_IDS: value})
+SUPPORTED_STRATEGY_ID_TEXTS: set[str] = {"1", "2", "3", "4", "5", "6", "7", "8"}
+SUPPORTED_STRATEGY_SELECT_OPTIONS: list[str] = ["1", "2", "3", "4", "5", "6", "7", "8"]
+
+
+def _normalize_strategy_id_list_for_key(value: str, key: str, attr_name: str) -> str:
+    cfg = build_config_from_env_values({key: value})
     raw = [item.strip() for item in str(value).split(',') if item.strip()]
-    if raw and len(cfg.paper_strategy_ids) == 1 and cfg.paper_strategy_ids[0] == cfg.strategy_id:
-        has_valid = any(item in {"1", "2", "3", "4", "5", "6", "7"} for item in raw)
+    normalized_ids = list(getattr(cfg, attr_name))
+    if raw and len(normalized_ids) == 1 and normalized_ids[0] == cfg.strategy_id:
+        has_valid = any(item in SUPPORTED_STRATEGY_ID_TEXTS for item in raw)
         if not has_valid:
-            raise ValueError(f"Invalid value for PAPER_STRATEGY_IDS: expected comma-separated strategy ids 1-7, got {value!r}")
-    normalized = [str(item) for item in cfg.paper_strategy_ids]
+            raise ValueError(f"Invalid value for {key}: expected comma-separated strategy ids 1-8, got {value!r}")
+    normalized = [str(item) for item in normalized_ids]
     if not normalized:
-        raise ValueError(f"Invalid value for PAPER_STRATEGY_IDS: expected comma-separated strategy ids 1-7, got {value!r}")
+        raise ValueError(f"Invalid value for {key}: expected comma-separated strategy ids 1-8, got {value!r}")
     return ",".join(normalized)
+
+
+def _normalize_unified_strategy_id_list_value(value: str) -> str:
+    return _normalize_strategy_id_list_for_key(value, STRATEGY_IDS, "strategy_ids")
+
+
+def _normalize_strategy_id_list_value(value: str) -> str:
+    return _normalize_strategy_id_list_for_key(value, PAPER_STRATEGY_IDS, "paper_strategy_ids")
 
 
 def _normalize_live_strategy_id_list_value(value: str) -> str:
-    cfg = build_config_from_env_values({LIVE_STRATEGY_IDS: value})
-    raw = [item.strip() for item in str(value).split(',') if item.strip()]
-    if raw and len(cfg.live_strategy_ids) == 1 and cfg.live_strategy_ids[0] == cfg.strategy_id:
-        has_valid = any(item in {"1", "2", "3", "4", "5", "6", "7"} for item in raw)
-        if not has_valid:
-            raise ValueError(f"Invalid value for LIVE_STRATEGY_IDS: expected comma-separated strategy ids 1-7, got {value!r}")
-    normalized = [str(item) for item in cfg.live_strategy_ids]
-    if not normalized:
-        raise ValueError(f"Invalid value for LIVE_STRATEGY_IDS: expected comma-separated strategy ids 1-7, got {value!r}")
-    return ",".join(normalized)
+    return _normalize_strategy_id_list_for_key(value, LIVE_STRATEGY_IDS, "live_strategy_ids")
 
 def _tail_csv_rows(path: Path, *, limit: int) -> list[dict[str, str]]:
     if limit <= 0 or not path.exists():
@@ -121,7 +126,7 @@ def _normalize_strategy_filter(strategy: int | str | None) -> str | None:
     raw = str(strategy).strip().lower()
     if raw in {"", "all"}:
         return None
-    if raw in {"1", "2", "3", "4", "5", "6", "7"}:
+    if raw in SUPPORTED_STRATEGY_ID_TEXTS:
         return raw
     raise ValueError(f"Invalid strategy filter: {strategy!r}")
 
@@ -703,6 +708,12 @@ def _strategy_catalog() -> dict[str, dict[str, Any]]:
             "preview": ["OFI", "MOMENTUM", "THRESHOLD", "SKIP"],
             "detail": "更偏向少做、做高质量信号。",
         },
+        "8": {
+            "label": "状态切换",
+            "summary": "趋势时跟随共识，强冲突时按盘口方向做反转，否则跳过。",
+            "preview": ["REGIME", "OFI", "MOMENTUM", "REVERSAL"],
+            "detail": "用同一套信号在趋势和过热冲突之间切换，纸面和实盘行为保持一致。",
+        },
     }
 
 
@@ -738,6 +749,7 @@ def _field_groups() -> list[dict[str, Any]]:
             "description": "决定方向节奏、下注模式和主要风险边界。",
             "keys": [
                 "STRATEGY_ID",
+                "STRATEGY_IDS",
                 "OPEN_DELAY_SECONDS",
                 "TARGET_PROFIT",
                 "BET_SIZING_MODE",
@@ -875,6 +887,7 @@ class DashboardState:
         "LIVE_AUTO_REDEEM_INITIAL_BACKOFF_SECONDS",
         "LIVE_AUTO_REDEEM_MAX_BACKOFF_SECONDS",
         "STRATEGY_ID",
+        "STRATEGY_IDS",
         "LIVE_STRATEGY_IDS",
         "PAPER_STRATEGY_IDS",
         "OPEN_DELAY_SECONDS",
@@ -936,6 +949,7 @@ class DashboardState:
         "LIVE_AUTO_REDEEM_INITIAL_BACKOFF_SECONDS": "自动赎回初始退避秒数",
         "LIVE_AUTO_REDEEM_MAX_BACKOFF_SECONDS": "自动赎回最大退避秒数",
         "STRATEGY_ID": "基础策略",
+        "STRATEGY_IDS": "统一策略组合",
         "LIVE_STRATEGY_IDS": "实盘策略组合",
         "PAPER_STRATEGY_IDS": "纸面策略组合",
         "OPEN_DELAY_SECONDS": "开盘后入场秒数",
@@ -977,9 +991,10 @@ class DashboardState:
         "LIVE_TRADING_ENABLED": ["true", "false"],
         "LIVE_AUTO_REDEEM_ENABLED": ["false", "true"],
         "LIVE_AUTO_REDEEM_DRY_RUN": ["false", "true"],
-        "STRATEGY_ID": ["1", "2", "3", "4", "5", "6", "7"],
-        "LIVE_STRATEGY_IDS": ["1", "2", "3", "4", "5", "6", "7"],
-        "PAPER_STRATEGY_IDS": ["1", "2", "3", "4", "5", "6", "7"],
+        "STRATEGY_ID": SUPPORTED_STRATEGY_SELECT_OPTIONS,
+        "STRATEGY_IDS": SUPPORTED_STRATEGY_SELECT_OPTIONS,
+        "LIVE_STRATEGY_IDS": SUPPORTED_STRATEGY_SELECT_OPTIONS,
+        "PAPER_STRATEGY_IDS": SUPPORTED_STRATEGY_SELECT_OPTIONS,
         "BET_SIZING_MODE": ["FIXED_BASE_COST", "TARGET_PROFIT"],
         "SIGNAL_WEAK_SIGNAL_MODE": ["SKIP", "FALLBACK"],
         "SIGNAL_FALLBACK_STRATEGY_ID": ["1", "2", "3", "4"],
@@ -1007,6 +1022,7 @@ class DashboardState:
         "LIVE_AUTO_REDEEM_INITIAL_BACKOFF_SECONDS": "live_auto_redeem_initial_backoff_seconds",
         "LIVE_AUTO_REDEEM_MAX_BACKOFF_SECONDS": "live_auto_redeem_max_backoff_seconds",
         "STRATEGY_ID": "strategy_id",
+        "STRATEGY_IDS": "strategy_ids",
         "LIVE_STRATEGY_IDS": "live_strategy_ids",
         "PAPER_STRATEGY_IDS": "paper_strategy_ids",
         "OPEN_DELAY_SECONDS": "open_delay_seconds",
@@ -1126,7 +1142,8 @@ class DashboardState:
         "STRATEGY7_LATE_CONFIRM_RELAX_SECONDS": "strategy_7_only",
     }
     FIELD_HELP: dict[str, str] = {
-        "STRATEGY_ID": "策略 1-4 是固定节奏策略，策略 5 是动量策略，策略 6 是 Binance OFI 盘口失衡策略。",
+        "STRATEGY_ID": "策略 1-4 是固定节奏策略，策略 5 是动量策略，策略 6 是 Binance OFI，策略 7/8 是组合信号策略。",
+        "STRATEGY_IDS": "统一策略组合。设置后纸面和实盘都使用同一组策略和同一套参数，切换模式只改变执行环境。",
         "LIVE_STRATEGY_IDS": "实盘模式下可轮询的策略列表，按输入顺序去重，例如 2,6。未填写时会回退到 STRATEGY_ID。",
         "PAPER_STRATEGY_IDS": "纸面测试可同时运行多个策略，按输入顺序去重，例如 1,2,6。",
         "TARGET_PROFIT": "在目标收益模式下，这里表示每轮期望净利；在固定金额模式下，它更多用于观察研究，不直接决定首笔下注金额。",
@@ -1229,6 +1246,9 @@ class DashboardState:
         if key == "LIVE_STRATEGY_IDS":
             return _normalize_live_strategy_id_list_value(normalized)
 
+        if key == "STRATEGY_IDS":
+            return _normalize_unified_strategy_id_list_value(normalized)
+
         if key == "PAPER_STRATEGY_IDS":
             return _normalize_strategy_id_list_value(normalized)
 
@@ -1301,9 +1321,12 @@ class DashboardState:
         return build_config_from_env_values(env_values)
 
     def _build_binance_signal_service(self, cfg: AppConfig) -> BinanceDepth5SignalService | None:
-        strategy_ids = list(getattr(cfg, "paper_strategy_ids", []) or [])
-        strategy_ids.extend(getattr(cfg, "live_strategy_ids", []) or [])
-        if cfg.strategy_id not in {6, 7} and not any(strategy_id in {6, 7} for strategy_id in strategy_ids):
+        strategy_ids = list(getattr(cfg, "strategy_ids", []) or [])
+        if not strategy_ids:
+            strategy_ids = []
+            strategy_ids.extend(getattr(cfg, "paper_strategy_ids", []) or [])
+            strategy_ids.extend(getattr(cfg, "live_strategy_ids", []) or [])
+        if cfg.strategy_id not in {6, 7, 8} and not any(strategy_id in {6, 7, 8} for strategy_id in strategy_ids):
             return None
         service = BinanceDepth5SignalService(ws_url=cfg.binance_ws_url, stream=cfg.binance_depth_stream)
         service.start()
@@ -1334,7 +1357,7 @@ class DashboardState:
         value = getattr(self._cfg, self.CONFIG_ATTR_MAP[key])
         if value is None:
             return ""
-        if key in {"LIVE_STRATEGY_IDS", "PAPER_STRATEGY_IDS"}:
+        if key in {"STRATEGY_IDS", "LIVE_STRATEGY_IDS", "PAPER_STRATEGY_IDS"}:
             return ",".join(str(item) for item in value)
         return _fmt_env(value)
 
@@ -1466,7 +1489,10 @@ class DashboardState:
             if field_groups:
                 field_groups[0]["title"] = "运行模式"
             select_options = json.loads(json.dumps(self.SELECT_OPTIONS))
-            select_options["STRATEGY_ID"] = ["1", "2", "3", "4", "5", "6", "7"]
+            select_options["STRATEGY_ID"] = list(SUPPORTED_STRATEGY_SELECT_OPTIONS)
+            select_options["STRATEGY_IDS"] = list(SUPPORTED_STRATEGY_SELECT_OPTIONS)
+            select_options["PAPER_STRATEGY_IDS"] = list(SUPPORTED_STRATEGY_SELECT_OPTIONS)
+            select_options["LIVE_STRATEGY_IDS"] = list(SUPPORTED_STRATEGY_SELECT_OPTIONS)
             paper_profiles = {
                 timeframe: {
                     "strategy_id": str(profile.strategy_id),
@@ -1720,18 +1746,18 @@ class DashboardState:
                 }
 
             strategy7_payload = {
-                "enabled": selected_strategy == 7,
+                "enabled": selected_strategy in {7, 8},
                 "ofi_score": quote.strategy6_ofi_score,
                 "momentum_delta": side_decision.signal_delta,
                 "agreement": (
                     "agree"
-                    if selected_strategy == 7 and side_decision.side in {"UP", "DOWN"}
-                    else ("conflict" if side_decision.reason == "strategy7_signal_conflict" else None)
+                    if selected_strategy in {7, 8} and side_decision.side in {"UP", "DOWN"} and side_decision.reason != "strategy8_conflict_reversal"
+                    else ("conflict" if side_decision.reason in {"strategy7_signal_conflict", "strategy8_conflict_reversal"} else None)
                 ),
                 "quality_gate": (
                     "passed"
-                    if selected_strategy == 7 and side_decision.side in {"UP", "DOWN"}
-                    else (side_decision.reason if selected_strategy == 7 else None)
+                    if selected_strategy in {7, 8} and side_decision.side in {"UP", "DOWN"}
+                    else (side_decision.reason if selected_strategy in {7, 8} else None)
                 ),
                 "final_reason": side_decision.reason,
             }
@@ -3830,6 +3856,7 @@ const HELP_TABS = [
   { id: 'quickstart', label: '快速上手' },
   { id: 'pageguide', label: '页面说明' },
   { id: 'configdict', label: '配置字典' },
+  { id: 'riskguide', label: '风控限制' },
   { id: 'strategyguide', label: '策略说明' },
   { id: 'faq', label: '常见问题' },
 ];
@@ -3931,6 +3958,57 @@ const HELP_SECTIONS = {
       },
     ],
   },
+  riskguide: {
+    title: '风控与下单限制',
+    sections: [
+      {
+        title: '所有模式通用',
+        bullets: [
+          '纸面和实盘都会先经过同一套下注计划检查：价格、下注金额、连续亏损、下注模式和止损重置都会先判断。',
+          'MAX_CONSECUTIVE_LOSSES 控制连续亏损达到多少轮后触发止损重置，重置会清空待回补亏损和连续亏损计数。',
+          'MAX_STAKE 是单笔最大下注金额；计算出的 order_cost 超过它时，本轮会跳过并显示 order_cost_above_max_stake。',
+          'MAX_PRICE_THRESHOLD 限制目标方向最高买入价；MIN_PRICE_THRESHOLD 可选限制最低买入价。',
+          'BET_SIZING_MODE 决定下注金额计算方式；FIXED_BASE_COST 从 BASE_ORDER_COST 起步，TARGET_PROFIT 按目标利润反推下注额。',
+        ],
+      },
+      {
+        title: '纸面与实盘差异',
+        bullets: [
+          '纸面模式不会读取真实钱包，会使用 PAPER_SIMULATED_WALLET_BALANCE 作为 dry-run 钱包预算。',
+          '实盘模式会读取真实钱包余额；余额不可用会显示 live_wallet_balance_unavailable，余额不足会显示 insufficient_live_wallet_balance。',
+          '纸面和实盘的信号、风控和预算检查路径应保持一致，差异只在最终是否发送真实订单。',
+        ],
+      },
+      {
+        title: '常见跳过原因',
+        bullets: [
+          'price_above_threshold 表示目标方向价格高于 MAX_PRICE_THRESHOLD；price_below_threshold 表示低于 MIN_PRICE_THRESHOLD。',
+          'order_cost_above_max_stake 表示本轮所需下注金额超过 MAX_STAKE。',
+          'max_consecutive_losses_reached 表示连续亏损已达到 MAX_CONSECUTIVE_LOSSES，本轮触发止损重置。',
+          'ws_stale 表示实时行情过旧，程序会阻止本轮交易，避免拿陈旧报价下单。',
+          'entry_window_missed 表示已经错过当前轮次允许入场的时间窗口。',
+        ],
+      },
+      {
+        title: '策略专属门槛',
+        bullets: [
+          '策略 1-4 是固定节奏策略，没有额外信号门槛，但仍受价格、下注金额、连续亏损和预算限制。',
+          '策略 5 使用动量信号，SIGNAL_MOMENTUM_THRESHOLD 不满足时会跳过；价格不可用也会跳过。',
+          '策略 6 使用 Binance OFI，OFI_THRESHOLD 不满足、信号过期或不可用时都会跳过。',
+          '策略 7 同时要求 OFI 和动量同向，受 STRATEGY7_OFI_THRESHOLD、STRATEGY7_MOMENTUM_THRESHOLD、STRATEGY7_MAX_ENTRY_PRICE 和确认时间限制影响。',
+        ],
+      },
+      {
+        title: '重置与告警',
+        bullets: [
+          '每次亏损会增加 recovery_loss 和 consecutive_losses；获胜后会清空 recovery_loss 和 consecutive_losses。',
+          '连续亏损达到 MAX_CONSECUTIVE_LOSSES 会触发止损重置，并增加 stop_loss_count。',
+          '连续因 MAX_STAKE 超额而跳过也会累积计数，达到 MAX_CONSECUTIVE_LOSSES 时会按风险门处理并重置。',
+          'MAX_STAKE_SKIP_ALERT_THRESHOLD 控制连续超额跳过多少次后打印提醒。',
+        ],
+      },
+    ],
+  },
 };
 
 const HELP_FAQ = [
@@ -3958,6 +4036,7 @@ const STRATEGY_LABELS = {
   5: '动量信号 V2',
   6: '币安盘口失衡',
   7: '盘口+动量共识',
+  8: '状态切换',
 };
 
 const OPTION_LABELS = {
@@ -4018,6 +4097,14 @@ const REASON_LABELS = {
   strategy7_entry_too_late: '策略7 确认出现过晚',
   strategy7_price_too_high: '策略7 入场价格过高',
   strategy7_confidence_too_low: '策略7 信号优势不足',
+  strategy8_signal_unavailable: '策略8 信号不可用',
+  strategy8_ofi_unavailable: '策略8 盘口失衡信号不可用',
+  strategy8_ofi_stale: '策略8 盘口失衡信号已过期',
+  strategy8_momentum_unavailable: '策略8 动量信号不可用',
+  strategy8_market_state_weak: '策略8 市场状态不明确',
+  strategy8_conflict_reversal: '策略8 强冲突反转入场',
+  strategy8_entry_too_late: '策略8 确认出现过晚',
+  strategy8_price_too_high: '策略8 入场价格过高',
   awaiting_fill_confirmation: '等待成交确认',
   insufficient_live_wallet_balance: '实盘钱包余额不足',
   market_timeframe: '市场频次切换待生效',
@@ -4031,6 +4118,7 @@ const CONFIG_KEY_NAMES = {
   POLYMARKET_PRIVATE_KEY: '实盘私钥',
   POLYMARKET_FUNDER: '\u5b9e\u76d8\u94b1\u5305\u5730\u5740',
   STRATEGY_ID: '基础策略',
+  STRATEGY_IDS: '统一策略组合',
   TARGET_PROFIT: '每次目标净利',
   BET_SIZING_MODE: '下注模式',
   BASE_ORDER_COST: '固定起始下注金额',
@@ -4316,7 +4404,7 @@ function strategyShortLabel(payload, strategyId) {
 }
 
 function strategyOptionLabel(key, opt, payload) {
-  if (key === 'STRATEGY_ID' || key === 'PAPER_STRATEGY_IDS' || key === 'LIVE_STRATEGY_IDS' || key === 'SIGNAL_FALLBACK_STRATEGY_ID') {
+  if (key === 'STRATEGY_ID' || key === 'STRATEGY_IDS' || key === 'PAPER_STRATEGY_IDS' || key === 'LIVE_STRATEGY_IDS' || key === 'SIGNAL_FALLBACK_STRATEGY_ID') {
     return String(opt) + ' | ' + strategyShortLabel(payload, opt);
   }
   const optMap = OPTION_LABELS[key] || {};
@@ -4399,6 +4487,16 @@ function activeConfigModeFromValues(payload, values) {
 }
 
 function activeStrategyListKey(payload, values) {
+  const envValues = (payload && payload.env_values) || {};
+  const selectOptions = (payload && payload.select_options) || {};
+  const editableKeys = (payload && payload.editable_keys) || [];
+  if (
+    Object.prototype.hasOwnProperty.call(envValues, 'STRATEGY_IDS') ||
+    Object.prototype.hasOwnProperty.call(selectOptions, 'STRATEGY_IDS') ||
+    editableKeys.indexOf('STRATEGY_IDS') >= 0
+  ) {
+    return 'STRATEGY_IDS';
+  }
   const mode = activeConfigModeFromValues(payload, values);
   return mode === 'live' ? 'LIVE_STRATEGY_IDS' : 'PAPER_STRATEGY_IDS';
 }
@@ -4445,11 +4543,14 @@ function currentUnifiedStrategyDraftValues() {
     ? Array.from(multiNode.options || []).filter((option) => option.selected).map((option) => option.value).join(',')
     : '';
   const selectedValue = domStrategyListKey === multiKey ? domSelected : String(envValues[multiKey] || '');
-  return {
+  const output = {
     STRATEGY_ID: focusNode ? focusNode.value : String(envValues.STRATEGY_ID || ''),
-    PAPER_STRATEGY_IDS: multiKey === 'PAPER_STRATEGY_IDS' ? selectedValue : String(envValues.PAPER_STRATEGY_IDS || ''),
-    LIVE_STRATEGY_IDS: multiKey === 'LIVE_STRATEGY_IDS' ? selectedValue : String(envValues.LIVE_STRATEGY_IDS || ''),
+    STRATEGY_IDS: String(envValues.STRATEGY_IDS || ''),
+    PAPER_STRATEGY_IDS: String(envValues.PAPER_STRATEGY_IDS || ''),
+    LIVE_STRATEGY_IDS: String(envValues.LIVE_STRATEGY_IDS || ''),
   };
+  output[multiKey] = selectedValue;
+  return output;
 }
 
 function refreshStrategyPanelDependentUi() {
@@ -5324,6 +5425,10 @@ function renderHelpPageGuide() {
   return renderHelpSectionList(HELP_SECTIONS.pageguide);
 }
 
+function renderHelpRiskGuide() {
+  return renderHelpSectionList(HELP_SECTIONS.riskguide);
+}
+
 function renderHelpConfigDictionary() {
   const payload = state.config || {};
   const groups = payload.field_groups || [];
@@ -5410,6 +5515,8 @@ function renderHelpDrawer() {
     body.innerHTML = renderHelpPageGuide();
   } else if (state.helpTab === 'configdict') {
     body.innerHTML = renderHelpConfigDictionary();
+  } else if (state.helpTab === 'riskguide') {
+    body.innerHTML = renderHelpRiskGuide();
   } else if (state.helpTab === 'strategyguide') {
     body.innerHTML = renderHelpStrategyGuide();
   } else {
@@ -5658,7 +5765,7 @@ function renderConfig(payload) {
     ? payload.field_groups
     : [{ title: '\u5168\u90e8\u53c2\u6570', description: '', keys }];
   const editableKeySet = new Set(['ENABLE_LIVE_TRADING', ...keys.filter((key) => !isSingleLiveToggleKey(key))]);
-  const hiddenKeys = new Set(['PAPER_STRATEGY_IDS', 'LIVE_STRATEGY_IDS', 'PAPER_TIMEFRAMES', 'MARKET_TIMEFRAME', 'ENABLE_LIVE_TRADING']);
+  const hiddenKeys = new Set(['STRATEGY_IDS', 'PAPER_STRATEGY_IDS', 'LIVE_STRATEGY_IDS', 'PAPER_TIMEFRAMES', 'MARKET_TIMEFRAME', 'ENABLE_LIVE_TRADING']);
   const advancedPanel = el('advancedConfigPanel');
   if (advancedPanel) {
     advancedPanel.innerHTML = '';
@@ -5793,6 +5900,12 @@ function renderConfig(payload) {
         err.textContent = validationErrors.PAPER_STRATEGY_IDS;
         wrap.appendChild(err);
       }
+      if (key === 'STRATEGY_ID' && validationErrors.STRATEGY_IDS) {
+        const err = document.createElement('div');
+        err.className = 'field-error';
+        err.textContent = validationErrors.STRATEGY_IDS;
+        wrap.appendChild(err);
+      }
       if (key === 'STRATEGY_ID' && validationErrors.LIVE_STRATEGY_IDS) {
         const err = document.createElement('div');
         err.className = 'field-error';
@@ -5865,7 +5978,7 @@ function renderConfig(payload) {
 function collectConfigValues(options) {
   const settings = options || {};
   const payload = {};
-  const unifiedStrategyKeys = ['STRATEGY_ID', 'PAPER_STRATEGY_IDS', 'LIVE_STRATEGY_IDS'];
+  const unifiedStrategyKeys = ['STRATEGY_ID', 'STRATEGY_IDS', 'PAPER_STRATEGY_IDS', 'LIVE_STRATEGY_IDS'];
   const keys = ['ENABLE_LIVE_TRADING', ...(((state.config && state.config.editable_keys) || []).filter((key) => !isSingleLiveToggleKey(key)))];
   for (const key of keys) {
     if (unifiedStrategyKeys.indexOf(key) >= 0) {

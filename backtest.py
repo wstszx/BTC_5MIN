@@ -165,15 +165,16 @@ def run_backtest(csv_path: Path, cfg: AppConfig | None = None) -> BacktestResult
                 state.round_index,
                 signal_open_up_price=signal_open_up_price,
                 signal_current_up_price=signal_current_up_price,
-                signal_threshold=cfg.strategy7_momentum_threshold if cfg.strategy_id == 7 else cfg.signal_momentum_threshold,
+                signal_threshold=cfg.strategy7_momentum_threshold if cfg.strategy_id in {7, 8} else cfg.signal_momentum_threshold,
                 signal_fallback_strategy_id=cfg.signal_fallback_strategy_id,
                 ofi_score=ofi_score,
-                ofi_threshold=cfg.strategy7_ofi_threshold if cfg.strategy_id == 7 else cfg.ofi_threshold,
-                signal_min_gap=cfg.strategy7_min_signal_gap if cfg.strategy_id == 7 else 0.0,
+                ofi_threshold=cfg.strategy7_ofi_threshold if cfg.strategy_id in {7, 8} else cfg.ofi_threshold,
+                signal_min_gap=cfg.strategy7_min_signal_gap if cfg.strategy_id in {7, 8} else 0.0,
             )
         except ValueError:
-            if cfg.strategy_id != 7:
+            if cfg.strategy_id not in {7, 8}:
                 raise
+            strategy_prefix = "strategy7" if cfg.strategy_id == 7 else "strategy8"
             records.append(
                 _build_record(
                     cfg=cfg,
@@ -186,13 +187,14 @@ def run_backtest(csv_path: Path, cfg: AppConfig | None = None) -> BacktestResult
                     expected_profit=0.0,
                     result=None,
                     trade_pnl=0.0,
-                    skip_reason="strategy7_signal_unavailable",
+                    skip_reason=f"{strategy_prefix}_signal_unavailable",
                 )
             )
             skipped_round_count += 1
             state.round_index += 1
             continue
-        if cfg.strategy_id == 7:
+        if cfg.strategy_id in {7, 8}:
+            strategy_prefix = "strategy7" if cfg.strategy_id == 7 else "strategy8"
             quote_fetched_at = _select_quote_fetched_at(row)
             strategy6_signal_at = _select_strategy6_signal_at(row)
             if (
@@ -212,7 +214,7 @@ def run_backtest(csv_path: Path, cfg: AppConfig | None = None) -> BacktestResult
                         expected_profit=0.0,
                         result=None,
                         trade_pnl=0.0,
-                        skip_reason="strategy7_ofi_stale",
+                        skip_reason=f"{strategy_prefix}_ofi_stale",
                     )
                 )
                 skipped_round_count += 1
@@ -254,14 +256,15 @@ def run_backtest(csv_path: Path, cfg: AppConfig | None = None) -> BacktestResult
                         expected_profit=0.0,
                         result=None,
                         trade_pnl=0.0,
-                        skip_reason="strategy7_entry_too_late",
+                        skip_reason=f"{strategy_prefix}_entry_too_late",
                     )
                 )
                 skipped_round_count += 1
                 state.round_index += 1
                 continue
         price = _select_entry_price(row, side, cfg.entry_timing)
-        if cfg.strategy_id == 7 and price is not None and price > cfg.strategy7_max_entry_price:
+        if cfg.strategy_id in {7, 8} and price is not None and price > cfg.strategy7_max_entry_price:
+            strategy_prefix = "strategy7" if cfg.strategy_id == 7 else "strategy8"
             records.append(
                 _build_record(
                     cfg=cfg,
@@ -274,7 +277,7 @@ def run_backtest(csv_path: Path, cfg: AppConfig | None = None) -> BacktestResult
                     expected_profit=0.0,
                     result=None,
                     trade_pnl=0.0,
-                    skip_reason="strategy7_price_too_high",
+                    skip_reason=f"{strategy_prefix}_price_too_high",
                 )
             )
             skipped_round_count += 1

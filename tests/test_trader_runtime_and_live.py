@@ -3282,7 +3282,100 @@ def test_strategy7_clamps_confirmation_window_to_available_open_entry_window():
     )
 
     assert decision.side == "UP"
+
+
+def test_strategy8_returns_trend_side_when_ofi_and_momentum_agree():
+    now = datetime.now(timezone.utc)
+    cfg = AppConfig(
+        strategy_id=8,
+        strategy7_ofi_threshold=0.65,
+        strategy7_momentum_threshold=0.02,
+        strategy7_min_signal_gap=0.01,
+        strategy7_max_entry_price=0.56,
+        strategy7_confirm_before_entry_seconds=12,
+        binance_signal_stale_seconds=2.0,
+    )
+    state = SessionState(round_index=0, signal_round_slug="s1", signal_round_open_up_price=0.50)
+    quote = MarketQuote(
+        slug="s1",
+        up_price=0.54,
+        up_best_ask=0.54,
+        strategy6_ofi_score=0.8,
+        fetched_at=now,
+        strategy6_signal_at=now,
+    )
+
+    decision = _resolve_side_from_strategy(
+        cfg=cfg,
+        state=state,
+        slug="s1",
+        quote=quote,
+        now=now,
+        entry_time=now + timedelta(seconds=20),
+    )
+
+    assert decision.side == "UP"
     assert decision.reason is None
+    assert decision.signal_delta == pytest.approx(0.04)
+
+
+def test_strategy8_returns_reversal_side_when_ofi_and_momentum_conflict_strongly():
+    now = datetime.now(timezone.utc)
+    cfg = AppConfig(
+        strategy_id=8,
+        strategy7_ofi_threshold=0.65,
+        strategy7_momentum_threshold=0.02,
+        strategy7_min_signal_gap=0.01,
+        strategy7_max_entry_price=0.56,
+        strategy7_confirm_before_entry_seconds=12,
+        binance_signal_stale_seconds=2.0,
+    )
+    state = SessionState(round_index=0, signal_round_slug="s1", signal_round_open_up_price=0.50)
+    quote = MarketQuote(
+        slug="s1",
+        up_price=0.46,
+        down_price=0.54,
+        down_best_ask=0.54,
+        strategy6_ofi_score=0.8,
+        fetched_at=now,
+        strategy6_signal_at=now,
+    )
+
+    decision = _resolve_side_from_strategy(
+        cfg=cfg,
+        state=state,
+        slug="s1",
+        quote=quote,
+        now=now,
+        entry_time=now + timedelta(seconds=20),
+    )
+
+    assert decision.side == "UP"
+    assert decision.reason == "strategy8_conflict_reversal"
+
+
+def test_strategy8_skips_when_market_state_is_weak():
+    now = datetime.now(timezone.utc)
+    cfg = AppConfig(
+        strategy_id=8,
+        strategy7_ofi_threshold=0.65,
+        strategy7_momentum_threshold=0.02,
+        strategy7_min_signal_gap=0.01,
+    )
+    state = SessionState(round_index=0, signal_round_slug="s1", signal_round_open_up_price=0.50)
+    quote = MarketQuote(
+        slug="s1",
+        up_price=0.51,
+        up_best_ask=0.51,
+        strategy6_ofi_score=0.66,
+        fetched_at=now,
+        strategy6_signal_at=now,
+    )
+
+    decision = _resolve_side_from_strategy(cfg=cfg, state=state, slug="s1", quote=quote, now=now)
+
+    assert decision.side is None
+    assert decision.reason == "strategy8_market_state_weak"
 
 
 def test_poll_interval_uses_base_when_no_target_round():

@@ -9,6 +9,7 @@ MARKET_TIMEFRAME = "MARKET_TIMEFRAME"
 PAPER_TIMEFRAMES = "PAPER_TIMEFRAMES"
 PAPER_STRATEGY_IDS = bytes([80, 65, 80, 69, 82, 95, 83, 84, 82, 65, 84, 69, 71, 89, 95, 73, 68, 83]).decode()
 LIVE_STRATEGY_IDS = "LIVE_STRATEGY_IDS"
+STRATEGY_IDS = "STRATEGY_IDS"
 STRATEGY_ID = bytes([83, 84, 82, 65, 84, 69, 71, 89, 95, 73, 68]).decode()
 
 
@@ -142,7 +143,7 @@ def _parse_strategy_id_list(raw: str | None, *, fallback: int) -> list[int]:
             strategy_id = int(candidate)
         except ValueError:
             continue
-        if strategy_id < 1 or strategy_id > 7 or strategy_id in seen:
+        if strategy_id < 1 or strategy_id > 8 or strategy_id in seen:
             continue
         seen.add(strategy_id)
         strategy_ids.append(strategy_id)
@@ -254,6 +255,37 @@ class LiveStrategyProfile:
     strategy7_late_confirm_relax_seconds: float
 
 
+def _base_live_profile_for_strategy(cfg: AppConfig, strategy_id: int) -> LiveStrategyProfile:
+    return LiveStrategyProfile(
+        strategy_id=strategy_id,
+        target_profit=cfg.target_profit,
+        bet_sizing_mode=cfg.bet_sizing_mode,
+        base_order_cost=cfg.base_order_cost,
+        max_consecutive_losses=cfg.max_consecutive_losses,
+        max_stake=cfg.max_stake,
+        open_delay_seconds=cfg.open_delay_seconds,
+        signal_momentum_threshold=cfg.signal_momentum_threshold,
+        signal_fallback_strategy_id=cfg.signal_fallback_strategy_id,
+        signal_weak_signal_mode=cfg.signal_weak_signal_mode,
+        signal_history_fidelity_seconds=cfg.signal_history_fidelity_seconds,
+        signal_anchor_max_offset_seconds=cfg.signal_anchor_max_offset_seconds,
+        signal_dynamic_threshold_k=cfg.signal_dynamic_threshold_k,
+        signal_dynamic_threshold_min_points=cfg.signal_dynamic_threshold_min_points,
+        signal_lock_before_entry_seconds=cfg.signal_lock_before_entry_seconds,
+        max_stake_skip_alert_threshold=cfg.max_stake_skip_alert_threshold,
+        ofi_threshold=cfg.ofi_threshold,
+        max_entry_price=cfg.max_entry_price,
+        binance_signal_stale_seconds=cfg.binance_signal_stale_seconds,
+        strategy7_ofi_threshold=cfg.strategy7_ofi_threshold,
+        strategy7_momentum_threshold=cfg.strategy7_momentum_threshold,
+        strategy7_max_entry_price=cfg.strategy7_max_entry_price,
+        strategy7_min_signal_gap=cfg.strategy7_min_signal_gap,
+        strategy7_confirm_before_entry_seconds=cfg.strategy7_confirm_before_entry_seconds,
+        strategy7_late_confirm_strong_signal_gap=cfg.strategy7_late_confirm_strong_signal_gap,
+        strategy7_late_confirm_relax_seconds=cfg.strategy7_late_confirm_relax_seconds,
+    )
+
+
 def _live_profile_for_strategy(cfg: AppConfig, strategy_id: int) -> LiveStrategyProfile:
     prefix = _live_profile_prefix(strategy_id)
     max_stake_key = f"{prefix}_MAX_STAKE"
@@ -337,6 +369,7 @@ class AppConfig:
     data_api_base: str = "https://data-api.polymarket.com"
     market_timeframe: str = field(default_factory=lambda: _env_market_timeframe("5m"))
     paper_timeframes: list[str] = field(default_factory=list)
+    strategy_ids: list[int] = field(default_factory=list)
     paper_strategy_ids: list[int] = field(default_factory=lambda: _parse_strategy_id_list(os.getenv(PAPER_STRATEGY_IDS), fallback=_env_int(STRATEGY_ID, 2)))
     paper_simulated_wallet_balance: float = field(default_factory=lambda: _env_float("PAPER_SIMULATED_WALLET_BALANCE", 1_000_000.0))
     trade_mode: str = field(default_factory=lambda: (os.getenv("TRADE_MODE") or "paper").strip().lower() or "paper")
@@ -428,7 +461,14 @@ class AppConfig:
     def __post_init__(self) -> None:
         if not self.paper_timeframes:
             self.paper_timeframes = _env_paper_timeframes(self.market_timeframe)
-        if not self.live_strategy_ids:
+        raw_strategy_ids = os.getenv(STRATEGY_IDS)
+        if not self.strategy_ids and raw_strategy_ids is not None and raw_strategy_ids.strip():
+            self.strategy_ids = _parse_strategy_id_list(raw_strategy_ids, fallback=self.strategy_id)
+        use_unified_strategy_config = bool(self.strategy_ids)
+        if use_unified_strategy_config:
+            self.paper_strategy_ids = list(self.strategy_ids)
+            self.live_strategy_ids = list(self.strategy_ids)
+        elif not self.live_strategy_ids:
             self.live_strategy_ids = _parse_strategy_id_list(os.getenv(LIVE_STRATEGY_IDS), fallback=self.strategy_id)
         self.paper_profiles = {}
         for timeframe in self.paper_timeframes:
@@ -437,35 +477,89 @@ class AppConfig:
             self.paper_profiles[timeframe] = PaperTimeframeProfile(
                 timeframe=timeframe,
                 strategy_id=strategy_id,
-                paper_strategy_ids=_paper_profile_strategy_ids(prefix, self.paper_strategy_ids, strategy_id),
-                target_profit=_env_float(f"{prefix}_TARGET_PROFIT", self.target_profit),
-                bet_sizing_mode=(os.getenv(f"{prefix}_BET_SIZING_MODE") or self.bet_sizing_mode).upper(),
-                base_order_cost=_env_float(f"{prefix}_BASE_ORDER_COST", self.base_order_cost),
-                max_consecutive_losses=_env_int(f"{prefix}_MAX_CONSECUTIVE_LOSSES", self.max_consecutive_losses),
+                paper_strategy_ids=(
+                    list(self.strategy_ids)
+                    if use_unified_strategy_config
+                    else _paper_profile_strategy_ids(prefix, self.paper_strategy_ids, strategy_id)
+                ),
+                target_profit=(
+                    self.target_profit
+                    if use_unified_strategy_config
+                    else _env_float(f"{prefix}_TARGET_PROFIT", self.target_profit)
+                ),
+                bet_sizing_mode=(
+                    self.bet_sizing_mode
+                    if use_unified_strategy_config
+                    else (os.getenv(f"{prefix}_BET_SIZING_MODE") or self.bet_sizing_mode).upper()
+                ),
+                base_order_cost=(
+                    self.base_order_cost
+                    if use_unified_strategy_config
+                    else _env_float(f"{prefix}_BASE_ORDER_COST", self.base_order_cost)
+                ),
+                max_consecutive_losses=(
+                    self.max_consecutive_losses
+                    if use_unified_strategy_config
+                    else _env_int(f"{prefix}_MAX_CONSECUTIVE_LOSSES", self.max_consecutive_losses)
+                ),
                 max_stake=(
-                    _env_optional_float(f"{prefix}_MAX_STAKE")
+                    self.max_stake
+                    if use_unified_strategy_config
+                    else _env_optional_float(f"{prefix}_MAX_STAKE")
                     if os.getenv(f"{prefix}_MAX_STAKE") is not None
                     else self.max_stake
                 ),
-                open_delay_seconds=_env_int(f"{prefix}_OPEN_DELAY_SECONDS", self.open_delay_seconds),
-                signal_momentum_threshold=_env_float(f"{prefix}_SIGNAL_MOMENTUM_THRESHOLD", self.signal_momentum_threshold),
-                ofi_threshold=_env_float(f"{prefix}_OFI_THRESHOLD", self.ofi_threshold),
-                binance_signal_stale_seconds=_env_float(
-                    f"{prefix}_BINANCE_SIGNAL_STALE_SECONDS",
-                    self.binance_signal_stale_seconds,
+                open_delay_seconds=(
+                    self.open_delay_seconds
+                    if use_unified_strategy_config
+                    else _env_int(f"{prefix}_OPEN_DELAY_SECONDS", self.open_delay_seconds)
                 ),
-                strategy7_ofi_threshold=_env_float(f"{prefix}_STRATEGY7_OFI_THRESHOLD", self.strategy7_ofi_threshold),
-                strategy7_momentum_threshold=_env_float(
-                    f"{prefix}_STRATEGY7_MOMENTUM_THRESHOLD",
-                    self.strategy7_momentum_threshold,
+                signal_momentum_threshold=(
+                    self.signal_momentum_threshold
+                    if use_unified_strategy_config
+                    else _env_float(f"{prefix}_SIGNAL_MOMENTUM_THRESHOLD", self.signal_momentum_threshold)
                 ),
-                strategy7_max_entry_price=_env_float(
-                    f"{prefix}_STRATEGY7_MAX_ENTRY_PRICE",
-                    self.strategy7_max_entry_price,
+                ofi_threshold=(
+                    self.ofi_threshold
+                    if use_unified_strategy_config
+                    else _env_float(f"{prefix}_OFI_THRESHOLD", self.ofi_threshold)
+                ),
+                binance_signal_stale_seconds=(
+                    self.binance_signal_stale_seconds
+                    if use_unified_strategy_config
+                    else _env_float(
+                        f"{prefix}_BINANCE_SIGNAL_STALE_SECONDS",
+                        self.binance_signal_stale_seconds,
+                    )
+                ),
+                strategy7_ofi_threshold=(
+                    self.strategy7_ofi_threshold
+                    if use_unified_strategy_config
+                    else _env_float(f"{prefix}_STRATEGY7_OFI_THRESHOLD", self.strategy7_ofi_threshold)
+                ),
+                strategy7_momentum_threshold=(
+                    self.strategy7_momentum_threshold
+                    if use_unified_strategy_config
+                    else _env_float(
+                        f"{prefix}_STRATEGY7_MOMENTUM_THRESHOLD",
+                        self.strategy7_momentum_threshold,
+                    )
+                ),
+                strategy7_max_entry_price=(
+                    self.strategy7_max_entry_price
+                    if use_unified_strategy_config
+                    else _env_float(
+                        f"{prefix}_STRATEGY7_MAX_ENTRY_PRICE",
+                        self.strategy7_max_entry_price,
+                    )
                 ),
             )
         self.live_profiles = {
-            strategy_id: _live_profile_for_strategy(self, strategy_id)
+            strategy_id: (
+                _base_live_profile_for_strategy(self, strategy_id)
+                if use_unified_strategy_config
+                else _live_profile_for_strategy(self, strategy_id)
+            )
             for strategy_id in self.live_strategy_ids
         }
 

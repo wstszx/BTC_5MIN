@@ -476,14 +476,15 @@ def test_dashboard_assets_mode_selector_propagates_into_save_payload_path():
     assert "payload[key] = node.value;" in js
     assert "expanded.TRADE_MODE = normalized === 'true' ? 'live' : 'paper';" in js
     assert "expanded.LIVE_TRADING_ENABLED = normalized;" in js
-    assert "const hiddenKeys = new Set(['PAPER_STRATEGY_IDS', 'LIVE_STRATEGY_IDS', 'PAPER_TIMEFRAMES', 'MARKET_TIMEFRAME', 'ENABLE_LIVE_TRADING']);" in js
-    assert "const unifiedStrategyKeys = ['STRATEGY_ID', 'PAPER_STRATEGY_IDS', 'LIVE_STRATEGY_IDS'];" in js
+    assert "const hiddenKeys = new Set(['STRATEGY_IDS', 'PAPER_STRATEGY_IDS', 'LIVE_STRATEGY_IDS', 'PAPER_TIMEFRAMES', 'MARKET_TIMEFRAME', 'ENABLE_LIVE_TRADING']);" in js
+    assert "const unifiedStrategyKeys = ['STRATEGY_ID', 'STRATEGY_IDS', 'PAPER_STRATEGY_IDS', 'LIVE_STRATEGY_IDS'];" in js
     assert "payload[multiKey] = unifiedValues[multiKey];" in js
 
 
-def test_dashboard_assets_use_mode_specific_strategy_selection():
+def test_dashboard_assets_use_unified_strategy_selection():
     js = _dashboard_js()
 
+    assert "return 'STRATEGY_IDS';" in js
     assert "return mode === 'live' ? 'LIVE_STRATEGY_IDS' : 'PAPER_STRATEGY_IDS';" in js
     assert "const multiKey = activeStrategyListKey(payload, values);" in js
     assert "const selectedRaw = parseStrategyIdList((values && values[multiKey]) ?? envValues[multiKey] ?? '');" in js
@@ -529,7 +530,7 @@ def test_dashboard_config_payload_exposes_live_strategy_ids(tmp_path: Path):
         assert LIVE_STRATEGY_IDS in payload['editable_keys']
         assert payload['labels'][LIVE_STRATEGY_IDS] == '实盘策略组合'
         assert payload['field_help'][LIVE_STRATEGY_IDS].startswith('实盘模式下可轮询的策略列表')
-        assert payload['select_options'][LIVE_STRATEGY_IDS] == ['1', '2', '3', '4', '5', '6', '7']
+        assert payload['select_options'][LIVE_STRATEGY_IDS] == ['1', '2', '3', '4', '5', '6', '7', '8']
         assert LIVE_STRATEGY_IDS not in payload['field_groups'][1]['keys']
     finally:
         state.close()
@@ -569,6 +570,17 @@ def test_dashboard_help_center_includes_quickstart_copy():
     assert "运行操作手册" in js
     assert "日常检查清单" in js
     assert "\u9875\u9762\u5143\u7d20\u8bf4\u660e" in js
+
+
+def test_dashboard_help_center_includes_risk_limit_guide():
+    js = _dashboard_js()
+
+    assert "{ id: 'riskguide', label: '风控限制' }" in js
+    assert "function renderHelpRiskGuide()" in js
+    assert "MAX_CONSECUTIVE_LOSSES" in js
+    assert "PAPER_SIMULATED_WALLET_BALANCE" in js
+    assert "insufficient_live_wallet_balance" in js
+    assert "策略 7" in js
 
 
 def test_dashboard_help_center_reuses_strategy_and_field_metadata():
@@ -1572,7 +1584,7 @@ def test_dashboard_assets_use_strategy_panel_for_unified_strategy_selection():
     assert '策略面板' in js
     assert 'cfgStrategyPanel' in js
     assert 'strategy-panel' in js
-    assert "'STRATEGY_ID', 'PAPER_STRATEGY_IDS'" in js
+    assert "'STRATEGY_ID', 'STRATEGY_IDS'" in js
     assert 'cfgPaperStrategiesSelectAll' not in js
     assert '全选全部策略' not in js
     assert 'function renderStrategyPanel(' in js
@@ -2294,8 +2306,10 @@ def test_dashboard_config_payload_includes_paper_strategy_ids(tmp_path: Path):
     try:
         payload = state.get_config_payload()
         assert 'PAPER_STRATEGY_IDS' in payload['editable_keys']
-        assert payload['select_options']['STRATEGY_ID'] == ['1', '2', '3', '4', '5', '6', '7']
-        assert payload['select_options']['PAPER_STRATEGY_IDS'] == ['1', '2', '3', '4', '5', '6', '7']
+        assert 'STRATEGY_IDS' in payload['editable_keys']
+        assert payload['select_options']['STRATEGY_ID'] == ['1', '2', '3', '4', '5', '6', '7', '8']
+        assert payload['select_options']['STRATEGY_IDS'] == ['1', '2', '3', '4', '5', '6', '7', '8']
+        assert payload['select_options']['PAPER_STRATEGY_IDS'] == ['1', '2', '3', '4', '5', '6', '7', '8']
     finally:
         state.close()
 
@@ -2681,7 +2695,7 @@ def test_dashboard_config_payload_includes_strategy7_fields(tmp_path: Path):
     state = DashboardState(env_file=tmp_path / '.env.dashboard')
     try:
         payload = state.get_config_payload()
-        assert payload['select_options']['STRATEGY_ID'] == ['1', '2', '3', '4', '5', '6', '7']
+        assert payload['select_options']['STRATEGY_ID'] == ['1', '2', '3', '4', '5', '6', '7', '8']
         assert payload['labels']['STRATEGY7_OFI_THRESHOLD'] == '策略7 盘口失衡阈值'
         assert payload['labels']['STRATEGY7_MOMENTUM_THRESHOLD'] == '策略7 动量阈值'
         assert payload['labels']['STRATEGY7_LATE_CONFIRM_STRONG_SIGNAL_GAP'] == '策略7 强信号额外优势'

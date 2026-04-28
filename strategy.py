@@ -83,6 +83,27 @@ def strategy7_strong_signal_allows_late_confirm(
     )
 
 
+def _strategy8_side_for_signals(
+    *,
+    ofi_score: float,
+    momentum_delta: float,
+    ofi_threshold: float,
+    momentum_threshold: float,
+    signal_min_gap: float,
+) -> str:
+    if not strategy7_signal_gap_ok(
+        ofi_score=ofi_score,
+        momentum_delta=momentum_delta,
+        ofi_threshold=ofi_threshold,
+        momentum_threshold=momentum_threshold,
+        signal_min_gap=signal_min_gap,
+    ):
+        raise ValueError('strategy_id=8 requires decisive market state')
+    if ofi_score * momentum_delta > 0:
+        return 'UP' if momentum_delta > 0 else 'DOWN'
+    return 'UP' if ofi_score > 0 else 'DOWN'
+
+
 def get_side_for_round(
     strategy_id: int,
     round_index: int,
@@ -144,5 +165,23 @@ def get_side_for_round(
         ):
             raise ValueError('strategy_id=7 requires signal gap above threshold')
         return 'UP' if momentum_delta > 0 else 'DOWN'
+
+    if strategy_id == 8:
+        if ofi_score is None:
+            raise ValueError('strategy_id=8 requires ofi_score')
+        if not (_is_valid_price(signal_open_up_price) and _is_valid_price(signal_current_up_price)):
+            raise ValueError('strategy_id=8 requires momentum prices')
+
+        threshold = max(0.0, ofi_threshold)
+        momentum_threshold = max(0.0, signal_threshold)
+        min_gap = max(0.0, signal_min_gap)
+        momentum_delta = signal_current_up_price - signal_open_up_price
+        return _strategy8_side_for_signals(
+            ofi_score=ofi_score,
+            momentum_delta=momentum_delta,
+            ofi_threshold=threshold,
+            momentum_threshold=momentum_threshold,
+            signal_min_gap=min_gap,
+        )
 
     raise ValueError(f'Unsupported strategy_id: {strategy_id}')
