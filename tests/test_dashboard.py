@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import json
 import os
@@ -963,6 +963,63 @@ def test_dashboard_live_recent_orders_resolves_official_result_fields(tmp_path: 
         assert row["resolved_final_price"] == "68501.25"
         assert row["resolved_expected_result"] == "UP"
         assert row["result_check_status"] == "official"
+    finally:
+        state.close()
+        os.chdir(old_cwd)
+
+
+def test_dashboard_live_recent_orders_only_validates_submitted_orders_but_prices_all_rows(tmp_path: Path, monkeypatch):
+    old_cwd = Path.cwd()
+    os.chdir(tmp_path)
+
+    class StubClient:
+        def __init__(self, cfg):
+            self.config = cfg
+
+        def close(self) -> None:
+            return
+
+        def get_event_by_slug(self, slug: str):
+            return {
+                "id": "evt-live",
+                "slug": slug,
+                "eventMetadata": {
+                    "priceToBeat": 68420.5,
+                    "finalPrice": 68501.25,
+                },
+                "markets": [
+                    {
+                        "id": "mkt-live",
+                        "outcomes": '["Up", "Down"]',
+                        "outcomePrices": '["1", "0"]',
+                    }
+                ],
+            }
+
+    monkeypatch.setattr(dashboard, "PolymarketClient", StubClient)
+    state = DashboardState(env_file=tmp_path / ".env.dashboard")
+    try:
+        live_csv = tmp_path / "logs" / "live_orders.csv"
+        live_csv.parent.mkdir(parents=True, exist_ok=True)
+        live_csv.write_text(
+            "timestamp,mode,round_index,strategy,entry_timing,event_slug,start_time,end_time,side,price,order_size,order_cost,expected_profit,result,trade_pnl,cash_pnl,recovery_loss,consecutive_losses,stop_loss_triggered,skip_reason,signal_open_up_price,signal_current_up_price,signal_threshold,signal_delta,signal_locked,signal_reason\n"
+            "2026-04-27T08:10:00+00:00,live,4,2,OPEN,btc-updown-5m-live,2026-04-27T08:05:00+00:00,2026-04-27T08:10:00+00:00,UP,0.56,2.0,1.12,0.88,,0.0,0.0,0.0,0,False,,,,,,False,\n"
+            "2026-04-27T08:11:00+00:00,live,4,7,OPEN,btc-updown-5m-live,2026-04-27T08:05:00+00:00,2026-04-27T08:10:00+00:00,UP,0.56,0.0,0.0,0.0,,0.0,0.0,0.0,0,False,insufficient_live_wallet_balance,,,,,,False,\n",
+            encoding="utf-8",
+        )
+
+        payload = state.get_live_recent_orders_payload(limit=10)
+        skipped_row = payload["rows"][0]
+        submitted_row = payload["rows"][1]
+
+        assert skipped_row["resolved_price_to_beat"] == "68420.5"
+        assert skipped_row["resolved_final_price"] == "68501.25"
+        assert skipped_row["result"] == ""
+        assert skipped_row["resolved_expected_result"] == ""
+        assert skipped_row["result_check_status"] == ""
+        assert submitted_row["result"] == "UP"
+        assert submitted_row["resolved_expected_result"] == "UP"
+        assert submitted_row["result_check_status"] == "official"
     finally:
         state.close()
         os.chdir(old_cwd)
@@ -2231,6 +2288,18 @@ def test_dashboard_config_payload_includes_paper_strategy_ids(tmp_path: Path):
         assert 'PAPER_STRATEGY_IDS' in payload['editable_keys']
         assert payload['select_options']['STRATEGY_ID'] == ['1', '2', '3', '4', '5', '6', '7']
         assert payload['select_options']['PAPER_STRATEGY_IDS'] == ['1', '2', '3', '4', '5', '6', '7']
+    finally:
+        state.close()
+
+
+def test_dashboard_config_payload_includes_paper_simulated_wallet_balance(tmp_path: Path):
+    state = DashboardState(env_file=tmp_path / '.env.dashboard')
+    try:
+        payload = state.get_config_payload()
+        assert 'PAPER_SIMULATED_WALLET_BALANCE' in payload['editable_keys']
+        assert payload['env_values']['PAPER_SIMULATED_WALLET_BALANCE'] == '1000000.0'
+        assert payload['labels']['PAPER_SIMULATED_WALLET_BALANCE'] == '纸面模拟钱包余额'
+        assert payload['field_help']['PAPER_SIMULATED_WALLET_BALANCE'].startswith('仅纸面模式使用')
     finally:
         state.close()
 

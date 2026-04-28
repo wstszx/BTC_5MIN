@@ -338,6 +338,7 @@ class AppConfig:
     market_timeframe: str = field(default_factory=lambda: _env_market_timeframe("5m"))
     paper_timeframes: list[str] = field(default_factory=list)
     paper_strategy_ids: list[int] = field(default_factory=lambda: _parse_strategy_id_list(os.getenv(PAPER_STRATEGY_IDS), fallback=_env_int(STRATEGY_ID, 2)))
+    paper_simulated_wallet_balance: float = field(default_factory=lambda: _env_float("PAPER_SIMULATED_WALLET_BALANCE", 1_000_000.0))
     trade_mode: str = field(default_factory=lambda: (os.getenv("TRADE_MODE") or "paper").strip().lower() or "paper")
     strategy_id: int = field(default_factory=lambda: _env_int("STRATEGY_ID", 2))
     live_strategy_ids: list[int] = field(default_factory=list)

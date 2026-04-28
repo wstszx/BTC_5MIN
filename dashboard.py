@@ -442,6 +442,19 @@ def _slug_matches_client_series(slug: str, client: PolymarketClient | Any) -> bo
     return False
 
 
+def _should_validate_trade_result(row: dict[str, str], *, fill_missing_result: bool, missing_result: bool) -> bool:
+    side = str(row.get('side') or '').strip().upper()
+    if side not in {'UP', 'DOWN'}:
+        return False
+    if str(row.get('skip_reason') or '').strip():
+        return False
+    order_cost = _optional_float(row.get('order_cost')) or 0.0
+    order_size = _optional_float(row.get('order_size')) or 0.0
+    if order_cost <= 0.0 or order_size <= 0.0:
+        return False
+    return bool(fill_missing_result or not missing_result)
+
+
 def _validate_recent_trade_row(
     row: dict[str, str],
     *,
@@ -462,6 +475,11 @@ def _validate_recent_trade_row(
     slug = str(validated.get('event_slug') or '').strip()
     result = str(validated.get('result') or '').strip().upper()
     missing_result = not result or result == '--'
+    should_validate_result = _should_validate_trade_result(
+        validated,
+        fill_missing_result=fill_missing_result,
+        missing_result=missing_result,
+    )
     if not slug or (missing_result and not fill_missing_result):
         return validated
     if not _slug_matches_client_series(slug, client):
@@ -479,7 +497,8 @@ def _validate_recent_trade_row(
         try:
             event_payload = client.get_event_by_slug(slug)
         except Exception:
-            validated['result_check_status'] = 'error'
+            if should_validate_result:
+                validated['result_check_status'] = 'error'
             return validated
 
         metadata = event_payload.get("eventMetadata") or {}
@@ -514,6 +533,8 @@ def _validate_recent_trade_row(
     validated['resolved_price_to_beat'] = resolved.get('resolved_price_to_beat', '')
     validated['resolved_final_price'] = resolved.get('resolved_final_price', '')
     official_result = resolved.get('resolved_expected_result', '')
+    if not should_validate_result:
+        return validated
     if not official_result:
         validated['result_check_status'] = resolved.get('result_check_status') or 'official_pending'
         return validated
@@ -721,6 +742,7 @@ def _field_groups() -> list[dict[str, Any]]:
                 "TARGET_PROFIT",
                 "BET_SIZING_MODE",
                 "BASE_ORDER_COST",
+                "PAPER_SIMULATED_WALLET_BALANCE",
                 "MAX_CONSECUTIVE_LOSSES",
                 "MAX_STAKE",
                 "MAX_PRICE_THRESHOLD",
@@ -859,6 +881,7 @@ class DashboardState:
         "TARGET_PROFIT",
         "BET_SIZING_MODE",
         "BASE_ORDER_COST",
+        "PAPER_SIMULATED_WALLET_BALANCE",
         "MAX_CONSECUTIVE_LOSSES",
         "MAX_STAKE",
         "MAX_PRICE_THRESHOLD",
@@ -919,6 +942,7 @@ class DashboardState:
         "TARGET_PROFIT": "每次目标净利",
         "BET_SIZING_MODE": "下注模式",
         "BASE_ORDER_COST": "固定起始下注金额",
+        "PAPER_SIMULATED_WALLET_BALANCE": "纸面模拟钱包余额",
         "MAX_CONSECUTIVE_LOSSES": "连亏重置轮数",
         "MAX_STAKE": "单笔最大下注金额",
         "MAX_PRICE_THRESHOLD": "最高买入价格阈值",
@@ -989,6 +1013,7 @@ class DashboardState:
         "TARGET_PROFIT": "target_profit",
         "BET_SIZING_MODE": "bet_sizing_mode",
         "BASE_ORDER_COST": "base_order_cost",
+        "PAPER_SIMULATED_WALLET_BALANCE": "paper_simulated_wallet_balance",
         "MAX_CONSECUTIVE_LOSSES": "max_consecutive_losses",
         "MAX_STAKE": "max_stake",
         "MAX_PRICE_THRESHOLD": "max_price_threshold",
@@ -1038,6 +1063,7 @@ class DashboardState:
     FLOAT_CONFIG_KEYS: tuple[str, ...] = (
         "TARGET_PROFIT",
         "BASE_ORDER_COST",
+        "PAPER_SIMULATED_WALLET_BALANCE",
         "MAX_STAKE",
         "MAX_PRICE_THRESHOLD",
         "BINANCE_SIGNAL_STALE_SECONDS",
@@ -1125,6 +1151,7 @@ class DashboardState:
         "LIVE_AUTO_REDEEM_INITIAL_BACKOFF_SECONDS": "自动赎回失败后的首次退避等待秒数。",
         "LIVE_AUTO_REDEEM_MAX_BACKOFF_SECONDS": "自动赎回重试之间的最大退避上限秒数。",
         "BASE_ORDER_COST": "仅固定金额模式使用；获胜后策略会重置回这个起始下注金额。",
+        "PAPER_SIMULATED_WALLET_BALANCE": "仅纸面模式使用，作为 dry-run 的模拟钱包余额；纸面不会读取真实钱包，但会经过与实盘相同的预算检查节点。",
         "MAX_CONSECUTIVE_LOSSES": "连续亏损达到这个次数后，策略会执行一次止损重置。",
         "MAX_STAKE": "单笔订单允许投入的最大 USDC；超过后会直接跳过本轮。",
         "MAX_PRICE_THRESHOLD": "目标方向价格高于该阈值时不入场。",
@@ -4007,6 +4034,7 @@ const CONFIG_KEY_NAMES = {
   TARGET_PROFIT: '每次目标净利',
   BET_SIZING_MODE: '下注模式',
   BASE_ORDER_COST: '固定起始下注金额',
+  PAPER_SIMULATED_WALLET_BALANCE: '纸面模拟钱包余额',
   MAX_CONSECUTIVE_LOSSES: '连亏重置轮数',
   MAX_STAKE: '单笔最大下注金额',
   MAX_PRICE_THRESHOLD: '最高买入价格阈值',
@@ -5411,6 +5439,7 @@ function isCompactConfigField(key) {
   return [
     'TARGET_PROFIT',
     'BASE_ORDER_COST',
+    'PAPER_SIMULATED_WALLET_BALANCE',
     'MAX_CONSECUTIVE_LOSSES',
     'MAX_STAKE',
     'MAX_PRICE_THRESHOLD',

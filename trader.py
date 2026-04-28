@@ -35,6 +35,16 @@ class SideDecision:
     signal_locked: bool = False
 
 
+@dataclass(slots=True)
+class OrderExecutionResult:
+    status: str
+    remaining_budget: float | None
+    order_id: str | None = None
+    response: Any | None = None
+    skip_reason: str | None = None
+    balance_error: str | None = None
+
+
 SESSION_DAY_TZ = timezone(timedelta(hours=8))
 _LIVE_STRATEGY_FIELD_NAMES = (
     "round_index",
@@ -1997,6 +2007,55 @@ def _submit_live_strategy_order(
     return _validate_live_submission_response(response), response
 
 
+def _execute_order_plan(
+    *,
+    mode: str,
+    cfg: AppConfig,
+    clob_client: Any | None,
+    strategy_id: int,
+    slug: str,
+    token_id: str | None,
+    plan: TradePlan,
+    remaining_budget: float | None,
+    balance_error: str | None = None,
+) -> OrderExecutionResult:
+    if token_id is None:
+        raise RuntimeError(f"Missing token id for side={plan.side} on market={slug}")
+    if remaining_budget is None:
+        return OrderExecutionResult(
+            status="skipped",
+            remaining_budget=None,
+            skip_reason="live_wallet_balance_unavailable",
+            balance_error=balance_error,
+        )
+    if plan.order_cost > remaining_budget:
+        return OrderExecutionResult(
+            status="skipped",
+            remaining_budget=remaining_budget,
+            skip_reason="insufficient_live_wallet_balance",
+        )
+    if mode == "paper":
+        order_id = f"paper-{strategy_id}-{slug}"
+        return OrderExecutionResult(
+            status="submitted",
+            remaining_budget=max(0.0, remaining_budget - plan.order_cost),
+            order_id=order_id,
+            response={"success": True, "orderID": order_id, "simulated": True},
+        )
+    order_id, response = _submit_live_strategy_order(
+        cfg=cfg,
+        clob_client=clob_client,
+        token_id=token_id,
+        plan=plan,
+    )
+    return OrderExecutionResult(
+        status="submitted",
+        remaining_budget=max(0.0, remaining_budget - plan.order_cost),
+        order_id=order_id,
+        response=response,
+    )
+
+
 def _cached_ws_market_result(market_client: PolymarketClient | Any, market: dict[str, Any]) -> str:
     get_resolution = getattr(market_client, "get_ws_market_resolution", None)
     if not callable(get_resolution):
@@ -3613,105 +3672,65 @@ def run_live_trading(
                                 }
                             )
                             continue
-                        if remaining_live_budget is None:
-                            append_trade_log(
-                                log_path,
-                                TradeRecord(
-                                    timestamp=datetime.now(timezone.utc),
-                                    mode="live",
-                                    round_index=strategy_state.round_index,
-                                    strategy=strategy_id,
-                                    entry_timing=strategy_cfg.entry_timing,
-                                    event_slug=target_round.slug,
-                                    start_time=target_round.start_time,
-                                    end_time=target_round.end_time,
-                                    side=side,
-                                    price=price,
-                                    order_size=0.0,
-                                    order_cost=0.0,
-                                    expected_profit=0.0,
-                                    result=None,
-                                    trade_pnl=0.0,
-                                    cash_pnl=strategy_state.cash_pnl,
-                                    recovery_loss=strategy_state.recovery_loss,
-                                    consecutive_losses=strategy_state.consecutive_losses,
-                                    skip_reason="live_wallet_balance_unavailable",
-                                    **_signal_record_kwargs(side_decision),
-                                ),
-                            )
-                            strategy_results.append(
-                                {
-                                    "strategy_id": strategy_id,
-                                    "status": "skipped",
-                                    "slug": target_round.slug,
-                                    "side": side,
-                                    "price": price,
-                                    "should_trade": False,
-                                    "skip_reason": "live_wallet_balance_unavailable",
-                                    "balance_error": balance_read_error,
-                                    "order_size": plan.order_size,
-                                    "order_cost": plan.order_cost,
-                                    "expected_profit": plan.expected_profit,
-                                    "signal_open_up_price": side_decision.signal_open_up_price,
-                                    "signal_current_up_price": side_decision.signal_current_up_price,
-                                    "signal_threshold": side_decision.signal_threshold,
-                                    "signal_delta": side_decision.signal_delta,
-                                    "signal_locked": side_decision.signal_locked,
-                                }
-                            )
-                            continue
-                        if plan.order_cost > remaining_live_budget:
-                            append_trade_log(
-                                log_path,
-                                TradeRecord(
-                                    timestamp=datetime.now(timezone.utc),
-                                    mode="live",
-                                    round_index=strategy_state.round_index,
-                                    strategy=strategy_id,
-                                    entry_timing=strategy_cfg.entry_timing,
-                                    event_slug=target_round.slug,
-                                    start_time=target_round.start_time,
-                                    end_time=target_round.end_time,
-                                    side=side,
-                                    price=price,
-                                    order_size=0.0,
-                                    order_cost=0.0,
-                                    expected_profit=0.0,
-                                    result=None,
-                                    trade_pnl=0.0,
-                                    cash_pnl=strategy_state.cash_pnl,
-                                    recovery_loss=strategy_state.recovery_loss,
-                                    consecutive_losses=strategy_state.consecutive_losses,
-                                    skip_reason="insufficient_live_wallet_balance",
-                                    **_signal_record_kwargs(side_decision),
-                                ),
-                            )
-                            strategy_results.append(
-                                {
-                                    "strategy_id": strategy_id,
-                                    "status": "skipped",
-                                    "slug": target_round.slug,
-                                    "side": side,
-                                    "price": price,
-                                    "should_trade": False,
-                                    "skip_reason": "insufficient_live_wallet_balance",
-                                    "order_size": plan.order_size,
-                                    "order_cost": plan.order_cost,
-                                    "expected_profit": plan.expected_profit,
-                                    "signal_open_up_price": side_decision.signal_open_up_price,
-                                    "signal_current_up_price": side_decision.signal_current_up_price,
-                                    "signal_threshold": side_decision.signal_threshold,
-                                    "signal_delta": side_decision.signal_delta,
-                                    "signal_locked": side_decision.signal_locked,
-                                }
-                            )
-                            continue
-                        order_id, response = _submit_live_strategy_order(
+                        execution = _execute_order_plan(
+                            mode="live",
                             cfg=strategy_cfg,
                             clob_client=live_client,
+                            strategy_id=strategy_id,
+                            slug=target_round.slug,
                             token_id=token_id,
                             plan=plan,
+                            remaining_budget=remaining_live_budget,
+                            balance_error=balance_read_error,
                         )
+                        remaining_live_budget = execution.remaining_budget
+                        if execution.status == "skipped":
+                            append_trade_log(
+                                log_path,
+                                TradeRecord(
+                                    timestamp=datetime.now(timezone.utc),
+                                    mode="live",
+                                    round_index=strategy_state.round_index,
+                                    strategy=strategy_id,
+                                    entry_timing=strategy_cfg.entry_timing,
+                                    event_slug=target_round.slug,
+                                    start_time=target_round.start_time,
+                                    end_time=target_round.end_time,
+                                    side=side,
+                                    price=price,
+                                    order_size=0.0,
+                                    order_cost=0.0,
+                                    expected_profit=0.0,
+                                    result=None,
+                                    trade_pnl=0.0,
+                                    cash_pnl=strategy_state.cash_pnl,
+                                    recovery_loss=strategy_state.recovery_loss,
+                                    consecutive_losses=strategy_state.consecutive_losses,
+                                    skip_reason=execution.skip_reason,
+                                    **_signal_record_kwargs(side_decision),
+                                ),
+                            )
+                            strategy_results.append(
+                                {
+                                    "strategy_id": strategy_id,
+                                    "status": "skipped",
+                                    "slug": target_round.slug,
+                                    "side": side,
+                                    "price": price,
+                                    "should_trade": False,
+                                    "skip_reason": execution.skip_reason,
+                                    "balance_error": execution.balance_error,
+                                    "order_size": plan.order_size,
+                                    "order_cost": plan.order_cost,
+                                    "expected_profit": plan.expected_profit,
+                                    "signal_open_up_price": side_decision.signal_open_up_price,
+                                    "signal_current_up_price": side_decision.signal_current_up_price,
+                                    "signal_threshold": side_decision.signal_threshold,
+                                    "signal_delta": side_decision.signal_delta,
+                                    "signal_locked": side_decision.signal_locked,
+                                }
+                            )
+                            continue
                         append_trade_log(
                             log_path,
                             TradeRecord(
@@ -3742,11 +3761,10 @@ def run_live_trading(
                         strategy_state.pending_live_order_size = plan.order_size
                         strategy_state.pending_live_order_cost = plan.order_cost
                         strategy_state.pending_live_expected_profit = plan.expected_profit
-                        strategy_state.pending_live_order_id = order_id
+                        strategy_state.pending_live_order_id = execution.order_id
                         strategy_state.pending_live_end_time = target_round.end_time.isoformat()
                         strategy_state.round_index += 1
                         state.live_strategies[strategy_id] = strategy_state
-                        remaining_live_budget = max(0.0, remaining_live_budget - plan.order_cost)
                         strategy_results.append(
                             {
                                 "strategy_id": strategy_id,
@@ -3759,8 +3777,8 @@ def run_live_trading(
                                 "order_cost": plan.order_cost,
                                 "expected_profit": plan.expected_profit,
                                 "order_type": strategy_cfg.live_order_type.upper(),
-                                "order_id": order_id,
-                                "response": response,
+                                "order_id": execution.order_id,
+                                "response": execution.response,
                                 "signal_open_up_price": side_decision.signal_open_up_price,
                                 "signal_current_up_price": side_decision.signal_current_up_price,
                                 "signal_threshold": side_decision.signal_threshold,
@@ -3995,6 +4013,7 @@ def run_paper_trading(
             entry_time = _entry_time_for_round(cfg, target_round)
             market = client.get_market_by_slug(target_round.slug)
             quote = client.quote_from_market(market)
+            remaining_paper_budget: float | None = max(0.0, float(cfg.paper_simulated_wallet_balance))
             any_processed = False
             round_completed = False
             for strategy_id in strategy_ids:
@@ -4301,6 +4320,48 @@ def run_paper_trading(
                 strategy_session.consecutive_max_stake_skips = 0
                 if (entry_time - now).total_seconds() > 1:
                     state.paper_strategies[strategy_id] = _session_state_to_paper_strategy_state(strategy_session)
+                    continue
+                token_ids = extract_token_ids(market.get("clobTokenIds"), market.get("outcomes"))
+                token_id = token_ids.get(side)
+                execution = _execute_order_plan(
+                    mode="paper",
+                    cfg=strategy_cfg,
+                    clob_client=None,
+                    strategy_id=strategy_id,
+                    slug=target_round.slug,
+                    token_id=token_id,
+                    plan=plan,
+                    remaining_budget=remaining_paper_budget,
+                )
+                remaining_paper_budget = execution.remaining_budget
+                if execution.status == "skipped":
+                    append_trade_log(
+                        log_path,
+                        TradeRecord(
+                            timestamp=datetime.now(timezone.utc),
+                            mode="paper",
+                            experiment_id=experiment_id,
+                            round_index=strategy_session.round_index,
+                            strategy=strategy_id,
+                            entry_timing=strategy_cfg.entry_timing,
+                            event_slug=target_round.slug,
+                            start_time=target_round.start_time,
+                            end_time=target_round.end_time,
+                            side=side,
+                            price=price,
+                            order_size=0.0,
+                            order_cost=0.0,
+                            expected_profit=0.0,
+                            result=None,
+                            trade_pnl=0.0,
+                            cash_pnl=strategy_session.cash_pnl,
+                            recovery_loss=strategy_session.recovery_loss,
+                            consecutive_losses=strategy_session.consecutive_losses,
+                            skip_reason=execution.skip_reason,
+                            **_signal_record_kwargs(side_decision),
+                        ),
+                    )
+                    round_completed = True
                     continue
                 queued = _queue_pending_paper_trade(
                     state=strategy_session,

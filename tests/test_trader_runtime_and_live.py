@@ -4008,6 +4008,54 @@ def test_run_paper_trading_processes_all_selected_strategies(tmp_path, monkeypat
     assert state.paper_strategies[6].strategy6_last_ofi_score == pytest.approx(signal.ofi_score)
 
 
+def test_run_paper_trading_uses_simulated_budget_like_live_execution(tmp_path, monkeypatch):
+    stop_event = threading.Event()
+
+    def fake_sleep(_seconds):
+        stop_event.set()
+
+    monkeypatch.setattr("trader.time.sleep", fake_sleep)
+    monkeypatch.setattr(
+        "trader._resolve_side_from_strategy",
+        lambda **kwargs: SideDecision(side="UP"),
+    )
+    monkeypatch.setattr(
+        "trader.build_trade_plan",
+        lambda *args, **kwargs: TradePlan(
+            True,
+            "UP",
+            price=0.55,
+            order_size=2.0,
+            order_cost=1.5,
+            expected_profit=0.5,
+        ),
+    )
+
+    result = run_paper_trading(
+        AppConfig(
+            trade_mode="paper",
+            paper_strategy_ids=[1, 3],
+            base_order_cost=1.5,
+            paper_simulated_wallet_balance=2.0,
+            poll_interval_seconds=1,
+        ),
+        client=_LiveMarketClient(),
+        state_path=tmp_path / "paper_state.json",
+        log_path=tmp_path / "paper_trades.csv",
+        stop_event=stop_event,
+    )
+
+    state = load_session_state(tmp_path / "paper_state.json", effective_paper_strategy_ids=[1, 3])
+    rows = (tmp_path / "paper_trades.csv").read_text(encoding="utf-8").splitlines()
+
+    assert result["status"] == "stopped"
+    assert len(state.paper_strategies[1].pending_paper_trades) == 1
+    assert state.paper_strategies[3].pending_paper_trades == []
+    assert len(rows) == 2
+    assert ",3,OPEN,btc-updown-5m-test," in rows[1]
+    assert "insufficient_live_wallet_balance" in rows[1]
+
+
 def test_settled_pending_paper_trade_writes_single_final_csv_row(tmp_path):
     state_path = tmp_path / 'state.json'
     log_path = tmp_path / 'paper.csv'

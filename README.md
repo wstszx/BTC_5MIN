@@ -21,6 +21,7 @@ Dashboard saves write back to `.env.dashboard`, and mode changes also update the
 - `PAPER_STRATEGY_IDS`
 - `LIVE_STRATEGY_IDS`
 - `TARGET_PROFIT`
+- `PAPER_SIMULATED_WALLET_BALANCE`
 - `MAX_STAKE`
 - `MAX_CONSECUTIVE_LOSSES`
 - `SIGNAL_MOMENTUM_THRESHOLD`
@@ -39,6 +40,7 @@ Dashboard saves write back to `.env.dashboard`, and mode changes also update the
 Trading mode safety rules:
 
 - `TRADE_MODE=paper` keeps the runtime in paper trading.
+- Paper trading uses `PAPER_SIMULATED_WALLET_BALANCE` as its dry-run wallet budget; it does not read the real wallet, but it does run through the same budget check node as live trading.
 - Real trading requires both `TRADE_MODE=live` and `LIVE_TRADING_ENABLED=true`.
 - Saving a new mode updates the desired target mode immediately, but the runtime only switches after the current round reaches a safe boundary.
 - `paper -> live` still requires confirmation in the dashboard before the save completes.
