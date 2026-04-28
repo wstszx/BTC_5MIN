@@ -653,6 +653,8 @@ def test_dashboard_reason_fallback_is_human_friendly():
     assert "ofi_stale" in js
     assert "ofi_too_weak" in js
     assert "awaiting_fill_confirmation" in js
+    assert "live_wallet_balance_unavailable" in js
+    assert "实盘钱包余额不可用" in js
     assert "insufficient_live_wallet_balance" in js
     assert "实盘钱包余额不足" in js
     assert "market_timeframe" in js

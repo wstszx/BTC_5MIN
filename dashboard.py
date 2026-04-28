@@ -4070,7 +4070,7 @@ const HELP_SECTIONS = {
         title: '纸面与实盘差异',
         bullets: [
           '纸面模式不会读取真实钱包，会使用 PAPER_SIMULATED_WALLET_BALANCE 作为 dry-run 钱包预算。',
-          '实盘模式会读取真实钱包余额；余额不可用会显示 live_wallet_balance_unavailable，余额不足会显示 insufficient_live_wallet_balance。',
+          '实盘模式会读取真实钱包余额；余额不可用会显示“实盘钱包余额不可用”，余额不足会显示“实盘钱包余额不足”。',
           '纸面和实盘的信号、风控和预算检查路径应保持一致，差异只在最终是否发送真实订单。',
         ],
       },
@@ -4201,6 +4201,7 @@ const REASON_LABELS = {
   strategy8_entry_too_late: '策略8 确认出现过晚',
   strategy8_price_too_high: '策略8 入场价格过高',
   awaiting_fill_confirmation: '等待成交确认',
+  live_wallet_balance_unavailable: '实盘钱包余额不可用',
   insufficient_live_wallet_balance: '实盘钱包余额不足',
   market_timeframe: '市场频次切换待生效',
   'INVALID OPERATION': '实时连接订阅请求无效',
