@@ -138,11 +138,88 @@ def _filter_trade_rows_by_strategy(rows: list[dict[str, str]], strategy: int | s
     return [row for row in rows if str(row.get("strategy") or "").strip() == strategy_filter]
 
 
+def _filter_trade_rows_by_strategy_ids(rows: list[dict[str, str]], strategy_ids: list[int] | set[int] | tuple[int, ...]) -> list[dict[str, str]]:
+    strategy_texts = {str(item) for item in strategy_ids}
+    if not strategy_texts:
+        return list(rows)
+    return [row for row in rows if str(row.get("strategy") or "").strip() in strategy_texts]
+
+
 def _filter_pending_paper_trades_by_strategy(items: list[PendingPaperTrade], strategy: int | str | None) -> list[PendingPaperTrade]:
     strategy_filter = _normalize_strategy_filter(strategy)
     if strategy_filter is None:
         return list(items)
     return [item for item in items if str(item.strategy) == strategy_filter]
+
+
+def _filter_pending_paper_trades_by_strategy_ids(
+    items: list[PendingPaperTrade],
+    strategy_ids: list[int] | set[int] | tuple[int, ...],
+) -> list[PendingPaperTrade]:
+    strategy_texts = {str(item) for item in strategy_ids}
+    if not strategy_texts:
+        return list(items)
+    return [item for item in items if str(item.strategy) in strategy_texts]
+
+
+def _has_explicit_live_strategy_scope(env_values: dict[str, str]) -> bool:
+    return any(str(env_values.get(key) or "").strip() for key in (STRATEGY_IDS, LIVE_STRATEGY_IDS))
+
+
+def _has_explicit_paper_strategy_scope(env_values: dict[str, str], timeframe: str) -> bool:
+    normalized_timeframe = _normalize_timeframe_filter(timeframe)
+    timeframe_prefix = normalized_timeframe.upper().replace("M", "M")
+    return any(
+        str(env_values.get(key) or "").strip()
+        for key in (
+            STRATEGY_IDS,
+            PAPER_STRATEGY_IDS,
+            f"PAPER_{timeframe_prefix}_STRATEGY_IDS",
+        )
+    )
+
+
+def _recent_row_has_result(row: dict[str, str]) -> bool:
+    result = str(row.get("result") or "").strip()
+    return bool(result and result != "--")
+
+
+def _live_recent_merge_key(row: dict[str, str]) -> tuple[str, str] | None:
+    if str(row.get("mode") or "").strip().lower() != "live":
+        return None
+    strategy = str(row.get("strategy") or "").strip()
+    event_slug = str(row.get("event_slug") or "").strip()
+    if not strategy or not event_slug:
+        return None
+    return strategy, event_slug
+
+
+def _merge_recent_live_rows(entry_row: dict[str, str], settlement_row: dict[str, str]) -> dict[str, str]:
+    merged = dict(entry_row)
+    for key, value in settlement_row.items():
+        if value in (None, ""):
+            continue
+        if key in {"timestamp", "round_index"} and str(entry_row.get(key) or "").strip():
+            continue
+        merged[key] = value
+    return merged
+
+
+def _collapse_live_recent_rows(rows: list[dict[str, str]]) -> list[dict[str, str]]:
+    collapsed: list[dict[str, str]] = []
+    unresolved_index_by_key: dict[tuple[str, str], int] = {}
+    for row in reversed(rows):
+        row_copy = dict(row)
+        key = _live_recent_merge_key(row_copy)
+        if key is not None and _recent_row_has_result(row_copy) and key in unresolved_index_by_key:
+            unresolved_index = unresolved_index_by_key.pop(key)
+            collapsed[unresolved_index] = _merge_recent_live_rows(collapsed[unresolved_index], row_copy)
+            continue
+        collapsed.append(row_copy)
+        if key is not None and not _recent_row_has_result(row_copy):
+            unresolved_index_by_key[key] = len(collapsed) - 1
+    collapsed.sort(key=lambda row: str(row.get("timestamp") or ""), reverse=True)
+    return collapsed
 
 
 def _normalize_timeframe_filter(timeframe: str | None, *, fallback: str = "5m") -> str:
@@ -1905,9 +1982,14 @@ class DashboardState:
             if timeframe is None and not paper_csv.exists():
                 paper_csv = cfg.logs_dir / "paper_trades.csv"
                 state_path = cfg.logs_dir / "session_state.json"
+            explicit_paper_strategy_scope = _has_explicit_paper_strategy_scope(self._env_values, target_timeframe)
         capped_limit = max(1, min(300, int(limit)))
         strategy_filter = _normalize_strategy_filter(strategy)
-        rows = _filter_trade_rows_by_strategy(_tail_csv_rows(paper_csv, limit=capped_limit * 4), strategy_filter)
+        rows = _tail_csv_rows(paper_csv, limit=capped_limit * 4)
+        if strategy_filter is None and explicit_paper_strategy_scope:
+            rows = _filter_trade_rows_by_strategy_ids(rows, effective_paper_strategy_ids)
+        elif strategy_filter is not None:
+            rows = _filter_trade_rows_by_strategy(rows, strategy_filter)
         pending_rows: list[dict[str, str]] = []
         session_state = load_session_state(state_path, effective_paper_strategy_ids=effective_paper_strategy_ids)
         pending_items = list(getattr(session_state, "pending_paper_trades", []) or [])
@@ -1915,7 +1997,13 @@ class DashboardState:
             pending_items = []
             for strategy_state in session_state.paper_strategies.values():
                 pending_items.extend(getattr(strategy_state, "pending_paper_trades", []) or [])
-        for item in _filter_pending_paper_trades_by_strategy(pending_items, strategy_filter):
+        if strategy_filter is None and explicit_paper_strategy_scope:
+            filtered_pending_items = _filter_pending_paper_trades_by_strategy_ids(pending_items, effective_paper_strategy_ids)
+        elif strategy_filter is not None:
+            filtered_pending_items = _filter_pending_paper_trades_by_strategy(pending_items, strategy_filter)
+        else:
+            filtered_pending_items = list(pending_items)
+        for item in filtered_pending_items:
             pending_rows.append(_pending_paper_trade_to_recent_row(item))
         merged_rows = pending_rows + rows
         merged_rows.sort(key=lambda row: str(row.get("timestamp") or ""), reverse=True)
@@ -1950,9 +2038,16 @@ class DashboardState:
             live_csv = self._cfg.logs_dir / "live_orders.csv"
             target_timeframe = self._cfg.market_timeframe
             validation_cache = self._result_validation_cache
+            effective_live_strategy_ids = list(getattr(cfg, "strategy_ids", []) or getattr(cfg, "live_strategy_ids", []) or [cfg.strategy_id])
+            explicit_live_strategy_scope = _has_explicit_live_strategy_scope(self._env_values)
         capped_limit = max(1, min(300, int(limit)))
         strategy_filter = _normalize_strategy_filter(strategy)
-        rows = _filter_trade_rows_by_strategy(_tail_csv_rows(live_csv, limit=capped_limit * 4), strategy_filter)
+        rows = _tail_csv_rows(live_csv, limit=capped_limit * 6)
+        if strategy_filter is None and explicit_live_strategy_scope:
+            rows = _filter_trade_rows_by_strategy_ids(rows, effective_live_strategy_ids)
+        elif strategy_filter is not None:
+            rows = _filter_trade_rows_by_strategy(rows, strategy_filter)
+        rows = _collapse_live_recent_rows(rows)
         rows = rows[:capped_limit]
         client = PolymarketClient(cfg)
         try:
@@ -4490,6 +4585,16 @@ function activeStrategyListKey(payload, values) {
   const envValues = (payload && payload.env_values) || {};
   const selectOptions = (payload && payload.select_options) || {};
   const editableKeys = (payload && payload.editable_keys) || [];
+  const unifiedValue = String((values && values.STRATEGY_IDS) ?? envValues.STRATEGY_IDS ?? '').trim();
+  if (unifiedValue) {
+    return 'STRATEGY_IDS';
+  }
+  const mode = activeConfigModeFromValues(payload, values);
+  const legacyKey = mode === 'live' ? 'LIVE_STRATEGY_IDS' : 'PAPER_STRATEGY_IDS';
+  const legacyValue = String((values && values[legacyKey]) ?? envValues[legacyKey] ?? '').trim();
+  if (legacyValue) {
+    return legacyKey;
+  }
   if (
     Object.prototype.hasOwnProperty.call(envValues, 'STRATEGY_IDS') ||
     Object.prototype.hasOwnProperty.call(selectOptions, 'STRATEGY_IDS') ||
@@ -4497,8 +4602,7 @@ function activeStrategyListKey(payload, values) {
   ) {
     return 'STRATEGY_IDS';
   }
-  const mode = activeConfigModeFromValues(payload, values);
-  return mode === 'live' ? 'LIVE_STRATEGY_IDS' : 'PAPER_STRATEGY_IDS';
+  return legacyKey;
 }
 
 function resolveUnifiedStrategySelection(payload, values) {
@@ -4797,8 +4901,17 @@ function paperReportStrategyOptions() {
   return ['all', ...ordered, ...extras];
 }
 
+function defaultPaperReportStrategyFilter() {
+  const configured = configuredPaperReportStrategyOptions();
+  return configured.length === 1 ? String(configured[0]) : 'all';
+}
+
 function effectivePaperReportStrategyFilter() {
-  return String(state.paperReportStrategyFilter || 'all');
+  const current = String(state.paperReportStrategyFilter || '');
+  if (!current || current === 'all') {
+    return defaultPaperReportStrategyFilter();
+  }
+  return current;
 }
 
 function effectivePaperSummaryStrategyFilter() {

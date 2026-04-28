@@ -2024,6 +2024,7 @@ def test_place_live_order_submits_market_order_with_injected_clob(tmp_path):
         market_client=_LiveMarketClient(),
         clob_client=stub_clob,
         state_path=tmp_path / "state.json",
+        log_path=tmp_path / "live.csv",
     )
 
     assert result["status"] == "submitted"
@@ -3505,6 +3506,61 @@ def test_append_trade_log_writes_experiment_id_column(tmp_path):
     lines = log_path.read_text(encoding="utf-8").splitlines()
     assert "experiment_id" in lines[0]
     assert "challenger-s5-a" in lines[1]
+
+
+def test_append_trade_log_updates_existing_live_trade_when_result_arrives(tmp_path):
+    log_path = tmp_path / "live_orders.csv"
+    start = datetime(2026, 4, 28, 5, 30, tzinfo=timezone.utc)
+    end = start + timedelta(minutes=15)
+
+    append_trade_log(
+        log_path,
+        TradeRecord(
+            timestamp=start + timedelta(seconds=30),
+            mode="live",
+            round_index=20,
+            strategy=7,
+            entry_timing="OPEN",
+            event_slug="btc-updown-15m-1777354200",
+            start_time=start,
+            end_time=end,
+            side="UP",
+            price=0.38,
+            order_size=4.222010080645161,
+            order_cost=1.604363830645161,
+            expected_profit=2.61764625,
+        ),
+    )
+    append_trade_log(
+        log_path,
+        TradeRecord(
+            timestamp=end + timedelta(minutes=3),
+            mode="live",
+            round_index=21,
+            strategy=7,
+            entry_timing="OPEN",
+            event_slug="btc-updown-15m-1777354200",
+            start_time=start,
+            end_time=end,
+            side="UP",
+            price=0.55,
+            order_size=4.210525,
+            order_cost=2.31578875,
+            expected_profit=1.89473625,
+            result="DOWN",
+            trade_pnl=-2.31578875,
+            cash_pnl=-2.90516175,
+            recovery_loss=3.933435,
+            consecutive_losses=2,
+        ),
+    )
+
+    rows = list(csv.DictReader(log_path.open(newline="", encoding="utf-8")))
+    assert len(rows) == 1
+    assert rows[0]["timestamp"] == "2026-04-28T05:30:30+00:00"
+    assert rows[0]["round_index"] == "20"
+    assert rows[0]["result"] == "DOWN"
+    assert float(rows[0]["trade_pnl"]) == pytest.approx(-2.31578875)
 
 
 def test_paper_experiment_id_defaults_to_strategy_prefix():

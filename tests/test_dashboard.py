@@ -485,7 +485,8 @@ def test_dashboard_assets_use_unified_strategy_selection():
     js = _dashboard_js()
 
     assert "return 'STRATEGY_IDS';" in js
-    assert "return mode === 'live' ? 'LIVE_STRATEGY_IDS' : 'PAPER_STRATEGY_IDS';" in js
+    assert "const legacyKey = mode === 'live' ? 'LIVE_STRATEGY_IDS' : 'PAPER_STRATEGY_IDS';" in js
+    assert "return legacyKey;" in js
     assert "const multiKey = activeStrategyListKey(payload, values);" in js
     assert "const selectedRaw = parseStrategyIdList((values && values[multiKey]) ?? envValues[multiKey] ?? '');" in js
     assert "strategyOptionLabel(multiKey, opt, payload)" in js
@@ -888,6 +889,61 @@ def test_dashboard_live_recent_orders_filters_by_strategy(tmp_path: Path):
         assert payload['count'] == 1
         assert payload['rows'][0]['event_slug'] == 'slug-seven'
         assert payload['rows'][0]['strategy'] == '7'
+    finally:
+        state.close()
+        os.chdir(old_cwd)
+
+
+def test_dashboard_live_recent_orders_all_scopes_to_configured_live_strategies(tmp_path: Path):
+    old_cwd = Path.cwd()
+    os.chdir(tmp_path)
+    env_file = tmp_path / ".env.dashboard"
+    env_file.write_text("TRADE_MODE=live\nSTRATEGY_IDS=7\n", encoding="utf-8")
+    state = DashboardState(env_file=env_file)
+    try:
+        live_csv = tmp_path / "logs" / "live_orders.csv"
+        live_csv.parent.mkdir(parents=True, exist_ok=True)
+        live_csv.write_text(
+            "timestamp,mode,round_index,strategy,event_slug,side,price,order_cost,trade_pnl,skip_reason\n"
+            "2026-04-28T07:41:06+00:00,live,0,2,btc-updown-5m-test,UP,0.56,1.0,0.0,\n"
+            "2026-04-28T07:15:32+00:00,live,21,7,btc-updown-15m-1777360500,SKIP,,0.0,0.0,strategy7_signal_conflict\n",
+            encoding="utf-8",
+        )
+
+        payload = state.get_live_recent_orders_payload(limit=10)
+
+        assert payload["strategy"] == "all"
+        assert payload["count"] == 1
+        assert payload["rows"][0]["strategy"] == "7"
+        assert payload["rows"][0]["event_slug"] == "btc-updown-15m-1777360500"
+    finally:
+        state.close()
+        os.chdir(old_cwd)
+
+
+def test_dashboard_live_recent_orders_collapses_entry_and_settlement_rows(tmp_path: Path):
+    old_cwd = Path.cwd()
+    os.chdir(tmp_path)
+    env_file = tmp_path / ".env.dashboard"
+    env_file.write_text("TRADE_MODE=live\nSTRATEGY_IDS=7\nMARKET_TIMEFRAME=15m\n", encoding="utf-8")
+    state = DashboardState(env_file=env_file)
+    try:
+        live_csv = tmp_path / "logs" / "live_orders.csv"
+        live_csv.parent.mkdir(parents=True, exist_ok=True)
+        live_csv.write_text(
+            "timestamp,mode,round_index,strategy,entry_timing,event_slug,start_time,end_time,side,price,order_size,order_cost,expected_profit,result,trade_pnl,cash_pnl,recovery_loss,consecutive_losses,stop_loss_triggered,skip_reason,signal_open_up_price,signal_current_up_price,signal_threshold,signal_delta,signal_locked,signal_reason\n"
+            "2026-04-28T05:30:34+00:00,live,20,7,OPEN,btc-updown-15m-1777354200,2026-04-28T05:30:00+00:00,2026-04-28T05:45:00+00:00,UP,0.38,4.222010080645161,1.604363830645161,2.61764625,,0.0,-0.589373,1.61764625,1,False,,0.485,0.375,,,-0.11,True,\n"
+            "2026-04-28T05:48:44+00:00,live,21,7,OPEN,btc-updown-15m-1777354200,2026-04-28T05:30:00+00:00,2026-04-28T05:45:00+00:00,UP,0.55,4.210525,2.31578875,1.89473625,DOWN,-2.31578875,-2.90516175,3.933435,2,False,,,,,,False,\n",
+            encoding="utf-8",
+        )
+
+        payload = state.get_live_recent_orders_payload(limit=10)
+
+        assert payload["count"] == 1
+        assert payload["rows"][0]["timestamp"] == "2026-04-28T05:30:34+00:00"
+        assert payload["rows"][0]["round_index"] == "20"
+        assert payload["rows"][0]["result"] == "DOWN"
+        assert payload["rows"][0]["trade_pnl"] == "-2.31578875"
     finally:
         state.close()
         os.chdir(old_cwd)
