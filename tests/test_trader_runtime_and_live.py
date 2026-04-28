@@ -1024,6 +1024,58 @@ def test_run_live_trading_reuses_created_clob_client_across_poll_loops(tmp_path,
     assert attempts["create_client"] == 1
 
 
+def test_run_live_trading_treats_transient_balance_ssl_error_as_unavailable_budget(tmp_path, monkeypatch):
+    stop_event = threading.Event()
+
+    class _BalanceSslErrorClobClient(_StubClobClient):
+        def get_balance(self):
+            raise Exception(
+                "[py_clob_client_v2] request error: [SSL: UNEXPECTED_EOF_WHILE_READING] "
+                "EOF occurred in violation of protocol (_ssl.c:1081) "
+                "PolyApiException[status_code=None, error_message=Request exception!]"
+            )
+
+    def fake_sleep(_seconds):
+        stop_event.set()
+
+    monkeypatch.setattr("trader.time.sleep", fake_sleep)
+    monkeypatch.setattr(
+        "trader._resolve_side_from_strategy",
+        lambda **kwargs: SideDecision(side="UP"),
+    )
+    monkeypatch.setattr(
+        "trader.build_trade_plan",
+        lambda *args, **kwargs: TradePlan(
+            True,
+            "UP",
+            price=0.55,
+            order_size=2.0,
+            order_cost=1.0,
+            expected_profit=1.0,
+        ),
+    )
+
+    result = run_live_trading(
+        AppConfig(
+            trade_mode="live",
+            live_trading_enabled=True,
+            live_private_key="pk",
+            live_funder="0xfunder",
+            poll_interval_seconds=1,
+        ),
+        market_client=_LiveMarketClient(),
+        clob_client=_BalanceSslErrorClobClient(),
+        state_path=tmp_path / "live_state.json",
+        log_path=tmp_path / "live_orders.csv",
+        stop_event=stop_event,
+    )
+
+    rows = (tmp_path / "live_orders.csv").read_text(encoding="utf-8").splitlines()
+    assert result["status"] == "stopped"
+    assert len(rows) == 2
+    assert "live_wallet_balance_unavailable" in rows[1]
+
+
 def test_run_live_trading_reports_pending_live_order_blocks_switch(tmp_path):
     control = RuntimeControl(initial_mode='live')
     state_path = tmp_path / 'live_state.json'

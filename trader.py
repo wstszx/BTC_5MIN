@@ -1549,6 +1549,25 @@ def _runtime_backoff_seconds(cfg: AppConfig, consecutive_errors: int) -> int:
     return max(1, min(cfg.runtime_error_backoff_max_seconds, scaled))
 
 
+def _is_retryable_live_clob_error(exc: Exception) -> bool:
+    message = str(exc).lower()
+    if any(marker in message for marker in ("status_code=401", "status_code=403", "unauthorized", "forbidden")):
+        return False
+    retryable_markers = (
+        "timeout",
+        "timed out",
+        "request exception",
+        "status_code=none",
+        "status_code=5",
+        "connection",
+        "temporar",
+        "ssl",
+        "eof occurred",
+        "unexpected_eof_while_reading",
+    )
+    return any(marker in message for marker in retryable_markers)
+
+
 def _resolve_live_order_type(raw_order_type: str):
     from py_clob_client_v2 import OrderType
 
@@ -3206,19 +3225,7 @@ def run_live_trading(
                     live_client = cached_live_client
                 consecutive_errors = 0
             except Exception as exc:
-                message = str(exc).lower()
-                if any(marker in message for marker in ("status_code=401", "status_code=403", "unauthorized", "forbidden")):
-                    raise
-                retryable_markers = (
-                    "timeout",
-                    "timed out",
-                    "request exception",
-                    "status_code=none",
-                    "status_code=5",
-                    "connection",
-                    "temporar",
-                )
-                if not any(marker in message for marker in retryable_markers):
+                if not _is_retryable_live_clob_error(exc):
                     raise
                 consecutive_errors += 1
                 backoff = _runtime_backoff_seconds(cfg, consecutive_errors)
@@ -3292,6 +3299,11 @@ def run_live_trading(
                 remaining_live_budget: float | None = _read_available_live_balance(cfg=cfg, clob_client=live_client)
                 balance_read_error: str | None = None
             except RuntimeError as exc:
+                remaining_live_budget = None
+                balance_read_error = str(exc)
+            except Exception as exc:
+                if not _is_retryable_live_clob_error(exc):
+                    raise
                 remaining_live_budget = None
                 balance_read_error = str(exc)
 
