@@ -98,6 +98,29 @@ def test_requirements_pin_runtime_dependencies():
         assert any('<' in line for line in matching)
 
 
+def test_describe_ws_runtime_reports_current_error_not_recovered_last_error():
+    class _RecoveredWsClient:
+        def get_ws_runtime_stats(self):
+            return {
+                "ws_enabled": True,
+                "ws_available": True,
+                "ws_connected": True,
+                "ws_reconnect_count": 5,
+                "ws_invalid_operation_count": 0,
+                "ws_connect_attempts": 6,
+                "ws_subscribed_asset_count": 2,
+                "ws_cached_asset_count": 88,
+                "ws_last_message_age_seconds": 1.2,
+                "ws_current_error": None,
+                "ws_last_error": "Connection to remote host was lost.",
+            }
+
+    text = trader._describe_ws_runtime(_RecoveredWsClient())
+
+    assert "current_error=None" in text
+    assert "last_error=Connection to remote host was lost." not in text
+
+
 def test_sleep_if_not_stopped_waits_on_stop_event(monkeypatch):
     class FakeStopEvent:
         def __init__(self) -> None:

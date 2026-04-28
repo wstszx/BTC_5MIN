@@ -441,6 +441,14 @@ def test_dashboard_assets_include_left_panel_mode_selector_shell():
     assert "return buildLiveToggleValue(envValues) === 'true' ? 'live' : 'paper';" in js
 
 
+def test_dashboard_assets_distinguish_current_and_historical_ws_errors():
+    js = _dashboard_js()
+
+    assert "ws_current_error: '当前错误'" in js
+    assert "ws_last_error: '最近历史错误'" in js
+    assert "['current_error', runtimeValue(ws, 'current_error', 'ws_current_error')]" in js
+
+
 def test_dashboard_assets_hide_paper_and_live_sections_by_active_mode():
     js = _dashboard_js()
 

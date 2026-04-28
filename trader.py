@@ -2908,7 +2908,7 @@ def _describe_ws_runtime(client: PolymarketClient | Any) -> str:
         + ', subscribed_assets=' + str(stats.get('ws_subscribed_asset_count'))
         + ', cached_assets=' + str(stats.get('ws_cached_asset_count'))
         + ', last_message_age_s=' + _fmt_price(stats.get('ws_last_message_age_seconds'))
-        + ', last_error=' + str(stats.get('ws_last_error'))
+        + ', current_error=' + str(stats.get('ws_current_error', stats.get('ws_last_error')))
     )
 
 

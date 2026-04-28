@@ -225,6 +225,7 @@ class PolymarketClient:
         self._ws_last_pong_at: datetime | None = None
         self._ws_connect_attempts: int = 0
         self._ws_reconnect_count: int = 0
+        self._ws_current_error: str | None = None
         self._ws_last_error: str | None = None
         self._ws_invalid_operation_count: int = 0
         self._ws_ping_thread: threading.Thread | None = None
@@ -244,6 +245,7 @@ class PolymarketClient:
             self._ws_last_message_at = None
             self._ws_last_ping_at = None
             self._ws_last_pong_at = None
+            self._ws_current_error = None
             self._ws_last_error = None
             self._ws_invalid_operation_count = 0
             self._ws_subscribed_assets.clear()
@@ -265,11 +267,13 @@ class PolymarketClient:
             with self._ws_lock:
                 self._ws_last_message_at = now
                 self._ws_last_pong_at = now
+                self._ws_current_error = None
             return
 
         if normalized_message == "INVALID OPERATION":
             with self._ws_lock:
                 self._ws_invalid_operation_count += 1
+                self._ws_current_error = "INVALID OPERATION"
                 self._ws_last_error = "INVALID OPERATION"
                 app = self._ws_app
                 self._ws_app = None
@@ -306,6 +310,7 @@ class PolymarketClient:
         now = datetime.now(timezone.utc)
         with self._ws_lock:
             self._ws_last_message_at = now
+            self._ws_current_error = None
             for item in updates:
                 if item.get("event_type") == "market_resolved":
                     self._cache_ws_market_resolution_locked(item, now=now)
@@ -386,6 +391,7 @@ class PolymarketClient:
             app.send("PING")
         except Exception as exc:
             with self._ws_lock:
+                self._ws_current_error = str(exc)
                 self._ws_last_error = str(exc)
             return False
         with self._ws_lock:
@@ -432,12 +438,14 @@ class PolymarketClient:
             def on_open(_ws: websocket.WebSocketApp) -> None:
                 with self._ws_lock:
                     self._ws_opened_at = datetime.now(timezone.utc)
+                    self._ws_current_error = None
 
             def on_message(_ws: websocket.WebSocketApp, message: str) -> None:
                 self._handle_ws_message(message)
 
             def on_error(_ws: websocket.WebSocketApp, _error: Any) -> None:
                 with self._ws_lock:
+                    self._ws_current_error = str(_error)
                     self._ws_last_error = str(_error)
                 return
 
@@ -524,6 +532,7 @@ class PolymarketClient:
                     )
         except Exception as exc:
             with self._ws_lock:
+                self._ws_current_error = str(exc)
                 self._ws_last_error = str(exc)
             return
 
@@ -574,6 +583,7 @@ class PolymarketClient:
                 "ws_last_message_age_seconds": (
                     (now - last_message).total_seconds() if isinstance(last_message, datetime) else None
                 ),
+                "ws_current_error": self._ws_current_error,
                 "ws_last_error": self._ws_last_error,
             }
 

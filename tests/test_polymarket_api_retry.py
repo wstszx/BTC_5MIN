@@ -220,6 +220,18 @@ def test_get_ws_runtime_stats_reports_core_fields():
     assert stats["ws_last_message_age_seconds"] is None
 
 
+def test_ws_runtime_separates_current_error_from_recovered_last_error():
+    client = PolymarketClient(AppConfig(ws_enabled=True))
+    client._ws_last_error = "Connection to remote host was lost."
+    client._ws_current_error = "Connection to remote host was lost."
+
+    client._handle_ws_message("PONG")
+
+    stats = client.get_ws_runtime_stats()
+    assert stats["ws_current_error"] is None
+    assert stats["ws_last_error"] == "Connection to remote host was lost."
+
+
 def test_ws_message_handler_resets_on_invalid_operation():
     client = PolymarketClient(AppConfig(ws_enabled=True))
     client._ws_opened_at = datetime.now(timezone.utc)
@@ -233,6 +245,7 @@ def test_ws_message_handler_resets_on_invalid_operation():
     assert stats["ws_invalid_operation_count"] == 1
     assert stats["ws_subscribed_asset_count"] == 0
     assert stats["ws_cached_asset_count"] == 0
+    assert stats["ws_current_error"] == "INVALID OPERATION"
     assert stats["ws_last_error"] == "INVALID OPERATION"
 
 

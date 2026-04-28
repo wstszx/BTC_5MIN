@@ -5167,14 +5167,16 @@ const RUNTIME_LABELS = {
   ws_opened_at: '建连时间',
   ws_last_message_at: '最近消息时间',
   ws_last_message_age_seconds: '消息延迟(秒)',
-  ws_last_error: '最近错误',
+  ws_current_error: '当前错误',
+  ws_last_error: '最近历史错误',
   reconnects: '重连次数',
   invalid_ops: '异常操作次数',
   connect_attempts: '连接尝试次数',
   subscribed_assets: '已订阅资产数',
   cached_assets: '缓存资产数',
   last_message_age_s: '消息延迟(秒)',
-  last_error: '最近错误',
+  current_error: '当前错误',
+  last_error: '最近历史错误',
 };
 
 const STATUS_LABELS = {
@@ -5964,20 +5966,37 @@ async function saveConfig() {
 
 function renderWsRuntime(ws, staleGuard) {
   const list = el('wsRuntimeList');
+  const runtimeValue = (payload, shortKey, rawKey) => {
+    if (!payload) {
+      return undefined;
+    }
+    return payload[shortKey] ?? payload[rawKey];
+  };
   const basePairs = [
     ['ws_enabled', ws.ws_enabled],
     ['ws_available', ws.ws_available],
     ['ws_connected', ws.ws_connected],
-    ['reconnects', ws.reconnects],
-    ['invalid_ops', ws.invalid_ops],
-    ['connect_attempts', ws.connect_attempts],
-    ['subscribed_assets', ws.subscribed_assets],
-    ['cached_assets', ws.cached_assets],
-    ['last_message_age_s', ws.last_message_age_s],
-    ['last_error', ws.last_error],
+    ['reconnects', runtimeValue(ws, 'reconnects', 'ws_reconnect_count')],
+    ['invalid_ops', runtimeValue(ws, 'invalid_ops', 'ws_invalid_operation_count')],
+    ['connect_attempts', runtimeValue(ws, 'connect_attempts', 'ws_connect_attempts')],
+    ['subscribed_assets', runtimeValue(ws, 'subscribed_assets', 'ws_subscribed_asset_count')],
+    ['cached_assets', runtimeValue(ws, 'cached_assets', 'ws_cached_asset_count')],
+    ['last_message_age_s', runtimeValue(ws, 'last_message_age_s', 'ws_last_message_age_seconds')],
+    ['current_error', runtimeValue(ws, 'current_error', 'ws_current_error')],
+    ['last_error', runtimeValue(ws, 'last_error', 'ws_last_error')],
   ];
 
-  const used = new Set(basePairs.map((item) => item[0]));
+  const used = new Set([
+    ...basePairs.map((item) => item[0]),
+    'ws_reconnect_count',
+    'ws_invalid_operation_count',
+    'ws_connect_attempts',
+    'ws_subscribed_asset_count',
+    'ws_cached_asset_count',
+    'ws_last_message_age_seconds',
+    'ws_current_error',
+    'ws_last_error',
+  ]);
   const extraPairs = Object.entries(ws || {}).filter(([k]) => !used.has(k));
   const pairs = basePairs.concat(extraPairs);
 
@@ -5986,7 +6005,7 @@ function renderWsRuntime(ws, staleGuard) {
     if (key in STATUS_LABELS && (value === true || value === false)) {
       shown = STATUS_LABELS[value];
     }
-    if (key === 'last_error') {
+    if (key === 'last_error' || key === 'current_error' || key === 'ws_last_error' || key === 'ws_current_error') {
       shown = reasonText(shown);
     }
     if (key === 'last_message_age_s' && shown !== '--') {
