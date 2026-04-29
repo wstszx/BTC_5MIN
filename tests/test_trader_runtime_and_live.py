@@ -2624,6 +2624,7 @@ def test_run_live_trading_isolates_strategy_exceptions_and_continues(tmp_path, m
             strategy_id=1,
             live_strategy_ids=[1, 3],
             base_order_cost=1.5,
+            open_delay_seconds=5,
             poll_interval_seconds=1,
         ),
         market_client=_LiveMarketClient(),
@@ -2639,9 +2640,14 @@ def test_run_live_trading_isolates_strategy_exceptions_and_continues(tmp_path, m
     assert len(stub_clob.created_orders) == 1
     assert state.live_strategies[1].pending_live_slug is None
     assert state.live_strategies[3].pending_live_slug == "btc-updown-5m-test"
-    rows = (tmp_path / "live_orders.csv").read_text(encoding="utf-8").splitlines()
+    with (tmp_path / "live_orders.csv").open(newline="", encoding="utf-8") as handle:
+        rows = list(csv.DictReader(handle))
     assert len(rows) == 2
-    assert ",3,OPEN,btc-updown-5m-test," in rows[1]
+    assert rows[0]["strategy"] == "1"
+    assert rows[0]["side"] == "SKIP"
+    assert rows[0]["skip_reason"] == "strategy_evaluation_error: strategy 1 blew up"
+    assert rows[1]["strategy"] == "3"
+    assert rows[1]["event_slug"] == "btc-updown-5m-test"
 
 
 def test_run_live_trading_keeps_running_and_alerts_on_geoblock(tmp_path, monkeypatch):

@@ -4232,8 +4232,12 @@ const REASON_LABELS = {
   strategy8_entry_too_late: '策略8 确认出现过晚',
   strategy8_price_too_high: '策略8 入场价格过高',
   awaiting_fill_confirmation: '等待成交确认',
+  round_in_progress: '轮次仍在进行中',
+  round_unresolved: '轮次尚未结算',
   live_wallet_balance_unavailable: '实盘钱包余额不可用',
   insufficient_live_wallet_balance: '实盘钱包余额不足',
+  strategy_evaluation_error: '策略评估异常',
+  strategy_settlement_error: '策略结算异常',
   market_timeframe: '市场频次切换待生效',
   'INVALID OPERATION': '实时连接订阅请求无效',
 };
@@ -4280,7 +4284,12 @@ function reasonText(reason) {
   if (REASON_LABELS[reason]) {
     return REASON_LABELS[reason];
   }
-  return String(reason);
+  const rawReason = String(reason);
+  const reasonCode = rawReason.split(':', 1)[0];
+  if (REASON_LABELS[reasonCode]) {
+    return REASON_LABELS[reasonCode];
+  }
+  return rawReason;
 }
 
 function formatConfigLabel(key, labels) {

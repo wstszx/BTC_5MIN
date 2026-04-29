@@ -2956,6 +2956,46 @@ def _signal_record_kwargs(side_decision: SideDecision) -> dict[str, Any]:
     }
 
 
+def _strategy_exception_skip_reason(code: str, exc: Exception) -> str:
+    message = " ".join(str(exc).split()) or exc.__class__.__name__
+    return f"{code}: {message}"
+
+
+def _append_live_strategy_error_log(
+    *,
+    log_path: Path,
+    cfg: AppConfig,
+    strategy_id: int,
+    strategy_state: LiveStrategyState,
+    target_round: MarketWindow,
+    skip_reason: str,
+) -> None:
+    append_trade_log(
+        log_path,
+        TradeRecord(
+            timestamp=datetime.now(timezone.utc),
+            mode="live",
+            round_index=strategy_state.round_index,
+            strategy=strategy_id,
+            entry_timing=cfg.entry_timing,
+            event_slug=target_round.slug,
+            start_time=target_round.start_time,
+            end_time=target_round.end_time,
+            side="SKIP",
+            price=None,
+            order_size=0.0,
+            order_cost=0.0,
+            expected_profit=0.0,
+            result=None,
+            trade_pnl=0.0,
+            cash_pnl=strategy_state.cash_pnl,
+            recovery_loss=strategy_state.recovery_loss,
+            consecutive_losses=strategy_state.consecutive_losses,
+            skip_reason=skip_reason,
+        ),
+    )
+
+
 def _describe_side_decision(side_decision: SideDecision) -> str:
     signal_bits = []
     if side_decision.signal_open_up_price is not None:
@@ -3942,6 +3982,19 @@ def run_live_trading(
                         )
                         status = "blocked" if _is_live_trading_restricted_error(exc) else "error"
                         error_code = "trading_restricted" if status == "blocked" else None
+                        try:
+                            error_cfg = _cfg_for_live_strategy(cfg, strategy_id)
+                        except Exception:
+                            error_cfg = replace(cfg, strategy_id=strategy_id)
+                        error_state = state.live_strategies.get(strategy_id) or LiveStrategyState()
+                        _append_live_strategy_error_log(
+                            log_path=log_path,
+                            cfg=error_cfg,
+                            strategy_id=strategy_id,
+                            strategy_state=error_state,
+                            target_round=target_round,
+                            skip_reason=_strategy_exception_skip_reason("strategy_evaluation_error", exc),
+                        )
                         strategy_results.append(
                             {
                                 "strategy_id": strategy_id,

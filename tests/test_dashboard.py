@@ -449,6 +449,14 @@ def test_dashboard_assets_distinguish_current_and_historical_ws_errors():
     assert "['current_error', runtimeValue(ws, 'current_error', 'ws_current_error')]" in js
 
 
+def test_dashboard_reason_text_translates_prefixed_runtime_errors():
+    js = _dashboard_js()
+
+    assert "strategy_evaluation_error: '策略评估异常'" in js
+    assert "const reasonCode = rawReason.split(':', 1)[0];" in js
+    assert "return REASON_LABELS[reasonCode];" in js
+
+
 def test_dashboard_assets_hide_paper_and_live_sections_by_active_mode():
     js = _dashboard_js()
 
@@ -653,13 +661,17 @@ def test_dashboard_reason_fallback_is_human_friendly():
     assert "ofi_stale" in js
     assert "ofi_too_weak" in js
     assert "awaiting_fill_confirmation" in js
+    assert "round_in_progress" in js
+    assert "轮次仍在进行中" in js
+    assert "round_unresolved" in js
+    assert "轮次尚未结算" in js
     assert "live_wallet_balance_unavailable" in js
     assert "实盘钱包余额不可用" in js
     assert "insufficient_live_wallet_balance" in js
     assert "实盘钱包余额不足" in js
     assert "market_timeframe" in js
     assert "INVALID OPERATION" in js
-    assert "return String(reason);" in js
+    assert "return rawReason;" in js
 
 
 
