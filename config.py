@@ -206,6 +206,10 @@ def _live_profile_prefix(strategy_id: int) -> str:
     return f"LIVE_STRATEGY_{strategy_id}"
 
 
+def _paper_strategy_profile_prefix(strategy_id: int) -> str:
+    return f"PAPER_STRATEGY_{strategy_id}"
+
+
 @dataclass(frozen=True, slots=True)
 class PaperTimeframeProfile:
     timeframe: str
@@ -286,80 +290,96 @@ def _base_live_profile_for_strategy(cfg: AppConfig, strategy_id: int) -> LiveStr
     )
 
 
-def _live_profile_for_strategy(cfg: AppConfig, strategy_id: int) -> LiveStrategyProfile:
-    prefix = _live_profile_prefix(strategy_id)
+def _cap_profile_safety_limits(cfg: AppConfig, profile: LiveStrategyProfile) -> LiveStrategyProfile:
+    if cfg.max_stake is not None and profile.max_stake is not None:
+        profile.max_stake = min(profile.max_stake, cfg.max_stake)
+    return profile
+
+
+def _profile_for_strategy_prefix(cfg: AppConfig, strategy_id: int, prefix: str) -> LiveStrategyProfile:
     max_stake_key = f"{prefix}_MAX_STAKE"
 
-    return LiveStrategyProfile(
-        strategy_id=strategy_id,
-        target_profit=_env_float(f"{prefix}_TARGET_PROFIT", cfg.target_profit),
-        bet_sizing_mode=(os.getenv(f"{prefix}_BET_SIZING_MODE") or cfg.bet_sizing_mode).upper(),
-        base_order_cost=_env_float(f"{prefix}_BASE_ORDER_COST", cfg.base_order_cost),
-        max_consecutive_losses=_env_int(f"{prefix}_MAX_CONSECUTIVE_LOSSES", cfg.max_consecutive_losses),
-        max_stake=_env_optional_float(max_stake_key) if os.getenv(max_stake_key) is not None else cfg.max_stake,
-        open_delay_seconds=_env_int(f"{prefix}_OPEN_DELAY_SECONDS", cfg.open_delay_seconds),
-        signal_momentum_threshold=_env_float(f"{prefix}_SIGNAL_MOMENTUM_THRESHOLD", cfg.signal_momentum_threshold),
-        signal_fallback_strategy_id=_env_int(
-            f"{prefix}_SIGNAL_FALLBACK_STRATEGY_ID",
-            cfg.signal_fallback_strategy_id,
-        ),
-        signal_weak_signal_mode=(os.getenv(f"{prefix}_SIGNAL_WEAK_SIGNAL_MODE") or cfg.signal_weak_signal_mode).upper(),
-        signal_history_fidelity_seconds=_env_int(
-            f"{prefix}_SIGNAL_HISTORY_FIDELITY_SECONDS",
-            cfg.signal_history_fidelity_seconds,
-        ),
-        signal_anchor_max_offset_seconds=_env_int(
-            f"{prefix}_SIGNAL_ANCHOR_MAX_OFFSET_SECONDS",
-            cfg.signal_anchor_max_offset_seconds,
-        ),
-        signal_dynamic_threshold_k=_env_float(
-            f"{prefix}_SIGNAL_DYNAMIC_THRESHOLD_K",
-            cfg.signal_dynamic_threshold_k,
-        ),
-        signal_dynamic_threshold_min_points=_env_int(
-            f"{prefix}_SIGNAL_DYNAMIC_THRESHOLD_MIN_POINTS",
-            cfg.signal_dynamic_threshold_min_points,
-        ),
-        signal_lock_before_entry_seconds=_env_int(
-            f"{prefix}_SIGNAL_LOCK_BEFORE_ENTRY_SECONDS",
-            cfg.signal_lock_before_entry_seconds,
-        ),
-        max_stake_skip_alert_threshold=_env_int(
-            f"{prefix}_MAX_STAKE_SKIP_ALERT_THRESHOLD",
-            cfg.max_stake_skip_alert_threshold,
-        ),
-        ofi_threshold=_env_float(f"{prefix}_OFI_THRESHOLD", cfg.ofi_threshold),
-        max_entry_price=_env_float(f"{prefix}_MAX_ENTRY_PRICE", cfg.max_entry_price),
-        binance_signal_stale_seconds=_env_float(
-            f"{prefix}_BINANCE_SIGNAL_STALE_SECONDS",
-            cfg.binance_signal_stale_seconds,
-        ),
-        strategy7_ofi_threshold=_env_float(f"{prefix}_STRATEGY7_OFI_THRESHOLD", cfg.strategy7_ofi_threshold),
-        strategy7_momentum_threshold=_env_float(
-            f"{prefix}_STRATEGY7_MOMENTUM_THRESHOLD",
-            cfg.strategy7_momentum_threshold,
-        ),
-        strategy7_max_entry_price=_env_float(
-            f"{prefix}_STRATEGY7_MAX_ENTRY_PRICE",
-            cfg.strategy7_max_entry_price,
-        ),
-        strategy7_min_signal_gap=_env_float(
-            f"{prefix}_STRATEGY7_MIN_SIGNAL_GAP",
-            cfg.strategy7_min_signal_gap,
-        ),
-        strategy7_confirm_before_entry_seconds=_env_int(
-            f"{prefix}_STRATEGY7_CONFIRM_BEFORE_ENTRY_SECONDS",
-            cfg.strategy7_confirm_before_entry_seconds,
-        ),
-        strategy7_late_confirm_strong_signal_gap=_env_float(
-            f"{prefix}_STRATEGY7_LATE_CONFIRM_STRONG_SIGNAL_GAP",
-            cfg.strategy7_late_confirm_strong_signal_gap,
-        ),
-        strategy7_late_confirm_relax_seconds=_env_float(
-            f"{prefix}_STRATEGY7_LATE_CONFIRM_RELAX_SECONDS",
-            cfg.strategy7_late_confirm_relax_seconds,
+    return _cap_profile_safety_limits(
+        cfg,
+        LiveStrategyProfile(
+            strategy_id=strategy_id,
+            target_profit=_env_float(f"{prefix}_TARGET_PROFIT", cfg.target_profit),
+            bet_sizing_mode=(os.getenv(f"{prefix}_BET_SIZING_MODE") or cfg.bet_sizing_mode).upper(),
+            base_order_cost=_env_float(f"{prefix}_BASE_ORDER_COST", cfg.base_order_cost),
+            max_consecutive_losses=_env_int(f"{prefix}_MAX_CONSECUTIVE_LOSSES", cfg.max_consecutive_losses),
+            max_stake=_env_optional_float(max_stake_key) if os.getenv(max_stake_key) is not None else cfg.max_stake,
+            open_delay_seconds=_env_int(f"{prefix}_OPEN_DELAY_SECONDS", cfg.open_delay_seconds),
+            signal_momentum_threshold=_env_float(f"{prefix}_SIGNAL_MOMENTUM_THRESHOLD", cfg.signal_momentum_threshold),
+            signal_fallback_strategy_id=_env_int(
+                f"{prefix}_SIGNAL_FALLBACK_STRATEGY_ID",
+                cfg.signal_fallback_strategy_id,
+            ),
+            signal_weak_signal_mode=(os.getenv(f"{prefix}_SIGNAL_WEAK_SIGNAL_MODE") or cfg.signal_weak_signal_mode).upper(),
+            signal_history_fidelity_seconds=_env_int(
+                f"{prefix}_SIGNAL_HISTORY_FIDELITY_SECONDS",
+                cfg.signal_history_fidelity_seconds,
+            ),
+            signal_anchor_max_offset_seconds=_env_int(
+                f"{prefix}_SIGNAL_ANCHOR_MAX_OFFSET_SECONDS",
+                cfg.signal_anchor_max_offset_seconds,
+            ),
+            signal_dynamic_threshold_k=_env_float(
+                f"{prefix}_SIGNAL_DYNAMIC_THRESHOLD_K",
+                cfg.signal_dynamic_threshold_k,
+            ),
+            signal_dynamic_threshold_min_points=_env_int(
+                f"{prefix}_SIGNAL_DYNAMIC_THRESHOLD_MIN_POINTS",
+                cfg.signal_dynamic_threshold_min_points,
+            ),
+            signal_lock_before_entry_seconds=_env_int(
+                f"{prefix}_SIGNAL_LOCK_BEFORE_ENTRY_SECONDS",
+                cfg.signal_lock_before_entry_seconds,
+            ),
+            max_stake_skip_alert_threshold=_env_int(
+                f"{prefix}_MAX_STAKE_SKIP_ALERT_THRESHOLD",
+                cfg.max_stake_skip_alert_threshold,
+            ),
+            ofi_threshold=_env_float(f"{prefix}_OFI_THRESHOLD", cfg.ofi_threshold),
+            max_entry_price=_env_float(f"{prefix}_MAX_ENTRY_PRICE", cfg.max_entry_price),
+            binance_signal_stale_seconds=_env_float(
+                f"{prefix}_BINANCE_SIGNAL_STALE_SECONDS",
+                cfg.binance_signal_stale_seconds,
+            ),
+            strategy7_ofi_threshold=_env_float(f"{prefix}_STRATEGY7_OFI_THRESHOLD", cfg.strategy7_ofi_threshold),
+            strategy7_momentum_threshold=_env_float(
+                f"{prefix}_STRATEGY7_MOMENTUM_THRESHOLD",
+                cfg.strategy7_momentum_threshold,
+            ),
+            strategy7_max_entry_price=_env_float(
+                f"{prefix}_STRATEGY7_MAX_ENTRY_PRICE",
+                cfg.strategy7_max_entry_price,
+            ),
+            strategy7_min_signal_gap=_env_float(
+                f"{prefix}_STRATEGY7_MIN_SIGNAL_GAP",
+                cfg.strategy7_min_signal_gap,
+            ),
+            strategy7_confirm_before_entry_seconds=_env_int(
+                f"{prefix}_STRATEGY7_CONFIRM_BEFORE_ENTRY_SECONDS",
+                cfg.strategy7_confirm_before_entry_seconds,
+            ),
+            strategy7_late_confirm_strong_signal_gap=_env_float(
+                f"{prefix}_STRATEGY7_LATE_CONFIRM_STRONG_SIGNAL_GAP",
+                cfg.strategy7_late_confirm_strong_signal_gap,
+            ),
+            strategy7_late_confirm_relax_seconds=_env_float(
+                f"{prefix}_STRATEGY7_LATE_CONFIRM_RELAX_SECONDS",
+                cfg.strategy7_late_confirm_relax_seconds,
+            ),
         ),
     )
+
+
+def _live_profile_for_strategy(cfg: AppConfig, strategy_id: int) -> LiveStrategyProfile:
+    return _profile_for_strategy_prefix(cfg, strategy_id, _live_profile_prefix(strategy_id))
+
+
+def _paper_strategy_profile_for_strategy(cfg: AppConfig, strategy_id: int) -> LiveStrategyProfile:
+    return _profile_for_strategy_prefix(cfg, strategy_id, _paper_strategy_profile_prefix(strategy_id))
 
 
 @dataclass(slots=True)
@@ -456,6 +476,7 @@ class AppConfig:
     live_auto_redeem_max_backoff_seconds: int = field(default_factory=lambda: _env_int("LIVE_AUTO_REDEEM_MAX_BACKOFF_SECONDS", 300))
     live_auto_redeem_dry_run: bool = field(default_factory=lambda: _env_bool("LIVE_AUTO_REDEEM_DRY_RUN", False))
     paper_profiles: dict[str, PaperTimeframeProfile] = field(init=False)
+    paper_strategy_profiles: dict[int, LiveStrategyProfile] = field(init=False)
     live_profiles: dict[int, LiveStrategyProfile] = field(init=False)
 
     def __post_init__(self) -> None:
@@ -554,12 +575,12 @@ class AppConfig:
                     )
                 ),
             )
+        self.paper_strategy_profiles = {
+            strategy_id: _paper_strategy_profile_for_strategy(self, strategy_id)
+            for strategy_id in self.paper_strategy_ids
+        }
         self.live_profiles = {
-            strategy_id: (
-                _base_live_profile_for_strategy(self, strategy_id)
-                if use_unified_strategy_config
-                else _live_profile_for_strategy(self, strategy_id)
-            )
+            strategy_id: _live_profile_for_strategy(self, strategy_id)
             for strategy_id in self.live_strategy_ids
         }
 

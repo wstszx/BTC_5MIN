@@ -26,7 +26,7 @@ from config import (
     STRATEGY_IDS,
 )
 from binance_signal import BinanceDepth5SignalService
-from models import MarketWindow, PendingPaperTrade
+from models import LiveStrategyState, MarketWindow, PaperStrategyState, PendingPaperTrade
 from paper_report import summarize_paper_trades, summarize_paper_trades_by_strategy
 from polymarket_api import (
     PolymarketClient,
@@ -42,9 +42,11 @@ from trader import (
     _entry_time_for_round,
     _resolve_side_from_strategy,
     _apply_strategy6_signal_to_quote,
+    _cfg_for_paper_strategy,
     _is_strategy6_signal_stale,
     _ws_is_stale_for_trade,
     load_session_state,
+    save_session_state,
     resolve_quote_price,
     load_live_redeem_state,
     validate_live_runtime_config,
@@ -257,6 +259,40 @@ PAPER_PROFILE_EDITABLE_FIELDS: tuple[str, ...] = (
     "STRATEGY7_MAX_ENTRY_PRICE",
 )
 
+STRATEGY_PROFILE_EDITABLE_FIELDS: tuple[str, ...] = (
+    "TARGET_PROFIT",
+    "BET_SIZING_MODE",
+    "BASE_ORDER_COST",
+    "MAX_CONSECUTIVE_LOSSES",
+    "OPEN_DELAY_SECONDS",
+    "MAX_STAKE",
+    "SIGNAL_MOMENTUM_THRESHOLD",
+    "SIGNAL_WEAK_SIGNAL_MODE",
+    "SIGNAL_FALLBACK_STRATEGY_ID",
+    "SIGNAL_HISTORY_FIDELITY_SECONDS",
+    "SIGNAL_ANCHOR_MAX_OFFSET_SECONDS",
+    "SIGNAL_DYNAMIC_THRESHOLD_K",
+    "SIGNAL_DYNAMIC_THRESHOLD_MIN_POINTS",
+    "SIGNAL_LOCK_BEFORE_ENTRY_SECONDS",
+    "OFI_THRESHOLD",
+    "BINANCE_SIGNAL_STALE_SECONDS",
+    "STRATEGY7_OFI_THRESHOLD",
+    "STRATEGY7_MOMENTUM_THRESHOLD",
+    "STRATEGY7_MAX_ENTRY_PRICE",
+    "STRATEGY7_MIN_SIGNAL_GAP",
+    "STRATEGY7_CONFIRM_BEFORE_ENTRY_SECONDS",
+    "STRATEGY7_LATE_CONFIRM_STRONG_SIGNAL_GAP",
+    "STRATEGY7_LATE_CONFIRM_RELAX_SECONDS",
+)
+
+STRATEGY_PROFILE_COMMON_FIELDS: tuple[str, ...] = (
+    "TARGET_PROFIT",
+    "BET_SIZING_MODE",
+    "BASE_ORDER_COST",
+    "MAX_CONSECUTIVE_LOSSES",
+    "OPEN_DELAY_SECONDS",
+)
+
 
 def _paper_profile_env_prefix(timeframe: str) -> str:
     return f"PAPER_{str(timeframe).upper()}"
@@ -276,6 +312,58 @@ def _split_paper_profile_key(key: str) -> tuple[str, str] | None:
         if key.startswith(prefix):
             return timeframe, key[len(prefix):]
     return None
+
+
+def _strategy_profile_prefix(mode: str, strategy_id: int | str) -> str:
+    normalized_mode = "live" if str(mode or "").lower() == "live" else "paper"
+    return f"{normalized_mode.upper()}_STRATEGY_{strategy_id}"
+
+
+def _split_strategy_profile_key(key: str) -> tuple[str, str, str] | None:
+    match = re.match(r"^(LIVE|PAPER)_STRATEGY_([1-8])_(.+)$", str(key or ""))
+    if not match:
+        return None
+    mode = match.group(1).lower()
+    strategy_id = match.group(2)
+    base_key = match.group(3)
+    if base_key not in STRATEGY_PROFILE_EDITABLE_FIELDS:
+        return None
+    return mode, strategy_id, base_key
+
+
+def _strategy_profile_field_names(strategy_id: int | str) -> list[str]:
+    fields = list(STRATEGY_PROFILE_COMMON_FIELDS)
+    strategy_text = str(strategy_id)
+    if strategy_text == "5":
+        fields.extend(
+            [
+                "SIGNAL_MOMENTUM_THRESHOLD",
+                "SIGNAL_WEAK_SIGNAL_MODE",
+                "SIGNAL_FALLBACK_STRATEGY_ID",
+                "SIGNAL_HISTORY_FIDELITY_SECONDS",
+                "SIGNAL_ANCHOR_MAX_OFFSET_SECONDS",
+                "SIGNAL_DYNAMIC_THRESHOLD_K",
+                "SIGNAL_DYNAMIC_THRESHOLD_MIN_POINTS",
+                "SIGNAL_LOCK_BEFORE_ENTRY_SECONDS",
+            ]
+        )
+    if strategy_text == "6":
+        fields.extend(["OFI_THRESHOLD", "BINANCE_SIGNAL_STALE_SECONDS"])
+    if strategy_text in {"7", "8"}:
+        fields.extend(
+            [
+                "OFI_THRESHOLD",
+                "BINANCE_SIGNAL_STALE_SECONDS",
+                "STRATEGY7_OFI_THRESHOLD",
+                "STRATEGY7_MOMENTUM_THRESHOLD",
+                "STRATEGY7_MAX_ENTRY_PRICE",
+                "STRATEGY7_MIN_SIGNAL_GAP",
+                "STRATEGY7_CONFIRM_BEFORE_ENTRY_SECONDS",
+                "STRATEGY7_LATE_CONFIRM_STRONG_SIGNAL_GAP",
+                "STRATEGY7_LATE_CONFIRM_RELAX_SECONDS",
+            ]
+        )
+    return fields
 
 
 def _normalize_paper_timeframes_value(value: str) -> str:
@@ -1312,6 +1400,33 @@ class DashboardState:
         if key == "PAPER_TIMEFRAMES":
             return _normalize_paper_timeframes_value(normalized)
 
+        strategy_profile_key = _split_strategy_profile_key(key)
+        if strategy_profile_key is not None:
+            _, _, base_key = strategy_profile_key
+            if base_key in cls.BOOL_CONFIG_KEYS:
+                return cls._normalize_bool_config_value(key, normalized)
+            if base_key in cls.SELECT_OPTIONS:
+                allowed = cls.SELECT_OPTIONS[base_key]
+                upper_value = normalized.upper()
+                lower_value = normalized.lower()
+                if normalized in allowed:
+                    return normalized
+                if upper_value in allowed:
+                    return upper_value
+                if lower_value in allowed:
+                    return lower_value
+                raise ValueError(f"Invalid value for {key}: expected one of {allowed}, got {value!r}")
+            if base_key in cls.INT_CONFIG_KEYS:
+                try:
+                    return str(int(normalized))
+                except ValueError as exc:
+                    raise ValueError(f"Invalid value for {key}: expected integer, got {value!r}") from exc
+            if base_key in cls.FLOAT_CONFIG_KEYS:
+                try:
+                    return str(float(normalized))
+                except ValueError as exc:
+                    raise ValueError(f"Invalid value for {key}: expected number, got {value!r}") from exc
+
         paper_profile_key = _split_paper_profile_key(key)
         if paper_profile_key is not None:
             _, base_key = paper_profile_key
@@ -1439,6 +1554,21 @@ class DashboardState:
     def _effective_config_value(self, key: str) -> str:
         if key == "PAPER_TIMEFRAMES":
             return ",".join(getattr(self._cfg, "paper_timeframes", []) or [])
+        strategy_profile_key = _split_strategy_profile_key(key)
+        if strategy_profile_key is not None:
+            mode, strategy_id_text, base_key = strategy_profile_key
+            profile_map = (
+                getattr(self._cfg, "live_profiles", {})
+                if mode == "live"
+                else getattr(self._cfg, "paper_strategy_profiles", {})
+            )
+            profile = profile_map.get(int(strategy_id_text))
+            if profile is None:
+                return self._effective_config_value(base_key)
+            value = getattr(profile, self.CONFIG_ATTR_MAP[base_key])
+            if value is None:
+                return ""
+            return _fmt_env(value)
         paper_profile_key = _split_paper_profile_key(key)
         if paper_profile_key is not None:
             timeframe, base_key = paper_profile_key
@@ -1458,6 +1588,49 @@ class DashboardState:
         if key in {"STRATEGY_IDS", "LIVE_STRATEGY_IDS", "PAPER_STRATEGY_IDS"}:
             return ",".join(str(item) for item in value)
         return _fmt_env(value)
+
+    def _active_strategy_profile_payload(self, env_values: dict[str, str]) -> dict[str, Any]:
+        saved_mode = str(env_values.get("TRADE_MODE") or self._cfg.trade_mode or "paper").strip().lower()
+        live_enabled = str(env_values.get("LIVE_TRADING_ENABLED") or getattr(self._cfg, "live_trading_enabled", False)).strip().lower()
+        mode = "live" if saved_mode == "live" and live_enabled in {"1", "true", "yes", "on"} else "paper"
+        if mode == "live":
+            strategy_ids = list(getattr(self._cfg, "strategy_ids", []) or getattr(self._cfg, "live_strategy_ids", []) or [self._cfg.strategy_id])
+        else:
+            timeframe = _normalize_timeframe_filter(getattr(self._cfg, "market_timeframe", "5m"))
+            profile = getattr(self._cfg, "paper_profiles", {}).get(timeframe)
+            strategy_ids = list(
+                getattr(self._cfg, "strategy_ids", [])
+                or (getattr(profile, "paper_strategy_ids", None) if profile is not None else None)
+                or getattr(self._cfg, "paper_strategy_ids", [])
+                or [self._cfg.strategy_id]
+            )
+
+        strategies: dict[str, Any] = {}
+        for strategy_id in strategy_ids:
+            strategy_text = str(strategy_id)
+            fields: dict[str, Any] = {}
+            for base_key in _strategy_profile_field_names(strategy_id):
+                prefixed_key = f"{_strategy_profile_prefix(mode, strategy_text)}_{base_key}"
+                inherited_value = self._effective_config_value(base_key)
+                explicit_value = self._env_values.get(prefixed_key)
+                value = explicit_value if explicit_value is not None else self._effective_config_value(prefixed_key)
+                fields[base_key] = {
+                    "key": prefixed_key,
+                    "label": self.CONFIG_LABELS.get(base_key, base_key),
+                    "value": value,
+                    "inherited_value": inherited_value,
+                    "inherited": explicit_value is None,
+                    "options": list(self.SELECT_OPTIONS.get(base_key, [])),
+                }
+            strategies[strategy_text] = {
+                "strategy": strategy_text,
+                "label": self.STRATEGY_CATALOG.get(strategy_text, {}).get("label", f"策略 {strategy_text}"),
+                "fields": fields,
+            }
+        return {
+            "mode": mode,
+            "strategies": strategies,
+        }
 
     def _masked_env_values(self, env_values: dict[str, str]) -> dict[str, str]:
         masked = dict(env_values)
@@ -1589,6 +1762,9 @@ class DashboardState:
     def get_config_payload(self) -> dict[str, Any]:
         with self._lock:
             env_values, validation_errors = self._merged_env_values()
+            for key, value in self._env_values.items():
+                if _split_strategy_profile_key(key) is not None:
+                    env_values[key] = value
             runtime_status = self._build_runtime_status(env_values)
             strategy_catalog = json.loads(json.dumps(self.STRATEGY_CATALOG))
             field_groups = json.loads(json.dumps(self.FIELD_GROUPS))
@@ -1618,6 +1794,7 @@ class DashboardState:
                 }
                 for timeframe, profile in getattr(self._cfg, "paper_profiles", {}).items()
             }
+            strategy_profiles = self._active_strategy_profile_payload(env_values)
             return {
                 "env_file": str(self.env_file),
                 "env_values": self._masked_env_values(env_values),
@@ -1634,12 +1811,17 @@ class DashboardState:
                 "saved_at": _iso(self._last_saved_at),
                 "paper_timeframes": list(getattr(self._cfg, "paper_timeframes", [])),
                 "paper_profiles": paper_profiles,
+                "strategy_profiles": strategy_profiles,
             }
 
     def update_config(self, values: dict[str, str]) -> dict[str, Any]:
         if not isinstance(values, dict):
             raise ValueError("Config payload must be an object.")
-        unsupported = sorted(key for key in values.keys() if key not in self.EDITABLE_CONFIG_KEYS)
+        unsupported = sorted(
+            key
+            for key in values.keys()
+            if key not in self.EDITABLE_CONFIG_KEYS and _split_strategy_profile_key(key) is None
+        )
         if unsupported:
             raise ValueError(f"Unsupported keys: {', '.join(unsupported)}")
 
@@ -1694,6 +1876,72 @@ class DashboardState:
             self.notify_mode_change(next_mode)
         return self.get_config_payload()
 
+    @staticmethod
+    def _reset_strategy_sizing_state(strategy_state: Any) -> None:
+        strategy_state.round_index = 0
+        strategy_state.recovery_loss = 0.0
+        strategy_state.consecutive_losses = 0
+        strategy_state.consecutive_max_stake_skips = 0
+        strategy_state.signal_round_slug = None
+        strategy_state.signal_round_open_up_price = None
+        strategy_state.signal_round_locked_side = None
+        strategy_state.strategy6_last_ofi_score = None
+        strategy_state.stop_loss_count = 0
+
+    def reset_strategy_state(
+        self,
+        *,
+        mode: str | None = None,
+        strategy: int | str,
+        timeframe: str | None = None,
+    ) -> dict[str, Any]:
+        strategy_filter = _normalize_strategy_filter(strategy)
+        if strategy_filter is None:
+            raise ValueError("请选择要重置的策略。")
+        strategy_id = int(strategy_filter)
+        with self._lock:
+            cfg = self._cfg
+            target_mode = str(mode or cfg.trade_mode or "paper").strip().lower()
+            if target_mode not in {"paper", "live"}:
+                raise ValueError(f"Invalid reset mode: {mode!r}")
+
+            if target_mode == "live":
+                strategy_ids = list(getattr(cfg, "strategy_ids", []) or getattr(cfg, "live_strategy_ids", []) or [cfg.strategy_id])
+                state_path = cfg.logs_dir / "live_session_state.json"
+                state_path.parent.mkdir(parents=True, exist_ok=True)
+                state = load_session_state(state_path, effective_live_strategy_ids=strategy_ids)
+                strategy_state = state.live_strategies.setdefault(strategy_id, LiveStrategyState())
+                if getattr(strategy_state, "pending_live_slug", None):
+                    raise ValueError("该策略还有待结算实盘订单，不能重置。")
+                self._reset_strategy_sizing_state(strategy_state)
+                state.live_strategies[strategy_id] = strategy_state
+                save_session_state(state_path, state)
+            else:
+                target_timeframe = _normalize_timeframe_filter(timeframe, fallback=cfg.market_timeframe)
+                profile = getattr(cfg, "paper_profiles", {}).get(target_timeframe)
+                strategy_ids = list(
+                    getattr(cfg, "strategy_ids", [])
+                    or (getattr(profile, "paper_strategy_ids", None) if profile is not None else None)
+                    or getattr(cfg, "paper_strategy_ids", [])
+                    or [cfg.strategy_id]
+                )
+                state_path = _paper_session_state_path(cfg, target_timeframe)
+                state_path.parent.mkdir(parents=True, exist_ok=True)
+                state = load_session_state(state_path, effective_paper_strategy_ids=strategy_ids)
+                strategy_state = state.paper_strategies.get(strategy_id)
+                if strategy_state is None:
+                    strategy_state = PaperStrategyState()
+                    state.paper_strategies[strategy_id] = strategy_state
+                if getattr(strategy_state, "pending_paper_trades", None):
+                    raise ValueError("该策略还有待结算纸面订单，不能重置。")
+                self._reset_strategy_sizing_state(strategy_state)
+                state.paper_strategies[strategy_id] = strategy_state
+                save_session_state(state_path, state)
+
+        payload = self.get_config_payload()
+        payload["reset"] = {"mode": target_mode, "strategy": str(strategy_id)}
+        return payload
+
     def get_market_payload(self, *, strategy: int | str | None = None, timeframe: str | None = None) -> dict[str, Any]:
         with self._lock:
             cfg = self._cfg
@@ -1704,7 +1952,7 @@ class DashboardState:
         timeframe_cfg = _cfg_for_paper_timeframe(cfg, target_timeframe)
         strategy_filter = _normalize_strategy_filter(strategy)
         selected_strategy = int(strategy_filter or str(timeframe_cfg.strategy_id))
-        effective_cfg = replace(timeframe_cfg, strategy_id=selected_strategy)
+        effective_cfg = _cfg_for_paper_strategy(timeframe_cfg, selected_strategy)
         effective_paper_strategy_ids = list(getattr(timeframe_cfg, "paper_strategy_ids", []) or [timeframe_cfg.strategy_id])
         if selected_strategy not in effective_paper_strategy_ids:
             effective_paper_strategy_ids.append(selected_strategy)
@@ -2229,6 +2477,35 @@ class _DashboardRequestHandler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:  # noqa: N802
         parsed = urlparse(self.path)
+        if parsed.path == "/api/strategy/reset":
+            try:
+                payload = self._read_json_body()
+                strategy = payload.get("strategy_id", payload.get("strategy"))
+                updated = self.dashboard_state.reset_strategy_state(
+                    mode=payload.get("mode"),
+                    strategy=strategy,
+                    timeframe=payload.get("timeframe"),
+                )
+                self._send_json(updated)
+            except OSError as exc:
+                if self._is_client_disconnect(exc):
+                    return
+                raise
+            except ValueError as exc:
+                try:
+                    self._send_json({"error": str(exc)}, status=HTTPStatus.BAD_REQUEST)
+                except OSError as send_exc:
+                    if self._is_client_disconnect(send_exc):
+                        return
+                    raise
+            except Exception as exc:  # pragma: no cover
+                try:
+                    self._send_json({"error": str(exc)}, status=HTTPStatus.INTERNAL_SERVER_ERROR)
+                except OSError as send_exc:
+                    if self._is_client_disconnect(send_exc):
+                        return
+                    raise
+            return
         if parsed.path != "/api/config":
             self._send_json({"error": "Not found"}, status=HTTPStatus.NOT_FOUND)
             return
@@ -3706,6 +3983,58 @@ input.input-compact {
   line-height: 1.45;
 }
 
+.strategy-profile-editor,
+.strategy-profile-card {
+  display: grid;
+  gap: 10px;
+}
+
+.strategy-profile-card {
+  border: 1px solid rgba(90, 144, 255, 0.24);
+  border-radius: 10px;
+  padding: 10px;
+  background: rgba(6, 12, 22, 0.72);
+}
+
+.strategy-profile-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.strategy-profile-title {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.strategy-profile-subtitle {
+  font-size: 11px;
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.strategy-profile-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.strategy-profile-field {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(90px, 1fr) minmax(92px, auto) auto;
+  gap: 6px;
+  align-items: center;
+  font-size: 11px;
+}
+
+.strategy-profile-field label {
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
 .strategy-panel-primary {
   justify-self: end;
 }
@@ -4834,6 +5163,65 @@ function renderStrategyPanel(payload, values) {
   });
 
   panelNode.appendChild(list);
+  const editor = document.createElement('div');
+  editor.id = 'strategyProfileEditor';
+  editor.className = 'strategy-profile-editor';
+  panelNode.appendChild(editor);
+}
+
+function renderStrategyProfileEditor(payload, values) {
+  const editor = el('strategyProfileEditor');
+  if (!editor) {
+    return;
+  }
+  const profilePayload = (payload || {}).strategy_profiles || {};
+  const strategies = profilePayload.strategies || {};
+  const mode = activeConfigModeFromValues(payload || {}, values || {});
+  const unified = resolveUnifiedStrategySelection(payload || {}, values || {});
+  const selected = unified.selected.length > 0 ? unified.selected : Object.keys(strategies);
+  const cards = selected.map((strategyId) => {
+    const profile = strategies[String(strategyId)] || {};
+    const fields = (profile.fields || {});
+    const fieldHtml = Object.entries(fields).map(([baseKey, field]) => {
+      const key = String((field || {}).key || '');
+      const value = String((field || {}).value ?? '');
+      const inheritedValue = String((field || {}).inherited_value ?? '');
+      const explicit = !(field || {}).inherited;
+      const label = String((field || {}).label || CONFIG_KEY_NAMES[baseKey] || baseKey);
+      const options = Array.isArray((field || {}).options) ? field.options : [];
+      const attrs = ' data-strategy-config-key="' + esc(key) + '"' +
+        ' data-strategy-config-explicit="' + (explicit ? 'true' : 'false') + '"' +
+        ' data-strategy-config-inherited-value="' + esc(inheritedValue) + '"';
+      const control = options.length > 0
+        ? ('<select class="input-compact"' + attrs + '>' + options.map((opt) => {
+            const selectedAttr = String(opt) === value ? ' selected' : '';
+            return '<option value="' + esc(opt) + '"' + selectedAttr + '>' + esc(strategyOptionLabel(baseKey, opt, payload)) + '</option>';
+          }).join('') + '</select>')
+        : ('<input class="input-compact" type="text" value="' + esc(value) + '"' + attrs + '>');
+      const chip = explicit ? '<span class="chip warn">单独配置</span>' : '<span class="chip">继承全局</span>';
+      return '<div class="strategy-profile-field">' +
+        '<label>' + esc(label) + '</label>' +
+        control +
+        chip +
+        '</div>';
+    }).join('');
+    return '<section class="strategy-profile-card">' +
+      '<div class="strategy-profile-head">' +
+        '<div><div class="strategy-profile-title">策略 ' + esc(strategyId) + ' 参数</div>' +
+        '<div class="strategy-profile-subtitle">' + esc(profile.label || strategyShortLabel(payload, strategyId)) + '</div></div>' +
+        '<button type="button" class="btn btn-ghost" data-reset-strategy="' + esc(strategyId) + '">重置状态</button>' +
+      '</div>' +
+      '<div class="strategy-profile-grid">' + fieldHtml + '</div>' +
+      '</section>';
+  }).join('');
+  editor.innerHTML = '<div class="strategy-profile-title">策略参数</div>' +
+    '<div class="strategy-profile-subtitle">' + esc(formatModeLabel(mode)) + ' · 全局参数管安全边界，策略参数管下注与信号行为</div>' +
+    (cards || '<div class="empty">暂无可配置策略</div>');
+  editor.querySelectorAll('[data-reset-strategy]').forEach((node) => {
+    node.addEventListener('click', () => {
+      resetStrategyState(node.getAttribute('data-reset-strategy') || '');
+    });
+  });
 }
 
 function selectAllPaperStrategiesInPanel() {
@@ -4909,6 +5297,7 @@ function renderUnifiedStrategyToolbar(payload, values) {
     multiNode.appendChild(option);
   });
   renderStrategyPanel(payload, values);
+  renderStrategyProfileEditor(payload, values);
   state.marketStrategyFilter = focusStrategy;
 }
 
@@ -5604,6 +5993,32 @@ async function apiPost(path, payload) {
   return data;
 }
 
+async function resetStrategyState(strategyId) {
+  const strategyText = String(strategyId || '').trim();
+  if (!strategyText) {
+    return;
+  }
+  const mode = effectiveConfigMode(state.config || {});
+  if (!window.confirm('确认重置策略 ' + strategyText + ' 的下注状态吗？')) {
+    return;
+  }
+  try {
+    setChip('cfgStatus', '重置中', 'warn');
+    const data = await apiPost('/api/strategy/reset', {
+      mode,
+      strategy_id: strategyText,
+      timeframe: effectivePaperTimeframeFilter(),
+    });
+    renderConfig(data);
+    await Promise.allSettled([refreshMarket(), refreshSummary(), refreshRecent()]);
+    setChip('cfgStatus', '已重置策略 ' + strategyText, 'ok');
+  } catch (err) {
+    setChip('cfgStatus', '重置失败', 'err');
+    setConfigError(err && err.message ? err.message : '重置失败');
+    console.error(err);
+  }
+}
+
 function renderHelpSectionList(section) {
   return (section.sections || []).map((group) => {
     const items = (group.bullets || []).map((item) => '<li>' + esc(item) + '</li>').join('');
@@ -6150,7 +6565,10 @@ function renderConfig(payload) {
 
   renderUnifiedStrategyToolbar(payload, displayValues);
   renderConfigModeShell(payload);
-  form.oninput = () => {
+  form.oninput = (event) => {
+    if (event && event.target && event.target.getAttribute && event.target.getAttribute('data-strategy-config-key')) {
+      return;
+    }
     const liveValues = expandLiveToggleValues(collectConfigValues());
     renderUnifiedStrategyToolbar(state.config, liveValues);
     renderStrategyGuide(state.config, liveValues);
@@ -6214,6 +6632,18 @@ function collectConfigValues(options) {
     }
     payload[key] = node.value;
   }
+  document.querySelectorAll('[data-strategy-config-key]').forEach((node) => {
+    const key = String(node.getAttribute('data-strategy-config-key') || '');
+    if (!key) {
+      return;
+    }
+    const value = String(node.value ?? '').trim();
+    const inheritedValue = String(node.getAttribute('data-strategy-config-inherited-value') || '');
+    const explicit = String(node.getAttribute('data-strategy-config-explicit') || '') === 'true';
+    if (explicit || value !== inheritedValue) {
+      payload[key] = value;
+    }
+  });
   if (settings.includeUnified === false) {
     return payload;
   }

@@ -1696,6 +1696,18 @@ def test_dashboard_assets_use_strategy_panel_for_unified_strategy_selection():
     assert 'id="strategyGuideCard"' in html
 
 
+def test_dashboard_assets_include_strategy_profile_editor_and_reset_action():
+    js = _dashboard_js()
+
+    assert 'function renderStrategyProfileEditor(' in js
+    assert 'strategy_profiles' in js
+    assert 'data-strategy-config-key' in js
+    assert 'function resetStrategyState(' in js
+    assert "'/api/strategy/reset'" in js
+    assert '重置状态' in js
+    assert '策略参数' in js
+
+
 def test_dashboard_assets_allow_strategy_panel_rows_to_wrap_without_overflow():
     css = dashboard._dashboard_css()
 
@@ -2013,6 +2025,124 @@ def test_dashboard_runtime_status_keeps_pending_live_order_from_removed_strategy
         assert runtime['live_strategy_ids'] == ['3']
         assert runtime['pending_live_order'] is True
         assert runtime['live_strategy_states']['6']['pending_live_slug'] == 'btc-updown-5m-orphaned'
+    finally:
+        state.close()
+        os.chdir(old_cwd)
+
+
+def test_dashboard_config_payload_exposes_and_saves_strategy_profile_overrides(tmp_path: Path):
+    env_file = tmp_path / '.env.dashboard'
+    env_file.write_text(
+        'TRADE_MODE=live\n'
+        'LIVE_TRADING_ENABLED=true\n'
+        'LIVE_STRATEGY_IDS=3,7\n'
+        'BASE_ORDER_COST=2\n'
+        'LIVE_STRATEGY_7_BASE_ORDER_COST=5.5\n',
+        encoding='utf-8',
+    )
+    state = DashboardState(env_file=env_file)
+    try:
+        payload = state.get_config_payload()
+
+        assert payload['strategy_profiles']['mode'] == 'live'
+        strategy_seven = payload['strategy_profiles']['strategies']['7']
+        assert strategy_seven['fields']['BASE_ORDER_COST']['key'] == 'LIVE_STRATEGY_7_BASE_ORDER_COST'
+        assert strategy_seven['fields']['BASE_ORDER_COST']['value'] == '5.5'
+        assert strategy_seven['fields']['BASE_ORDER_COST']['inherited'] is False
+        assert payload['strategy_profiles']['strategies']['3']['fields']['BASE_ORDER_COST']['value'] == '2.0'
+        assert payload['strategy_profiles']['strategies']['3']['fields']['BASE_ORDER_COST']['inherited'] is True
+
+        updated = state.update_config({'LIVE_STRATEGY_3_BASE_ORDER_COST': '4.25'})
+
+        assert updated['strategy_profiles']['strategies']['3']['fields']['BASE_ORDER_COST']['value'] == '4.25'
+        assert 'LIVE_STRATEGY_3_BASE_ORDER_COST=4.25' in env_file.read_text(encoding='utf-8')
+    finally:
+        state.close()
+
+
+def test_dashboard_can_reset_one_live_strategy_sizing_state(tmp_path: Path):
+    old_cwd = Path.cwd()
+    os.chdir(tmp_path)
+    env_file = tmp_path / '.env.dashboard'
+    env_file.write_text(
+        'TRADE_MODE=live\nLIVE_TRADING_ENABLED=true\nLIVE_STRATEGY_IDS=3,7\n',
+        encoding='utf-8',
+    )
+    logs_dir = tmp_path / 'logs'
+    logs_dir.mkdir(parents=True, exist_ok=True)
+    (logs_dir / 'live_session_state.json').write_text(
+        json.dumps(
+            {
+                'live_strategies': {
+                    '3': {
+                        'round_index': 9,
+                        'cash_pnl': -12.5,
+                        'recovery_loss': 12.5,
+                        'consecutive_losses': 4,
+                        'consecutive_max_stake_skips': 2,
+                        'stop_loss_count': 1,
+                        'daily_realized_pnl': -12.5,
+                        'current_day': '2026-04-29',
+                    },
+                    '7': {
+                        'round_index': 5,
+                        'cash_pnl': 3.0,
+                        'recovery_loss': 0.0,
+                        'consecutive_losses': 0,
+                        'consecutive_max_stake_skips': 0,
+                    },
+                }
+            }
+        ),
+        encoding='utf-8',
+    )
+    state = DashboardState(env_file=env_file)
+    try:
+        result = state.reset_strategy_state(mode='live', strategy=3)
+
+        assert result['reset']['strategy'] == '3'
+        reset_state = result['runtime_status']['live_strategy_states']['3']
+        assert reset_state['round_index'] == 0
+        assert reset_state['cash_pnl'] == -12.5
+        assert reset_state['recovery_loss'] == 0.0
+        assert reset_state['consecutive_losses'] == 0
+        assert reset_state['consecutive_max_stake_skips'] == 0
+        assert reset_state['stop_loss_count'] == 0
+        assert result['runtime_status']['live_strategy_states']['7']['round_index'] == 5
+    finally:
+        state.close()
+        os.chdir(old_cwd)
+
+
+def test_dashboard_refuses_to_reset_strategy_with_pending_live_order(tmp_path: Path):
+    old_cwd = Path.cwd()
+    os.chdir(tmp_path)
+    env_file = tmp_path / '.env.dashboard'
+    env_file.write_text(
+        'TRADE_MODE=live\nLIVE_TRADING_ENABLED=true\nLIVE_STRATEGY_IDS=7\n',
+        encoding='utf-8',
+    )
+    logs_dir = tmp_path / 'logs'
+    logs_dir.mkdir(parents=True, exist_ok=True)
+    (logs_dir / 'live_session_state.json').write_text(
+        json.dumps(
+            {
+                'live_strategies': {
+                    '7': {
+                        'round_index': 5,
+                        'recovery_loss': 10.0,
+                        'consecutive_losses': 3,
+                        'pending_live_slug': 'btc-updown-5m-current',
+                    }
+                }
+            }
+        ),
+        encoding='utf-8',
+    )
+    state = DashboardState(env_file=env_file)
+    try:
+        with pytest.raises(ValueError, match='待结算'):
+            state.reset_strategy_state(mode='live', strategy=7)
     finally:
         state.close()
         os.chdir(old_cwd)
@@ -3975,5 +4105,3 @@ def test_dashboard_summary_payload_includes_daily_strategy_performance(tmp_path:
     finally:
         state.close()
         os.chdir(old_cwd)
-
-

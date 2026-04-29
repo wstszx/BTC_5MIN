@@ -839,9 +839,16 @@ def _managed_live_strategy_ids(
 
 
 def _cfg_for_live_strategy(cfg: AppConfig, strategy_id: int) -> AppConfig:
-    if getattr(cfg, "strategy_ids", None):
-        return replace(cfg, strategy_id=strategy_id)
     profile = getattr(cfg, "live_profiles", {}).get(strategy_id)
+    if profile is None:
+        return replace(cfg, strategy_id=strategy_id)
+    overrides = asdict(profile)
+    overrides["strategy_id"] = strategy_id
+    return replace(cfg, **overrides)
+
+
+def _cfg_for_paper_strategy(cfg: AppConfig, strategy_id: int) -> AppConfig:
+    profile = getattr(cfg, "paper_strategy_profiles", {}).get(strategy_id)
     if profile is None:
         return replace(cfg, strategy_id=strategy_id)
     overrides = asdict(profile)
@@ -4234,7 +4241,7 @@ def run_paper_trading(
                     any_processed = True
                     round_completed = True
                     continue
-                strategy_cfg = replace(cfg, strategy_id=strategy_id)
+                strategy_cfg = _cfg_for_paper_strategy(cfg, strategy_id)
                 strategy_session = _paper_strategy_state_to_session_state(strategy_state, state)
                 strategy_quote = replace(quote)
                 _apply_strategy6_signal_to_quote(

@@ -93,6 +93,31 @@ def test_build_config_applies_live_strategy_profile_overrides():
     assert cfg.live_profiles[2].signal_weak_signal_mode == 'SKIP'
 
 
+def test_build_config_applies_strategy_overrides_with_unified_strategy_ids_and_global_stake_cap():
+    cfg = build_config_from_env_values(
+        {
+            'STRATEGY_ID': '3',
+            'STRATEGY_IDS': '3,7',
+            'MAX_STAKE': '20',
+            'BASE_ORDER_COST': '2',
+            'LIVE_STRATEGY_7_BASE_ORDER_COST': '5.5',
+            'LIVE_STRATEGY_7_MAX_STAKE': '99',
+            'LIVE_STRATEGY_7_STRATEGY7_OFI_THRESHOLD': '0.58',
+            'PAPER_STRATEGY_3_BASE_ORDER_COST': '4.0',
+            'PAPER_STRATEGY_3_MAX_STAKE': '30',
+        }
+    )
+
+    assert cfg.live_strategy_ids == [3, 7]
+    assert cfg.live_profiles[3].base_order_cost == 2.0
+    assert cfg.live_profiles[7].base_order_cost == 5.5
+    assert cfg.live_profiles[7].max_stake == 20.0
+    assert cfg.live_profiles[7].strategy7_ofi_threshold == 0.58
+    assert cfg.paper_strategy_profiles[3].base_order_cost == 4.0
+    assert cfg.paper_strategy_profiles[3].max_stake == 20.0
+    assert cfg.paper_strategy_profiles[7].base_order_cost == 2.0
+
+
 def test_build_config_ignores_invalid_paper_strategy_entries():
     cfg = build_config_from_env_values({'STRATEGY_ID': '3', 'PAPER_STRATEGY_IDS': '6,x,9,2,6'})
 
