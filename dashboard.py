@@ -2698,6 +2698,11 @@ def _dashboard_html() -> str:
       <div class=\"subtitle\">策略参数、实时盘口、信号决策、纸面收益一屏联动</div>
     </div>
     <div class=\"top-actions\">
+      <div id=\"topConnectionStatus\" class=\"top-connection-status\" title=\"实时连接状态\">
+        <span class=\"top-connection-label\">连接</span>
+        <div id=\"wsHealth\" class=\"chip\">待刷新</div>
+        <span id=\"topConnectionDetail\" class=\"top-connection-detail\">--</span>
+      </div>
       <div id=\"clockLocal\" class=\"clock\">本地时间 --</div>
       <button id=\"btnHelp\" class=\"btn btn-ghost\" type=\"button\">帮助</button>
       <button id=\"btnRefreshNow\" class=\"btn btn-ghost\" type=\"button\">立即刷新</button>
@@ -2929,71 +2934,6 @@ def _dashboard_html() -> str:
       </div>
     </section>
 
-    <section class="stack right-stack monitor-stack">
-      <div id="monitorRuntimePanel" class=\"panel\">
-        <div class=\"panel-head\">
-          <div>
-            <div class=\"head-title\">运行与连接监控</div>
-            <div class=\"head-desc\">运行模式、连接质量与后台状态</div>
-          </div>
-          <div id=\"wsHealth\" class=\"chip\">待刷新</div>
-        </div>
-        <div class=\"panel-body monitor-runtime-grid\">
-          <div id="runtimeSummaryBar" class="strategy-guide-card fold-summary">
-            <div class="strategy-guide-head">
-              <div>
-                <div class="strategy-guide-title">系统状态</div>
-                <div id="runtimeSummaryText" class="strategy-guide-subtitle">当前模式 -- / 目标模式 -- / 是否待切换 -- / 实盘就绪 --</div>
-              </div>
-              <button id="runtimeDetailsToggle" class="btn btn-ghost" type="button" aria-expanded="false" aria-controls="runtimeDetailsPanel">展开运行详情</button>
-            </div>
-          </div>
-
-          <div id="paperRuntimeCards" class="rows"></div>
-
-          <div id="runtimeDetailsPanel" hidden>
-            <div id="runtimeModeCard" class="strategy-guide-card">
-              <div class="strategy-guide-head">
-                <div>
-                  <div class="strategy-guide-title">运行模式</div>
-                  <div class="strategy-guide-subtitle">显示配置目标、当前实际状态、切换进度和实盘条件。</div>
-                </div>
-                <span class="chip warn">热切换受控</span>
-              </div>
-              <div class="rows">
-                <div class="row"><span class="label">目标模式</span><span id="runtimeSavedMode" class="value">--</span></div>
-                <div class="row"><span class="label">当前模式</span><span id="runtimeRunningMode" class="value">--</span></div>
-                  <div class="row"><span class="label">是否待切换</span><span id="runtimeRestartRequired" class="value">--</span></div>
-                  <div class="row"><span class="label">实盘就绪</span><span id="runtimeLiveReady" class="value">--</span></div>
-                  <div class="row"><span class="label">校验结果</span><span id="runtimeLiveError" class="value">--</span></div>
-                  <div class="row"><span class="label">运行告警</span><span id="runtimeAlertMessage" class="value">--</span></div>
-                  <div id="runtimeRedeemRows">
-                  <div class="row"><span class="label">自动赎回</span><span id="runtimeRedeemEnabled" class="value">--</span></div>
-                  <div class="row"><span class="label">待赎回数量</span><span id="runtimeRedeemPending" class="value">--</span></div>
-                  <div class="row"><span class="label">最近结果</span><span id="runtimeRedeemResult" class="value">--</span></div>
-                  <div class="row"><span class="label">最近尝试</span><span id="runtimeRedeemAttempt" class="value">--</span></div>
-                  <div class="row"><span class="label">最近交易哈希</span><span id="runtimeRedeemTxHash" class="value">--</span></div>
-                </div>
-                <div id="runtimeOptimizerRows">
-                  <div class="row"><span class="label">优化器</span><span id="runtimeOptimizerEnabled" class="value">--</span></div>
-                  <div class="row"><span class="label">当前冠军</span><span id="runtimeOptimizerChampion" class="value">--</span></div>
-                  <div class="row"><span class="label">活动挑战者</span><span id="runtimeOptimizerChallengers" class="value">--</span></div>
-                  <div class="row"><span class="label">可晋级数量</span><span id="runtimeOptimizerPromotable" class="value">--</span></div>
-                  <div class="row"><span class="label">最近运行</span><span id="runtimeOptimizerLastRun" class="value">--</span></div>
-                  <div class="row"><span class="label">挑战者明细</span><span id="runtimeOptimizerChallengerList" class="value">--</span></div>
-                  <div class="row"><span class="label">可晋级明细</span><span id="runtimeOptimizerPromotableList" class="value">--</span></div>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div id=\"wsRuntimeList\" class=\"runtime-list\"></div>
-          <div class=\"footnote\">说明：行情来源显示为 websocket 时，表示使用 WS 缓存盘口；显示为 http 时，表示回退到 HTTP 拉取。</div>
-        </div>
-      </div>
-
-    </section>
-
     <section class="panel unified-report-card">
       <div class="report-card-head">
         <div>
@@ -3147,12 +3087,12 @@ body::before {
 }
 
 .topbar {
-  height: 56px;
+  min-height: 56px;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 0 16px;
+  padding: 8px 16px;
   border-bottom: 1px solid var(--line);
   background: rgba(5, 11, 20, 0.92);
   position: sticky;
@@ -3192,6 +3132,28 @@ body::before {
   gap: 10px;
   flex-wrap: wrap;
   justify-content: flex-end;
+}
+
+.top-connection-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.top-connection-label {
+  color: #87a2c9;
+  white-space: nowrap;
+}
+
+.top-connection-detail {
+  max-width: 220px;
+  color: #a8bad8;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .clock {
@@ -3437,7 +3399,7 @@ body::before {
   padding: 14px;
   display: grid;
   gap: 14px;
-  grid-template-columns: 380px minmax(520px, 1.15fr) 380px;
+  grid-template-columns: 380px minmax(0, 1fr);
   align-items: start;
 }
 
@@ -3447,20 +3409,6 @@ body::before {
 
 .decision-stack {
   min-width: 0;
-}
-
-.monitor-stack {
-  min-width: 0;
-}
-
-.monitor-stack .panel-body {
-  display: grid;
-  gap: 12px;
-}
-
-.monitor-runtime-grid {
-  display: grid;
-  gap: 12px;
 }
 
 .panel {
@@ -4268,25 +4216,17 @@ tr:hover td { background: rgba(50, 88, 131, 0.1); }
 
 @media (max-width: 1450px) {
   .layout {
-    grid-template-columns: 340px minmax(500px, 1.1fr);
+    grid-template-columns: 340px minmax(0, 1fr);
   }
 
   .report-card-body {
     grid-template-columns: minmax(200px, 0.48fr) minmax(0, 1.72fr);
-  }
-
-  .monitor-stack {
-    grid-column: span 2;
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 14px;
   }
 }
 
 @media (max-width: 1024px) {
   .layout { grid-template-columns: 1fr; }
   .report-card-body { grid-template-columns: 1fr; }
-  .monitor-stack { grid-column: auto; grid-template-columns: 1fr; }
   .strategy-panel-row { grid-template-columns: 1fr; }
   .strategy-panel-primary { justify-self: start; }
   .split,
@@ -4295,6 +4235,7 @@ tr:hover td { background: rgba(50, 88, 131, 0.1); }
   .market-header { grid-template-columns: 1fr; }
   .timer-wrap { text-align: left; }
   .subtitle { max-width: 56vw; }
+  .top-connection-detail { display: none; }
   .help-drawer { width: 100vw; }
 }
 """
@@ -5889,6 +5830,27 @@ function setChip(id, text, kind = '') {
   }
 }
 
+function setText(id, text) {
+  const node = el(id);
+  if (node) {
+    node.textContent = text;
+  }
+}
+
+function setHtml(id, html) {
+  const node = el(id);
+  if (node) {
+    node.innerHTML = html;
+  }
+}
+
+function setDisplay(id, display) {
+  const node = el(id);
+  if (node) {
+    node.style.display = display;
+  }
+}
+
 function setReportStatus(id, prefix, text, tone) {
   setChip(id, prefix + ': ' + text, tone);
 }
@@ -6255,32 +6217,32 @@ function expandLiveToggleValues(values) {
 }
 
 function renderRuntimeStatus(payload) {
-  el('runtimeSavedMode').textContent = formatModeLabel(payload.saved_mode || 'paper');
-  el('runtimeRunningMode').textContent = formatModeLabel(payload.running_mode || 'paper');
-  el('runtimeRestartRequired').textContent = payload.restart_required ? '需要' : '不需要';
-  el('runtimeLiveReady').textContent = payload.live_ready ? '已就绪' : '未就绪';
-  el('runtimeLiveError').textContent = payload.live_validation_error || '--';
-  el('runtimeAlertMessage').textContent = payload.runtime_alert_message || '--';
   maybeShowRuntimeAlert(payload);
-  el('runtimeSummaryText').textContent =
+  setText('runtimeSavedMode', formatModeLabel(payload.saved_mode || 'paper'));
+  setText('runtimeRunningMode', formatModeLabel(payload.running_mode || 'paper'));
+  setText('runtimeRestartRequired', payload.restart_required ? '需要' : '不需要');
+  setText('runtimeLiveReady', payload.live_ready ? '已就绪' : '未就绪');
+  setText('runtimeLiveError', payload.live_validation_error || '--');
+  setText('runtimeAlertMessage', payload.runtime_alert_message || '--');
+  setText('runtimeSummaryText',
     '当前模式 ' + formatModeLabel(payload.running_mode || 'paper') +
     ' / 目标模式 ' + formatModeLabel(payload.saved_mode || 'paper') +
     ' / 是否待切换 ' + (payload.restart_required ? '需要' : '不需要') +
-    ' / 实盘就绪 ' + (payload.live_ready ? '已就绪' : '未就绪');
+    ' / 实盘就绪 ' + (payload.live_ready ? '已就绪' : '未就绪'));
   const redeemVisible = !!(payload.redeem_visible || payload.redeem_enabled || ((payload.running_mode || payload.active_mode || 'paper') === 'live'));
-  el('runtimeRedeemRows').style.display = redeemVisible ? '' : 'none';
-  el('runtimeRedeemEnabled').textContent = payload.redeem_enabled ? '已开启' : '未开启';
-  el('runtimeRedeemPending').textContent = String(payload.redeem_pending_count ?? 0);
-  el('runtimeRedeemResult').textContent = payload.redeem_last_result || '--';
-  el('runtimeRedeemAttempt').textContent = payload.redeem_last_attempt_at ? fmtIso(payload.redeem_last_attempt_at) : '--';
-  el('runtimeRedeemTxHash').textContent = payload.redeem_last_tx_hash || '--';
-  el('runtimeOptimizerEnabled').textContent = payload.optimizer_enabled ? '已开启' : '未开启';
-  el('runtimeOptimizerChampion').textContent = payload.optimizer_champion_id || '--';
-  el('runtimeOptimizerChallengers').textContent = String((payload.optimizer_active_challengers || []).length);
-  el('runtimeOptimizerPromotable').textContent = String(payload.optimizer_promotable_count ?? 0);
-  el('runtimeOptimizerLastRun').textContent = payload.optimizer_last_run_at ? fmtIso(payload.optimizer_last_run_at) : '--';
-  el('runtimeOptimizerChallengerList').innerHTML = renderOptimizerCandidateList(payload.optimizer_active_challengers || []);
-  el('runtimeOptimizerPromotableList').innerHTML = renderOptimizerCandidateList(payload.optimizer_promotable_candidates || []);
+  setDisplay('runtimeRedeemRows', redeemVisible ? '' : 'none');
+  setText('runtimeRedeemEnabled', payload.redeem_enabled ? '已开启' : '未开启');
+  setText('runtimeRedeemPending', String(payload.redeem_pending_count ?? 0));
+  setText('runtimeRedeemResult', payload.redeem_last_result || '--');
+  setText('runtimeRedeemAttempt', payload.redeem_last_attempt_at ? fmtIso(payload.redeem_last_attempt_at) : '--');
+  setText('runtimeRedeemTxHash', payload.redeem_last_tx_hash || '--');
+  setText('runtimeOptimizerEnabled', payload.optimizer_enabled ? '已开启' : '未开启');
+  setText('runtimeOptimizerChampion', payload.optimizer_champion_id || '--');
+  setText('runtimeOptimizerChallengers', String((payload.optimizer_active_challengers || []).length));
+  setText('runtimeOptimizerPromotable', String(payload.optimizer_promotable_count ?? 0));
+  setText('runtimeOptimizerLastRun', payload.optimizer_last_run_at ? fmtIso(payload.optimizer_last_run_at) : '--');
+  setHtml('runtimeOptimizerChallengerList', renderOptimizerCandidateList(payload.optimizer_active_challengers || []));
+  setHtml('runtimeOptimizerPromotableList', renderOptimizerCandidateList(payload.optimizer_promotable_candidates || []));
 }
 
 function maybeShowRuntimeAlert(payload) {
@@ -6733,6 +6695,7 @@ async function saveConfig() {
 
 function renderWsRuntime(ws, staleGuard) {
   const list = el('wsRuntimeList');
+  const wsPayload = ws || {};
   const runtimeValue = (payload, shortKey, rawKey) => {
     if (!payload) {
       return undefined;
@@ -6740,17 +6703,17 @@ function renderWsRuntime(ws, staleGuard) {
     return payload[shortKey] ?? payload[rawKey];
   };
   const basePairs = [
-    ['ws_enabled', ws.ws_enabled],
-    ['ws_available', ws.ws_available],
-    ['ws_connected', ws.ws_connected],
-    ['reconnects', runtimeValue(ws, 'reconnects', 'ws_reconnect_count')],
-    ['invalid_ops', runtimeValue(ws, 'invalid_ops', 'ws_invalid_operation_count')],
-    ['connect_attempts', runtimeValue(ws, 'connect_attempts', 'ws_connect_attempts')],
-    ['subscribed_assets', runtimeValue(ws, 'subscribed_assets', 'ws_subscribed_asset_count')],
-    ['cached_assets', runtimeValue(ws, 'cached_assets', 'ws_cached_asset_count')],
-    ['last_message_age_s', runtimeValue(ws, 'last_message_age_s', 'ws_last_message_age_seconds')],
-    ['current_error', runtimeValue(ws, 'current_error', 'ws_current_error')],
-    ['last_error', runtimeValue(ws, 'last_error', 'ws_last_error')],
+    ['ws_enabled', wsPayload.ws_enabled],
+    ['ws_available', wsPayload.ws_available],
+    ['ws_connected', wsPayload.ws_connected],
+    ['reconnects', runtimeValue(wsPayload, 'reconnects', 'ws_reconnect_count')],
+    ['invalid_ops', runtimeValue(wsPayload, 'invalid_ops', 'ws_invalid_operation_count')],
+    ['connect_attempts', runtimeValue(wsPayload, 'connect_attempts', 'ws_connect_attempts')],
+    ['subscribed_assets', runtimeValue(wsPayload, 'subscribed_assets', 'ws_subscribed_asset_count')],
+    ['cached_assets', runtimeValue(wsPayload, 'cached_assets', 'ws_cached_asset_count')],
+    ['last_message_age_s', runtimeValue(wsPayload, 'last_message_age_s', 'ws_last_message_age_seconds')],
+    ['current_error', runtimeValue(wsPayload, 'current_error', 'ws_current_error')],
+    ['last_error', runtimeValue(wsPayload, 'last_error', 'ws_last_error')],
   ];
 
   const used = new Set([
@@ -6764,7 +6727,7 @@ function renderWsRuntime(ws, staleGuard) {
     'ws_current_error',
     'ws_last_error',
   ]);
-  const extraPairs = Object.entries(ws || {}).filter(([k]) => !used.has(k));
+  const extraPairs = Object.entries(wsPayload).filter(([k]) => !used.has(k));
   const pairs = basePairs.concat(extraPairs);
 
   const rows = pairs.map(([key, value]) => {
@@ -6783,12 +6746,31 @@ function renderWsRuntime(ws, staleGuard) {
     return '<div class=\"runtime-item\"><span class=\"rk\">' + esc(displayKey) + '</span><span class=\"rv\">' + esc(shown) + '</span></div>';
   }).join('');
 
-  list.innerHTML = rows || '<div class=\"empty\">暂无实时连接运行数据</div>';
+  if (list) {
+    list.innerHTML = rows || '<div class=\"empty\">暂无实时连接运行数据</div>';
+  }
+
+  const lastAge = runtimeValue(wsPayload, 'last_message_age_s', 'ws_last_message_age_seconds');
+  const ageNumber = toNum(lastAge);
+  const ageText = ageNumber === null ? '--' : ageNumber.toFixed(1) + 's';
+  const subscribed = runtimeValue(wsPayload, 'subscribed_assets', 'ws_subscribed_asset_count');
+  const detailParts = [];
+  detailParts.push('延迟 ' + ageText);
+  if (subscribed !== null && subscribed !== undefined && subscribed !== '') {
+    detailParts.push('订阅 ' + String(subscribed));
+  }
+  const currentError = runtimeValue(wsPayload, 'current_error', 'ws_current_error');
+  if (currentError) {
+    detailParts.push(reasonText(currentError));
+  }
+  setText('topConnectionDetail', detailParts.join(' / '));
 
   if (staleGuard) {
-    setChip('wsHealth', '已触发陈旧保护', 'err');
-  } else if (ws && ws.ws_connected) {
+    setChip('wsHealth', '连接陈旧', 'err');
+  } else if (wsPayload.ws_connected) {
     setChip('wsHealth', '连接正常', 'ok');
+  } else if (wsPayload.ws_enabled === false) {
+    setChip('wsHealth', '未启用', 'warn');
   } else {
     setChip('wsHealth', '连接异常', 'warn');
   }
@@ -7121,7 +7103,6 @@ async function refreshRecent() {
 
 async function refreshAll() {
   await refreshConfig();
-  await refreshPaperRuntimeCards();
   await refreshMarket();
   await Promise.allSettled([refreshSummary(), refreshRecent()]);
 }
@@ -7144,10 +7125,13 @@ function bindActions() {
   });
   el('btnHelpClose').addEventListener('click', closeHelpDrawer);
   el('helpBackdrop').addEventListener('click', closeHelpDrawer);
-  el('runtimeDetailsToggle').addEventListener('click', () => {
-    state.runtimeDetailsOpen = !state.runtimeDetailsOpen;
-    toggleFoldSection('runtimeDetails', state.runtimeDetailsOpen);
-  });
+  const runtimeDetailsToggle = el('runtimeDetailsToggle');
+  if (runtimeDetailsToggle) {
+    runtimeDetailsToggle.addEventListener('click', () => {
+      state.runtimeDetailsOpen = !state.runtimeDetailsOpen;
+      toggleFoldSection('runtimeDetails', state.runtimeDetailsOpen);
+    });
+  }
   el('diagnosticsToggle').addEventListener('click', () => {
     state.diagnosticsOpen = !state.diagnosticsOpen;
     toggleFoldSection('diagnostics', state.diagnosticsOpen);
@@ -7172,7 +7156,6 @@ function bindActions() {
 function startPolling() {
   setInterval(refreshMarket, POLL_MS.market);
   setInterval(refreshRuntimeStatus, POLL_MS.market);
-  setInterval(refreshPaperRuntimeCards, POLL_MS.market);
   setInterval(refreshSummary, POLL_MS.summary);
   setInterval(refreshRecent, POLL_MS.recent);
   setInterval(tickClock, POLL_MS.clock);

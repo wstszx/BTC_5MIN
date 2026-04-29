@@ -446,7 +446,7 @@ def test_dashboard_assets_distinguish_current_and_historical_ws_errors():
 
     assert "ws_current_error: '当前错误'" in js
     assert "ws_last_error: '最近历史错误'" in js
-    assert "['current_error', runtimeValue(ws, 'current_error', 'ws_current_error')]" in js
+    assert "['current_error', runtimeValue(wsPayload, 'current_error', 'ws_current_error')]" in js
 
 
 def test_dashboard_reason_text_translates_prefixed_runtime_errors():
@@ -1220,24 +1220,15 @@ def test_dashboard_assets_include_runtime_mode_status_shell():
     html = _dashboard_html()
     js = _dashboard_js()
 
-    assert 'id="runtimeModeCard"' in html
-    assert '目标模式' in html
-    assert '当前模式' in html
-    assert '是否待切换' in html
-    assert '实盘就绪' in html
-    assert '校验结果' in html
-    assert '自动赎回' in html
-    assert '待赎回数量' in html
-    assert '最近结果' in html
-    assert '最近尝试' in html
-    assert '最近交易哈希' in html
-    assert 'id="runtimeSavedMode"' in html
-    assert 'id="runtimeRunningMode"' in html
-    assert 'id="runtimeRestartRequired"' in html
-    assert 'id="runtimeLiveReady"' in html
-    assert 'id="runtimeLiveError"' in html
+    assert 'id="runtimeModeCard"' not in html
+    assert 'id="runtimeSavedMode"' not in html
+    assert 'id="runtimeRunningMode"' not in html
+    assert 'id="runtimeRestartRequired"' not in html
+    assert 'id="runtimeLiveReady"' not in html
+    assert 'id="runtimeLiveError"' not in html
     assert 'function renderRuntimeStatus(' in js
     assert 'payload.runtime_status || {}' in js
+    assert "setText('runtimeSavedMode', formatModeLabel(payload.saved_mode || 'paper'));" in js
 
 
 
@@ -1309,46 +1300,46 @@ def test_dashboard_assets_include_live_redeem_runtime_rows():
     html = _dashboard_html()
     js = _dashboard_js()
 
-    assert 'id="runtimeRedeemRows"' in html
-    assert 'id="runtimeRedeemEnabled"' in html
-    assert 'id="runtimeRedeemPending"' in html
-    assert 'id="runtimeRedeemResult"' in html
-    assert 'id="runtimeRedeemAttempt"' in html
-    assert 'id="runtimeRedeemTxHash"' in html
+    assert 'id="runtimeRedeemRows"' not in html
+    assert 'id="runtimeRedeemEnabled"' not in html
+    assert 'id="runtimeRedeemPending"' not in html
+    assert 'id="runtimeRedeemResult"' not in html
+    assert 'id="runtimeRedeemAttempt"' not in html
+    assert 'id="runtimeRedeemTxHash"' not in html
     assert "const redeemVisible = !!(payload.redeem_visible || payload.redeem_enabled || ((payload.running_mode || payload.active_mode || 'paper') === 'live'));" in js
-    assert "el('runtimeRedeemRows').style.display = redeemVisible ? '' : 'none';" in js
-    assert "el('runtimeRestartRequired').textContent = payload.restart_required ? '需要' : '不需要';" in js
-    assert "el('runtimeLiveReady').textContent = payload.live_ready ? '已就绪' : '未就绪';" in js
-    assert "el('runtimeRedeemEnabled').textContent = payload.redeem_enabled ? '已开启' : '未开启';" in js
-    assert "el('runtimeRedeemPending').textContent = String(payload.redeem_pending_count ?? 0);" in js
-    assert "el('runtimeRedeemResult').textContent = payload.redeem_last_result || '--';" in js
+    assert "setDisplay('runtimeRedeemRows', redeemVisible ? '' : 'none');" in js
+    assert "setText('runtimeRestartRequired', payload.restart_required ? '需要' : '不需要');" in js
+    assert "setText('runtimeLiveReady', payload.live_ready ? '已就绪' : '未就绪');" in js
+    assert "setText('runtimeRedeemEnabled', payload.redeem_enabled ? '已开启' : '未开启');" in js
+    assert "setText('runtimeRedeemPending', String(payload.redeem_pending_count ?? 0));" in js
+    assert "setText('runtimeRedeemResult', payload.redeem_last_result || '--');" in js
 
 
 def test_dashboard_assets_include_optimizer_runtime_rows():
     html = _dashboard_html()
     js = _dashboard_js()
 
-    assert 'id="runtimeOptimizerRows"' in html
-    assert 'id="runtimeOptimizerEnabled"' in html
-    assert 'id="runtimeOptimizerChampion"' in html
-    assert 'id="runtimeOptimizerChallengers"' in html
-    assert 'id="runtimeOptimizerPromotable"' in html
-    assert 'id="runtimeOptimizerLastRun"' in html
-    assert "el('runtimeOptimizerEnabled').textContent = payload.optimizer_enabled ? '已开启' : '未开启';" in js
-    assert "el('runtimeOptimizerChampion').textContent = payload.optimizer_champion_id || '--';" in js
-    assert "el('runtimeOptimizerChallengers').textContent = String((payload.optimizer_active_challengers || []).length);" in js
-    assert "el('runtimeOptimizerPromotable').textContent = String(payload.optimizer_promotable_count ?? 0);" in js
-    assert "el('runtimeOptimizerLastRun').textContent = payload.optimizer_last_run_at ? fmtIso(payload.optimizer_last_run_at) : '--';" in js
-    assert 'id="runtimeOptimizerChallengerList"' in html
-    assert 'id="runtimeOptimizerPromotableList"' in html
+    assert 'id="runtimeOptimizerRows"' not in html
+    assert 'id="runtimeOptimizerEnabled"' not in html
+    assert 'id="runtimeOptimizerChampion"' not in html
+    assert 'id="runtimeOptimizerChallengers"' not in html
+    assert 'id="runtimeOptimizerPromotable"' not in html
+    assert 'id="runtimeOptimizerLastRun"' not in html
+    assert "setText('runtimeOptimizerEnabled', payload.optimizer_enabled ? '已开启' : '未开启');" in js
+    assert "setText('runtimeOptimizerChampion', payload.optimizer_champion_id || '--');" in js
+    assert "setText('runtimeOptimizerChallengers', String((payload.optimizer_active_challengers || []).length));" in js
+    assert "setText('runtimeOptimizerPromotable', String(payload.optimizer_promotable_count ?? 0));" in js
+    assert "setText('runtimeOptimizerLastRun', payload.optimizer_last_run_at ? fmtIso(payload.optimizer_last_run_at) : '--');" in js
+    assert 'id="runtimeOptimizerChallengerList"' not in html
+    assert 'id="runtimeOptimizerPromotableList"' not in html
     assert "function renderOptimizerCandidateList(" in js
-    assert "el('runtimeOptimizerChallengerList').innerHTML" in js
-    assert "el('runtimeOptimizerPromotableList').innerHTML" in js
+    assert "setHtml('runtimeOptimizerChallengerList'" in js
+    assert "setHtml('runtimeOptimizerPromotableList'" in js
     assert "const decision = (item || {}).promotion_decision || {};" in js
     assert "const decisionState = String(decision.state || '--');" in js
     assert "const decisionReason = String(decision.reason || '--');" in js
-    assert "el('runtimeRedeemAttempt').textContent = payload.redeem_last_attempt_at ? fmtIso(payload.redeem_last_attempt_at) : '--';" in js
-    assert "el('runtimeRedeemTxHash').textContent = payload.redeem_last_tx_hash || '--';" in js
+    assert "setText('runtimeRedeemAttempt', payload.redeem_last_attempt_at ? fmtIso(payload.redeem_last_attempt_at) : '--');" in js
+    assert "setText('runtimeRedeemTxHash', payload.redeem_last_tx_hash || '--');" in js
 
 
 def test_dashboard_runtime_mode_labels_are_localized(tmp_path: Path):
@@ -1411,9 +1402,9 @@ def test_dashboard_assets_fold_runtime_and_strategy_diagnostics():
     html = _dashboard_html()
     js = _dashboard_js()
 
-    assert 'id="runtimeSummaryBar"' in html
-    assert 'id="runtimeDetailsToggle"' in html
-    assert 'id="runtimeDetailsPanel"' in html
+    assert 'id="runtimeSummaryBar"' not in html
+    assert 'id="runtimeDetailsToggle"' not in html
+    assert 'id="runtimeDetailsPanel"' not in html
     assert 'id="diagnosticsToggle"' in html
     assert 'id="diagnosticsPanel"' in html
     assert 'strategy6Panel' in html
@@ -1421,27 +1412,27 @@ def test_dashboard_assets_fold_runtime_and_strategy_diagnostics():
     assert 'function toggleFoldSection(' in js
 
 
-def test_dashboard_assets_rebalance_main_columns_for_config_decision_monitoring():
+def test_dashboard_assets_rebalance_main_columns_for_config_and_decision():
     html = _dashboard_html()
     css = dashboard._dashboard_css()
 
     assert 'class="panel left-stack config-stack"' in html
     assert 'class="panel center-stack decision-stack"' in html
-    assert 'class="stack right-stack monitor-stack"' in html
-    assert 'grid-template-columns: 380px minmax(520px, 1.15fr) 380px;' in css
+    assert 'class="stack right-stack monitor-stack"' not in html
+    assert 'grid-template-columns: 380px minmax(0, 1fr);' in css
 
 
-def test_dashboard_assets_use_near_symmetric_left_and_right_columns():
+def test_dashboard_assets_use_two_column_primary_layout():
     css = dashboard._dashboard_css()
 
-    assert 'grid-template-columns: 380px minmax(520px, 1.15fr) 380px;' in css
+    assert 'grid-template-columns: 380px minmax(0, 1fr);' in css
 
 
-def test_dashboard_assets_mid_width_layout_keeps_left_and_right_balanced():
+def test_dashboard_assets_mid_width_layout_keeps_config_and_decision_columns():
     css = dashboard._dashboard_css()
 
     assert '@media (max-width: 1450px) {' in css
-    assert 'grid-template-columns: 340px minmax(500px, 1.1fr);' in css
+    assert 'grid-template-columns: 340px minmax(0, 1fr);' in css
 
 
 def test_dashboard_assets_remove_visible_config_status_block():
@@ -1481,15 +1472,18 @@ def test_dashboard_assets_allow_strategy_guide_content_to_wrap_fully():
     assert 'max-width: 100%;' in css
 
 
-def test_dashboard_assets_move_runtime_monitoring_into_monitor_column():
+def test_dashboard_assets_move_connection_status_to_topbar_and_remove_runtime_monitoring_panel():
     html = _dashboard_html()
 
-    assert 'id="monitorRuntimePanel"' in html
-    assert '运行与连接监控' in html
-    assert 'id="runtimeSummaryBar"' in html
-    assert 'id="runtimeDetailsToggle"' in html
-    assert 'id="runtimeDetailsPanel"' in html
-    assert 'id="wsRuntimeList"' in html
+    assert 'id="topConnectionStatus"' in html
+    assert 'id="wsHealth"' in html
+    assert 'id="topConnectionDetail"' in html
+    assert 'id="monitorRuntimePanel"' not in html
+    assert '运行与连接监控' not in html
+    assert 'id="runtimeSummaryBar"' not in html
+    assert 'id="runtimeDetailsToggle"' not in html
+    assert 'id="runtimeDetailsPanel"' not in html
+    assert 'id="wsRuntimeList"' not in html
 
 
 def test_dashboard_assets_move_diagnostics_entry_into_decision_column():
@@ -1533,19 +1527,21 @@ def test_dashboard_assets_remove_redundant_market_updated_time_row():
 def test_dashboard_assets_style_monitor_and_decision_columns_for_rebalanced_roles():
     css = dashboard._dashboard_css()
 
-    assert '.monitor-stack .panel-body {' in css
     assert '.decision-stack {' in css
     assert '.config-stack {' in css
-    assert '.monitor-runtime-grid {' in css
+    assert '.top-connection-status {' in css
+    assert '.top-connection-detail {' in css
+    assert '.monitor-stack' not in css
+    assert '.monitor-runtime-grid' not in css
 
 
 def test_dashboard_assets_responsive_layout_preserves_priority_order():
     css = dashboard._dashboard_css()
 
     assert '@media (max-width: 1450px) {' in css
-    assert 'grid-template-columns: 340px minmax(500px, 1.1fr);' in css
+    assert 'grid-template-columns: 340px minmax(0, 1fr);' in css
     assert '@media (max-width: 1024px) {' in css
-    assert '.monitor-stack { grid-column: auto; grid-template-columns: 1fr; }' in css
+    assert '.layout { grid-template-columns: 1fr; }' in css
 
 
 def test_dashboard_assets_use_primary_decision_card_with_folded_signal_details():
@@ -1845,7 +1841,7 @@ def test_dashboard_assets_include_runtime_alert_popup():
     html = _dashboard_html()
     js = _dashboard_js()
 
-    assert 'id="runtimeAlertMessage"' in html
+    assert 'id="runtimeAlertMessage"' not in html
     assert "function maybeShowRuntimeAlert(" in js
     assert "setInterval(refreshRuntimeStatus, POLL_MS.market);" in js
 
@@ -2698,11 +2694,12 @@ def test_dashboard_assets_include_multi_timeframe_paper_runtime_cards():
     html = _dashboard_html()
     js = _dashboard_js()
 
-    assert 'id="paperRuntimeCards"' in html
+    assert 'id="paperRuntimeCards"' not in html
     assert "function renderPaperRuntimeCards(" in js
     assert "function refreshPaperRuntimeCard(" in js
     assert "纸面运行" in js
     assert "该时间频次的纸面运行状态" in js
+    assert "setInterval(refreshPaperRuntimeCards, POLL_MS.market);" not in js
 
 
 def test_dashboard_timeframe_presets_only_include_timeframe_sensitive_fields(tmp_path: Path):
