@@ -2342,6 +2342,46 @@ def test_recent_trades_payload_validates_from_official_token_winner(tmp_path: Pa
         os.chdir(old_cwd)
 
 
+def test_recent_trades_payload_caches_official_lookup_errors(tmp_path: Path, monkeypatch):
+    old_cwd = Path.cwd()
+    os.chdir(tmp_path)
+    calls: list[str] = []
+
+    class StubClient:
+        def __init__(self, cfg):
+            self.config = cfg
+
+        def close(self) -> None:
+            return
+
+        def get_event_by_slug(self, slug: str):
+            calls.append(slug)
+            raise RuntimeError('gamma timeout')
+
+    monkeypatch.setattr(dashboard, 'PolymarketClient', StubClient)
+    state = DashboardState(env_file=tmp_path / '.env.dashboard')
+    try:
+        logs_dir = tmp_path / 'logs'
+        logs_dir.mkdir(parents=True, exist_ok=True)
+        (logs_dir / 'paper_trades.csv').write_text(
+            'timestamp,mode,round_index,strategy,entry_timing,event_slug,start_time,end_time,side,price,order_size,order_cost,expected_profit,result,trade_pnl,cash_pnl,recovery_loss,consecutive_losses,stop_loss_triggered,skip_reason,signal_open_up_price,signal_current_up_price,signal_threshold,signal_delta,signal_locked,signal_reason\n'
+            '2026-04-25T15:38:15+00:00,paper,33,4,OPEN,btc-updown-15m-1777130100,2026-04-25T15:15:00+00:00,2026-04-25T15:30:00+00:00,UP,0.52,1.9230,1.0,0.9230,UP,0.9230,11.7695,0.0,0,False,,,,,,False,\n',
+            encoding='utf-8',
+        )
+
+        first = state.get_recent_trades_payload(limit=10)['rows'][0]
+        second = state.get_recent_trades_payload(limit=10)['rows'][0]
+
+        assert calls == ['btc-updown-15m-1777130100']
+        assert first['result_check_status'] == 'error'
+        assert first['result_check_error'] == 'RuntimeError: gamma timeout'
+        assert second['result_check_status'] == 'error'
+        assert second['result_check_error'] == 'RuntimeError: gamma timeout'
+    finally:
+        state.close()
+        os.chdir(old_cwd)
+
+
 def test_dashboard_assets_include_recent_result_validation_column():
     html = _dashboard_html()
     js = _dashboard_js()
@@ -2351,6 +2391,7 @@ def test_dashboard_assets_include_recent_result_validation_column():
     assert "row.result_check_status" in js
     assert "if (status === 'official_pending') return '待官方结算';" in js
     assert "if (status === 'error') return '校验异常';" in js
+    assert "row.result_check_error" in js
     assert "resolved_price_to_beat" in js
     assert "resolved_final_price" in js
 

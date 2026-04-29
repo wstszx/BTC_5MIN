@@ -1182,14 +1182,17 @@ def _resolve_signal_round_open_up_price(
     # Pull a tight history window around round open, then find the nearest point to the intended open anchor.
     start_ts = max(0, target_ts - max(30, cfg.signal_anchor_max_offset_seconds * 2))
     end_ts = max(start_ts + 1, min(window_end_ts, max(now_ts, target_ts + cfg.signal_anchor_max_offset_seconds)))
-    anchor = market_client.get_nearest_history_point(
-        window.up_token_id,
-        target_ts=target_ts,
-        start_ts=start_ts,
-        end_ts=end_ts,
-        fidelity=max(1, cfg.signal_history_fidelity_seconds),
-        max_offset_seconds=max(0, cfg.signal_anchor_max_offset_seconds),
-    )
+    try:
+        anchor = market_client.get_nearest_history_point(
+            window.up_token_id,
+            target_ts=target_ts,
+            start_ts=start_ts,
+            end_ts=end_ts,
+            fidelity=max(1, cfg.signal_history_fidelity_seconds),
+            max_offset_seconds=max(0, cfg.signal_anchor_max_offset_seconds),
+        )
+    except Exception:
+        return current_up_price
     if anchor is None:
         return current_up_price
     return float(anchor["price"])
@@ -1216,12 +1219,15 @@ def _compute_signal_threshold(
     if end_ts <= start_ts:
         return base_threshold
 
-    history_payload = market_client.get_price_history(
-        window.up_token_id,
-        start_ts=start_ts,
-        end_ts=end_ts,
-        fidelity=max(1, cfg.signal_history_fidelity_seconds),
-    )
+    try:
+        history_payload = market_client.get_price_history(
+            window.up_token_id,
+            start_ts=start_ts,
+            end_ts=end_ts,
+            fidelity=max(1, cfg.signal_history_fidelity_seconds),
+        )
+    except Exception:
+        return base_threshold
     prices: list[float] = []
     for item in history_payload.get("history", []):
         raw = item.get("p")

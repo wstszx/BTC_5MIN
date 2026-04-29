@@ -450,6 +450,13 @@ def _truthy_official_value(value: Any) -> bool:
     return False
 
 
+def _result_validation_error_text(exc: Exception) -> str:
+    text = f"{exc.__class__.__name__}: {exc}".strip()
+    if len(text) > 240:
+        return text[:237] + "..."
+    return text
+
+
 def _token_outcome(token: dict[str, Any]) -> str:
     return _normalize_validation_outcome(
         _first_value(token, ("outcome", "name", "label", "side"))
@@ -549,6 +556,7 @@ def _validate_recent_trade_row(
     validated.setdefault('resolved_final_price', '')
     validated.setdefault('resolved_expected_result', '')
     validated.setdefault('result_check_status', '')
+    validated.setdefault('result_check_error', '')
 
     if validated.get('pending_status') == 'pending_settlement':
         validated['result_check_status'] = 'pending'
@@ -578,9 +586,14 @@ def _validate_recent_trade_row(
         }
         try:
             event_payload = client.get_event_by_slug(slug)
-        except Exception:
+        except Exception as exc:
+            resolved['result_check_status'] = 'error'
+            resolved['result_check_error'] = _result_validation_error_text(exc)
+            if validation_cache is not None:
+                validation_cache[cache_key] = dict(resolved)
             if should_validate_result:
                 validated['result_check_status'] = 'error'
+                validated['result_check_error'] = resolved['result_check_error']
             return validated
 
         metadata = event_payload.get("eventMetadata") or {}
@@ -614,6 +627,11 @@ def _validate_recent_trade_row(
 
     validated['resolved_price_to_beat'] = resolved.get('resolved_price_to_beat', '')
     validated['resolved_final_price'] = resolved.get('resolved_final_price', '')
+    if resolved.get('result_check_status') == 'error':
+        if should_validate_result:
+            validated['result_check_status'] = 'error'
+            validated['result_check_error'] = resolved.get('result_check_error', '')
+        return validated
     official_result = resolved.get('resolved_expected_result', '')
     if not should_validate_result:
         return validated
@@ -6495,7 +6513,7 @@ function renderRecent(payload) {
     const resultText = isPending ? '待结算' : (row.result || '--');
     const checkText = resultCheckText(row.result_check_status);
     const checkCls = row.result_check_status === 'match' ? 'trade-up' : ((row.result_check_status === 'mismatch') ? 'trade-down' : 'trade-skip');
-    const checkTitle = '官方结果: ' + (row.resolved_expected_result || '--');
+    const checkTitle = '官方结果: ' + (row.resolved_expected_result || '--') + (row.result_check_error ? (' · 错误: ' + row.result_check_error) : '');
     const rowClass = isPending ? 'recent-pending' : (isMissedEntry ? 'recent-missed-entry' : '');
     const reasonHtml = isMissedEntry
       ? ('<span class="skip-reason-badge missed-entry">' + esc(reasonText(row.skip_reason)) + '</span>')
