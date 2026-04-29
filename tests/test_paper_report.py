@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 from pathlib import Path
 
+import paper_report
 from paper_report import summarize_paper_trades
 
 
@@ -225,3 +226,79 @@ def test_summarize_paper_trades_respects_date_filter(tmp_path: Path):
     assert len(summaries) == 1
     assert summaries[0].date == "2026-03-31"
     assert round(summaries[0].total_pnl, 4) == -1.0
+
+
+def test_summarize_paper_trades_by_strategy_builds_daily_strategy_metrics(tmp_path: Path):
+    csv_path = tmp_path / "paper_trades.csv"
+
+    def row(
+        timestamp: str,
+        strategy: str,
+        side: str,
+        result: str,
+        trade_pnl: str,
+        cash_pnl: str,
+        skip_reason: str = "",
+    ) -> dict[str, str]:
+        return {
+            "timestamp": timestamp,
+            "mode": "paper",
+            "round_index": "1",
+            "strategy": strategy,
+            "entry_timing": "OPEN",
+            "event_slug": f"s-{strategy}-{timestamp}",
+            "start_time": timestamp,
+            "end_time": timestamp,
+            "side": side,
+            "result": result,
+            "trade_pnl": trade_pnl,
+            "cash_pnl": cash_pnl,
+            "skip_reason": skip_reason,
+        }
+
+    _write_rows(
+        csv_path,
+        [
+            row("2026-04-28T01:00:00+00:00", "3", "UP", "UP", "2.0", "2.0"),
+            row("2026-04-28T01:05:00+00:00", "7", "DOWN", "UP", "-1.0", "-1.0"),
+            row("2026-04-28T01:10:00+00:00", "7", "SKIP", "", "0.0", "-1.0", "strategy7_ofi_unavailable"),
+            row("2026-04-29T01:00:00+00:00", "3", "DOWN", "UP", "-0.5", "1.5"),
+            row("2026-04-29T01:05:00+00:00", "7", "UP", "UP", "3.0", "2.0"),
+        ],
+    )
+
+    assert hasattr(paper_report, "summarize_paper_trades_by_strategy")
+
+    summaries = paper_report.summarize_paper_trades_by_strategy(csv_path, tz_offset="+00:00")
+
+    assert [(item.date, item.strategy) for item in summaries] == [
+        ("2026-04-28", "3"),
+        ("2026-04-28", "7"),
+        ("2026-04-29", "3"),
+        ("2026-04-29", "7"),
+    ]
+    strategy_three_first_day = summaries[0]
+    assert strategy_three_first_day.trade_rows == 1
+    assert strategy_three_first_day.skip_rows == 0
+    assert strategy_three_first_day.wins == 1
+    assert strategy_three_first_day.losses == 0
+    assert round(strategy_three_first_day.hit_rate, 4) == 1.0
+    assert round(strategy_three_first_day.total_pnl, 4) == 2.0
+    assert round(strategy_three_first_day.cumulative_pnl, 4) == 2.0
+
+    strategy_seven_first_day = summaries[1]
+    assert strategy_seven_first_day.trade_rows == 1
+    assert strategy_seven_first_day.skip_rows == 1
+    assert strategy_seven_first_day.wins == 0
+    assert strategy_seven_first_day.losses == 1
+    assert round(strategy_seven_first_day.hit_rate, 4) == 0.0
+    assert round(strategy_seven_first_day.total_pnl, 4) == -1.0
+    assert round(strategy_seven_first_day.cumulative_pnl, 4) == -1.0
+
+    strategy_three_second_day = summaries[2]
+    assert round(strategy_three_second_day.total_pnl, 4) == -0.5
+    assert round(strategy_three_second_day.cumulative_pnl, 4) == 1.5
+
+    strategy_seven_second_day = summaries[3]
+    assert round(strategy_seven_second_day.total_pnl, 4) == 3.0
+    assert round(strategy_seven_second_day.cumulative_pnl, 4) == 2.0

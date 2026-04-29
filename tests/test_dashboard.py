@@ -675,6 +675,22 @@ def test_dashboard_reason_fallback_is_human_friendly():
 
 
 
+def test_dashboard_assets_include_daily_strategy_performance_table():
+    html = _dashboard_html()
+    js = _dashboard_js()
+
+    assert "每日策略表现" in html
+    assert 'id="strategyDaysTbody"' in html
+    assert "<th>下单</th>" in html
+    assert "<th>跳过</th>" in html
+    assert "<th>胜率</th>" in html
+    assert "<th>单日盈亏</th>" in html
+    assert "<th>累计盈亏</th>" in html
+    assert "function renderStrategyDays(" in js
+    assert "payload.strategy_days" in js
+    assert "cumulative_pnl" in js
+
+
 def test_dashboard_assets_mark_pending_recent_trades_clearly():
     js = _dashboard_js()
 
@@ -3914,5 +3930,50 @@ def test_dashboard_paper_payloads_switch_per_strategy(tmp_path: Path):
         state.close()
         os.chdir(old_cwd)
 
+
+def test_dashboard_summary_payload_includes_daily_strategy_performance(tmp_path: Path):
+    env_file = tmp_path / '.env.dashboard'
+    env_file.write_text('STRATEGY_ID=3\nPAPER_STRATEGY_IDS=3,7\n', encoding='utf-8')
+    old_cwd = Path.cwd()
+    os.chdir(tmp_path)
+    state = DashboardState(env_file=env_file)
+    try:
+        logs_dir = tmp_path / 'logs'
+        logs_dir.mkdir(parents=True, exist_ok=True)
+        csv_lines = [
+            'timestamp,mode,round_index,strategy,entry_timing,event_slug,start_time,end_time,side,price,order_size,order_cost,expected_profit,result,trade_pnl,cash_pnl,recovery_loss,consecutive_losses,stop_loss_triggered,skip_reason,signal_open_up_price,signal_current_up_price,signal_threshold,signal_delta,signal_locked,signal_reason',
+            '2026-04-28T01:00:00+00:00,paper,1,3,OPEN,s3-win,2026-04-28T00:55:00+00:00,2026-04-28T01:00:00+00:00,UP,0.50,4.0,2.0,2.0,UP,2.0,2.0,0.0,0,False,,,,,,False,',
+            '2026-04-28T01:05:00+00:00,paper,1,7,OPEN,s7-loss,2026-04-28T01:00:00+00:00,2026-04-28T01:05:00+00:00,DOWN,0.50,2.0,1.0,1.0,UP,-1.0,-1.0,1.0,1,False,,,,,,False,',
+            '2026-04-28T01:10:00+00:00,paper,2,7,OPEN,s7-skip,2026-04-28T01:05:00+00:00,2026-04-28T01:10:00+00:00,SKIP,,0.0,0.0,0.0,,0.0,-1.0,1.0,1,False,strategy7_ofi_unavailable,,,,,False,strategy7_ofi_unavailable',
+            '2026-04-29T01:00:00+00:00,paper,2,3,OPEN,s3-loss,2026-04-29T00:55:00+00:00,2026-04-29T01:00:00+00:00,DOWN,0.50,1.0,0.5,1.0,UP,-0.5,1.5,0.5,1,False,,,,,,False,',
+            '2026-04-29T01:05:00+00:00,paper,3,7,OPEN,s7-win,2026-04-29T01:00:00+00:00,2026-04-29T01:05:00+00:00,UP,0.50,6.0,3.0,3.0,UP,3.0,2.0,0.0,0,False,,,,,,False,',
+        ]
+        (logs_dir / 'paper_trades.csv').write_text('\n'.join(csv_lines) + '\n', encoding='utf-8')
+
+        payload = state.get_paper_summary_payload()
+
+        assert 'strategy_days' in payload
+        assert [
+            (row['date'], row['strategy'], row['trade_rows'], row['skip_rows'], row['total_pnl'], row['cumulative_pnl'])
+            for row in payload['strategy_days']
+        ] == [
+            ('2026-04-28', '3', 1, 0, 2.0, 2.0),
+            ('2026-04-28', '7', 1, 1, -1.0, -1.0),
+            ('2026-04-29', '3', 1, 0, -0.5, 1.5),
+            ('2026-04-29', '7', 1, 0, 3.0, 2.0),
+        ]
+
+        strategy_seven = state.get_paper_summary_payload(strategy=7)
+
+        assert [
+            (row['date'], row['strategy'], row['trade_rows'], row['skip_rows'])
+            for row in strategy_seven['strategy_days']
+        ] == [
+            ('2026-04-28', '7', 1, 1),
+            ('2026-04-29', '7', 1, 0),
+        ]
+    finally:
+        state.close()
+        os.chdir(old_cwd)
 
 

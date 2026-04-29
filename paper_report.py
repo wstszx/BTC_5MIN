@@ -61,6 +61,28 @@ class DailyPaperSummary:
     skip_reason_counts: dict[str, int]
 
 
+@dataclass(slots=True)
+class DailyStrategyPaperSummary:
+    date: str
+    strategy: str
+    rows: int
+    trade_rows: int
+    skip_rows: int
+    wins: int
+    losses: int
+    hit_rate: float
+    total_pnl: float
+    cumulative_pnl: float
+
+
+def _strategy_sort_key(value: str) -> tuple[int, int | str]:
+    raw = str(value or "").strip()
+    try:
+        return 0, int(raw)
+    except ValueError:
+        return 1, raw
+
+
 def summarize_paper_trades(
     csv_path: Path,
     *,
@@ -170,5 +192,96 @@ def summarize_paper_trades(
                 skip_reason_counts=dict(skip_reason_counts),
             )
         )
+
+    return summaries
+
+
+def summarize_paper_trades_by_strategy(
+    csv_path: Path,
+    *,
+    tz_offset: str = "+08:00",
+    start_date: str | None = None,
+    end_date: str | None = None,
+) -> list[DailyStrategyPaperSummary]:
+    if not csv_path.exists():
+        raise FileNotFoundError(f"CSV not found: {csv_path}")
+
+    tzinfo = parse_utc_offset(tz_offset)
+    with csv_path.open("r", newline="", encoding="utf-8") as handle:
+        rows = list(csv.DictReader(handle))
+    if not rows:
+        return []
+
+    grouped: dict[str, dict[str, list[dict[str, str]]]] = defaultdict(lambda: defaultdict(list))
+    for row in rows:
+        ts_raw = row.get("timestamp")
+        if not ts_raw:
+            continue
+        try:
+            ts = datetime.fromisoformat(ts_raw)
+        except ValueError:
+            continue
+        local_day = ts.astimezone(tzinfo).date().isoformat()
+        if start_date and local_day < start_date:
+            continue
+        if end_date and local_day > end_date:
+            continue
+        strategy = str(row.get("strategy") or "").strip() or "--"
+        grouped[local_day][strategy].append(row)
+
+    summaries: list[DailyStrategyPaperSummary] = []
+    rolling_pnl: defaultdict[str, float] = defaultdict(float)
+    for day in sorted(grouped.keys()):
+        strategy_rows = grouped[day]
+        for strategy in sorted(strategy_rows.keys(), key=_strategy_sort_key):
+            day_rows = sorted(strategy_rows[strategy], key=lambda item: item.get("timestamp") or "")
+            rows_count = 0
+            trade_rows = 0
+            skip_rows = 0
+            wins = 0
+            losses = 0
+            total_pnl = 0.0
+            last_cash_pnl: float | None = None
+
+            for row in day_rows:
+                rows_count += 1
+                trade_pnl = _optional_float(row.get("trade_pnl")) or 0.0
+                total_pnl += trade_pnl
+                cash_pnl = _optional_float(row.get("cash_pnl"))
+                if cash_pnl is not None:
+                    last_cash_pnl = cash_pnl
+
+                side = (row.get("side") or "").strip().upper()
+                result = (row.get("result") or "").strip().upper()
+                skip_reason = (row.get("skip_reason") or "").strip()
+
+                if result in {"UP", "DOWN"}:
+                    trade_rows += 1
+                    if side == result:
+                        wins += 1
+                    else:
+                        losses += 1
+                elif skip_reason or side == "SKIP":
+                    skip_rows += 1
+
+            computed_cumulative = rolling_pnl[strategy] + total_pnl
+            cumulative_pnl = last_cash_pnl if last_cash_pnl is not None else computed_cumulative
+            rolling_pnl[strategy] = cumulative_pnl
+            hit_rate = (wins / trade_rows) if trade_rows else 0.0
+
+            summaries.append(
+                DailyStrategyPaperSummary(
+                    date=day,
+                    strategy=strategy,
+                    rows=rows_count,
+                    trade_rows=trade_rows,
+                    skip_rows=skip_rows,
+                    wins=wins,
+                    losses=losses,
+                    hit_rate=hit_rate,
+                    total_pnl=total_pnl,
+                    cumulative_pnl=cumulative_pnl,
+                )
+            )
 
     return summaries

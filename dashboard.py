@@ -27,7 +27,7 @@ from config import (
 )
 from binance_signal import BinanceDepth5SignalService
 from models import MarketWindow, PendingPaperTrade
-from paper_report import summarize_paper_trades
+from paper_report import summarize_paper_trades, summarize_paper_trades_by_strategy
 from polymarket_api import (
     PolymarketClient,
     extract_token_ids,
@@ -1925,10 +1925,12 @@ class DashboardState:
         try:
             if strategy_filter is None:
                 daily = summarize_paper_trades(paper_csv, tz_offset="+08:00")
+                strategy_daily = summarize_paper_trades_by_strategy(paper_csv, tz_offset="+08:00")
             else:
                 filtered_rows = list(reversed(_filter_trade_rows_by_strategy(_tail_csv_rows(paper_csv, limit=1000000), strategy_filter)))
                 if not filtered_rows:
                     daily = []
+                    strategy_daily = []
                 else:
                     filtered_csv = paper_csv.with_name(f"{paper_csv.stem}_strategy_{strategy_filter}_summary{paper_csv.suffix}")
                     with filtered_csv.open("w", newline="", encoding="utf-8") as handle:
@@ -1937,12 +1939,16 @@ class DashboardState:
                         writer.writerows(filtered_rows)
                     try:
                         daily = summarize_paper_trades(filtered_csv, tz_offset="+08:00")
+                        strategy_daily = summarize_paper_trades_by_strategy(filtered_csv, tz_offset="+08:00")
                     finally:
                         if filtered_csv.exists():
                             filtered_csv.unlink()
         except (FileNotFoundError, ValueError):
             daily = []
+            strategy_daily = []
         days = [asdict(item) for item in daily[-14:]]
+        summary_dates = {item["date"] for item in days}
+        strategy_days = [asdict(item) for item in strategy_daily if item.date in summary_dates]
         return {
             "csv_path": str(paper_csv),
             "mode": "paper",
@@ -1950,6 +1956,7 @@ class DashboardState:
             "strategy": strategy_filter or "all",
             "timeframe": target_timeframe,
             "days": days,
+            "strategy_days": strategy_days,
             "latest": days[-1] if days else None,
         }
 
@@ -1964,6 +1971,7 @@ class DashboardState:
             filtered_rows = _filter_trade_rows_by_strategy(live_rows, strategy_filter)
             if not filtered_rows:
                 daily = []
+                strategy_daily = []
             else:
                 client = PolymarketClient(cfg)
                 try:
@@ -1983,18 +1991,23 @@ class DashboardState:
                     writer.writerows(summary_rows)
                 try:
                     daily = summarize_paper_trades(filtered_csv, tz_offset="+08:00")
+                    strategy_daily = summarize_paper_trades_by_strategy(filtered_csv, tz_offset="+08:00")
                 finally:
                     if filtered_csv.exists():
                         filtered_csv.unlink()
         except (FileNotFoundError, ValueError):
             daily = []
+            strategy_daily = []
         days = [asdict(item) for item in daily[-14:]]
+        summary_dates = {item["date"] for item in days}
+        strategy_days = [asdict(item) for item in strategy_daily if item.date in summary_dates]
         return {
             "csv_path": str(live_csv),
             "mode": "live",
             "tz_offset": "+08:00",
             "strategy": strategy_filter or "all",
             "days": days,
+            "strategy_days": strategy_days,
             "latest": days[-1] if days else None,
         }
 
@@ -2742,6 +2755,24 @@ def _dashboard_html() -> str:
                 </tr>
               </thead>
               <tbody id=\"daysTbody\"></tbody>
+            </table>
+          </div>
+
+          <div class="section-title">每日策略表现</div>
+          <div class=\"strategy-days-table table-wrap\">
+            <table>
+              <thead>
+                <tr>
+                  <th>日期</th>
+                  <th>策略</th>
+                  <th>下单</th>
+                  <th>跳过</th>
+                  <th>胜率</th>
+                  <th>单日盈亏</th>
+                  <th>累计盈亏</th>
+                </tr>
+              </thead>
+              <tbody id=\"strategyDaysTbody\"></tbody>
             </table>
           </div>
         </section>
@@ -3790,6 +3821,16 @@ tr:hover td { background: rgba(50, 88, 131, 0.1); }
   min-width: 0;
   display: grid;
   gap: 10px;
+}
+
+.strategy-days-table {
+  max-height: 300px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+
+.strategy-days-table table {
+  min-width: 560px;
 }
 
 .report-recent-table {
@@ -6442,11 +6483,51 @@ function renderMarket(payload) {
   renderWsRuntime(payload.ws_runtime || {}, !!payload.ws_stale_guard_triggered);
 }
 
+function compareStrategySummaryRows(a, b) {
+  const dateCompare = String(b.date || '').localeCompare(String(a.date || ''));
+  if (dateCompare !== 0) {
+    return dateCompare;
+  }
+  const aStrategy = Number(a.strategy);
+  const bStrategy = Number(b.strategy);
+  if (Number.isFinite(aStrategy) && Number.isFinite(bStrategy)) {
+    return aStrategy - bStrategy;
+  }
+  return String(a.strategy || '').localeCompare(String(b.strategy || ''));
+}
+
+function renderStrategyDays(payload, emptyText) {
+  const tbody = el('strategyDaysTbody');
+  if (!tbody) {
+    return;
+  }
+  const rows = (payload.strategy_days || []).slice().sort(compareStrategySummaryRows);
+  if (rows.length === 0) {
+    tbody.innerHTML = '<tr><td colspan=\"7\" class=\"empty\">' + emptyText + '</td></tr>';
+    return;
+  }
+  tbody.innerHTML = rows.map((row) => {
+    const dailyPnlCls = classifyPnl(row.total_pnl);
+    const cumulativePnlCls = classifyPnl(row.cumulative_pnl);
+    const strategyLabel = row.strategy ? ('策略 ' + row.strategy) : '--';
+    return '<tr>' +
+      '<td>' + esc(row.date || '--') + '</td>' +
+      '<td>' + esc(strategyLabel) + '</td>' +
+      '<td>' + esc(String(row.trade_rows ?? '--')) + '</td>' +
+      '<td>' + esc(String(row.skip_rows ?? '--')) + '</td>' +
+      '<td>' + esc(fmtPct(row.hit_rate, 1)) + '</td>' +
+      '<td class=\"' + esc(dailyPnlCls) + '\">' + esc(fmtPnl(row.total_pnl, 4)) + '</td>' +
+      '<td class=\"' + esc(cumulativePnlCls) + '\">' + esc(fmtPnl(row.cumulative_pnl, 4)) + '</td>' +
+      '</tr>';
+  }).join('');
+}
+
 function renderSummary(payload) {
   state.summary = payload;
   const latest = payload.latest || null;
   const reportMode = effectiveReportMode();
   renderReportModeCopy();
+  const emptyText = reportMode === 'live' ? '暂无实盘数据' : '暂无纸面数据';
 
   if (!latest) {
     el('sumDate').textContent = '--';
@@ -6455,8 +6536,8 @@ function renderSummary(payload) {
     el('sumTotalPnl').textContent = '--';
     el('sumDrawdown').textContent = '--';
     el('sumStrongRate').textContent = '--';
-    const emptyText = reportMode === 'live' ? '暂无实盘数据' : '暂无纸面数据';
     el('daysTbody').innerHTML = '<tr><td colspan=\"5\" class=\"empty\">' + emptyText + '</td></tr>';
+    renderStrategyDays(payload, emptyText);
     setReportStatus('paperStatus', '汇总', '暂无数据', 'warn');
     return;
   }
@@ -6487,8 +6568,8 @@ function renderSummary(payload) {
       '</tr>';
   }).join('');
 
-  const emptyText = reportMode === 'live' ? '暂无实盘数据' : '暂无纸面数据';
   el('daysTbody').innerHTML = rows || '<tr><td colspan=\"5\" class=\"empty\">' + emptyText + '</td></tr>';
+  renderStrategyDays(payload, emptyText);
   setReportStatus('paperStatus', '汇总', '已更新', 'ok');
 }
 
