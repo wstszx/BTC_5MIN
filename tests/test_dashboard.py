@@ -1782,6 +1782,34 @@ def test_dashboard_runtime_payload_uses_manager_snapshot(tmp_path: Path):
         state.close()
 
 
+def test_dashboard_runtime_payload_exposes_worker_runtime_alert(tmp_path: Path):
+    control = RuntimeControl(initial_mode="live")
+    control.update_worker_state(
+        runtime_alert_code="trading_restricted",
+        runtime_alert_message="Trading restricted in your region.",
+        runtime_alert_level="error",
+    )
+    state = DashboardState(env_file=tmp_path / ".env.dashboard", runtime_control=control)
+    try:
+        payload = state.get_config_payload()
+        runtime = payload["runtime_status"]
+        assert runtime["runtime_alert_code"] == "trading_restricted"
+        assert "Polymarket 限制当前地区实盘交易" in runtime["runtime_alert_message"]
+        assert runtime["runtime_alert_level"] == "error"
+        assert runtime["runtime_alert_at"] is not None
+    finally:
+        state.close()
+
+
+def test_dashboard_assets_include_runtime_alert_popup():
+    html = _dashboard_html()
+    js = _dashboard_js()
+
+    assert 'id="runtimeAlertMessage"' in html
+    assert "function maybeShowRuntimeAlert(" in js
+    assert "setInterval(refreshRuntimeStatus, POLL_MS.market);" in js
+
+
 def test_dashboard_runtime_payload_includes_optimizer_status(tmp_path: Path):
     state = DashboardState(env_file=tmp_path / ".env.dashboard")
     try:

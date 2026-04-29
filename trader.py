@@ -1632,6 +1632,16 @@ def _is_retryable_live_clob_error(exc: Exception) -> bool:
     return _is_retryable_live_io_error(exc)
 
 
+def _is_live_trading_restricted_error(exc: Exception) -> bool:
+    message = str(exc).lower()
+    return (
+        "trading restricted" in message
+        or "geoblock" in message
+        or ("status=403" in message and "restricted" in message)
+        or ("status_code=403" in message and "restricted" in message)
+    )
+
+
 def _is_retryable_live_io_error(exc: Exception) -> bool:
     message = str(exc).lower()
     if any(marker in message for marker in ("status_code=401", "status_code=403", "unauthorized", "forbidden")):
@@ -2986,6 +2996,27 @@ def _describe_ws_runtime(client: PolymarketClient | Any) -> str:
     )
 
 
+def _runtime_alert_changes_for_live_result(result: dict[str, Any]) -> dict[str, str | None]:
+    strategies = result.get("strategies")
+    if isinstance(strategies, list):
+        for item in strategies:
+            if not isinstance(item, dict):
+                continue
+            if item.get("status") == "blocked" and item.get("error_code") == "trading_restricted":
+                return {
+                    "runtime_alert_code": "trading_restricted",
+                    "runtime_alert_message": str(item.get("error") or "Trading restricted in your region."),
+                    "runtime_alert_level": "error",
+                }
+    if result.get("status") in {"submitted", "skipped", "waiting_for_entry", "pending_settlement", "no_market"}:
+        return {
+            "runtime_alert_code": None,
+            "runtime_alert_message": None,
+            "runtime_alert_level": None,
+        }
+    return {}
+
+
 def _ws_is_stale_for_trade(client: PolymarketClient | Any, cfg: AppConfig) -> bool:
     get_stats = getattr(client, 'get_ws_runtime_stats', None)
     if not callable(get_stats):
@@ -3903,12 +3934,15 @@ def run_live_trading(
                         _runtime_log(
                             f"live strategy {strategy_id} evaluation error: {exc}"
                         )
+                        status = "blocked" if _is_live_trading_restricted_error(exc) else "error"
+                        error_code = "trading_restricted" if status == "blocked" else None
                         strategy_results.append(
                             {
                                 "strategy_id": strategy_id,
-                                "status": "error",
+                                "status": status,
                                 "phase": "evaluation",
                                 "slug": target_round.slug,
+                                "error_code": error_code,
                                 "error": str(exc),
                             }
                         )
@@ -3920,6 +3954,8 @@ def run_live_trading(
                     overall_status = "pending_settlement"
                 elif any(item.get("status") == "waiting_for_entry" for item in strategy_results):
                     overall_status = "waiting_for_entry"
+                elif any(item.get("status") == "blocked" for item in strategy_results):
+                    overall_status = "blocked"
                 elif any(item.get("status") == "error" for item in strategy_results):
                     overall_status = "error"
                 else:
@@ -3948,12 +3984,13 @@ def run_live_trading(
                 round_in_progress=pending_live_order,
                 safe_to_switch=not pending_live_order,
                 pending_live_order=pending_live_order,
+                **_runtime_alert_changes_for_live_result(result),
             )
             if _is_stop_requested(stop_event):
                 return {'status': 'stopped'}
             if _safe_stop_requested(stop_when_safe) and result.get('status') == 'pending_settlement':
                 return result
-            if result.get('status') in {'submitted', 'skipped', 'waiting_for_entry', 'pending_settlement', 'no_market'}:
+            if result.get('status') in {'submitted', 'skipped', 'waiting_for_entry', 'pending_settlement', 'no_market', 'blocked'}:
                 if not _sleep_if_not_stopped(stop_event, cfg.poll_interval_seconds):
                     return {'status': 'stopped'}
                 continue

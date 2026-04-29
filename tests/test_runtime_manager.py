@@ -18,6 +18,10 @@ def test_runtime_control_starts_idle_in_paper_mode():
         round_in_progress=False,
         safe_to_switch=True,
         pending_live_order=False,
+        runtime_alert_code=None,
+        runtime_alert_message=None,
+        runtime_alert_level=None,
+        runtime_alert_at=None,
         last_transition_at=None,
     )
 
@@ -176,3 +180,19 @@ def test_runtime_control_aggregates_multiple_paper_worker_states():
     assert snapshot.current_round_slug == "btc-updown-15m-current"
     assert snapshot.round_in_progress is True
     assert snapshot.safe_to_switch is False
+
+
+def test_runtime_control_accepts_worker_runtime_alert():
+    control = RuntimeControl(initial_mode="live")
+
+    control.update_worker_state(
+        runtime_alert_code="trading_restricted",
+        runtime_alert_message="Trading restricted in your region.",
+        runtime_alert_level="error",
+    )
+
+    snapshot = control.snapshot()
+    assert snapshot.runtime_alert_code == "trading_restricted"
+    assert snapshot.runtime_alert_message == "Trading restricted in your region."
+    assert snapshot.runtime_alert_level == "error"
+    assert snapshot.runtime_alert_at is not None

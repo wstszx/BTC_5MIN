@@ -15,6 +15,10 @@ class RuntimeSnapshot:
     round_in_progress: bool
     safe_to_switch: bool
     pending_live_order: bool
+    runtime_alert_code: str | None
+    runtime_alert_message: str | None
+    runtime_alert_level: str | None
+    runtime_alert_at: str | None
     last_transition_at: str | None
 
 
@@ -35,6 +39,10 @@ class RuntimeControl:
             round_in_progress=False,
             safe_to_switch=True,
             pending_live_order=False,
+            runtime_alert_code=None,
+            runtime_alert_message=None,
+            runtime_alert_level=None,
+            runtime_alert_at=None,
             last_transition_at=None,
         )
 
@@ -80,6 +88,10 @@ class RuntimeControl:
             "round_in_progress",
             "safe_to_switch",
             "pending_live_order",
+            "runtime_alert_code",
+            "runtime_alert_message",
+            "runtime_alert_level",
+            "runtime_alert_at",
         }
         invalid = set(changes) - allowed
         if invalid:
@@ -91,6 +103,11 @@ class RuntimeControl:
             for key, value in changes.items():
                 if getattr(snapshot, key) != value:
                     updates[key] = value
+            if any(
+                key in updates
+                for key in ("runtime_alert_code", "runtime_alert_message", "runtime_alert_level")
+            ) and "runtime_alert_at" not in changes:
+                updates["runtime_alert_at"] = self._iso_timestamp() if changes.get("runtime_alert_code") else None
 
             return self._apply_updates(snapshot, updates)
 

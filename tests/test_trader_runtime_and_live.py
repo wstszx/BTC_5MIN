@@ -2644,6 +2644,71 @@ def test_run_live_trading_isolates_strategy_exceptions_and_continues(tmp_path, m
     assert ",3,OPEN,btc-updown-5m-test," in rows[1]
 
 
+def test_run_live_trading_keeps_running_and_alerts_on_geoblock(tmp_path, monkeypatch):
+    stop_event = threading.Event()
+    control = RuntimeControl(initial_mode="live")
+
+    class _GeoblockedClobClient(_StubClobClient):
+        def post_order(self, order, order_type):
+            raise RuntimeError(
+                "[py_clob_client_v2] request error status=403 "
+                "url=https://clob.polymarket.com/order "
+                'body={"error":"Trading restricted in your region, please refer to available regions - '
+                'https://docs.polymarket.com/developers/CLOB/geoblock"}'
+            )
+
+    def fake_sleep(_seconds):
+        stop_event.set()
+
+    monkeypatch.setattr("trader.time.sleep", fake_sleep)
+    monkeypatch.setattr(
+        "trader._resolve_side_from_strategy",
+        lambda **kwargs: SideDecision(side="UP"),
+    )
+    monkeypatch.setattr(
+        "trader.build_trade_plan",
+        lambda *args, **kwargs: TradePlan(
+            True,
+            "UP",
+            price=0.55,
+            order_size=2.0,
+            order_cost=1.5,
+            expected_profit=0.5,
+        ),
+    )
+
+    result = run_live_trading(
+        AppConfig(
+            trade_mode="live",
+            live_trading_enabled=True,
+            live_private_key="pk",
+            live_funder="0xfunder",
+            strategy_id=3,
+            live_strategy_ids=[3],
+            base_order_cost=1.5,
+            poll_interval_seconds=1,
+        ),
+        market_client=_LiveMarketClient(),
+        clob_client=_GeoblockedClobClient(balance_payload={"available": 3.0}),
+        state_path=tmp_path / "live_state.json",
+        log_path=tmp_path / "live_orders.csv",
+        stop_event=stop_event,
+        runtime_control=control,
+    )
+
+    snapshot = control.snapshot()
+    state = load_session_state(tmp_path / "live_state.json", effective_live_strategy_ids=[3])
+
+    assert result["status"] == "stopped"
+    assert state.live_strategies[3].pending_live_slug is None
+    assert snapshot.safe_to_switch is True
+    assert snapshot.pending_live_order is False
+    assert snapshot.runtime_alert_code == "trading_restricted"
+    assert snapshot.runtime_alert_level == "error"
+    assert snapshot.runtime_alert_message is not None
+    assert "Trading restricted" in snapshot.runtime_alert_message
+
+
 def test_run_live_trading_wallet_budget_skips_later_strategy_after_earlier_submission(tmp_path, monkeypatch):
     stop_event = threading.Event()
     stub_clob = _StubClobClient(balance_payload={"available": 2.0})

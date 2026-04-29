@@ -695,6 +695,9 @@ def _csv_fieldnames_for_rows(rows: list[dict[str, str]]) -> list[str]:
 def _localize_runtime_message(message: str | None) -> str | None:
     if not message:
         return message
+    lowered = message.lower()
+    if "trading restricted" in lowered or "geoblock" in lowered:
+        return "Polymarket 限制当前地区实盘交易。程序已保持运行，但当前地区无法提交实盘订单；请更换允许地区或切回模拟盘。"
     mapping = {
         "Live trading is disabled.": "实盘交易未开启。",
         "Live trading is disabled. Set LIVE_TRADING_ENABLED=true (or config flag) to submit orders.": "实盘交易未开启。请先打开实盘交易开关。",
@@ -1506,14 +1509,22 @@ class DashboardState:
             "live_validation_error": live_validation_error,
             "active_mode": active_mode,
             "desired_mode": desired_mode,
-            "switch_state": switch_state,
-            "switch_reason": switch_reason,
-            "current_round_slug": runtime_snapshot.current_round_slug if runtime_snapshot is not None else None,
-            "round_in_progress": runtime_snapshot.round_in_progress if runtime_snapshot is not None else False,
-            "safe_to_switch": runtime_snapshot.safe_to_switch if runtime_snapshot is not None else (saved_mode == active_mode),
-            "pending_live_order": bool((runtime_snapshot.pending_live_order if runtime_snapshot is not None else False) or live_pending_live_order),
-            "live_strategy_ids": live_strategy_ids,
-            "live_strategy_states": live_strategy_states,
+                "switch_state": switch_state,
+                "switch_reason": switch_reason,
+                "current_round_slug": runtime_snapshot.current_round_slug if runtime_snapshot is not None else None,
+                "round_in_progress": runtime_snapshot.round_in_progress if runtime_snapshot is not None else False,
+                "safe_to_switch": runtime_snapshot.safe_to_switch if runtime_snapshot is not None else (saved_mode == active_mode),
+                "pending_live_order": bool((runtime_snapshot.pending_live_order if runtime_snapshot is not None else False) or live_pending_live_order),
+                "runtime_alert_code": runtime_snapshot.runtime_alert_code if runtime_snapshot is not None else None,
+                "runtime_alert_message": (
+                    _localize_runtime_message(runtime_snapshot.runtime_alert_message)
+                    if runtime_snapshot is not None
+                    else None
+                ),
+                "runtime_alert_level": runtime_snapshot.runtime_alert_level if runtime_snapshot is not None else None,
+                "runtime_alert_at": runtime_snapshot.runtime_alert_at if runtime_snapshot is not None else None,
+                "live_strategy_ids": live_strategy_ids,
+                "live_strategy_states": live_strategy_states,
             "redeem_visible": redeem_visible,
             "redeem_enabled": redeem_enabled,
             "redeem_auth_mode": getattr(redeem_cfg, "live_redeem_auth_mode", "unconfigured"),
@@ -2644,10 +2655,11 @@ def _dashboard_html() -> str:
               <div class="rows">
                 <div class="row"><span class="label">目标模式</span><span id="runtimeSavedMode" class="value">--</span></div>
                 <div class="row"><span class="label">当前模式</span><span id="runtimeRunningMode" class="value">--</span></div>
-                <div class="row"><span class="label">是否待切换</span><span id="runtimeRestartRequired" class="value">--</span></div>
-                <div class="row"><span class="label">实盘就绪</span><span id="runtimeLiveReady" class="value">--</span></div>
-                <div class="row"><span class="label">校验结果</span><span id="runtimeLiveError" class="value">--</span></div>
-                <div id="runtimeRedeemRows">
+                  <div class="row"><span class="label">是否待切换</span><span id="runtimeRestartRequired" class="value">--</span></div>
+                  <div class="row"><span class="label">实盘就绪</span><span id="runtimeLiveReady" class="value">--</span></div>
+                  <div class="row"><span class="label">校验结果</span><span id="runtimeLiveError" class="value">--</span></div>
+                  <div class="row"><span class="label">运行告警</span><span id="runtimeAlertMessage" class="value">--</span></div>
+                  <div id="runtimeRedeemRows">
                   <div class="row"><span class="label">自动赎回</span><span id="runtimeRedeemEnabled" class="value">--</span></div>
                   <div class="row"><span class="label">待赎回数量</span><span id="runtimeRedeemPending" class="value">--</span></div>
                   <div class="row"><span class="label">最近结果</span><span id="runtimeRedeemResult" class="value">--</span></div>
@@ -3922,6 +3934,7 @@ const state = {
   diagnosticsOpen: false,
   signalDetailsOpen: false,
   advancedConfigOpen: false,
+  lastRuntimeAlertKey: null,
   helpOpen: false,
   helpTab: 'quickstart',
   helpReturnFocusId: 'btnHelp',
@@ -5764,6 +5777,8 @@ function renderRuntimeStatus(payload) {
   el('runtimeRestartRequired').textContent = payload.restart_required ? '需要' : '不需要';
   el('runtimeLiveReady').textContent = payload.live_ready ? '已就绪' : '未就绪';
   el('runtimeLiveError').textContent = payload.live_validation_error || '--';
+  el('runtimeAlertMessage').textContent = payload.runtime_alert_message || '--';
+  maybeShowRuntimeAlert(payload);
   el('runtimeSummaryText').textContent =
     '当前模式 ' + formatModeLabel(payload.running_mode || 'paper') +
     ' / 目标模式 ' + formatModeLabel(payload.saved_mode || 'paper') +
@@ -5783,6 +5798,33 @@ function renderRuntimeStatus(payload) {
   el('runtimeOptimizerLastRun').textContent = payload.optimizer_last_run_at ? fmtIso(payload.optimizer_last_run_at) : '--';
   el('runtimeOptimizerChallengerList').innerHTML = renderOptimizerCandidateList(payload.optimizer_active_challengers || []);
   el('runtimeOptimizerPromotableList').innerHTML = renderOptimizerCandidateList(payload.optimizer_promotable_candidates || []);
+}
+
+function maybeShowRuntimeAlert(payload) {
+  const message = payload && payload.runtime_alert_message;
+  const code = payload && payload.runtime_alert_code;
+  if (!message || !code) {
+    return;
+  }
+  const key = [code, payload.runtime_alert_at || message].join('|');
+  if (state.lastRuntimeAlertKey === key) {
+    return;
+  }
+  state.lastRuntimeAlertKey = key;
+  window.alert(message);
+}
+
+async function refreshRuntimeStatus() {
+  try {
+    const data = await apiGet('/api/config');
+    state.config = {
+      ...(state.config || {}),
+      runtime_status: data.runtime_status || {},
+    };
+    renderRuntimeStatus(data.runtime_status || {});
+  } catch (err) {
+    console.error(err);
+  }
 }
 
 function renderOptimizerCandidateList(items) {
@@ -6591,6 +6633,7 @@ function bindActions() {
 
 function startPolling() {
   setInterval(refreshMarket, POLL_MS.market);
+  setInterval(refreshRuntimeStatus, POLL_MS.market);
   setInterval(refreshPaperRuntimeCards, POLL_MS.market);
   setInterval(refreshSummary, POLL_MS.summary);
   setInterval(refreshRecent, POLL_MS.recent);
