@@ -1629,6 +1629,10 @@ def _runtime_backoff_seconds(cfg: AppConfig, consecutive_errors: int) -> int:
 
 
 def _is_retryable_live_clob_error(exc: Exception) -> bool:
+    return _is_retryable_live_io_error(exc)
+
+
+def _is_retryable_live_io_error(exc: Exception) -> bool:
     message = str(exc).lower()
     if any(marker in message for marker in ("status_code=401", "status_code=403", "unauthorized", "forbidden")):
         return False
@@ -1639,6 +1643,7 @@ def _is_retryable_live_clob_error(exc: Exception) -> bool:
         "status_code=none",
         "status_code=5",
         "connection",
+        "unable to fetch",
         "temporar",
         "ssl",
         "eof occurred",
@@ -3435,7 +3440,46 @@ def run_live_trading(
                 remaining_live_budget = None
                 balance_read_error = str(exc)
 
-            current_round, next_round = market_client.find_current_and_next_rounds(now=now)
+            try:
+                current_round, next_round = market_client.find_current_and_next_rounds(now=now)
+            except Exception as exc:
+                if not _is_retryable_live_io_error(exc):
+                    raise
+                consecutive_errors += 1
+                backoff = _runtime_backoff_seconds(cfg, consecutive_errors)
+                pending_live_order = any(
+                    _strategy_has_pending_live_trade(state.live_strategies.get(strategy_id))
+                    for strategy_id in managed_strategy_ids
+                )
+                current_round_slug = next(
+                    (
+                        state.live_strategies[strategy_id].pending_live_slug
+                        for strategy_id in managed_strategy_ids
+                        if _strategy_has_pending_live_trade(state.live_strategies.get(strategy_id))
+                    ),
+                    None,
+                )
+                _sync_legacy_live_state_fields(state, managed_strategy_ids)
+                save_session_state(state_path, state)
+                _runtime_log(
+                    "live market data transient error #"
+                    + str(consecutive_errors)
+                    + ": "
+                    + str(exc)
+                    + " | backoff="
+                    + str(backoff)
+                    + "s"
+                )
+                _update_runtime_control(
+                    runtime_control,
+                    current_round_slug=current_round_slug,
+                    round_in_progress=pending_live_order,
+                    safe_to_switch=not pending_live_order,
+                    pending_live_order=pending_live_order,
+                )
+                if not _sleep_if_not_stopped(stop_event, backoff):
+                    return {"status": "stopped"}
+                continue
             target_round = _select_target_round(cfg, now=now, current_round=current_round, next_round=next_round)
             if target_round is None:
                 for strategy_id in configured_strategy_ids:

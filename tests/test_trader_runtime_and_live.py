@@ -238,6 +238,20 @@ class _NoTradeLiveMarketClient(_LiveMarketClient):
         return None, None
 
 
+class _TransientLiveMarketDiscoveryClient(_LiveMarketClient):
+    def __init__(self):
+        self.calls = 0
+
+    def find_current_and_next_rounds(self, *, now):
+        self.calls += 1
+        if self.calls == 1:
+            raise RuntimeError(
+                "Unable to fetch https://gamma-api.polymarket.com/events after 4 attempts: "
+                "[SSL: UNEXPECTED_EOF_WHILE_READING] EOF occurred in violation of protocol"
+            )
+        return None, None
+
+
 class _MissedEntryNoNextLiveClient(_LiveMarketClient):
     def find_current_and_next_rounds(self, *, now):
         window = MarketWindow(
@@ -1013,6 +1027,36 @@ def test_run_live_trading_retries_transient_clob_client_timeout(tmp_path, monkey
 
     assert result["status"] == "stopped"
     assert attempts["create_client"] == 2
+    assert attempts["sleeps"] == [1, 1]
+
+
+def test_run_live_trading_retries_transient_market_discovery_ssl_error(tmp_path, monkeypatch):
+    attempts = {"sleeps": []}
+    market_client = _TransientLiveMarketDiscoveryClient()
+
+    def fake_sleep_if_not_stopped(_stop_event, seconds):
+        attempts["sleeps"].append(seconds)
+        return len(attempts["sleeps"]) == 1
+
+    monkeypatch.setattr("trader._sleep_if_not_stopped", fake_sleep_if_not_stopped)
+
+    result = run_live_trading(
+        AppConfig(
+            trade_mode="live",
+            live_trading_enabled=True,
+            live_private_key="pk",
+            live_funder="0xfunder",
+            poll_interval_seconds=1,
+            runtime_error_backoff_base_seconds=1,
+        ),
+        market_client=market_client,
+        clob_client=_StubClobClient(),
+        state_path=tmp_path / "live_state.json",
+        log_path=tmp_path / "live_orders.csv",
+    )
+
+    assert result["status"] == "stopped"
+    assert market_client.calls == 2
     assert attempts["sleeps"] == [1, 1]
 
 
