@@ -11,21 +11,26 @@ from datetime import datetime, timedelta, timezone
 import pytest
 import requests
 import trader
+import utils
+import redeem_worker
 
 from binance_signal import BinanceDepth5SignalService
 from config import AppConfig
 from models import LiveStrategyState, MarketQuote, MarketWindow, PaperStrategyState, PendingPaperTrade, SessionState, TradePlan, TradeRecord
 from paper_report import summarize_paper_trades
 from runtime_control import RuntimeControl
-from trader import (
-    SideDecision,
+from utils import _sleep_if_not_stopped
+from redeem_worker import (
     _list_redeemable_live_positions,
-    _sleep_if_not_stopped,
     load_live_redeem_state,
     save_live_redeem_state,
     execute_live_redeem,
     attempt_live_redeem,
     run_live_redeem_worker,
+    validate_live_runtime_config,
+)
+from trader import (
+    SideDecision,
     _resolve_side_from_strategy,
     _update_max_stake_skip_streak,
     append_trade_log,
@@ -36,7 +41,6 @@ from trader import (
     run_paper_trading,
     _create_live_clob_client,
     _candidate_cfg_with_params,
-    validate_live_runtime_config,
     _paper_experiment_id,
 )
 
@@ -458,7 +462,7 @@ def test_create_live_clob_client_prefers_deriving_api_credentials_after_explicit
 
 
 def test_live_redeem_default_collateral_uses_v2_pusd_token():
-    assert trader._LIVE_REDEEM_COLLATERAL_TOKEN == '0xC011a7E12a19f7B1f670d46F03B03f3342E82DFB'
+    assert redeem_worker._LIVE_REDEEM_COLLATERAL_TOKEN == '0xC011a7E12a19f7B1f670d46F03B03f3342E82DFB'
 
 
 def test_submit_live_strategy_order_prefers_v2_create_and_post_market_order():
@@ -760,8 +764,8 @@ def test_execute_live_redeem_uses_builder_credentials_when_available(monkeypatch
         captured['index_sets'] = list(index_sets)
         return {'submission_id': 'sub-1', 'tx_hash': None}
 
-    import trader as trader_module
-    monkeypatch.setattr(trader_module, '_execute_live_redeem_via_relayer', fake_relayer_execute)
+    import redeem_worker as redeem_worker_module
+    monkeypatch.setattr(redeem_worker_module, '_execute_live_redeem_via_relayer', fake_relayer_execute)
 
     cfg = AppConfig(
         live_redeem_builder_api_key='builder-key',
@@ -791,8 +795,8 @@ def test_execute_live_redeem_uses_relayer_key_when_builder_missing(monkeypatch):
         captured['auth_mode'] = cfg.live_redeem_auth_mode
         return {'submission_id': 'sub-relayer', 'tx_hash': '0xabc'}
 
-    import trader as trader_module
-    monkeypatch.setattr(trader_module, '_execute_live_redeem_via_relayer', fake_relayer_execute)
+    import redeem_worker as redeem_worker_module
+    monkeypatch.setattr(redeem_worker_module, '_execute_live_redeem_via_relayer', fake_relayer_execute)
 
     cfg = AppConfig(
         live_redeem_relayer_api_key='relayer-key',
@@ -1400,7 +1404,7 @@ def test_session_state_roundtrip_preserves_pending_paper_trades(tmp_path):
 
 
 def test_load_session_state_wraps_legacy_paper_state_for_effective_strategy(tmp_path):
-    state_path = tmp_path / bytes([115, 101, 115, 115, 105, 111, 110, 95, 115, 116, 97, 116, 101, 46, 106, 115, 111, 110]).decode()
+    state_path = tmp_path / "session_state.json"
     state_path.write_text(
         json.dumps(
             dict(
@@ -1438,7 +1442,7 @@ def test_load_session_state_wraps_legacy_paper_state_for_effective_strategy(tmp_
 
 
 def test_load_session_state_preserves_multi_strategy_payload(tmp_path):
-    state_path = tmp_path / bytes([115, 101, 115, 115, 105, 111, 110, 95, 115, 116, 97, 116, 101, 46, 106, 115, 111, 110]).decode()
+    state_path = tmp_path / "session_state.json"
     state_path.write_text(
         json.dumps(
             dict(
@@ -5006,3 +5010,4 @@ def test_candidate_cfg_with_params_applies_strategy7_optimizer_values():
     assert candidate_cfg.strategy7_ofi_threshold == pytest.approx(0.75)
     assert candidate_cfg.strategy7_momentum_threshold == pytest.approx(0.03)
     assert candidate_cfg.strategy7_max_entry_price == pytest.approx(0.53)
+
