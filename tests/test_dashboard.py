@@ -511,7 +511,7 @@ def test_dashboard_config_payload_exposes_live_auto_redeem_fields(tmp_path: Path
         assert 'LIVE_AUTO_REDEEM_DRY_RUN' in payload['editable_keys']
         assert payload['labels']['LIVE_AUTO_REDEEM_ENABLED'] == '实盘自动赎回'
         assert payload['labels']['LIVE_AUTO_REDEEM_DRY_RUN'] == '自动赎回演练模式'
-        assert payload['field_help']['LIVE_AUTO_REDEEM_ENABLED'].startswith('仅实盘模式使用')
+        assert payload['field_help']['LIVE_AUTO_REDEEM_ENABLED'].startswith('仅并行实盘使用')
         assert 'Polygon 链上赎回交易' in payload['field_help']['LIVE_AUTO_REDEEM_DRY_RUN']
         runtime_group = payload['field_groups'][0]
         assert 'LIVE_AUTO_REDEEM_ENABLED' in runtime_group['keys']
@@ -538,7 +538,7 @@ def test_dashboard_config_payload_exposes_live_strategy_ids(tmp_path: Path):
         payload = state.get_config_payload()
         assert LIVE_STRATEGY_IDS in payload['editable_keys']
         assert payload['labels'][LIVE_STRATEGY_IDS] == '实盘策略组合'
-        assert payload['field_help'][LIVE_STRATEGY_IDS].startswith('实盘模式下可轮询的策略列表')
+        assert payload['field_help'][LIVE_STRATEGY_IDS].startswith('实盘运行时可轮询的策略列表')
         assert payload['select_options'][LIVE_STRATEGY_IDS] == ['1', '2', '3', '4', '5', '6', '7', '8']
         assert LIVE_STRATEGY_IDS not in payload['field_groups'][1]['keys']
     finally:
@@ -1374,8 +1374,8 @@ def test_dashboard_runtime_mode_labels_are_localized(tmp_path: Path):
     try:
         payload = state.get_config_payload()
 
-        assert payload['labels']['TRADE_MODE'] == '交易模式'
-        assert payload['labels']['LIVE_TRADING_ENABLED'] == '实盘交易开关'
+        assert payload['labels']['TRADE_MODE'] == '运行视角'
+        assert payload['labels']['LIVE_TRADING_ENABLED'] == '并行实盘开关'
         assert payload['labels']['POLYMARKET_PRIVATE_KEY'] == '实盘私钥'
         assert payload['labels']['POLYMARKET_API_KEY'] == '官方 API 访问密钥'
         assert payload['labels']['POLYMARKET_API_SECRET'] == '官方 API 签名密钥'

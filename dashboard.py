@@ -808,7 +808,7 @@ def _localize_runtime_message(message: str | None) -> str | None:
         return "Polymarket 限制当前地区实盘交易。程序已保持运行，但当前地区无法提交实盘订单；请更换允许地区或切回模拟盘。"
     mapping = {
         "Live trading is disabled.": "实盘交易未开启。",
-        "Live trading is disabled. Set LIVE_TRADING_ENABLED=true (or config flag) to submit orders.": "实盘交易未开启。请先打开实盘交易开关。",
+        "Live trading is disabled. Set LIVE_TRADING_ENABLED=true (or config flag) to submit orders.": "并行实盘未开启。请先打开并行实盘开关。",
         "Missing private key for live trading.": "缺少实盘私钥。",
         "Missing POLYMARKET_FUNDER for live trading.": "\u7f3a\u5c11\u5b9e\u76d8\u94b1\u5305\u5730\u5740\u3002",
     }
@@ -909,7 +909,7 @@ def _field_groups() -> list[dict[str, Any]]:
     return [
         {
             "title": "运行模式",
-            "description": "控制是否启用实盘，并配置实盘所需的钱包凭证。",
+            "description": "控制是否并行启动实盘，并配置实盘所需的钱包凭证。",
             "keys": [
                 "TRADE_MODE",
                 "MARKET_TIMEFRAME",
@@ -1116,10 +1116,10 @@ class DashboardState:
     )
 
     CONFIG_LABELS: dict[str, str] = {
-        "ENABLE_LIVE_TRADING": "启用实盘",
-        "TRADE_MODE": "交易模式",
+        "ENABLE_LIVE_TRADING": "并行实盘",
+        "TRADE_MODE": "运行视角",
         "MARKET_TIMEFRAME": "市场频次",
-        "LIVE_TRADING_ENABLED": "实盘交易开关",
+        "LIVE_TRADING_ENABLED": "并行实盘开关",
         "POLYMARKET_PRIVATE_KEY": "实盘私钥",
         "POLYMARKET_FUNDER": "\u5b9e\u76d8\u94b1\u5305\u5730\u5740",
         "POLYMARKET_API_KEY": "官方 API 访问密钥",
@@ -1332,14 +1332,14 @@ class DashboardState:
     FIELD_HELP: dict[str, str] = {
         "STRATEGY_ID": "策略 1-4 是固定节奏策略，策略 5 是动量策略，策略 6 是 Binance OFI，策略 7/8 是组合信号策略。",
         "STRATEGY_IDS": "统一策略组合。设置后纸面和实盘都使用同一组策略和同一套参数，切换模式只改变执行环境。",
-        "LIVE_STRATEGY_IDS": "实盘模式下可轮询的策略列表，按输入顺序去重，例如 2,6。未填写时会回退到 STRATEGY_ID。",
+        "LIVE_STRATEGY_IDS": "实盘运行时可轮询的策略列表，按输入顺序去重，例如 2,6。未填写时会回退到 STRATEGY_ID。",
         "PAPER_STRATEGY_IDS": "纸面测试可同时运行多个策略，按输入顺序去重，例如 1,2,6。",
         "TARGET_PROFIT": "在目标收益模式下，这里表示每轮期望净利；在固定金额模式下，它更多用于观察研究，不直接决定首笔下注金额。",
         "BET_SIZING_MODE": "固定金额模式会使用固定首笔下注额；目标收益模式会根据目标净利反推下注金额。",
-        "ENABLE_LIVE_TRADING": "关闭时仅运行纸面测试；开启后，运行时可以切换到实盘配置并允许真实下单。",
+        "ENABLE_LIVE_TRADING": "关闭时仅运行纸面测试；开启后，纸面交易继续运行，同时启动通过校验的实盘交易。",
         "MARKET_TIMEFRAME": "选择当前要玩的 Polymarket BTC 预测频次，仅支持 5 分钟和 15 分钟。",
         "OPEN_DELAY_SECONDS": "OPEN 模式下，从每轮开始后延迟多少秒再尝试入场。",
-        "POLYMARKET_PRIVATE_KEY": "实盘钱包私钥，仅在实盘模式下需要。",
+        "POLYMARKET_PRIVATE_KEY": "实盘钱包私钥，仅在并行实盘开启时需要。",
         "POLYMARKET_FUNDER": "与私钥对应的实盘钱包地址（0x...），并且需要实际承担实盘订单资金。",
         "POLYMARKET_API_KEY": "CLOB 实盘下单凭证，仅用于实盘下单私有接口。",
         "POLYMARKET_API_SECRET": "CLOB 实盘下单签名密钥，仅用于实盘下单私有接口。",
@@ -1349,7 +1349,7 @@ class DashboardState:
         "POLYMARKET_BUILDER_PASSPHRASE": "官方免 Gas 赎回的 Builder 口令，仅用于自动赎回。",
         "POLYMARKET_RELAYER_API_KEY": "官方免 Gas 赎回的 Relayer 接口密钥，仅用于自动赎回。",
         "POLYMARKET_RELAYER_API_KEY_ADDRESS": "与 Relayer 接口密钥配套的地址，仅用于自动赎回认证。",
-        "LIVE_AUTO_REDEEM_ENABLED": "仅实盘模式使用。开启后会启动独立的自动赎回线程，扫描可赎回的获胜仓位并自动尝试赎回。",
+        "LIVE_AUTO_REDEEM_ENABLED": "仅并行实盘使用。开启后会启动独立的自动赎回线程，扫描可赎回的获胜仓位并自动尝试赎回。",
         "LIVE_AUTO_REDEEM_DRY_RUN": "仅在开启自动赎回后才有意义。设为 true 时，自动赎回线程仍会检测仓位、写入状态并更新监控页面，但不会发送真实的 Polygon 链上赎回交易。正常实盘请保持 false，只在首次验证或调试时临时开启。",
         "LIVE_AUTO_REDEEM_POLL_SECONDS": "检查可赎回实盘仓位的轮询间隔，单位秒。",
         "LIVE_AUTO_REDEEM_MAX_RETRIES": "单个 condition 在遇到临时 RPC 或链上错误时的最大重试次数。",
@@ -2745,17 +2745,17 @@ def _dashboard_html() -> str:
               <div id="configContextSummary" class="strategy-guide-subtitle">当前按模拟盘配置展示。</div>
             </div>
             <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
-              <select id="configModeSelect" class="input-compact" aria-label="左侧配置模式选择" title="配置模式">
-                <option value="paper">模拟盘模式</option>
-                <option value="live">实盘模式</option>
+              <select id="configModeSelect" class="input-compact" aria-label="左侧配置视角选择" title="配置视角">
+                <option value="paper">纸面视角</option>
+                <option value="live">实盘视角</option>
               </select>
               <select id="cfg_MARKET_TIMEFRAME" class="input-compact" aria-label="市场频次" title="市场频次">
                 <option value="5m">频次 5m</option>
                 <option value="15m">频次 15m</option>
               </select>
-              <select id="cfg_ENABLE_LIVE_TRADING" class="input-compact" aria-label="启用实盘" title="实盘开关">
-                <option value="false">实盘关闭</option>
-                <option value="true">实盘开启</option>
+              <select id="cfg_ENABLE_LIVE_TRADING" class="input-compact" aria-label="并行实盘" title="并行实盘开关">
+                <option value="false">仅纸面</option>
+                <option value="true">纸面+实盘</option>
               </select>
             </div>
           </div>
@@ -4389,7 +4389,7 @@ const HELP_SECTIONS = {
       {
         title: '实盘自动赎回',
         bullets: [
-          '实盘自动赎回开关只在实盘模式下生效，开启后会启动独立的自动赎回线程。',
+          '实盘自动赎回开关只在并行实盘开启后生效，开启后会启动独立的自动赎回线程。',
           '该线程会扫描可赎回的获胜仓位，并通过 Polygon 的 redeemPositions 方法尝试把它们转回可用余额。',
           '当自动赎回演练模式开启时，自动赎回线程只做检测、记录和监控页面展示，不会发送真实赎回交易。',
           '正常实盘请保持自动赎回演练模式关闭，只在首次验证或调试时临时打开。',
@@ -4495,7 +4495,7 @@ const HELP_SECTIONS = {
         title: '纸面与实盘差异',
         bullets: [
           '纸面模式不会读取真实钱包，会使用 PAPER_SIMULATED_WALLET_BALANCE 作为 dry-run 钱包预算。',
-          '实盘模式会读取真实钱包余额；余额不可用会显示“实盘钱包余额不可用”，余额不足会显示“实盘钱包余额不足”。',
+          '并行实盘会读取真实钱包余额；余额不可用会显示“实盘钱包余额不可用”，余额不足会显示“实盘钱包余额不足”。',
           '纸面和实盘的信号、风控和预算检查路径应保持一致，差异只在最终是否发送真实订单。',
         ],
       },
@@ -4538,7 +4538,7 @@ const HELP_FAQ = [
   ['为什么方向和我预期的不一样？', '固定节奏策略取决于当前轮次索引；动量策略则取决于开盘价、当前价、阈值和偏移。'],
   ['为什么会触发实时连接保护？', '这表示实时连接行情数据已经过旧，系统会选择阻止执行，而不是拿陈旧数据去下注。'],
   ['为什么当日已实现盈亏会重置？', '这是按天统计的自然切日行为；累计盈亏仍然保留在会话状态里。'],
-  ['实盘自动赎回开关是什么意思？', '这是实盘自动赎回开关。开启后，实盘模式会启动单独的自动赎回线程，自动扫描并尝试赎回获胜仓位。'],
+  ['实盘自动赎回开关是什么意思？', '这是实盘自动赎回开关。开启后，并行实盘会启动单独的自动赎回线程，自动扫描并尝试赎回获胜仓位。'],
   ['自动赎回演练模式需要关闭吗？', '不需要一直关闭。它是一个安全阀：开启时只做演练，不会发送真实的 Polygon 赎回交易。正常实盘应保持关闭，仅在首次验证或调试时开启。'],
   ['为什么触发最大下注金额后会连续跳过？', '待回补亏损和当前价格条件可能会把本轮所需金额推高到最大下注金额之上，需要结合待回补亏损一起判断。'],
   ['新用户最容易配错什么？', '最常见的是一次改太多参数、把固定节奏和动量逻辑混在一起看，以及把实时连接保护误当成策略故障。'],
@@ -4637,9 +4637,9 @@ const REASON_LABELS = {
 };
 
 const CONFIG_KEY_NAMES = {
-  ENABLE_LIVE_TRADING: '启用实盘',
-  TRADE_MODE: '交易模式',
-  LIVE_TRADING_ENABLED: '实盘交易开关',
+  ENABLE_LIVE_TRADING: '并行实盘',
+  TRADE_MODE: '运行视角',
+  LIVE_TRADING_ENABLED: '并行实盘开关',
   POLYMARKET_PRIVATE_KEY: '实盘私钥',
   POLYMARKET_FUNDER: '\u5b9e\u76d8\u94b1\u5305\u5730\u5740',
   STRATEGY_ID: '基础策略',
@@ -6787,7 +6787,7 @@ async function saveConfig() {
     setSaveButtonState('saving');
     const previousMode = String((((state.config || {}).env_values || {}).TRADE_MODE || 'paper')).toLowerCase();
     const nextMode = String((values.TRADE_MODE || previousMode || 'paper')).toLowerCase();
-    if (shouldConfirmLiveModeSwitch(previousMode, nextMode) && !window.confirm('切换为实盘后，后续下单会按实盘配置执行。确认继续吗？')) {
+    if (shouldConfirmLiveModeSwitch(previousMode, nextMode) && !window.confirm('开启并行实盘后，纸面交易会继续运行，同时实盘会按实盘配置执行。确认继续吗？')) {
       setChip('cfgStatus', '已取消', 'warn');
       setSaveButtonState('idle');
       return;

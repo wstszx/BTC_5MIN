@@ -40,11 +40,11 @@ Dashboard saves write back to `.env.dashboard`, and mode changes also update the
 
 Trading mode safety rules:
 
-- `TRADE_MODE=paper` keeps the runtime in paper trading.
-- Paper trading uses `PAPER_SIMULATED_WALLET_BALANCE` as its dry-run wallet budget; it does not read the real wallet, but it does run through the same budget check node as live trading.
-- Real trading requires both `TRADE_MODE=live` and `LIVE_TRADING_ENABLED=true`.
-- Saving a new mode updates the desired target mode immediately, but the runtime only switches after the current round reaches a safe boundary.
-- `paper -> live` still requires confirmation in the dashboard before the save completes.
+- Paper trading runs as the baseline runtime and uses `PAPER_SIMULATED_WALLET_BALANCE` as its dry-run wallet budget; it does not read the real wallet, but it does run through the same budget check node as live trading.
+- `LIVE_TRADING_ENABLED=false` keeps the runtime paper-only.
+- `LIVE_TRADING_ENABLED=true` allows the runtime to start live trading alongside paper trading after live credentials pass validation.
+- `TRADE_MODE` controls the active/saved runtime mode shown by the dashboard and the live config view, but it is not the only live safety gate.
+- Saving a change that enables live trading still requires dashboard confirmation before the save completes.
 - If live credentials are incomplete or a live order is still unsettled, the runtime stays pending or blocked instead of switching unsafely.
 - The dashboard shows the saved mode, current running mode, desired target mode, switch state, and live readiness so you can tell whether the switch is complete.
 
