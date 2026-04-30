@@ -622,6 +622,19 @@ def test_dashboard_assets_surface_field_errors_after_failed_save():
     assert "env_values: values" in js
 
 
+def test_dashboard_assets_render_config_warning_banner():
+    html = _dashboard_html()
+    css = dashboard._dashboard_css()
+    js = _dashboard_js()
+
+    assert 'id="configWarningBanner"' in html
+    assert 'id="configWarningList"' in html
+    assert '.config-warning-banner' in css
+    assert 'function renderConfigWarnings' in js
+    assert 'payload.config_warnings' in js
+    assert '配置警告' in js
+
+
 def test_dashboard_assets_include_entry_window_missed_reason_label():
     js = _dashboard_js()
 
@@ -922,6 +935,20 @@ def test_dashboard_live_recent_orders_filters_by_strategy(tmp_path: Path):
     finally:
         state.close()
         os.chdir(old_cwd)
+
+
+def test_dashboard_config_payload_exposes_runtime_config_warnings(tmp_path: Path):
+    env_file = tmp_path / ".env.dashboard"
+    env_file.write_text("MAX_STAKE=abc\nSTRATEGY_IDS=2,x\n", encoding="utf-8")
+    state = DashboardState(env_file=env_file)
+    try:
+        payload = state.get_config_payload()
+
+        assert payload["config_warnings"]["MAX_STAKE"].startswith("Invalid value for MAX_STAKE")
+        assert payload["config_warnings"]["STRATEGY_IDS"] == "Invalid entries for STRATEGY_IDS ignored: x"
+        assert payload["runtime_status"]["config_warning_count"] == 2
+    finally:
+        state.close()
 
 
 def test_dashboard_live_recent_orders_all_scopes_to_configured_live_strategies(tmp_path: Path):

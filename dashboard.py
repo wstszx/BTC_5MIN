@@ -20,6 +20,7 @@ from config import (
     AppConfig,
     MARKET_TIMEFRAME_DEFINITIONS,
     build_config_from_env_values,
+    collect_config_warnings,
     load_env_file_values,
     LIVE_STRATEGY_IDS,
     PAPER_STRATEGY_IDS,
@@ -1639,7 +1640,11 @@ class DashboardState:
             masked[key] = self._mask_secret(masked.get(key))
         return masked
 
-    def _build_runtime_status(self, env_values: dict[str, str]) -> dict[str, Any]:
+    def _build_runtime_status(
+        self,
+        env_values: dict[str, str],
+        config_warnings: dict[str, str] | None = None,
+    ) -> dict[str, Any]:
         saved_mode = str(env_values.get("TRADE_MODE") or self._cfg.trade_mode or "paper").strip().lower() or "paper"
         runtime_snapshot = self.runtime_control.snapshot() if self.runtime_control is not None else None
         active_mode = str((runtime_snapshot.active_mode if runtime_snapshot is not None else self.running_trade_mode) or "paper").strip().lower() or "paper"
@@ -1731,6 +1736,7 @@ class DashboardState:
             "optimizer_champion_id": optimizer_runtime["champion_id"],
             "optimizer_active_challengers": optimizer_runtime["active_challengers"],
             "optimizer_promotable_count": optimizer_runtime["promotable_count"],
+            "config_warning_count": len(config_warnings or {}),
         }
 
     def _refresh_runtime(self) -> None:
@@ -1766,7 +1772,8 @@ class DashboardState:
             for key, value in self._env_values.items():
                 if _split_strategy_profile_key(key) is not None:
                     env_values[key] = value
-            runtime_status = self._build_runtime_status(env_values)
+            config_warnings = collect_config_warnings(self._env_values)
+            runtime_status = self._build_runtime_status(env_values, config_warnings=config_warnings)
             strategy_catalog = json.loads(json.dumps(self.STRATEGY_CATALOG))
             field_groups = json.loads(json.dumps(self.FIELD_GROUPS))
             if field_groups:
@@ -1808,6 +1815,7 @@ class DashboardState:
                 "field_scope": self.FIELD_SCOPE,
                 "field_help": self.FIELD_HELP,
                 "validation_errors": validation_errors,
+                "config_warnings": config_warnings,
                 "runtime_status": runtime_status,
                 "saved_at": _iso(self._last_saved_at),
                 "paper_timeframes": list(getattr(self._cfg, "paper_timeframes", [])),
@@ -2720,6 +2728,16 @@ def _dashboard_html() -> str:
         <div id=\"cfgStatus\" class=\"chip\">未保存</div>
       </div>
       <div class=\"panel-body\">
+        <section id=\"configWarningBanner\" class=\"config-warning-banner\" hidden>
+          <div class=\"config-warning-head\">
+            <div>
+              <div id=\"configWarningTitle\" class=\"config-warning-title\">配置警告</div>
+              <div id=\"configWarningSummary\" class=\"config-warning-summary\">--</div>
+            </div>
+          </div>
+          <div id=\"configWarningList\" class=\"config-warning-list\"></div>
+        </section>
+
         <section class="strategy-guide-card">
           <div class="strategy-guide-head">
             <div>
@@ -3814,6 +3832,65 @@ input.input-compact {
   color: var(--amber);
   border-color: rgba(245, 166, 35, 0.35);
   background: rgba(245, 166, 35, 0.08);
+}
+
+.config-warning-banner {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid rgba(255, 214, 122, 0.42);
+  border-radius: 10px;
+  background: rgba(245, 166, 35, 0.1);
+}
+
+.config-warning-banner[hidden] {
+  display: none;
+}
+
+.config-warning-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.config-warning-title {
+  color: var(--amber);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.config-warning-summary {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.config-warning-list {
+  display: grid;
+  gap: 6px;
+}
+
+.config-warning-item {
+  display: grid;
+  grid-template-columns: minmax(90px, 0.45fr) minmax(0, 1fr);
+  gap: 8px;
+  padding: 7px 8px;
+  border: 1px solid rgba(255, 214, 122, 0.24);
+  border-radius: 8px;
+  background: rgba(5, 12, 22, 0.42);
+  font-size: 11px;
+}
+
+.config-warning-key {
+  color: var(--amber);
+  font-family: var(--mono);
+  overflow-wrap: anywhere;
+}
+
+.config-warning-message {
+  color: var(--text);
+  overflow-wrap: anywhere;
 }
 
 .kv-grid {
@@ -6363,6 +6440,7 @@ function renderConfig(payload) {
   state.config = payload;
   state.paperTimeframeFilter = effectivePaperTimeframeFilter();
   applyTimeframeCopy(payload);
+  renderConfigWarnings(payload);
   const savedAtNode = el('cfgSavedAt');
   if (savedAtNode) {
     savedAtNode.textContent = payload.saved_at ? fmtIso(payload.saved_at) : '--';
@@ -6594,6 +6672,33 @@ function renderConfig(payload) {
   setConfigError('--');
   setChip('cfgStatus', '\u5df2\u52a0\u8f7d', 'ok');
   setSaveButtonState('idle');
+}
+
+function renderConfigWarnings(payload) {
+  const banner = el('configWarningBanner');
+  const summary = el('configWarningSummary');
+  const list = el('configWarningList');
+  if (!banner || !summary || !list) {
+    return;
+  }
+  const warnings = (payload && payload.config_warnings) || {};
+  const entries = Object.entries(warnings)
+    .filter(([key, message]) => key && message)
+    .sort(([leftKey], [rightKey]) => String(leftKey).localeCompare(String(rightKey)));
+  if (entries.length === 0) {
+    banner.hidden = true;
+    summary.textContent = '--';
+    list.innerHTML = '';
+    return;
+  }
+  banner.hidden = false;
+  summary.textContent = '检测到 ' + entries.length + ' 项配置警告；这些值已按默认或有效值回退。';
+  list.innerHTML = entries.map(([key, message]) => (
+    '<div class="config-warning-item">' +
+      '<span class="config-warning-key">' + esc(formatConfigLabel(key, ((payload || {}).labels) || {})) + '</span>' +
+      '<span class="config-warning-message">' + esc(String(message || '')) + '</span>' +
+    '</div>'
+  )).join('');
 }
 
 function collectConfigValues(options) {

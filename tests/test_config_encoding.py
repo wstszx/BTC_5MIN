@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from config import AppConfig, build_config_from_env_values, load_env_file_values
+from config import AppConfig, build_config_from_env_values, collect_config_warnings, load_env_file_values
 
 
 def test_load_env_file_values_reads_gbk_encoded_dashboard_file(tmp_path: Path):
@@ -24,6 +24,38 @@ def test_build_config_from_gbk_encoded_dashboard_file(tmp_path: Path):
     assert cfg.trade_mode == 'paper'
     assert cfg.max_stake == 9.5
     assert cfg.live_funder == 'addr'
+
+
+def test_collect_config_warnings_reports_invalid_scalar_values():
+    warnings = collect_config_warnings(
+        {
+            'MAX_STAKE': 'abc',
+            'WS_ENABLED': 'maybe',
+            'STRATEGY_ID': '9',
+            'MARKET_TIMEFRAME': '7m',
+            'TARGET_PROFIT': '1.2',
+        }
+    )
+
+    assert warnings['MAX_STAKE'] == "Invalid value for MAX_STAKE: expected number, got 'abc'"
+    assert warnings['WS_ENABLED'] == "Invalid value for WS_ENABLED: expected true/false, got 'maybe'"
+    assert warnings['STRATEGY_ID'] == "Invalid value for STRATEGY_ID: expected strategy id 1-8, got '9'"
+    assert warnings['MARKET_TIMEFRAME'] == "Invalid value for MARKET_TIMEFRAME: expected one of 5m, 15m, got '7m'"
+    assert 'TARGET_PROFIT' not in warnings
+
+
+def test_collect_config_warnings_reports_profile_and_strategy_list_values():
+    warnings = collect_config_warnings(
+        {
+            'STRATEGY_IDS': '2,x,9',
+            'PAPER_15M_TARGET_PROFIT': 'oops',
+            'LIVE_STRATEGY_7_BASE_ORDER_COST': 'bad',
+        }
+    )
+
+    assert warnings['STRATEGY_IDS'] == "Invalid entries for STRATEGY_IDS ignored: x, 9"
+    assert warnings['PAPER_15M_TARGET_PROFIT'] == "Invalid value for PAPER_15M_TARGET_PROFIT: expected number, got 'oops'"
+    assert warnings['LIVE_STRATEGY_7_BASE_ORDER_COST'] == "Invalid value for LIVE_STRATEGY_7_BASE_ORDER_COST: expected number, got 'bad'"
 
 
 def test_build_config_uses_paper_strategy_ids_when_present():

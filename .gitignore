@@ -40,4 +40,5 @@ codex.patch
 tmp_apply.patch
 .playwright-cli/
 output/playwright/
+output/*.log
 .superpowers/

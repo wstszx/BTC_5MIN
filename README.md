@@ -80,17 +80,35 @@ When startup succeeds, the terminal prints:
 - `Runtime started: paper trading + dashboard`
 - `Dashboard URL: http://127.0.0.1:8787/`
 
-## 4. View the dashboard
+## 4. Run local checks
+
+Before changing runtime or trading logic, run the test suite from the repository root:
+
+```powershell
+python -m pytest -q
+```
+
+For a faster smoke check while iterating on configuration and runtime launch behavior:
+
+```powershell
+python -m pytest tests/test_config_encoding.py tests/test_runtime_launcher.py -q
+```
+
+GitHub Actions runs the full test suite before deploying `main` to the VPS.
+
+The runtime still falls back to safe defaults for malformed `.env.dashboard` values, but the dashboard config payload now reports those ignored values as `config_warnings`. Treat any warning on risk or live-trading fields as a configuration problem to fix before enabling live mode.
+
+## 5. View the dashboard
 
 Open [http://127.0.0.1:8787/](http://127.0.0.1:8787/) in your browser to inspect quotes, signals, risk checks, and the config editor that writes back to `.env.dashboard`.
 
 The dashboard runtime panel shows whether live trading is ready, whether a switch is pending or blocked, and whether recent orders are being read from the actual active mode logs.
 
-## 5. Stop
+## 6. Stop
 
 Press `Ctrl+C` in the terminal where `python main.py` is running. The runtime asks both services to stop cleanly and leaves run data in `logs/` for later review.
 
-## 6. Run The Strategy Optimizer
+## 7. Run The Strategy Optimizer
 
 The repository now includes an offline paper-strategy optimization pipeline in [optimizer.py](./optimizer.py). It is separate from `python main.py` and is meant to help you:
 

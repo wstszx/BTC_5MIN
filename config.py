@@ -14,6 +14,85 @@ STRATEGY_ID = "STRATEGY_ID"
 
 
 _ENV_FILE_ENCODINGS: tuple[str, ...] = ("utf-8", "utf-8-sig", "gbk")
+_BOOL_TRUE_VALUES = {"1", "true", "yes", "on"}
+_BOOL_FALSE_VALUES = {"0", "false", "no", "off"}
+_STRATEGY_ID_MIN = 1
+_STRATEGY_ID_MAX = 8
+
+_INT_CONFIG_KEYS: frozenset[str] = frozenset(
+    {
+        "STRATEGY_ID",
+        "MAX_CONSECUTIVE_LOSSES",
+        "SIGNAL_FALLBACK_STRATEGY_ID",
+        "SIGNAL_HISTORY_FIDELITY_SECONDS",
+        "SIGNAL_ANCHOR_MAX_OFFSET_SECONDS",
+        "SIGNAL_DYNAMIC_THRESHOLD_MIN_POINTS",
+        "SIGNAL_LOCK_BEFORE_ENTRY_SECONDS",
+        "MAX_STAKE_SKIP_ALERT_THRESHOLD",
+        "STRATEGY7_CONFIRM_BEFORE_ENTRY_SECONDS",
+        "WS_QUOTE_STALE_SECONDS",
+        "WS_CONNECT_TIMEOUT_SECONDS",
+        "WS_LOG_EVERY_UPDATES",
+        "OPEN_DELAY_SECONDS",
+        "ENTRY_GRACE_SECONDS",
+        "HISTORY_ENTRY_FIDELITY_SECONDS",
+        "HISTORY_ENTRY_MAX_OFFSET_SECONDS",
+        "POLYMARKET_CHAIN_ID",
+        "POLYMARKET_SIGNATURE_TYPE",
+        "LIVE_AUTO_REDEEM_POLL_SECONDS",
+        "LIVE_AUTO_REDEEM_MAX_RETRIES",
+        "LIVE_AUTO_REDEEM_INITIAL_BACKOFF_SECONDS",
+        "LIVE_AUTO_REDEEM_MAX_BACKOFF_SECONDS",
+    }
+)
+_FLOAT_CONFIG_KEYS: frozenset[str] = frozenset(
+    {
+        "PAPER_SIMULATED_WALLET_BALANCE",
+        "TARGET_PROFIT",
+        "BASE_ORDER_COST",
+        "MAX_STAKE",
+        "MAX_PRICE_THRESHOLD",
+        "MIN_PRICE_THRESHOLD",
+        "SIGNAL_MOMENTUM_THRESHOLD",
+        "SIGNAL_DYNAMIC_THRESHOLD_K",
+        "OFI_THRESHOLD",
+        "MAX_ENTRY_PRICE",
+        "STRATEGY7_OFI_THRESHOLD",
+        "STRATEGY7_MOMENTUM_THRESHOLD",
+        "STRATEGY7_MAX_ENTRY_PRICE",
+        "STRATEGY7_MIN_SIGNAL_GAP",
+        "STRATEGY7_LATE_CONFIRM_STRONG_SIGNAL_GAP",
+        "STRATEGY7_LATE_CONFIRM_RELAX_SECONDS",
+        "BINANCE_SIGNAL_STALE_SECONDS",
+        "NEAR_ENTRY_POLL_WINDOW_SECONDS",
+        "FAST_POLL_INTERVAL_SECONDS",
+        "WS_TRADE_GUARD_STALE_SECONDS",
+        "WS_PING_INTERVAL_SECONDS",
+    }
+)
+_BOOL_CONFIG_KEYS: frozenset[str] = frozenset(
+    {
+        "LIVE_TRADING_ENABLED",
+        "WS_ENABLED",
+        "LIVE_AUTO_REDEEM_ENABLED",
+        "LIVE_AUTO_REDEEM_DRY_RUN",
+    }
+)
+_SELECT_CONFIG_OPTIONS: dict[str, tuple[str, ...]] = {
+    "TRADE_MODE": ("paper", "live"),
+    "BET_SIZING_MODE": ("FIXED_BASE_COST", "TARGET_PROFIT"),
+    "SIGNAL_WEAK_SIGNAL_MODE": ("SKIP", "FALLBACK", "FORCE"),
+    "POLYMARKET_ORDER_TYPE": ("FOK", "FAK", "GTC", "GTD"),
+}
+
+
+def _base_config_key(key: str) -> str:
+    parts = key.split("_")
+    if len(parts) >= 3 and parts[0] == "PAPER" and parts[1] in {"5M", "15M"}:
+        return "_".join(parts[2:])
+    if len(parts) >= 4 and parts[0] in {"LIVE", "PAPER"} and parts[1] == "STRATEGY" and parts[2].isdigit():
+        return "_".join(parts[3:])
+    return key
 
 
 def _read_env_file_text(path: Path) -> str:
@@ -84,14 +163,117 @@ def build_config_from_env_values(values: dict[str, str]) -> AppConfig:
         return AppConfig()
 
 
+def _invalid_value_warning(name: str, expected: str, raw: str) -> str:
+    return f"Invalid value for {name}: expected {expected}, got {raw!r}"
+
+
+def _invalid_strategy_entries(raw: str) -> list[str]:
+    invalid: list[str] = []
+    for item in raw.split(","):
+        candidate = item.strip()
+        if not candidate:
+            continue
+        try:
+            strategy_id = int(candidate)
+        except ValueError:
+            invalid.append(candidate)
+            continue
+        if strategy_id < _STRATEGY_ID_MIN or strategy_id > _STRATEGY_ID_MAX:
+            invalid.append(candidate)
+    return invalid
+
+
+def _collect_strategy_list_warning(name: str, raw: str) -> str | None:
+    invalid = _invalid_strategy_entries(raw)
+    if invalid:
+        return f"Invalid entries for {name} ignored: {', '.join(invalid)}"
+    if not _parse_strategy_id_list(raw, fallback=2):
+        return _invalid_value_warning(name, "comma-separated strategy ids 1-8", raw)
+    return None
+
+
+def collect_config_warnings(values: dict[str, str]) -> dict[str, str]:
+    warnings: dict[str, str] = {}
+    for key, raw_value in values.items():
+        key = str(key).strip()
+        raw = str(raw_value).strip()
+        if not key or raw == "":
+            continue
+        base_key = _base_config_key(key)
+
+        if base_key in {STRATEGY_ID, "SIGNAL_FALLBACK_STRATEGY_ID"}:
+            try:
+                strategy_id = int(raw)
+            except ValueError:
+                warnings[key] = _invalid_value_warning(key, "strategy id 1-8", raw)
+                continue
+            if strategy_id < _STRATEGY_ID_MIN or strategy_id > _STRATEGY_ID_MAX:
+                warnings[key] = _invalid_value_warning(key, "strategy id 1-8", raw)
+            continue
+
+        if base_key in {STRATEGY_IDS, PAPER_STRATEGY_IDS, LIVE_STRATEGY_IDS} or (
+            base_key == "STRATEGY_IDS" and key != base_key
+        ):
+            warning = _collect_strategy_list_warning(key, raw)
+            if warning is not None:
+                warnings[key] = warning
+            continue
+
+        if base_key == PAPER_TIMEFRAMES:
+            invalid_timeframes = [
+                item.strip()
+                for item in raw.lower().split(",")
+                if item.strip() and item.strip() not in MARKET_TIMEFRAME_DEFINITIONS
+            ]
+            if invalid_timeframes:
+                warnings[key] = f"Invalid entries for {key} ignored: {', '.join(invalid_timeframes)}"
+            continue
+
+        if base_key == MARKET_TIMEFRAME:
+            normalized_timeframe = raw.lower()
+            if normalized_timeframe not in MARKET_TIMEFRAME_DEFINITIONS:
+                expected = ", ".join(MARKET_TIMEFRAME_DEFINITIONS)
+                warnings[key] = _invalid_value_warning(key, f"one of {expected}", raw)
+            continue
+
+        if base_key in _BOOL_CONFIG_KEYS:
+            normalized = raw.lower()
+            if normalized not in _BOOL_TRUE_VALUES and normalized not in _BOOL_FALSE_VALUES:
+                warnings[key] = _invalid_value_warning(key, "true/false", raw)
+            continue
+
+        if base_key in _INT_CONFIG_KEYS:
+            try:
+                int(raw)
+            except ValueError:
+                warnings[key] = _invalid_value_warning(key, "integer", raw)
+            continue
+
+        if base_key in _FLOAT_CONFIG_KEYS:
+            try:
+                float(raw)
+            except ValueError:
+                warnings[key] = _invalid_value_warning(key, "number", raw)
+            continue
+
+        allowed = _SELECT_CONFIG_OPTIONS.get(base_key)
+        if allowed is not None:
+            raw_lower = raw.lower()
+            raw_upper = raw.upper()
+            if raw not in allowed and raw_lower not in allowed and raw_upper not in allowed:
+                warnings[key] = _invalid_value_warning(key, f"one of {', '.join(allowed)}", raw)
+
+    return warnings
+
+
 def _env_bool(name: str, default: bool) -> bool:
     raw = os.getenv(name)
     if raw is None:
         return default
     normalized = raw.strip().lower()
-    if normalized in {"1", "true", "yes", "on"}:
+    if normalized in _BOOL_TRUE_VALUES:
         return True
-    if normalized in {"0", "false", "no", "off"}:
+    if normalized in _BOOL_FALSE_VALUES:
         return False
     return default
 
