@@ -15,6 +15,7 @@ import utils
 import redeem_worker
 
 from binance_signal import BinanceDepth5SignalService
+from clob_adapter import create_live_clob_client, read_available_live_balance
 from config import AppConfig
 from models import LiveStrategyState, MarketQuote, MarketWindow, PaperStrategyState, PendingPaperTrade, SessionState, TradePlan, TradeRecord
 from paper_report import summarize_paper_trades
@@ -39,7 +40,6 @@ from trader import (
     place_live_order,
     run_live_trading,
     run_paper_trading,
-    _create_live_clob_client,
     _candidate_cfg_with_params,
     _paper_experiment_id,
 )
@@ -291,7 +291,7 @@ def test_create_live_clob_client_prefers_explicit_api_credentials(monkeypatch):
 
     _install_fake_clob_v2(monkeypatch, _FakeClobClient)
 
-    client = _create_live_clob_client(
+    client = create_live_clob_client(
         AppConfig(
             trade_mode='live',
             live_trading_enabled=True,
@@ -330,7 +330,7 @@ def test_create_live_clob_client_derives_api_credentials_when_explicit_values_mi
 
     _install_fake_clob_v2(monkeypatch, _FakeClobClient)
 
-    client = _create_live_clob_client(
+    client = create_live_clob_client(
         AppConfig(
             trade_mode='live',
             live_trading_enabled=True,
@@ -384,7 +384,7 @@ def test_create_live_clob_client_falls_back_when_explicit_api_credentials_are_in
 
     _install_fake_clob_v2(monkeypatch, _FakeClobClient)
 
-    client = _create_live_clob_client(
+    client = create_live_clob_client(
         AppConfig(
             trade_mode='live',
             live_trading_enabled=True,
@@ -436,7 +436,7 @@ def test_create_live_clob_client_prefers_deriving_api_credentials_after_explicit
 
     _install_fake_clob_v2(monkeypatch, _FakeClobClient)
 
-    client = _create_live_clob_client(
+    client = create_live_clob_client(
         AppConfig(
             trade_mode='live',
             live_trading_enabled=True,
@@ -2795,7 +2795,7 @@ def test_read_available_live_balance_rejects_untrusted_or_missing_payloads():
 
     for payload in bad_payloads:
         with pytest.raises(RuntimeError, match="trustworthy live wallet balance"):
-            trader._read_available_live_balance(
+            read_available_live_balance(
                 cfg=AppConfig(
                     trade_mode="live",
                     live_trading_enabled=True,
@@ -2819,7 +2819,7 @@ def test_read_available_live_balance_passes_collateral_asset_type_to_v2_balance_
 
     client = _V2BalanceClient()
 
-    balance = trader._read_available_live_balance(
+    balance = read_available_live_balance(
         cfg=AppConfig(
             trade_mode="live",
             live_trading_enabled=True,
@@ -2844,7 +2844,7 @@ def test_read_available_live_balance_handles_v2_balance_allowance_payload():
                 },
             }
 
-    balance = trader._read_available_live_balance(
+    balance = read_available_live_balance(
         cfg=AppConfig(
             trade_mode="live",
             live_trading_enabled=True,
@@ -2868,7 +2868,7 @@ def test_read_available_live_balance_accepts_zero_v2_balance_allowance_payload()
                 },
             }
 
-    balance = trader._read_available_live_balance(
+    balance = read_available_live_balance(
         cfg=AppConfig(
             trade_mode="live",
             live_trading_enabled=True,
@@ -5010,4 +5010,3 @@ def test_candidate_cfg_with_params_applies_strategy7_optimizer_values():
     assert candidate_cfg.strategy7_ofi_threshold == pytest.approx(0.75)
     assert candidate_cfg.strategy7_momentum_threshold == pytest.approx(0.03)
     assert candidate_cfg.strategy7_max_entry_price == pytest.approx(0.53)
-

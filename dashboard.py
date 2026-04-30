@@ -37,6 +37,7 @@ from polymarket_api import (
 from risk_and_sizing import build_trade_plan
 from strategy import get_side_for_round
 from runtime_control import RuntimeControl
+from state_manager import load_session_state, save_session_state
 from trader import (
     _entry_window_missed,
     _entry_time_for_round,
@@ -45,8 +46,6 @@ from trader import (
     _cfg_for_paper_strategy,
     _is_strategy6_signal_stale,
     _ws_is_stale_for_trade,
-    load_session_state,
-    save_session_state,
     resolve_quote_price,
 )
 from redeem_worker import (
@@ -2943,6 +2942,10 @@ def _dashboard_html() -> str:
           <div id="reportCardDesc" class="head-desc">策略筛选同时作用于纸面交易汇总与最近交易明细</div>
         </div>
         <div class="top-actions report-card-actions">
+          <select id="reportModeSelect" class="btn btn-ghost">
+            <option value="paper">纸面</option>
+            <option value="live">实盘</option>
+          </select>
           <select id="paperReportStrategy" class="btn btn-ghost"></select>
           <div class="report-status-group">
             <div id="paperStatus" class="chip">待刷新</div>
@@ -4257,6 +4260,7 @@ const state = {
   paperReportStrategyFilter: 'all',
   paperSummaryStrategyFilter: null,
   paperRecentStrategyFilter: null,
+  reportMode: 'paper',
   paperTimeframeFilter: '',
   countdownSnapshotAtMs: null,
   countdownBaseSeconds: null,
@@ -5254,7 +5258,7 @@ function currentUnifiedStrategyDraftForReport() {
 }
 
 function effectiveReportMode() {
-  return effectiveConfigMode(state.config || {});
+  return state.reportMode === 'live' ? 'live' : 'paper';
 }
 
 function configuredPaperReportStrategyOptions() {
@@ -5374,6 +5378,17 @@ function renderReportModeCopy() {
 
 function renderSharedPaperReportStrategySelector() {
   renderReportModeCopy();
+  const modeNode = el('reportModeSelect');
+  if (modeNode) {
+    modeNode.value = effectiveReportMode();
+    modeNode.onchange = async () => {
+      state.reportMode = modeNode.value === 'live' ? 'live' : 'paper';
+      state.paperSummaryStrategyFilter = '';
+      state.paperRecentStrategyFilter = '';
+      renderSharedPaperReportStrategySelector();
+      await Promise.allSettled([refreshSummary(), refreshRecent()]);
+    };
+  }
   const options = paperReportStrategyOptions();
   const current = normalizePaperReportStrategyFilter(effectivePaperReportStrategyFilter(), options);
   const summaryCurrent = normalizePaperReportStrategyFilter(effectivePaperSummaryStrategyFilter(), options);

@@ -83,6 +83,32 @@ class _PaperRuntimeControlProxy:
     def update_worker_state(self, **changes):
         return self._runtime_control.update_paper_worker_state(self._worker_key, **changes)
 
+
+class _NullRuntimeControl:
+    def update_worker_state(self, **changes):
+        return None
+
+    def snapshot(self):
+        return RuntimeControl(initial_mode='paper').snapshot()
+
+
+def _cfg_trade_mode(cfg: AppConfig, fallback: str = 'paper') -> str:
+    return str(getattr(cfg, 'trade_mode', fallback) or fallback).strip().lower() or fallback
+
+
+def _runtime_control_for_paper(
+    *,
+    runtime_control: RuntimeControl,
+    worker_key: str | None = None,
+    live_enabled: bool,
+):
+    if live_enabled:
+        return _NullRuntimeControl()
+    if worker_key:
+        return _PaperRuntimeControlProxy(runtime_control, worker_key)
+    return runtime_control
+
+
 def _load_shared_config(env_file: Path) -> AppConfig:
     env_values = load_env_file_values(env_file)
     return build_config_from_env_values(env_values)
@@ -215,6 +241,80 @@ def run_single_command_runtime(
     def _config_provider() -> AppConfig:
         return _load_shared_config(env_path)
 
+    def _append_paper_worker_targets(
+        base_cfg: AppConfig,
+        worker_targets: list[tuple[str, object]],
+        *,
+        live_enabled: bool,
+    ) -> None:
+        paper_cfg = _cfg_for_active_mode(base_cfg, 'paper')
+        if not hasattr(paper_cfg, '__dataclass_fields__') or not hasattr(paper_cfg, 'paper_profiles'):
+            paper_kwargs = _build_worker_call_kwargs(
+                run_paper_trading,
+                stop_event=stop_event,
+                config_provider=lambda: _cfg_for_active_mode(_config_provider(), 'paper'),
+                runtime_control=_runtime_control_for_paper(
+                    runtime_control=manager.runtime_control,
+                    live_enabled=live_enabled,
+                ),
+                stop_when_safe=manager.restart_requested,
+            )
+            trader_target = lambda cfg=paper_cfg, paper_kwargs=paper_kwargs: run_paper_trading(cfg, **paper_kwargs)
+            worker_targets.append(('paper-trading-worker', trader_target))
+            return
+
+        paper_timeframes = list(getattr(paper_cfg, 'paper_timeframes', []) or [paper_cfg.market_timeframe])
+        manager.runtime_control.clear_paper_worker_states()
+        paper_signature = inspect.signature(run_paper_trading)
+        supports_state_path = 'state_path' in paper_signature.parameters
+        supports_log_path = 'log_path' in paper_signature.parameters
+        for timeframe in paper_timeframes:
+            timeframe_cfg = _paper_cfg_for_timeframe(paper_cfg, timeframe)
+            state_path, log_path = _paper_runtime_paths(paper_cfg, timeframe)
+            paper_kwargs = _build_worker_call_kwargs(
+                run_paper_trading,
+                stop_event=stop_event,
+                config_provider=lambda timeframe=timeframe: _paper_cfg_for_timeframe(
+                    _cfg_for_active_mode(_config_provider(), 'paper'),
+                    timeframe,
+                ),
+                runtime_control=_runtime_control_for_paper(
+                    runtime_control=manager.runtime_control,
+                    worker_key=timeframe,
+                    live_enabled=live_enabled,
+                ),
+                stop_when_safe=manager.restart_requested,
+            )
+            if supports_state_path:
+                paper_kwargs['state_path'] = state_path
+            if supports_log_path:
+                paper_kwargs['log_path'] = log_path
+            trader_target = lambda timeframe_cfg=timeframe_cfg, paper_kwargs=paper_kwargs: run_paper_trading(timeframe_cfg, **paper_kwargs)
+            worker_targets.append((f'paper-trading-worker-{timeframe}', trader_target))
+
+    def _append_live_worker_targets(base_cfg: AppConfig, worker_targets: list[tuple[str, object]]) -> None:
+        live_cfg = _cfg_for_active_mode(base_cfg, 'live')
+        validate_live_runtime_config(live_cfg)
+        live_kwargs = _build_worker_call_kwargs(
+            run_live_trading,
+            stop_event=stop_event,
+            config_provider=lambda: _cfg_for_active_mode(_config_provider(), 'live'),
+            runtime_control=manager.runtime_control,
+            stop_when_safe=manager.restart_requested,
+        )
+        live_target = lambda cfg=live_cfg, live_kwargs=live_kwargs: run_live_trading(cfg, **live_kwargs)
+        worker_targets.append(('live-trading-worker', live_target))
+
+        redeem_kwargs = _build_worker_call_kwargs(
+            run_live_redeem_worker,
+            stop_event=stop_event,
+            config_provider=lambda: _cfg_for_active_mode(_config_provider(), 'live'),
+            runtime_control=_NullRuntimeControl(),
+            stop_when_safe=manager.restart_requested,
+        )
+        redeem_target = lambda cfg=live_cfg, redeem_kwargs=redeem_kwargs: run_live_redeem_worker(cfg, **redeem_kwargs)
+        worker_targets.append(('live-redeem-worker', redeem_target))
+
     dashboard_runtime = None
     dashboard_thread = None
     trader_threads: list[threading.Thread] = []
@@ -222,7 +322,7 @@ def run_single_command_runtime(
     first_worker = True
     try:
         initial_mode = manager.snapshot().active_mode
-        if initial_mode == 'live':
+        if initial_mode == 'live' or getattr(startup_cfg, 'live_trading_enabled', False):
             validate_live_runtime_config(_cfg_for_active_mode(startup_cfg, 'live'))
         dashboard_runtime = create_dashboard_runtime(
             host=host,
@@ -244,75 +344,18 @@ def run_single_command_runtime(
             snapshot = manager.snapshot()
             active_mode = snapshot.active_mode
             base_cfg = startup_cfg if first_worker else _config_provider()
-            current_cfg = _cfg_for_active_mode(base_cfg, active_mode)
             first_worker = False
-            if active_mode == 'live':
-                validate_live_runtime_config(current_cfg)
-                worker_name = 'live-trading-worker'
-                startup_label = 'live trading'
-                worker = run_live_trading
-            else:
-                startup_label = 'paper trading'
-                worker = run_paper_trading
-
-            worker_signature = inspect.signature(worker)
-            worker_supports_runtime_control = 'runtime_control' in worker_signature.parameters
             worker_targets: list[tuple[str, object]] = []
-            if active_mode == 'paper':
-                if not hasattr(current_cfg, '__dataclass_fields__') or not hasattr(current_cfg, 'paper_profiles'):
-                    paper_kwargs = _build_worker_call_kwargs(
-                        run_paper_trading,
-                        stop_event=stop_event,
-                        config_provider=_config_provider,
-                        runtime_control=manager.runtime_control,
-                        stop_when_safe=manager.restart_requested,
-                    )
-                    trader_target = lambda cfg=current_cfg, paper_kwargs=paper_kwargs: run_paper_trading(cfg, **paper_kwargs)
-                    worker_targets.append(('paper-trading-worker', trader_target))
-                else:
-                    paper_timeframes = list(getattr(current_cfg, 'paper_timeframes', []) or [current_cfg.market_timeframe])
-                    manager.runtime_control.clear_paper_worker_states()
-                    paper_signature = inspect.signature(run_paper_trading)
-                    supports_state_path = 'state_path' in paper_signature.parameters
-                    supports_log_path = 'log_path' in paper_signature.parameters
-                    for timeframe in paper_timeframes:
-                        paper_cfg = _paper_cfg_for_timeframe(current_cfg, timeframe)
-                        state_path, log_path = _paper_runtime_paths(current_cfg, timeframe)
-                        paper_kwargs = _build_worker_call_kwargs(
-                            run_paper_trading,
-                            stop_event=stop_event,
-                            config_provider=lambda timeframe=timeframe: _paper_cfg_for_timeframe(_config_provider(), timeframe),
-                            runtime_control=_PaperRuntimeControlProxy(manager.runtime_control, timeframe),
-                            stop_when_safe=manager.restart_requested,
-                        )
-                        if supports_state_path:
-                            paper_kwargs['state_path'] = state_path
-                        if supports_log_path:
-                            paper_kwargs['log_path'] = log_path
-                        trader_target = lambda paper_cfg=paper_cfg, paper_kwargs=paper_kwargs: run_paper_trading(paper_cfg, **paper_kwargs)
-                        worker_targets.append((f'paper-trading-worker-{timeframe}', trader_target))
-            else:
-                worker_name = 'live-trading-worker'
-                worker_kwargs = _build_worker_call_kwargs(
-                    worker,
-                    stop_event=stop_event,
-                    config_provider=_config_provider,
-                    runtime_control=manager.runtime_control,
-                    stop_when_safe=manager.restart_requested,
-                )
-                trader_target = lambda worker=worker, cfg=current_cfg, worker_kwargs=worker_kwargs: worker(cfg, **worker_kwargs)
-                worker_targets.append((worker_name, trader_target))
+            live_enabled = bool(getattr(base_cfg, 'live_trading_enabled', False) or active_mode == 'live')
+            worker_supports_runtime_control = (
+                'runtime_control' in inspect.signature(run_paper_trading).parameters
+                or (live_enabled and 'runtime_control' in inspect.signature(run_live_trading).parameters)
+            )
+            _append_paper_worker_targets(base_cfg, worker_targets, live_enabled=live_enabled)
+            if live_enabled:
+                _append_live_worker_targets(base_cfg, worker_targets)
 
-            if active_mode == 'live':
-                redeem_kwargs = _build_worker_call_kwargs(
-                    run_live_redeem_worker,
-                    stop_event=stop_event,
-                    config_provider=_config_provider,
-                    runtime_control=manager.runtime_control,
-                    stop_when_safe=manager.restart_requested,
-                )
-                redeem_target = lambda cfg=current_cfg, redeem_kwargs=redeem_kwargs: run_live_redeem_worker(cfg, **redeem_kwargs)
-                worker_targets.append(('live-redeem-worker', redeem_target))
+            startup_label = 'paper + live trading' if live_enabled else 'paper trading'
             trader_threads = [
                 _spawn_runtime_worker(
                     name=name,
@@ -342,7 +385,8 @@ def run_single_command_runtime(
 
             if worker_supports_runtime_control:
                 try:
-                    manager.request_mode_change(_config_provider().trade_mode)
+                    next_cfg = _config_provider()
+                    manager.request_mode_change(_cfg_trade_mode(next_cfg, active_mode))
                     manager.poll_once()
                 except BaseException as exc:
                     startup_error = exc

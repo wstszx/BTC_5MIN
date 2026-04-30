@@ -1576,6 +1576,9 @@ def test_dashboard_assets_render_unified_report_card_shell():
     assert 'class="report-card-head"' in html
     assert '交易报告' in html
     assert '策略筛选同时作用于纸面交易汇总与最近交易明细' in html
+    assert 'id="reportModeSelect"' in html
+    assert '<option value="paper">纸面</option>' in html
+    assert '<option value="live">实盘</option>' in html
     assert 'id="paperReportStrategy"' in html
     assert 'id="paperStatus"' in html
     assert 'id="recentStatus"' in html
@@ -1630,12 +1633,15 @@ def test_dashboard_assets_render_unified_report_header_status_and_recent_copy():
     html = _dashboard_html()
     js = _dashboard_js()
 
+    assert 'id="reportModeSelect"' in html
     assert 'id="paperStatus"' in html
     assert 'id="recentStatus"' in html
     assert 'class="report-status-group"' in html
     assert 'id="reportCardDesc"' in html
     assert 'id="reportSummaryTitle"' in html
     assert 'id="recentPanelDesc"' in html
+    assert "reportMode: 'paper'" in js
+    assert "return state.reportMode === 'live' ? 'live' : 'paper';" in js
     assert 'function renderReportModeCopy()' in js
     assert "reportMode === 'live' ? '实盘交易汇总' : '纸面交易汇总'" in js
     assert "reportMode === 'live' ? '暂无实盘数据' : '暂无纸面数据'" in js
@@ -1649,6 +1655,8 @@ def test_dashboard_assets_render_unified_report_header_status_and_recent_copy():
 def test_dashboard_assets_refresh_shared_selector_still_updates_summary_and_recent():
     js = _dashboard_js()
 
+    assert "const modeNode = el('reportModeSelect');" in js
+    assert "state.reportMode = modeNode.value === 'live' ? 'live' : 'paper';" in js
     assert "state.paperReportStrategyFilter = node.value || 'all';" in js
     assert "state.paperSummaryStrategyFilter = '';" in js
     assert "state.paperRecentStrategyFilter = '';" in js
