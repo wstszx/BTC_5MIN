@@ -4960,10 +4960,10 @@ function sideText(side) {
 }
 
 function resultCheckText(status) {
-  if (status === 'match') return '一致';
-  if (status === 'mismatch') return '不一致';
+  if (status === 'match') return '已对官方';
+  if (status === 'mismatch') return '与官方不符';
   if (status === 'pending') return '待结算';
-  if (status === 'official') return '官方结果';
+  if (status === 'official') return '页面补官方';
   if (status === 'official_pending') return '待官方结算';
   if (status === 'error') return '校验异常';
   return '--';

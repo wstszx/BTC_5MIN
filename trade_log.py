@@ -28,6 +28,9 @@ def merge_live_trade_log_rows(existing: dict[str, str], incoming: dict[str, Any]
     merged: dict[str, Any] = dict(existing)
     for field_name in fieldnames:
         incoming_value = incoming.get(field_name)
+        if field_name == "skip_reason" and incoming_value in (None, ""):
+            merged[field_name] = ""
+            continue
         if incoming_value in (None, ""):
             continue
         if field_name in {"timestamp", "round_index"} and str(existing.get(field_name) or "").strip():
@@ -53,7 +56,7 @@ def append_trade_log(path: Path, record: TradeRecord) -> None:
             path.replace(legacy_path)
             write_header = True
 
-    upsert_key = live_trade_log_upsert_key(row) if row_has_result(row) else None
+    upsert_key = live_trade_log_upsert_key(row)
     if upsert_key is not None and path.exists() and not write_header:
         with path.open("r", newline="", encoding="utf-8") as handle:
             existing_rows = list(csv.DictReader(handle))

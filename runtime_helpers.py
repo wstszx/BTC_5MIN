@@ -58,6 +58,13 @@ def poll_interval_for_target_round(
     return base_interval
 
 
+def poll_interval_for_live_result(*, cfg: AppConfig, result: dict[str, Any]) -> float:
+    base_interval = max(0.0, float(cfg.poll_interval_seconds))
+    if result.get("status") == "pending_settlement":
+        return min(base_interval, max(0.0, float(cfg.fast_poll_interval_seconds)))
+    return base_interval
+
+
 def select_target_round(
     cfg: AppConfig,
     *,

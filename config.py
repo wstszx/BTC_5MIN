@@ -67,6 +67,7 @@ _FLOAT_CONFIG_KEYS: frozenset[str] = frozenset(
         "STRATEGY7_LATE_CONFIRM_RELAX_SECONDS",
         "BINANCE_SIGNAL_STALE_SECONDS",
         "NEAR_ENTRY_POLL_WINDOW_SECONDS",
+        "POLL_INTERVAL_SECONDS",
         "FAST_POLL_INTERVAL_SECONDS",
         "WS_TRADE_GUARD_STALE_SECONDS",
         "WS_PING_INTERVAL_SECONDS",
@@ -639,7 +640,7 @@ class AppConfig:
     binance_ws_url: str = field(default_factory=lambda: os.getenv('BINANCE_WS_URL') or 'wss://stream.binance.com:9443/ws')
     binance_depth_stream: str = field(default_factory=lambda: os.getenv('BINANCE_DEPTH_STREAM') or 'btcusdt@depth5')
     binance_signal_stale_seconds: float = field(default_factory=lambda: _env_float('BINANCE_SIGNAL_STALE_SECONDS', 2.0))
-    poll_interval_seconds: int = 5
+    poll_interval_seconds: int = field(default_factory=lambda: _env_int("POLL_INTERVAL_SECONDS", 5))
     near_entry_poll_window_seconds: float = field(
         default_factory=lambda: _env_float("NEAR_ENTRY_POLL_WINDOW_SECONDS", 10.0)
     )

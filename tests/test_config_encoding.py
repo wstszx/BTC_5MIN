@@ -203,6 +203,20 @@ def test_build_config_supports_open_delay_override():
     assert cfg.open_delay_seconds == 15
 
 
+def test_build_config_supports_runtime_poll_interval_overrides():
+    cfg = build_config_from_env_values(
+        {
+            'POLL_INTERVAL_SECONDS': '2',
+            'FAST_POLL_INTERVAL_SECONDS': '1.5',
+            'NEAR_ENTRY_POLL_WINDOW_SECONDS': '20',
+        }
+    )
+
+    assert cfg.poll_interval_seconds == 2
+    assert cfg.fast_poll_interval_seconds == 1.5
+    assert cfg.near_entry_poll_window_seconds == 20
+
+
 def test_build_config_parses_enabled_paper_timeframes_and_profile_values():
     cfg = build_config_from_env_values(
         {

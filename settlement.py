@@ -167,6 +167,23 @@ def resolved_result_from_official_market(event: dict[str, Any], market: dict[str
     return None
 
 
+def resolved_result_from_official_market_endpoint(market_client: Any, slug: str) -> str | None:
+    get_market = getattr(market_client, "get_market_by_slug", None)
+    if not callable(get_market):
+        return None
+    try:
+        market = get_market(slug)
+    except Exception:
+        return None
+    if not isinstance(market, dict):
+        return None
+    event = {
+        "closed": market.get("closed"),
+        "eventMetadata": market.get("eventMetadata") or {},
+    }
+    return resolved_result_from_official_market(event, market)
+
+
 def resolve_pending_live_result(
     *,
     market_client: Any,
@@ -179,15 +196,17 @@ def resolve_pending_live_result(
     if official_market_result:
         return official_market_result, None
 
+    official_market_endpoint_result = resolved_result_from_official_market_endpoint(market_client, slug)
+    if official_market_endpoint_result:
+        return official_market_endpoint_result, None
+
     official_position_result = resolved_result_from_redeemable_positions(
         market_client,
         funder=funder,
         slug=slug,
     )
-    cached_result = cached_ws_market_result(market_client, market)
-    result = official_position_result or cached_result
-    if result:
-        return result, None
+    if official_position_result:
+        return official_position_result, None
     return None, {
         "status": "pending_settlement",
         "slug": slug,

@@ -679,10 +679,8 @@ class PolymarketClient:
         return {}
 
     def get_market_by_slug(self, slug: str) -> dict[str, Any]:
-        payload = self._get_json("/markets", base_url=self.config.gamma_api_base, params={"slug": slug})
-        if isinstance(payload, list):
-            return payload[0] if payload else {}
-        return payload
+        payload = self._get_json(f"/markets/slug/{slug}", base_url=self.config.gamma_api_base)
+        return payload if isinstance(payload, dict) else {}
 
     def get_current_positions(
         self,

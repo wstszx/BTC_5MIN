@@ -479,7 +479,7 @@ def submit_live_strategy_order(
         if use_sdk
         else (cfg.live_order_type or "FOK").upper()
     )
-    market_order_price = getattr(cfg, "max_entry_price", None) if cfg.strategy_id in {7, 8} else None
+    market_order_price = getattr(cfg, "max_entry_price", None)
     order_args = build_live_market_order_args(
         token_id=token_id,
         plan=plan,

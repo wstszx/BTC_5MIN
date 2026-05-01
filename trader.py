@@ -79,6 +79,7 @@ from runtime_helpers import (
     entry_time_for_round as _entry_time_for_round,
     entry_window_missed as _entry_window_missed,
     fmt_price as _fmt_price,
+    poll_interval_for_live_result as _poll_interval_for_live_result,
     poll_interval_for_target_round as _poll_interval_for_target_round,
     refresh_daily_session_state as _refresh_daily_session_state,
     runtime_alert_changes_for_live_result as _runtime_alert_changes_for_live_result,
@@ -972,7 +973,18 @@ def run_live_trading(
                 if not _sleep_if_not_stopped(stop_event, backoff):
                     return {"status": "stopped"}
                 continue
-            target_round = _select_target_round(cfg, now=now, current_round=current_round, next_round=next_round)
+            current_entry_time = _entry_time_for_round(cfg, current_round) if current_round is not None else None
+            should_log_missed_current_round = (
+                current_round is not None
+                and next_round is not None
+                and current_entry_time is not None
+                and _entry_window_missed(now, current_entry_time, grace_seconds=cfg.entry_grace_seconds)
+            )
+            target_round = (
+                current_round
+                if should_log_missed_current_round
+                else _select_target_round(cfg, now=now, current_round=current_round, next_round=next_round)
+            )
             if target_round is None:
                 for strategy_id in configured_strategy_ids:
                     if strategy_id in handled_strategy_ids:
@@ -1002,6 +1014,30 @@ def run_live_trading(
                     try:
                         strategy_cfg = _cfg_for_live_strategy(cfg, strategy_id)
                         strategy_state = state.live_strategies.setdefault(strategy_id, LiveStrategyState())
+                        append_trade_log(
+                            log_path,
+                            TradeRecord(
+                                timestamp=datetime.now(timezone.utc),
+                                mode="live",
+                                round_index=strategy_state.round_index,
+                                strategy=strategy_id,
+                                entry_timing=strategy_cfg.entry_timing,
+                                event_slug=target_round.slug,
+                                start_time=target_round.start_time,
+                                end_time=target_round.end_time,
+                                side="SKIP",
+                                price=None,
+                                order_size=0.0,
+                                order_cost=0.0,
+                                expected_profit=0.0,
+                                result=None,
+                                trade_pnl=0.0,
+                                cash_pnl=strategy_state.cash_pnl,
+                                recovery_loss=strategy_state.recovery_loss,
+                                consecutive_losses=strategy_state.consecutive_losses,
+                                skip_reason="observed_waiting_for_entry",
+                            ),
+                        )
                         strategy_quote = replace(quote)
                         _apply_strategy6_signal_to_quote(
                             cfg=strategy_cfg,
@@ -1468,7 +1504,7 @@ def run_live_trading(
             if _safe_stop_requested(stop_when_safe) and result.get('status') == 'pending_settlement':
                 return result
             if result.get('status') in {'submitted', 'skipped', 'waiting_for_entry', 'pending_settlement', 'no_market', 'blocked'}:
-                if not _sleep_if_not_stopped(stop_event, cfg.poll_interval_seconds):
+                if not _sleep_if_not_stopped(stop_event, _poll_interval_for_live_result(cfg=cfg, result=result)):
                     return {'status': 'stopped'}
                 continue
             return result
