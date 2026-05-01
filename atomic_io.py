@@ -1,7 +1,25 @@
 from __future__ import annotations
 
+import time
 from pathlib import Path
 from uuid import uuid4
+
+
+_WINDOWS_REPLACE_RETRY_DELAYS = (0.02, 0.05, 0.1, 0.2, 0.4)
+
+
+def _replace_with_retry(source: Path, target: Path) -> None:
+    last_error: PermissionError | None = None
+    for delay in (0.0, *_WINDOWS_REPLACE_RETRY_DELAYS):
+        if delay:
+            time.sleep(delay)
+        try:
+            source.replace(target)
+            return
+        except PermissionError as exc:
+            last_error = exc
+    assert last_error is not None
+    raise last_error
 
 
 def atomic_write_text(path: Path, text: str, *, encoding: str = "utf-8") -> None:
@@ -10,7 +28,7 @@ def atomic_write_text(path: Path, text: str, *, encoding: str = "utf-8") -> None
     temp_path = target.with_name(f".{target.name}.{uuid4().hex}.tmp")
     try:
         temp_path.write_text(text, encoding=encoding)
-        temp_path.replace(target)
+        _replace_with_retry(temp_path, target)
     except Exception:
         temp_path.unlink(missing_ok=True)
         raise

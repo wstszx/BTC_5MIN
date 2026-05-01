@@ -168,6 +168,26 @@ def test_save_session_state_uses_atomic_replace(monkeypatch, tmp_path: Path):
     assert json.loads(state_path.read_text(encoding='utf-8'))['cash_pnl'] == 1.25
 
 
+def test_save_session_state_retries_transient_windows_replace_denial(monkeypatch, tmp_path: Path):
+    state_path = tmp_path / 'session_state.json'
+    attempts = 0
+    original_replace = Path.replace
+
+    def flaky_replace(self: Path, target: Path):
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise PermissionError(5, 'Access is denied')
+        return original_replace(self, target)
+
+    monkeypatch.setattr(Path, 'replace', flaky_replace)
+
+    save_session_state(state_path, SessionState(cash_pnl=2.5))
+
+    assert attempts == 2
+    assert json.loads(state_path.read_text(encoding='utf-8'))['cash_pnl'] == 2.5
+
+
 def test_save_live_redeem_state_uses_atomic_replace(monkeypatch, tmp_path: Path):
     state_path = tmp_path / 'live_redeem_state.json'
     replace_calls: list[tuple[Path, Path]] = []
