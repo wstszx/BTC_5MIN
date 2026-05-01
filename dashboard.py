@@ -6290,7 +6290,7 @@ function buildLiveToggleValue(values) {
 
 function effectiveConfigMode(payload) {
   const envValues = (payload && payload.env_values) || {};
-  return buildLiveToggleValue(envValues) === 'true' ? 'live' : 'paper';
+  return String(envValues.TRADE_MODE || 'paper').toLowerCase() === 'live' ? 'live' : 'paper';
 }
 
 function renderTaskflowVisibility(mode) {
@@ -6325,16 +6325,15 @@ function renderConfigModeShell(payload) {
   selectNode.dataset.bound = 'true';
   selectNode.addEventListener('change', () => {
     const nextMode = String(selectNode.value || 'paper').toLowerCase() === 'live' ? 'live' : 'paper';
-    const hiddenModeField = el('cfg_ENABLE_LIVE_TRADING');
-    if (hiddenModeField) {
-      hiddenModeField.value = nextMode === 'live' ? 'true' : 'false';
+    const modeField = el('cfg_TRADE_MODE');
+    if (modeField) {
+      modeField.value = nextMode;
     }
     state.config = {
       ...(state.config || {}),
       env_values: {
         ...(((state.config || {}).env_values) || {}),
         TRADE_MODE: nextMode,
-        LIVE_TRADING_ENABLED: nextMode === 'live' ? 'true' : 'false',
       },
     };
     const form = el('configForm');
@@ -6354,7 +6353,9 @@ function expandLiveToggleValues(values) {
     return expanded;
   }
   const normalized = String(expanded.ENABLE_LIVE_TRADING || 'false').toLowerCase() === 'true' ? 'true' : 'false';
-  expanded.TRADE_MODE = normalized === 'true' ? 'live' : 'paper';
+  if (!expanded.TRADE_MODE) {
+    expanded.TRADE_MODE = normalized === 'true' ? 'live' : 'paper';
+  }
   expanded.LIVE_TRADING_ENABLED = normalized;
   delete expanded.ENABLE_LIVE_TRADING;
   return expanded;
@@ -6510,7 +6511,7 @@ function renderConfig(payload) {
   const fieldGroups = Array.isArray(payload.field_groups) && payload.field_groups.length > 0
     ? payload.field_groups
     : [{ title: '\u5168\u90e8\u53c2\u6570', description: '', keys }];
-  const editableKeySet = new Set(['ENABLE_LIVE_TRADING', ...keys.filter((key) => !isSingleLiveToggleKey(key))]);
+  const editableKeySet = new Set(['ENABLE_LIVE_TRADING', 'TRADE_MODE', ...keys.filter((key) => !isSingleLiveToggleKey(key))]);
   const hiddenKeys = new Set(['STRATEGY_IDS', 'PAPER_STRATEGY_IDS', 'LIVE_STRATEGY_IDS', 'PAPER_TIMEFRAMES', 'MARKET_TIMEFRAME', 'ENABLE_LIVE_TRADING']);
   const advancedPanel = el('advancedConfigPanel');
   if (advancedPanel) {

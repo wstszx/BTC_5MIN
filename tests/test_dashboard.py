@@ -460,7 +460,7 @@ def test_dashboard_assets_include_left_panel_mode_selector_shell():
     assert "function renderTaskflowVisibility(mode)" in js
     assert "function activeStrategyListKey(payload, values)" in js
     assert "const envValues = (payload && payload.env_values) || {};" in js
-    assert "return buildLiveToggleValue(envValues) === 'true' ? 'live' : 'paper';" in js
+    assert "return String(envValues.TRADE_MODE || 'paper').toLowerCase() === 'live' ? 'live' : 'paper';" in js
 
 
 def test_dashboard_assets_distinguish_current_and_historical_ws_errors():
@@ -486,9 +486,8 @@ def test_dashboard_assets_hide_paper_and_live_sections_by_active_mode():
     assert "const liveRoot = el('liveTaskflowRoot');" in js
     assert "paperRoot.hidden = normalizedMode !== 'paper';" in js
     assert "liveRoot.hidden = normalizedMode !== 'live';" in js
-    assert "state.config = {" in js
-    assert "const hiddenModeField = el('cfg_ENABLE_LIVE_TRADING');" in js
-    assert "hiddenModeField.value = nextMode === 'live' ? 'true' : 'false';" in js
+    assert "const modeField = el('cfg_TRADE_MODE');" in js
+    assert "modeField.value = nextMode;" in js
     assert "renderUnifiedStrategyToolbar(state.config || {}, currentUnifiedStrategyDraftValues());" in js
     assert "renderSharedPaperReportStrategySelector();" in js
     assert "void Promise.allSettled([refreshSummary(), refreshRecent()]);" in js
@@ -500,12 +499,13 @@ def test_dashboard_assets_hide_paper_and_live_sections_by_active_mode():
 def test_dashboard_assets_mode_selector_propagates_into_save_payload_path():
     js = _dashboard_js()
 
-    assert "const hiddenModeField = el('cfg_ENABLE_LIVE_TRADING');" in js
-    assert "hiddenModeField.value = nextMode === 'live' ? 'true' : 'false';" in js
+    assert "const modeField = el('cfg_TRADE_MODE');" in js
+    assert "modeField.value = nextMode;" in js
     assert "const keys = ['ENABLE_LIVE_TRADING', ...(((state.config && state.config.editable_keys) || []).filter((key) => !isSingleLiveToggleKey(key)))];" in js
     assert "payload[key] = node.value;" in js
-    assert "expanded.TRADE_MODE = normalized === 'true' ? 'live' : 'paper';" in js
+    assert "if (!expanded.TRADE_MODE) {" in js
     assert "expanded.LIVE_TRADING_ENABLED = normalized;" in js
+    assert "const editableKeySet = new Set(['ENABLE_LIVE_TRADING', 'TRADE_MODE'," in js
     assert "const hiddenKeys = new Set(['STRATEGY_IDS', 'PAPER_STRATEGY_IDS', 'LIVE_STRATEGY_IDS', 'PAPER_TIMEFRAMES', 'MARKET_TIMEFRAME', 'ENABLE_LIVE_TRADING']);" in js
     assert "const unifiedStrategyKeys = ['STRATEGY_ID', 'STRATEGY_IDS', 'PAPER_STRATEGY_IDS', 'LIVE_STRATEGY_IDS'];" in js
     assert "payload[multiKey] = unifiedValues[multiKey];" in js
@@ -782,6 +782,24 @@ def test_dashboard_config_payload_masks_live_private_key_and_exposes_mode_fields
         assert payload['runtime_status']['saved_mode'] == 'live'
         assert payload['runtime_status']['running_mode'] == 'paper'
         assert payload['runtime_status']['restart_required'] is True
+    finally:
+        state.close()
+
+
+def test_dashboard_config_payload_keeps_live_view_when_live_trading_switch_is_off(tmp_path: Path):
+    env_file = tmp_path / '.env.dashboard'
+    env_file.write_text(
+        'TRADE_MODE=live\n'
+        'LIVE_TRADING_ENABLED=false\n',
+        encoding='utf-8',
+    )
+    state = DashboardState(env_file=env_file)
+    try:
+        payload = state.get_config_payload()
+
+        assert payload['env_values']['TRADE_MODE'] == 'live'
+        assert payload['env_values']['LIVE_TRADING_ENABLED'] == 'false'
+        assert payload['runtime_status']['saved_mode'] == 'live'
     finally:
         state.close()
 

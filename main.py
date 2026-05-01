@@ -325,7 +325,7 @@ def run_single_command_runtime(
     first_worker = True
     try:
         initial_mode = manager.snapshot().active_mode
-        if initial_mode == 'live' or getattr(startup_cfg, 'live_trading_enabled', False):
+        if getattr(startup_cfg, 'live_trading_enabled', False):
             validate_live_runtime_config(_cfg_for_active_mode(startup_cfg, 'live'))
         dashboard_runtime = create_dashboard_runtime(
             host=host,
@@ -349,7 +349,7 @@ def run_single_command_runtime(
             base_cfg = startup_cfg if first_worker else _config_provider()
             first_worker = False
             worker_targets: list[tuple[str, object]] = []
-            live_enabled = bool(getattr(base_cfg, 'live_trading_enabled', False) or active_mode == 'live')
+            live_enabled = bool(getattr(base_cfg, 'live_trading_enabled', False))
             worker_supports_runtime_control = (
                 'runtime_control' in inspect.signature(run_paper_trading).parameters
                 or (live_enabled and 'runtime_control' in inspect.signature(run_live_trading).parameters)

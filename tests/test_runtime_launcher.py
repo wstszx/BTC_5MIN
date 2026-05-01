@@ -320,6 +320,58 @@ def test_run_single_command_runtime_uses_live_worker_when_trade_mode_live(monkey
     assert dashboard_runtime.close_calls == 1
 
 
+def test_run_single_command_runtime_live_view_without_live_switch_starts_paper_only(monkeypatch, tmp_path: Path):
+    env_file = tmp_path / ".env.dashboard"
+    startup_cfg = AppConfig(
+        trade_mode='live',
+        live_trading_enabled=False,
+    )
+    dashboard_kwargs = {}
+    live_calls = {"count": 0}
+    paper_calls = {"count": 0}
+
+    class FakeDashboardRuntime:
+        def __init__(self) -> None:
+            self.shutdown_calls = 0
+            self.close_calls = 0
+
+        def serve_forever(self) -> None:
+            return
+
+        def shutdown(self) -> None:
+            self.shutdown_calls += 1
+
+        def close(self) -> None:
+            self.close_calls += 1
+
+    dashboard_runtime = FakeDashboardRuntime()
+
+    def fake_dashboard_runtime(**kwargs):
+        dashboard_kwargs.update(kwargs)
+        return dashboard_runtime
+
+    def fake_run_live_trading(*args, **kwargs):
+        live_calls["count"] += 1
+        return {"status": "stopped"}
+
+    def fake_run_paper_trading(cfg, *, stop_event, config_provider, **kwargs):
+        paper_calls["count"] += 1
+        stop_event.set()
+        return {"status": "stopped"}
+
+    monkeypatch.setattr(main, '_load_shared_config', lambda _path: startup_cfg)
+    monkeypatch.setattr(main, 'create_dashboard_runtime', fake_dashboard_runtime)
+    monkeypatch.setattr(main, 'run_live_trading', fake_run_live_trading, raising=False)
+    monkeypatch.setattr(main, 'run_paper_trading', fake_run_paper_trading)
+
+    exit_code = main.run_single_command_runtime(env_file=env_file)
+
+    assert exit_code == 0
+    assert dashboard_kwargs["running_trade_mode"] == "live"
+    assert paper_calls["count"] == 1
+    assert live_calls["count"] == 0
+
+
 def test_run_single_command_runtime_starts_live_redeem_worker_in_live_mode(monkeypatch, tmp_path: Path):
     env_file = tmp_path / ".env.dashboard"
     startup_cfg = AppConfig(
@@ -437,7 +489,7 @@ def test_run_single_command_runtime_surfaces_live_redeem_worker_failures(monkeyp
 
 
 def test_run_single_command_runtime_fails_fast_when_live_startup_validation_fails(monkeypatch):
-    startup_cfg = AppConfig(trade_mode='live')
+    startup_cfg = AppConfig(trade_mode='live', live_trading_enabled=True)
     dashboard_calls = {'count': 0}
     paper_calls = {'count': 0}
     live_calls = {'count': 0}
