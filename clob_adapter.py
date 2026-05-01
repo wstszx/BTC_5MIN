@@ -544,13 +544,20 @@ def execute_order_plan(
             client_factory=client_factory,
         )
     except Exception as exc:
-        if not is_live_fok_not_filled_error(exc):
-            raise
-        return OrderExecutionResult(
-            status="skipped",
-            remaining_budget=remaining_budget,
-            skip_reason="live_fok_not_filled",
-        )
+        if is_live_fok_not_filled_error(exc):
+            return OrderExecutionResult(
+                status="skipped",
+                remaining_budget=remaining_budget,
+                skip_reason="live_fok_not_filled",
+            )
+        if is_retryable_live_clob_error(exc):
+            return OrderExecutionResult(
+                status="skipped",
+                remaining_budget=remaining_budget,
+                skip_reason="live_retryable_clob_error",
+                balance_error=str(exc),
+            )
+        raise
     return OrderExecutionResult(
         status="submitted",
         remaining_budget=max(0.0, remaining_budget - plan.order_cost),

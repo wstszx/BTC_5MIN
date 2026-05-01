@@ -1407,6 +1407,16 @@ class _FokNotFilledClobClient(_StubClobClient):
         )
 
 
+class _TransientSubmitClobClient(_StubClobClient):
+    def post_order(self, order, order_type):
+        self.posted_orders.append((order, order_type))
+        raise RuntimeError(
+            "[py_clob_client_v2] request error: [SSL: UNEXPECTED_EOF_WHILE_READING] "
+            "EOF occurred in violation of protocol (_ssl.c:1000) "
+            "PolyApiException[status_code=None, error_message=Request exception!]"
+        )
+
+
 class _SettlingLiveClient(_LiveMarketClient):
     def get_event_by_slug(self, slug: str):
         if slug != "btc-updown-5m-prev":
@@ -2998,6 +3008,60 @@ def test_run_live_trading_skips_fok_not_filled_without_runtime_error(tmp_path, m
     assert rows[-1]["order_size"] == "0.0"
     assert rows[-1]["order_cost"] == "0.0"
     assert rows[-1]["expected_profit"] == "0.0"
+
+
+def test_run_live_trading_skips_transient_clob_submit_error_without_strategy_error(tmp_path, monkeypatch):
+    stop_event = threading.Event()
+    stub_clob = _TransientSubmitClobClient(balance_payload={"available": 3.0})
+
+    def fake_sleep(_seconds):
+        stop_event.set()
+
+    monkeypatch.setattr("trader.time.sleep", fake_sleep)
+    monkeypatch.setattr(
+        "trader._resolve_side_from_strategy",
+        lambda **kwargs: SideDecision(side="UP"),
+    )
+    monkeypatch.setattr(
+        "trader.build_trade_plan",
+        lambda *args, **kwargs: TradePlan(
+            True,
+            "UP",
+            price=0.55,
+            order_size=2.0,
+            order_cost=1.5,
+            expected_profit=0.5,
+        ),
+    )
+
+    result = run_live_trading(
+        AppConfig(
+            trade_mode="live",
+            live_trading_enabled=True,
+            live_private_key="pk",
+            live_funder="0xfunder",
+            strategy_id=7,
+            live_strategy_ids=[7],
+            base_order_cost=1.5,
+            poll_interval_seconds=1,
+        ),
+        market_client=_LiveMarketClient(),
+        clob_client=stub_clob,
+        state_path=tmp_path / "live_state.json",
+        log_path=tmp_path / "live_orders.csv",
+        stop_event=stop_event,
+    )
+
+    state = load_session_state(tmp_path / "live_state.json", effective_live_strategy_ids=[7])
+    rows = list(csv.DictReader((tmp_path / "live_orders.csv").open(newline="", encoding="utf-8")))
+
+    assert result["status"] == "stopped"
+    assert len(stub_clob.posted_orders) == 1
+    assert state.live_strategies[7].pending_live_slug is None
+    assert state.live_strategies[7].pending_live_order_id is None
+    assert state.live_strategies[7].last_processed_live_event_slug == "btc-updown-5m-test"
+    assert rows[-1]["strategy"] == "7"
+    assert rows[-1]["skip_reason"] == "live_retryable_clob_error"
 
 
 def test_run_live_trading_skips_missed_entry_window_without_submitting(tmp_path, monkeypatch):
