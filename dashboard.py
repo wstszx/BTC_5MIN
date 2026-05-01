@@ -4228,6 +4228,7 @@ tr:hover td { background: rgba(50, 88, 131, 0.1); }
 .report-section {
   min-width: 0;
   display: grid;
+  grid-auto-rows: max-content;
   gap: 10px;
 }
 

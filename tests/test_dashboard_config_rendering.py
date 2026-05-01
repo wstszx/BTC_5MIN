@@ -28,3 +28,11 @@ def test_strategy_config_layout_can_collapse_inside_left_panel():
     assert "grid-template-columns: repeat(auto-fit, minmax(min(100%, 150px), 1fr));" in css
     assert ".strategy-profile-field {" in css
     assert "grid-template-columns: minmax(0, 1fr);" in css
+
+
+def test_report_sections_keep_content_pinned_to_top_when_columns_stretch():
+    css = _dashboard_css()
+
+    report_section_rule = css.split(".report-section {", 1)[1].split("}", 1)[0]
+
+    assert "grid-auto-rows: max-content;" in report_section_rule
