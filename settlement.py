@@ -139,7 +139,7 @@ def resolved_result_from_redeemable_positions(
         row_user = str(row.get("proxyWallet") or row.get("user") or row.get("owner") or "").strip().lower()
         if row_user and row_user != target_user:
             continue
-        if not bool(row.get("redeemable")):
+        if not _truthy_position_flag(row.get("redeemable")):
             continue
         try:
             size = float(row.get("size") or 0)
@@ -151,6 +151,16 @@ def resolved_result_from_redeemable_positions(
         if outcome in {"UP", "DOWN"}:
             return outcome
     return None
+
+
+def _truthy_position_flag(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value == 1
+    if isinstance(value, str):
+        return value.strip().lower() in {"true", "1", "yes"}
+    return False
 
 
 def resolved_result_from_official_market(event: dict[str, Any], market: dict[str, Any]) -> str | None:

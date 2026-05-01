@@ -5,6 +5,7 @@ import errno
 import json
 import os
 import re
+import shutil
 import threading
 from collections import deque
 from dataclasses import asdict, dataclass, field, replace
@@ -811,6 +812,155 @@ def _csv_fieldnames_for_rows(rows: list[dict[str, str]]) -> list[str]:
             if key not in fieldnames:
                 fieldnames.append(key)
     return fieldnames
+
+
+def _live_result_value(row: dict[str, str]) -> str:
+    result = str(row.get("result") or "").strip().upper()
+    return result if result in {"UP", "DOWN"} else ""
+
+
+def _live_float_value(row: dict[str, str], key: str) -> float:
+    return _optional_float(row.get(key)) or 0.0
+
+
+def _live_row_counts_for_ledger(row: dict[str, str], result: str) -> bool:
+    side = str(row.get("side") or "").strip().upper()
+    if result not in {"UP", "DOWN"} or side not in {"UP", "DOWN"}:
+        return False
+    if str(row.get("skip_reason") or "").strip():
+        return False
+    return _live_float_value(row, "order_cost") > 0.0
+
+
+def _recompute_live_ledger_rows(rows: list[dict[str, str]]) -> dict[str, dict[str, float | int]]:
+    states: dict[str, dict[str, float | int]] = {}
+    for row in rows:
+        strategy_id = str(row.get("strategy") or "").strip()
+        if not strategy_id:
+            continue
+        state = states.setdefault(
+            strategy_id,
+            {
+                "cash_pnl": 0.0,
+                "daily_realized_pnl": 0.0,
+                "recovery_loss": 0.0,
+                "consecutive_losses": 0,
+            },
+        )
+        result = _live_result_value(row)
+        trade_pnl = 0.0
+        if _live_row_counts_for_ledger(row, result):
+            side = str(row.get("side") or "").strip().upper()
+            order_cost = _live_float_value(row, "order_cost")
+            expected_profit = _live_float_value(row, "expected_profit")
+            if result == side:
+                trade_pnl = expected_profit
+                state["cash_pnl"] = float(state["cash_pnl"]) + trade_pnl
+                state["daily_realized_pnl"] = float(state["daily_realized_pnl"]) + trade_pnl
+                state["recovery_loss"] = 0.0
+                state["consecutive_losses"] = 0
+            else:
+                trade_pnl = -order_cost
+                state["cash_pnl"] = float(state["cash_pnl"]) + trade_pnl
+                state["daily_realized_pnl"] = float(state["daily_realized_pnl"]) + trade_pnl
+                state["recovery_loss"] = float(state["recovery_loss"]) + order_cost
+                state["consecutive_losses"] = int(state["consecutive_losses"]) + 1
+        row["trade_pnl"] = str(trade_pnl)
+        row["cash_pnl"] = str(state["cash_pnl"])
+        row["recovery_loss"] = str(state["recovery_loss"])
+        row["consecutive_losses"] = str(state["consecutive_losses"])
+    return states
+
+
+def _update_live_session_state_from_ledger(
+    *,
+    state_path: Path,
+    ledger_states: dict[str, dict[str, float | int]],
+    active_strategy_id: int,
+) -> None:
+    if not state_path.exists():
+        return
+    payload = json.loads(state_path.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        return
+    raw_live_strategies = payload.get("live_strategies")
+    live_strategies = raw_live_strategies if isinstance(raw_live_strategies, dict) else {}
+    for strategy_id, ledger_state in ledger_states.items():
+        strategy_payload = live_strategies.get(strategy_id)
+        if not isinstance(strategy_payload, dict):
+            continue
+        for key in ("cash_pnl", "daily_realized_pnl", "recovery_loss", "consecutive_losses"):
+            strategy_payload[key] = ledger_state[key]
+    active_state = ledger_states.get(str(active_strategy_id))
+    if active_state is not None:
+        for key in ("cash_pnl", "daily_realized_pnl", "recovery_loss", "consecutive_losses"):
+            payload[key] = active_state[key]
+    atomic_write_text(state_path, json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+
+
+def _backup_live_ledger_files(*, live_csv: Path, state_path: Path) -> None:
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    if live_csv.exists():
+        shutil.copy2(
+            live_csv,
+            live_csv.with_name(f"{live_csv.stem}_backup_before_reconcile_{stamp}{live_csv.suffix}"),
+        )
+    if state_path.exists():
+        shutil.copy2(
+            state_path,
+            state_path.with_name(f"{state_path.stem}_backup_before_reconcile_{stamp}{state_path.suffix}"),
+        )
+
+
+def _auto_reconcile_live_ledger(
+    *,
+    live_csv: Path,
+    state_path: Path,
+    client: PolymarketClient | Any,
+    validation_cache: dict[str, dict[str, str]] | None,
+    active_strategy_id: int,
+) -> int:
+    if not live_csv.exists():
+        return 0
+    with live_csv.open("r", newline="", encoding="utf-8") as handle:
+        reader = csv.DictReader(handle)
+        fieldnames = list(reader.fieldnames or [])
+        rows = list(reader)
+    if not fieldnames or not rows:
+        return 0
+
+    changed = 0
+    for row in rows:
+        if _live_result_value(row) not in {"UP", "DOWN"}:
+            continue
+        validated = _validate_recent_trade_row(
+            row,
+            client=client,
+            validation_cache=validation_cache,
+        )
+        if validated.get("result_check_status") != "mismatch":
+            continue
+        official_result = str(validated.get("resolved_expected_result") or "").strip().upper()
+        if official_result not in {"UP", "DOWN"}:
+            continue
+        row["result"] = official_result
+        changed += 1
+
+    if changed <= 0:
+        return 0
+
+    _backup_live_ledger_files(live_csv=live_csv, state_path=state_path)
+    ledger_states = _recompute_live_ledger_rows(rows)
+    with live_csv.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fieldnames, extrasaction="ignore")
+        writer.writeheader()
+        writer.writerows(rows)
+    _update_live_session_state_from_ledger(
+        state_path=state_path,
+        ledger_states=ledger_states,
+        active_strategy_id=active_strategy_id,
+    )
+    return changed
 
 
 
@@ -2393,6 +2543,31 @@ class DashboardState:
                 )
                 for row in rows
             ]
+            if any(row.get("result_check_status") == "mismatch" for row in rows):
+                corrected_count = _auto_reconcile_live_ledger(
+                    live_csv=live_csv,
+                    state_path=cfg.logs_dir / "live_session_state.json",
+                    client=client,
+                    validation_cache=validation_cache,
+                    active_strategy_id=cfg.strategy_id,
+                )
+                if corrected_count > 0:
+                    rows = _tail_csv_rows(live_csv, limit=capped_limit * 6)
+                    if strategy_filter is None and explicit_live_strategy_scope and not explicit_all_strategy_filter:
+                        rows = _filter_trade_rows_by_strategy_ids(rows, effective_live_strategy_ids)
+                    elif strategy_filter is not None:
+                        rows = _filter_trade_rows_by_strategy(rows, strategy_filter)
+                    rows = _collapse_live_recent_rows(rows)
+                    rows = rows[:capped_limit]
+                    rows = [
+                        _validate_recent_trade_row(
+                            row,
+                            client=client,
+                            validation_cache=validation_cache,
+                            fill_missing_result=True,
+                        )
+                        for row in rows
+                    ]
         finally:
             close = getattr(client, "close", None)
             if callable(close):

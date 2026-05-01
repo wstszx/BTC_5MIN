@@ -3545,6 +3545,76 @@ def test_settle_pending_live_trade_uses_official_redeemable_position_without_wai
     assert updated_strategy.pending_live_order_id is None
 
 
+def test_settle_pending_live_trade_ignores_string_false_redeemable_position():
+    class _StringFalseRedeemableClient(_LiveMarketClient):
+        def get_event_by_slug(self, slug: str):
+            if slug != "btc-updown-5m-prev":
+                raise AssertionError(f"Unexpected slug {slug}")
+            return {
+                "closed": True,
+                "eventMetadata": {"priceToBeat": 100.0},
+                "markets": [
+                    {
+                        "closed": True,
+                        "outcomes": '["Up","Down"]',
+                        "outcomePrices": '["0.49","0.51"]',
+                    }
+                ],
+            }
+
+        def get_current_positions(self, *, user: str, redeemable: bool | None = None):
+            assert user == "0xfunder"
+            assert redeemable is True
+            return [
+                {
+                    "proxyWallet": "0xfunder",
+                    "eventSlug": "btc-updown-5m-prev",
+                    "outcome": "Up",
+                    "size": "2.0",
+                    "redeemable": "false",
+                }
+            ]
+
+    pending_strategy = LiveStrategyState(
+        round_index=1,
+        cash_pnl=0.0,
+        recovery_loss=0.0,
+        consecutive_losses=0,
+        pending_live_slug="btc-updown-5m-prev",
+        pending_live_side="UP",
+        pending_live_price=0.5,
+        pending_live_order_size=2.0,
+        pending_live_order_cost=1.0,
+        pending_live_expected_profit=1.0,
+        pending_live_order_id="oid-prev",
+        pending_live_end_time="2026-04-02T00:00:00+00:00",
+    )
+    stub_clob = _StubClobClient(
+        order_payloads={
+            "oid-prev": {
+                "status": "filled",
+                "filled_order_size": 2.0,
+                "filled_order_cost": 1.0,
+                "avg_price": 0.5,
+            }
+        }
+    )
+
+    updated_strategy, status, settled = trader._settle_pending_live_trade_if_needed(
+        market_client=_StringFalseRedeemableClient(),
+        clob_client=stub_clob,
+        strategy_state=pending_strategy,
+        now=datetime(2026, 4, 2, 0, 6, tzinfo=timezone.utc),
+        funder="0xfunder",
+    )
+
+    assert settled is False
+    assert status["status"] == "pending_settlement"
+    assert status["skip_reason"] == "round_unresolved"
+    assert updated_strategy.cash_pnl == pytest.approx(0.0)
+    assert updated_strategy.pending_live_slug == "btc-updown-5m-prev"
+
+
 def test_settle_pending_live_trade_uses_official_terminal_result_when_position_is_not_redeemable():
     pending_strategy = LiveStrategyState(
         round_index=1,
