@@ -158,6 +158,7 @@ class LiveStrategyState:
     pending_live_expected_profit: float | None = None
     pending_live_order_id: str | None = None
     pending_live_end_time: str | None = None
+    last_processed_live_event_slug: str | None = None
 
 
 @dataclass(slots=True)
@@ -183,6 +184,7 @@ class SessionState:
     pending_live_expected_profit: float | None = None
     pending_live_order_id: str | None = None
     pending_live_end_time: str | None = None
+    last_processed_live_event_slug: str | None = None
     pending_paper_trades: list[PendingPaperTrade] = field(default_factory=list)
     paper_strategies: dict[int, PaperStrategyState] = field(default_factory=dict)
     live_strategies: dict[int, LiveStrategyState] = field(default_factory=dict)

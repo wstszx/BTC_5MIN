@@ -9,9 +9,48 @@ from typing import Any
 from models import TradeRecord
 
 
+OBSERVED_WAITING_SKIP_REASON = "observed_waiting_for_entry"
+_OBSERVED_PLACEHOLDER_FIELDS = {
+    "side",
+    "price",
+    "order_size",
+    "order_cost",
+    "expected_profit",
+    "trade_pnl",
+    "skip_reason",
+    "stop_loss_triggered",
+    "signal_open_up_price",
+    "signal_current_up_price",
+    "signal_threshold",
+    "signal_delta",
+    "signal_locked",
+    "signal_reason",
+}
+
+
 def row_has_result(row: dict[str, Any]) -> bool:
     result = str(row.get("result") or "").strip()
     return bool(result and result != "--")
+
+
+def _positive_number(value: Any) -> bool:
+    try:
+        return float(value) > 0
+    except (TypeError, ValueError):
+        return False
+
+
+def live_row_is_observed_placeholder(row: dict[str, Any]) -> bool:
+    return str(row.get("skip_reason") or "").strip() == OBSERVED_WAITING_SKIP_REASON
+
+
+def live_row_is_actionable_update(row: dict[str, Any]) -> bool:
+    skip_reason = str(row.get("skip_reason") or "").strip()
+    if row_has_result(row):
+        return True
+    if skip_reason and skip_reason != OBSERVED_WAITING_SKIP_REASON:
+        return True
+    return _positive_number(row.get("order_cost")) or _positive_number(row.get("order_size"))
 
 
 def live_trade_log_upsert_key(row: dict[str, Any]) -> tuple[str, str] | None:
@@ -26,8 +65,11 @@ def live_trade_log_upsert_key(row: dict[str, Any]) -> tuple[str, str] | None:
 
 def merge_live_trade_log_rows(existing: dict[str, str], incoming: dict[str, Any], fieldnames: list[str]) -> dict[str, Any]:
     merged: dict[str, Any] = dict(existing)
+    keep_observed_placeholder = live_row_is_observed_placeholder(existing) and not live_row_is_actionable_update(incoming)
     for field_name in fieldnames:
         incoming_value = incoming.get(field_name)
+        if keep_observed_placeholder and field_name in _OBSERVED_PLACEHOLDER_FIELDS:
+            continue
         if field_name == "skip_reason" and incoming_value in (None, ""):
             merged[field_name] = ""
             continue

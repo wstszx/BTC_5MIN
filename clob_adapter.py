@@ -22,6 +22,14 @@ def is_retryable_live_clob_error(exc: Exception) -> bool:
     return is_retryable_live_io_error(exc)
 
 
+def is_live_fok_not_filled_error(exc: Exception) -> bool:
+    message = str(exc).lower()
+    return (
+        "order couldn't be fully filled" in message
+        and ("fok" in message or "fully filled or killed" in message)
+    )
+
+
 def is_live_trading_restricted_error(exc: Exception) -> bool:
     message = str(exc).lower()
     return (
@@ -527,13 +535,22 @@ def execute_order_plan(
             order_id=order_id,
             response={"success": True, "orderID": order_id, "simulated": True},
         )
-    order_id, response = submit_live_strategy_order(
-        cfg=cfg,
-        clob_client=clob_client,
-        token_id=token_id,
-        plan=plan,
-        client_factory=client_factory,
-    )
+    try:
+        order_id, response = submit_live_strategy_order(
+            cfg=cfg,
+            clob_client=clob_client,
+            token_id=token_id,
+            plan=plan,
+            client_factory=client_factory,
+        )
+    except Exception as exc:
+        if not is_live_fok_not_filled_error(exc):
+            raise
+        return OrderExecutionResult(
+            status="skipped",
+            remaining_budget=remaining_budget,
+            skip_reason="live_fok_not_filled",
+        )
     return OrderExecutionResult(
         status="submitted",
         remaining_budget=max(0.0, remaining_budget - plan.order_cost),

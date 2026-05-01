@@ -135,6 +135,10 @@ def _normalize_strategy_filter(strategy: int | str | None) -> str | None:
     raise ValueError(f"Invalid strategy filter: {strategy!r}")
 
 
+def _is_explicit_all_strategy_filter(strategy: int | str | None) -> bool:
+    return strategy is not None and str(strategy).strip().lower() == "all"
+
+
 def _filter_trade_rows_by_strategy(rows: list[dict[str, str]], strategy: int | str | None) -> list[dict[str, str]]:
     strategy_filter = _normalize_strategy_filter(strategy)
     if strategy_filter is None:
@@ -1919,6 +1923,8 @@ class DashboardState:
         strategy_state.signal_round_locked_side = None
         strategy_state.strategy6_last_ofi_score = None
         strategy_state.stop_loss_count = 0
+        if hasattr(strategy_state, "last_processed_live_event_slug"):
+            strategy_state.last_processed_live_event_slug = None
 
     def reset_strategy_state(
         self,
@@ -2310,8 +2316,9 @@ class DashboardState:
             explicit_paper_strategy_scope = _has_explicit_paper_strategy_scope(self._env_values, target_timeframe)
         capped_limit = max(1, min(300, int(limit)))
         strategy_filter = _normalize_strategy_filter(strategy)
+        explicit_all_strategy_filter = _is_explicit_all_strategy_filter(strategy)
         rows = _tail_csv_rows(paper_csv, limit=capped_limit * 4)
-        if strategy_filter is None and explicit_paper_strategy_scope:
+        if strategy_filter is None and explicit_paper_strategy_scope and not explicit_all_strategy_filter:
             rows = _filter_trade_rows_by_strategy_ids(rows, effective_paper_strategy_ids)
         elif strategy_filter is not None:
             rows = _filter_trade_rows_by_strategy(rows, strategy_filter)
@@ -2322,7 +2329,7 @@ class DashboardState:
             pending_items = []
             for strategy_state in session_state.paper_strategies.values():
                 pending_items.extend(getattr(strategy_state, "pending_paper_trades", []) or [])
-        if strategy_filter is None and explicit_paper_strategy_scope:
+        if strategy_filter is None and explicit_paper_strategy_scope and not explicit_all_strategy_filter:
             filtered_pending_items = _filter_pending_paper_trades_by_strategy_ids(pending_items, effective_paper_strategy_ids)
         elif strategy_filter is not None:
             filtered_pending_items = _filter_pending_paper_trades_by_strategy(pending_items, strategy_filter)
@@ -2367,8 +2374,9 @@ class DashboardState:
             explicit_live_strategy_scope = _has_explicit_live_strategy_scope(self._env_values)
         capped_limit = max(1, min(300, int(limit)))
         strategy_filter = _normalize_strategy_filter(strategy)
+        explicit_all_strategy_filter = _is_explicit_all_strategy_filter(strategy)
         rows = _tail_csv_rows(live_csv, limit=capped_limit * 6)
-        if strategy_filter is None and explicit_live_strategy_scope:
+        if strategy_filter is None and explicit_live_strategy_scope and not explicit_all_strategy_filter:
             rows = _filter_trade_rows_by_strategy_ids(rows, effective_live_strategy_ids)
         elif strategy_filter is not None:
             rows = _filter_trade_rows_by_strategy(rows, strategy_filter)
@@ -4637,6 +4645,7 @@ const OPTION_LABELS = {
 };
 
 const REASON_LABELS = {
+  observed_waiting_for_entry: '等待入场观察中',
   entry_window_missed: '已错过入场时间',
   ws_stale: '连接数据陈旧',
   signal_unavailable: '信号不可用',
@@ -5446,7 +5455,7 @@ function defaultPaperReportStrategyFilter() {
 
 function effectivePaperReportStrategyFilter() {
   const current = String(state.paperReportStrategyFilter || '');
-  if (!current || current === 'all') {
+  if (!current) {
     return defaultPaperReportStrategyFilter();
   }
   return current;

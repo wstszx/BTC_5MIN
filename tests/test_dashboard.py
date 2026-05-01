@@ -661,6 +661,16 @@ def test_dashboard_assets_include_entry_window_missed_reason_label():
     js = _dashboard_js()
 
     assert "entry_window_missed" in js
+    assert "observed_waiting_for_entry: '\u7b49\u5f85\u5165\u573a\u89c2\u5bdf\u4e2d'" in js
+
+
+def test_dashboard_report_strategy_all_is_sent_as_all():
+    js = _dashboard_js()
+
+    assert "if (!current) {\n    return defaultPaperReportStrategyFilter();" in js
+    assert "if (!current || current === 'all') {\n    return defaultPaperReportStrategyFilter();" not in js
+    assert "const summaryEndpoint = reportMode === 'live' ? '/api/live/summary?strategy=' + strategy" in js
+    assert "const recentEndpoint = reportMode === 'live' ? '/api/live/recent?limit=80&strategy=' + strategy" in js
 
 
 def test_dashboard_assets_use_planned_entry_copy():
@@ -972,6 +982,32 @@ def test_dashboard_live_recent_orders_filters_by_strategy(tmp_path: Path):
         assert payload['count'] == 1
         assert payload['rows'][0]['event_slug'] == 'slug-seven'
         assert payload['rows'][0]['strategy'] == '7'
+    finally:
+        state.close()
+        os.chdir(old_cwd)
+
+
+def test_dashboard_live_recent_orders_all_returns_all_report_rows_even_with_live_strategy_scope(tmp_path: Path):
+    old_cwd = Path.cwd()
+    os.chdir(tmp_path)
+    env_file = tmp_path / ".env.dashboard"
+    env_file.write_text("TRADE_MODE=live\nLIVE_STRATEGY_IDS=7\n", encoding="utf-8")
+    state = DashboardState(env_file=env_file)
+    try:
+        live_csv = tmp_path / "logs" / "live_orders.csv"
+        live_csv.parent.mkdir(parents=True, exist_ok=True)
+        live_csv.write_text(
+            "timestamp,mode,round_index,strategy,event_slug,side,price,order_cost,trade_pnl,skip_reason\n"
+            "2026-04-05T00:00:00+00:00,live,1,4,slug-four,UP,0.51,10.0,0.0,\n"
+            "2026-04-05T00:05:00+00:00,live,1,7,slug-seven,DOWN,0.49,12.0,1.5,\n",
+            encoding="utf-8",
+        )
+
+        payload = state.get_live_recent_orders_payload(limit=10, strategy="all")
+
+        assert payload["strategy"] == "all"
+        assert payload["count"] == 2
+        assert {row["strategy"] for row in payload["rows"]} == {"4", "7"}
     finally:
         state.close()
         os.chdir(old_cwd)
@@ -3934,6 +3970,178 @@ def test_dashboard_report_strategy_switch_ignores_stale_browser_responses(tmp_pa
         assert raced['totalPnl'] == '+7.7000'
         assert raced['recentRow'] == 'seven-row'
         assert '策略 7' in str(raced['recentDesc'])
+    finally:
+        try:
+            subprocess.run(
+                _playwright_cli_command(npx_path, session, 'close'),
+                cwd=str(Path.cwd()),
+                capture_output=True,
+                text=True,
+                encoding='utf-8',
+                errors='replace',
+                check=False,
+            )
+        finally:
+            runtime.close()
+
+
+def test_dashboard_report_strategy_all_stays_all_in_live_mode(tmp_path: Path, monkeypatch):
+    npx_path = _require_dashboard_browser_regressions()
+
+    class StubClient:
+        def __init__(self, cfg):
+            self.config = cfg
+
+        def close(self) -> None:
+            return
+
+    monkeypatch.setattr(dashboard, 'PolymarketClient', StubClient)
+    strategy_catalog = json.loads(json.dumps(DashboardState.STRATEGY_CATALOG))
+
+    def fake_get_config_payload(self):
+        return {
+            'env_file': str(tmp_path / '.env.dashboard'),
+            'env_values': {
+                'TRADE_MODE': 'live',
+                'MARKET_TIMEFRAME': '5m',
+                'STRATEGY_ID': '4',
+                'PAPER_STRATEGY_IDS': '4,7',
+                'LIVE_STRATEGY_IDS': '4',
+                'PAPER_TIMEFRAMES': '5m',
+            },
+            'timeframe_presets': {'5m': {}},
+            'editable_keys': ['TRADE_MODE', 'MARKET_TIMEFRAME', 'STRATEGY_ID', 'PAPER_STRATEGY_IDS', 'LIVE_STRATEGY_IDS'],
+            'labels': DashboardState.CONFIG_LABELS,
+            'select_options': {
+                'TRADE_MODE': ['paper', 'live'],
+                'MARKET_TIMEFRAME': ['5m'],
+                'STRATEGY_ID': ['4', '7'],
+                'PAPER_STRATEGY_IDS': ['4', '7'],
+                'LIVE_STRATEGY_IDS': ['4', '7'],
+            },
+            'strategy_catalog': strategy_catalog,
+            'field_groups': [{'title': '基础策略', 'description': '', 'keys': ['STRATEGY_ID', 'PAPER_STRATEGY_IDS', 'LIVE_STRATEGY_IDS']}],
+            'field_scope': {},
+            'field_help': {},
+            'validation_errors': {},
+            'runtime_status': {
+                'saved_mode': 'live',
+                'running_mode': 'live',
+                'restart_required': False,
+                'live_ready': True,
+                'live_validation_error': None,
+                'active_mode': 'live',
+                'desired_mode': 'live',
+                'switch_state': 'idle',
+                'switch_reason': None,
+                'current_round_slug': None,
+                'round_in_progress': False,
+                'safe_to_switch': True,
+                'pending_live_order': False,
+                'live_strategy_ids': ['4'],
+            },
+            'saved_at': None,
+            'paper_timeframes': ['5m'],
+            'paper_profiles': {'5m': {'strategy_id': '4', 'paper_strategy_ids': ['4', '7']}},
+        }
+
+    def fake_get_market_payload(self, *, strategy=None, timeframe=None):
+        return {
+            'ok': True,
+            'timestamp': '2026-04-23T03:40:00+00:00',
+            'round': None,
+            'quote': None,
+            'signal': None,
+            'plan': None,
+            'session_state': {'round_index': 1, 'cash_pnl': 0.0, 'recovery_loss': 0.0, 'consecutive_losses': 0, 'stop_loss_count': 0, 'daily_realized_pnl': 0.0, 'pending_paper_trades': []},
+            'ws_runtime': {},
+            'ws_stale_guard_triggered': False,
+            'message': 'no round',
+            'strategy6': {'enabled': False},
+            'strategy7': {'enabled': False},
+            'strategy_view': {'selected': '4', 'paper_strategy_ids': ['4'], 'available': ['4'], 'timeframe': '5m'},
+        }
+
+    def fake_get_paper_summary_payload(self, *, strategy=None, timeframe=None):
+        return {'csv_path': 'paper.csv', 'tz_offset': '+08:00', 'strategy': str(strategy or 'all'), 'timeframe': str(timeframe or '5m'), 'days': [], 'latest': None}
+
+    def fake_get_recent_trades_payload(self, *, limit, strategy=None, timeframe=None):
+        return {'csv_path': 'paper.csv', 'strategy': str(strategy or 'all'), 'timeframe': str(timeframe or '5m'), 'count': 0, 'rows': []}
+
+    def fake_get_live_summary_payload(self, *, strategy=None):
+        return {'csv_path': 'live.csv', 'tz_offset': '+08:00', 'strategy': str(strategy or 'all'), 'days': [], 'latest': None}
+
+    def fake_get_live_recent_orders_payload(self, *, limit, strategy=None):
+        return {'csv_path': 'live.csv', 'strategy': str(strategy or 'all'), 'timeframe': '5m', 'count': 0, 'rows': []}
+
+    monkeypatch.setattr(DashboardState, 'get_config_payload', fake_get_config_payload)
+    monkeypatch.setattr(DashboardState, 'get_market_payload', fake_get_market_payload)
+    monkeypatch.setattr(DashboardState, 'get_paper_summary_payload', fake_get_paper_summary_payload)
+    monkeypatch.setattr(DashboardState, 'get_recent_trades_payload', fake_get_recent_trades_payload)
+    monkeypatch.setattr(DashboardState, 'get_live_summary_payload', fake_get_live_summary_payload)
+    monkeypatch.setattr(DashboardState, 'get_live_recent_orders_payload', fake_get_live_recent_orders_payload)
+
+    runtime = create_dashboard_runtime(host='127.0.0.1', port=0, env_file=tmp_path / '.env.dashboard')
+    thread = threading.Thread(target=runtime.serve_forever, daemon=True)
+    thread.start()
+
+    port = runtime.server.server_address[1]
+    session = f"dashboard-report-all-live-{uuid.uuid4().hex}"
+
+    def pw(*args: str) -> str:
+        completed = subprocess.run(
+            _playwright_cli_command(npx_path, session, *args),
+            cwd=str(Path.cwd()),
+            capture_output=True,
+            text=True,
+            encoding='utf-8',
+            errors='replace',
+            check=True,
+        )
+        return completed.stdout.strip()
+
+    def pw_eval(script: str) -> dict[str, object]:
+        output = pw('eval', script, '--raw')
+        return json.loads(output)
+
+    try:
+        pw('open', f'http://127.0.0.1:{port}')
+
+        ready = None
+        for _ in range(20):
+            ready = pw_eval("() => ({ ready: !!document.getElementById('paperReportStrategy') && !!document.getElementById('reportModeSelect') })")
+            if ready.get('ready'):
+                break
+            time.sleep(0.5)
+        assert ready and ready.get('ready') is True
+
+        result = pw_eval(
+            "() => (async () => {"
+            "const seen = [];"
+            "const originalFetch = window.fetch.bind(window);"
+            "window.fetch = async (input, init) => {"
+            "const url = String(input);"
+            "if (url.includes('/api/live/summary') || url.includes('/api/live/recent')) { seen.push(url); }"
+            "return originalFetch(input, init);"
+            "};"
+            "try {"
+            "const mode = document.getElementById('reportModeSelect');"
+            "mode.value = 'live';"
+            "mode.dispatchEvent(new Event('change', { bubbles: true }));"
+            "await new Promise((resolve) => setTimeout(resolve, 200));"
+            "const node = document.getElementById('paperReportStrategy');"
+            "node.value = 'all';"
+            "node.dispatchEvent(new Event('change', { bubbles: true }));"
+            "await new Promise((resolve) => setTimeout(resolve, 200));"
+            "return { selected: node.value, filter: state.paperReportStrategyFilter, urls: seen };"
+            "} finally { window.fetch = originalFetch; }"
+            "})()"
+        )
+
+        assert result['selected'] == 'all'
+        assert result['filter'] == 'all'
+        assert any('/api/live/summary?strategy=all' in url for url in result['urls'])
+        assert any('/api/live/recent?limit=80&strategy=all' in url for url in result['urls'])
     finally:
         try:
             subprocess.run(

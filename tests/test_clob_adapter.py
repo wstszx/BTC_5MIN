@@ -6,6 +6,7 @@ import trader
 from clob_adapter import (
     build_verified_pending_live_trade_plan,
     create_live_clob_client,
+    is_live_fok_not_filled_error,
     read_available_live_balance,
     submit_live_strategy_order,
 )
@@ -30,6 +31,29 @@ class _InjectedOrderClient:
     def post_order(self, signed_order, order_type):
         self.posted_orders.append((signed_order, order_type))
         return {"success": True, "orderID": "oid-adapter"}
+
+
+def test_clob_adapter_identifies_fok_not_filled_error():
+    exc = RuntimeError(
+        "[py_clob_client_v2] request error status=400 "
+        "url=https://clob.polymarket.com/order "
+        'body={"error":"order couldn\'t be fully filled. FOK orders are fully filled or killed."}'
+    )
+
+    assert is_live_fok_not_filled_error(exc) is True
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "[py_clob_client_v2] request error status=400 body={'error':'invalid price'}",
+        "PolyApiException[status_code=401, error_message={'error': 'Unauthorized'}]",
+        "Trading restricted in your region, please refer to available regions",
+        "The read operation timed out PolyApiException[status_code=None, error_message=Request exception!]",
+    ],
+)
+def test_clob_adapter_does_not_misclassify_other_live_errors(message):
+    assert is_live_fok_not_filled_error(RuntimeError(message)) is False
 
 
 class _OrderLookupClient:

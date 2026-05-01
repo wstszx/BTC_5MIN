@@ -94,6 +94,7 @@ from clob_adapter import (
     OrderExecutionResult,
     create_live_clob_client as _create_live_clob_client,
     execute_order_plan as _adapter_execute_order_plan,
+    is_live_fok_not_filled_error as _is_live_fok_not_filled_error,
     is_live_trading_restricted_error as _is_live_trading_restricted_error,
     is_retryable_live_clob_error as _is_retryable_live_clob_error,
     is_retryable_live_io_error as _is_retryable_live_io_error,
@@ -334,7 +335,7 @@ def place_live_order(
                 "signal_delta": side_decision.signal_delta,
                 "signal_locked": side_decision.signal_locked,
             }
-        if now < entry_time:
+        if (entry_time - now).total_seconds() > 1:
             if persist_state:
                 save_session_state(state_path, state)
             return {
@@ -416,7 +417,7 @@ def place_live_order(
                 "signal_delta": side_decision.signal_delta,
                 "signal_locked": side_decision.signal_locked,
             }
-        if now < entry_time:
+        if (entry_time - now).total_seconds() > 1:
             if persist_state:
                 save_session_state(state_path, state)
             return {
@@ -593,7 +594,7 @@ def place_live_order(
             cfg=cfg,
             stop_loss_triggered=plan.stop_loss_triggered,
         )
-        if now < entry_time:
+        if (entry_time - now).total_seconds() > 1:
             if persist_state:
                 save_session_state(state_path, state)
             return {
@@ -674,7 +675,7 @@ def place_live_order(
     state.consecutive_max_stake_skips = 0
     if token_id is None:
         raise RuntimeError(f"Missing token id for side={side} on market={target_round.slug}")
-    if now < entry_time:
+    if (entry_time - now).total_seconds() > 1:
         if persist_state:
             save_session_state(state_path, state)
         return {
@@ -697,12 +698,62 @@ def place_live_order(
             "signal_locked": side_decision.signal_locked,
         }
 
-    order_id, response = _submit_live_strategy_order(
-        cfg=cfg,
-        clob_client=live_client,
-        token_id=token_id,
-        plan=plan,
-    )
+    try:
+        order_id, response = _submit_live_strategy_order(
+            cfg=cfg,
+            clob_client=live_client,
+            token_id=token_id,
+            plan=plan,
+        )
+    except Exception as exc:
+        if not _is_live_fok_not_filled_error(exc):
+            raise
+        append_trade_log(
+            log_path,
+            TradeRecord(
+                timestamp=datetime.now(timezone.utc),
+                mode="live",
+                round_index=state.round_index,
+                strategy=cfg.strategy_id,
+                entry_timing=cfg.entry_timing,
+                event_slug=target_round.slug,
+                start_time=target_round.start_time,
+                end_time=target_round.end_time,
+                side=side,
+                price=price,
+                order_size=0.0,
+                order_cost=0.0,
+                expected_profit=0.0,
+                result=None,
+                trade_pnl=0.0,
+                cash_pnl=state.cash_pnl,
+                recovery_loss=state.recovery_loss,
+                consecutive_losses=state.consecutive_losses,
+                skip_reason="live_fok_not_filled",
+                **_signal_record_kwargs(side_decision),
+            ),
+        )
+        if persist_state:
+            _sync_current_live_strategy_state(state, cfg.strategy_id)
+            save_session_state(state_path, state)
+        return {
+            "status": "skipped",
+            "slug": target_round.slug,
+            "side": side,
+            "token_id": token_id,
+            "price": price,
+            "should_trade": False,
+            "skip_reason": "live_fok_not_filled",
+            "order_size": plan.order_size,
+            "order_cost": plan.order_cost,
+            "expected_profit": plan.expected_profit,
+            "order_type": cfg.live_order_type.upper(),
+            "signal_open_up_price": side_decision.signal_open_up_price,
+            "signal_current_up_price": side_decision.signal_current_up_price,
+            "signal_threshold": side_decision.signal_threshold,
+            "signal_delta": side_decision.signal_delta,
+            "signal_locked": side_decision.signal_locked,
+        }
 
     append_trade_log(
         log_path,
@@ -909,6 +960,25 @@ def run_live_trading(
                 except Exception as exc:
                     state.live_strategies[strategy_id] = strategy_state
                     handled_strategy_ids.add(strategy_id)
+                    if _is_retryable_live_clob_error(exc):
+                        pending_strategy_ids.append(strategy_id)
+                        _runtime_log(
+                            f"live strategy {strategy_id} settlement retryable CLOB error: {exc}"
+                        )
+                        strategy_results.append(
+                            {
+                                "strategy_id": strategy_id,
+                                "status": "pending_settlement",
+                                "phase": "settlement",
+                                "slug": strategy_state.pending_live_slug,
+                                "side": strategy_state.pending_live_side,
+                                "skip_reason": "settlement_retryable_clob_error",
+                                "pending_end_time": strategy_state.pending_live_end_time,
+                                "order_id": strategy_state.pending_live_order_id,
+                                "error": str(exc),
+                            }
+                        )
+                        continue
                     _runtime_log(
                         f"live strategy {strategy_id} settlement error: {exc}"
                     )
@@ -1014,6 +1084,19 @@ def run_live_trading(
                     try:
                         strategy_cfg = _cfg_for_live_strategy(cfg, strategy_id)
                         strategy_state = state.live_strategies.setdefault(strategy_id, LiveStrategyState())
+                        if strategy_state.last_processed_live_event_slug == target_round.slug:
+                            strategy_results.append(
+                                {
+                                    "strategy_id": strategy_id,
+                                    "status": "skipped",
+                                    "slug": target_round.slug,
+                                    "side": None,
+                                    "price": None,
+                                    "should_trade": False,
+                                    "skip_reason": "already_processed_round",
+                                }
+                            )
+                            continue
                         append_trade_log(
                             log_path,
                             TradeRecord(
@@ -1055,7 +1138,7 @@ def run_live_trading(
                             entry_time=entry_time,
                         )
                         if side_decision.side is None:
-                            status = "waiting_for_entry" if now < entry_time else "skipped"
+                            status = "waiting_for_entry" if (entry_time - now).total_seconds() > 1 else "skipped"
                             skip_reason = side_decision.reason or "signal_unavailable"
                             if status == "skipped":
                                 append_trade_log(
@@ -1083,6 +1166,9 @@ def run_live_trading(
                                         **_signal_record_kwargs(side_decision),
                                     ),
                                 )
+                                strategy_state.last_processed_live_event_slug = target_round.slug
+                                strategy_state.round_index += 1
+                                state.live_strategies[strategy_id] = strategy_state
                             strategy_results.append(
                                 {
                                     "strategy_id": strategy_id,
@@ -1104,7 +1190,7 @@ def run_live_trading(
                         side = side_decision.side
                         price = resolve_quote_price(side, strategy_quote)
                         if _ws_is_stale_for_trade(market_client, strategy_cfg):
-                            status = "waiting_for_entry" if now < entry_time else "skipped"
+                            status = "waiting_for_entry" if (entry_time - now).total_seconds() > 1 else "skipped"
                             if status == "skipped":
                                 append_trade_log(
                                     log_path,
@@ -1131,6 +1217,9 @@ def run_live_trading(
                                         **_signal_record_kwargs(side_decision),
                                     ),
                                 )
+                                strategy_state.last_processed_live_event_slug = target_round.slug
+                                strategy_state.round_index += 1
+                                state.live_strategies[strategy_id] = strategy_state
                             strategy_results.append(
                                 {
                                     "strategy_id": strategy_id,
@@ -1176,6 +1265,7 @@ def run_live_trading(
                                 ),
                             )
                             strategy_state.round_index += 1
+                            strategy_state.last_processed_live_event_slug = target_round.slug
                             state.live_strategies[strategy_id] = strategy_state
                             strategy_results.append(
                                 {
@@ -1222,7 +1312,7 @@ def run_live_trading(
                                 cfg=strategy_cfg,
                                 stop_loss_triggered=plan.stop_loss_triggered,
                             )
-                            status = "waiting_for_entry" if now < entry_time else "skipped"
+                            status = "waiting_for_entry" if (entry_time - now).total_seconds() > 1 else "skipped"
                             if status == "skipped":
                                 append_trade_log(
                                     log_path,
@@ -1256,6 +1346,7 @@ def run_live_trading(
                                     cfg=strategy_cfg,
                                     stop_loss_triggered=plan.stop_loss_triggered,
                                 )
+                                strategy_state.last_processed_live_event_slug = target_round.slug
                                 if should_alert:
                                     _emit_max_stake_skip_alert(
                                         slug=target_round.slug,
@@ -1292,7 +1383,7 @@ def run_live_trading(
                         strategy_state.consecutive_max_stake_skips = 0
                         if token_id is None:
                             raise RuntimeError(f"Missing token id for side={side} on market={target_round.slug}")
-                        if now < entry_time:
+                        if (entry_time - now).total_seconds() > 1:
                             strategy_results.append(
                                 {
                                     "strategy_id": strategy_id,
@@ -1354,6 +1445,8 @@ def run_live_trading(
                                     **_signal_record_kwargs(side_decision),
                                 ),
                             )
+                            strategy_state.last_processed_live_event_slug = target_round.slug
+                            state.live_strategies[strategy_id] = strategy_state
                             strategy_results.append(
                                 {
                                     "strategy_id": strategy_id,
@@ -1408,6 +1501,7 @@ def run_live_trading(
                         strategy_state.pending_live_order_id = execution.order_id
                         strategy_state.pending_live_end_time = target_round.end_time.isoformat()
                         strategy_state.round_index += 1
+                        strategy_state.last_processed_live_event_slug = target_round.slug
                         state.live_strategies[strategy_id] = strategy_state
                         strategy_results.append(
                             {

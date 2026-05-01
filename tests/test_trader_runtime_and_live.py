@@ -1283,6 +1283,62 @@ def test_run_live_trading_keeps_removed_pending_live_strategy_managed(tmp_path):
     assert state.live_strategies[6].pending_live_slug == 'btc-updown-5m-orphaned'
 
 
+def test_run_live_trading_keeps_retryable_settlement_clob_timeout_pending(tmp_path):
+    state_path = tmp_path / "live_state.json"
+    state_path.write_text(
+        json.dumps(
+            {
+                "live_strategies": {
+                    "4": {
+                        "round_index": 4,
+                        "cash_pnl": 0.0,
+                        "recovery_loss": 0.0,
+                        "consecutive_losses": 0,
+                        "pending_live_slug": "btc-updown-5m-prev",
+                        "pending_live_side": "UP",
+                        "pending_live_price": 0.5,
+                        "pending_live_order_size": 2.0,
+                        "pending_live_order_cost": 1.0,
+                        "pending_live_expected_profit": 1.0,
+                        "pending_live_order_id": "oid-timeout",
+                        "pending_live_end_time": "2026-04-02T00:00:00+00:00",
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = run_live_trading(
+        AppConfig(
+            trade_mode="live",
+            live_trading_enabled=True,
+            live_private_key="pk",
+            live_funder="0xfunder",
+            strategy_id=4,
+            live_strategy_ids=[4],
+            poll_interval_seconds=1,
+        ),
+        market_client=_SettlingLiveClient(),
+        clob_client=_SettlementTimeoutClobClient(),
+        state_path=state_path,
+        log_path=tmp_path / "live_orders.csv",
+        stop_when_safe=lambda: True,
+    )
+
+    state = load_session_state(state_path, effective_live_strategy_ids=[4])
+    strategy_result = next(item for item in result["strategies"] if item["strategy_id"] == 4)
+
+    assert result["status"] == "pending_settlement"
+    assert strategy_result["status"] == "pending_settlement"
+    assert strategy_result["phase"] == "settlement"
+    assert strategy_result["skip_reason"] == "settlement_retryable_clob_error"
+    assert "Request exception" in strategy_result["error"]
+    assert not any(item.get("status") == "error" for item in result["strategies"])
+    assert state.live_strategies[4].pending_live_slug == "btc-updown-5m-prev"
+    assert state.live_strategies[4].pending_live_order_id == "oid-timeout"
+
+
 class _RoundEndMarketClient(_LiveMarketClient):
     def find_current_and_next_rounds(self, *, now):
         window = MarketWindow(
@@ -1330,6 +1386,25 @@ class _StrictStubClobClient(_StubClobClient):
         assert not hasattr(order_args, "nonce")
         assert not hasattr(order_args, "taker")
         return super().create_market_order(order_args)
+
+
+class _SettlementTimeoutClobClient(_StubClobClient):
+    def get_trades(self, params=None):
+        raise RuntimeError(
+            "[py_clob_client_v2] request error: The read operation timed out "
+            "PolyApiException[status_code=None, error_message=Request exception!]"
+        )
+
+
+class _FokNotFilledClobClient(_StubClobClient):
+    def post_order(self, order, order_type):
+        self.posted_orders.append((order, order_type))
+        raise RuntimeError(
+            "[py_clob_client_v2] request error status=400 "
+            "url=https://clob.polymarket.com/order "
+            'body={"error":"order couldn\'t be fully filled. FOK orders are fully filled or killed.",'
+            '"orderID":"0xdeadbeef"}'
+        )
 
 
 class _SettlingLiveClient(_LiveMarketClient):
@@ -2251,6 +2326,37 @@ def test_place_live_order_rejects_submission_response_without_acceptance(tmp_pat
     assert state.round_index == 0
 
 
+def test_place_live_order_skips_fok_not_filled_without_pending_state(tmp_path):
+    cfg = AppConfig(live_trading_enabled=True)
+    stub_clob = _FokNotFilledClobClient()
+    state_path = tmp_path / "state.json"
+    log_path = tmp_path / "live.csv"
+
+    result = place_live_order(
+        cfg=cfg,
+        market_client=_LiveMarketClient(),
+        clob_client=stub_clob,
+        state_path=state_path,
+        log_path=log_path,
+    )
+
+    state = load_session_state(state_path)
+    rows = list(csv.DictReader(log_path.open(newline="", encoding="utf-8")))
+
+    assert result["status"] == "skipped"
+    assert result["skip_reason"] == "live_fok_not_filled"
+    assert result["side"] == "UP"
+    assert result["token_id"] == "up-token"
+    assert len(stub_clob.created_orders) == 1
+    assert len(stub_clob.posted_orders) == 1
+    assert state.pending_live_slug is None
+    assert state.pending_live_order_id is None
+    assert rows[-1]["skip_reason"] == "live_fok_not_filled"
+    assert rows[-1]["order_size"] == "0.0"
+    assert rows[-1]["order_cost"] == "0.0"
+    assert rows[-1]["expected_profit"] == "0.0"
+
+
 def test_place_live_order_with_injected_client_provides_full_market_order_args(tmp_path):
     cfg = AppConfig(live_trading_enabled=True)
     stub_clob = _StrictStubClobClient()
@@ -2703,6 +2809,115 @@ def test_run_live_trading_submits_multiple_strategies_in_same_round_when_wallet_
     assert ",3,OPEN,btc-updown-5m-test," in rows[2]
 
 
+def test_run_live_trading_executes_inside_paper_entry_threshold(tmp_path, monkeypatch):
+    stop_event = threading.Event()
+    stub_clob = _StubClobClient(balance_payload={"available": 3.0})
+
+    def fake_sleep(_seconds):
+        stop_event.set()
+
+    monkeypatch.setattr("trader.time.sleep", fake_sleep)
+    monkeypatch.setattr(
+        "trader._entry_time_for_round",
+        lambda cfg, window: datetime.now(timezone.utc) + timedelta(seconds=0.5),
+    )
+    monkeypatch.setattr(
+        "trader._resolve_side_from_strategy",
+        lambda **kwargs: SideDecision(side="UP"),
+    )
+    monkeypatch.setattr(
+        "trader.build_trade_plan",
+        lambda *args, **kwargs: TradePlan(
+            True,
+            "UP",
+            price=0.55,
+            order_size=2.0,
+            order_cost=1.5,
+            expected_profit=0.5,
+        ),
+    )
+
+    result = run_live_trading(
+        AppConfig(
+            trade_mode="live",
+            live_trading_enabled=True,
+            live_private_key="pk",
+            live_funder="0xfunder",
+            strategy_id=1,
+            live_strategy_ids=[1],
+            base_order_cost=1.5,
+            poll_interval_seconds=1,
+        ),
+        market_client=_LiveMarketClient(),
+        clob_client=stub_clob,
+        state_path=tmp_path / "live_state.json",
+        log_path=tmp_path / "live_orders.csv",
+        stop_event=stop_event,
+    )
+
+    state = load_session_state(tmp_path / "live_state.json", effective_live_strategy_ids=[1])
+
+    assert result["status"] == "stopped"
+    assert len(stub_clob.created_orders) == 1
+    assert state.live_strategies[1].pending_live_slug == "btc-updown-5m-test"
+
+
+def test_run_live_trading_skips_fok_not_filled_without_runtime_error(tmp_path, monkeypatch):
+    stop_event = threading.Event()
+    stub_clob = _FokNotFilledClobClient(balance_payload={"available": 3.0})
+
+    def fake_sleep(_seconds):
+        stop_event.set()
+
+    monkeypatch.setattr("trader.time.sleep", fake_sleep)
+    monkeypatch.setattr(
+        "trader._resolve_side_from_strategy",
+        lambda **kwargs: SideDecision(side="UP"),
+    )
+    monkeypatch.setattr(
+        "trader.build_trade_plan",
+        lambda *args, **kwargs: TradePlan(
+            True,
+            "UP",
+            price=0.55,
+            order_size=2.0,
+            order_cost=1.5,
+            expected_profit=0.5,
+        ),
+    )
+
+    result = run_live_trading(
+        AppConfig(
+            trade_mode="live",
+            live_trading_enabled=True,
+            live_private_key="pk",
+            live_funder="0xfunder",
+            strategy_id=1,
+            live_strategy_ids=[1],
+            base_order_cost=1.5,
+            poll_interval_seconds=1,
+        ),
+        market_client=_LiveMarketClient(),
+        clob_client=stub_clob,
+        state_path=tmp_path / "live_state.json",
+        log_path=tmp_path / "live_orders.csv",
+        stop_event=stop_event,
+    )
+
+    state = load_session_state(tmp_path / "live_state.json", effective_live_strategy_ids=[1])
+    rows = list(csv.DictReader((tmp_path / "live_orders.csv").open(newline="", encoding="utf-8")))
+
+    assert result["status"] == "stopped"
+    assert len(stub_clob.created_orders) == 1
+    assert state.live_strategies[1].pending_live_slug is None
+    assert state.live_strategies[1].pending_live_order_id is None
+    assert rows[-1]["strategy"] == "1"
+    assert rows[-1]["skip_reason"] == "live_fok_not_filled"
+    assert rows[-1]["order_size"] == "0.0"
+    assert rows[-1]["order_cost"] == "0.0"
+    assert rows[-1]["expected_profit"] == "0.0"
+
+
 def test_run_live_trading_skips_missed_entry_window_without_submitting(tmp_path, monkeypatch):
     stop_event = threading.Event()
     stub_clob = _StubClobClient(balance_payload={"available": 3.0})
@@ -2738,6 +2953,100 @@ def test_run_live_trading_skips_missed_entry_window_without_submitting(tmp_path,
     assert state.live_strategies[4].pending_live_slug is None
     assert len(rows) == 2
     assert "entry_window_missed" in rows[1]
+
+
+def test_run_live_trading_does_not_advance_same_missed_live_round_twice(tmp_path, monkeypatch):
+    state_path = tmp_path / "live_state.json"
+    log_path = tmp_path / "live_orders.csv"
+    stub_clob = _StubClobClient(balance_payload={"available": 3.0})
+
+    def fake_sleep(_seconds):
+        active_stop_event.set()
+
+    monkeypatch.setattr("trader.time.sleep", fake_sleep)
+
+    cfg = AppConfig(
+        trade_mode="live",
+        live_trading_enabled=True,
+        live_private_key="pk",
+        live_funder="0xfunder",
+        strategy_id=4,
+        live_strategy_ids=[4],
+        open_delay_seconds=0,
+        entry_grace_seconds=1,
+        poll_interval_seconds=1,
+    )
+
+    for _ in range(2):
+        active_stop_event = threading.Event()
+        result = run_live_trading(
+            cfg,
+            market_client=_MissedEntryNoNextLiveClient(),
+            clob_client=stub_clob,
+            state_path=state_path,
+            log_path=log_path,
+            stop_event=active_stop_event,
+        )
+        assert result["status"] == "stopped"
+
+    state = load_session_state(state_path, effective_live_strategy_ids=[4])
+    rows = list(csv.DictReader(log_path.open(newline="", encoding="utf-8")))
+
+    assert state.live_strategies[4].round_index == 1
+    assert len(rows) == 1
+    assert rows[0]["event_slug"] == "btc-updown-5m-missed"
+    assert rows[0]["skip_reason"] == "entry_window_missed"
+
+
+def test_run_live_trading_marks_signal_skip_round_processed_like_paper(tmp_path, monkeypatch):
+    state_path = tmp_path / "live_state.json"
+    log_path = tmp_path / "live_orders.csv"
+    stub_clob = _StubClobClient(balance_payload={"available": 3.0})
+    side_calls = 0
+
+    def fake_sleep(_seconds):
+        active_stop_event.set()
+
+    def fake_side(**kwargs):
+        nonlocal side_calls
+        side_calls += 1
+        return SideDecision(side=None, reason="signal_unavailable")
+
+    monkeypatch.setattr("trader.time.sleep", fake_sleep)
+    monkeypatch.setattr("trader._resolve_side_from_strategy", fake_side)
+
+    cfg = AppConfig(
+        trade_mode="live",
+        live_trading_enabled=True,
+        live_private_key="pk",
+        live_funder="0xfunder",
+        strategy_id=4,
+        live_strategy_ids=[4],
+        open_delay_seconds=0,
+        poll_interval_seconds=1,
+    )
+
+    for _ in range(2):
+        active_stop_event = threading.Event()
+        result = run_live_trading(
+            cfg,
+            market_client=_LiveMarketClient(),
+            clob_client=stub_clob,
+            state_path=state_path,
+            log_path=log_path,
+            stop_event=active_stop_event,
+        )
+        assert result["status"] == "stopped"
+
+    state = load_session_state(state_path, effective_live_strategy_ids=[4])
+    rows = list(csv.DictReader(log_path.open(newline="", encoding="utf-8")))
+
+    assert side_calls == 1
+    assert state.live_strategies[4].round_index == 1
+    assert state.live_strategies[4].last_processed_live_event_slug == "btc-updown-5m-test"
+    assert len(rows) == 1
+    assert rows[0]["event_slug"] == "btc-updown-5m-test"
+    assert rows[0]["skip_reason"] == "signal_unavailable"
 
 
 def test_run_live_trading_logs_observed_round_before_entry_without_submitting(tmp_path, monkeypatch):
@@ -4356,6 +4665,131 @@ def test_append_trade_log_updates_live_observed_placeholder(tmp_path):
     assert rows[0]["price"] == "0.49"
     assert rows[0]["order_cost"] == "1.0"
     assert rows[0]["skip_reason"] == ""
+
+
+def test_append_trade_log_keeps_live_observed_placeholder_stable_during_waiting_updates(tmp_path):
+    log_path = tmp_path / "live_orders.csv"
+    start = datetime(2026, 5, 1, 8, 45, tzinfo=timezone.utc)
+    end = start + timedelta(minutes=5)
+
+    append_trade_log(
+        log_path,
+        TradeRecord(
+            timestamp=start,
+            mode="live",
+            round_index=1,
+            strategy=4,
+            entry_timing="OPEN",
+            event_slug="btc-updown-5m-waiting",
+            start_time=start,
+            end_time=end,
+            side="SKIP",
+            price=None,
+            order_size=0.0,
+            order_cost=0.0,
+            expected_profit=0.0,
+            result=None,
+            trade_pnl=0.0,
+            cash_pnl=-5.1824,
+            recovery_loss=2.0,
+            consecutive_losses=1,
+            skip_reason="observed_waiting_for_entry",
+        ),
+    )
+    append_trade_log(
+        log_path,
+        TradeRecord(
+            timestamp=start + timedelta(seconds=3),
+            mode="live",
+            round_index=1,
+            strategy=4,
+            entry_timing="OPEN",
+            event_slug="btc-updown-5m-waiting",
+            start_time=start,
+            end_time=end,
+            side="DOWN",
+            price=0.54,
+            order_size=0.0,
+            order_cost=0.0,
+            expected_profit=0.0,
+            result=None,
+            trade_pnl=0.0,
+            cash_pnl=-5.1824,
+            recovery_loss=2.0,
+            consecutive_losses=1,
+            skip_reason="observed_waiting_for_entry",
+        ),
+    )
+
+    rows = list(csv.DictReader(log_path.open(newline="", encoding="utf-8")))
+    assert len(rows) == 1
+    assert rows[0]["timestamp"] == start.isoformat()
+    assert rows[0]["side"] == "SKIP"
+    assert rows[0]["price"] == ""
+    assert rows[0]["order_cost"] == "0.0"
+    assert rows[0]["skip_reason"] == "observed_waiting_for_entry"
+
+
+def test_append_trade_log_replaces_live_observed_placeholder_with_final_skip(tmp_path):
+    log_path = tmp_path / "live_orders.csv"
+    start = datetime(2026, 5, 1, 8, 45, tzinfo=timezone.utc)
+    end = start + timedelta(minutes=5)
+
+    append_trade_log(
+        log_path,
+        TradeRecord(
+            timestamp=start,
+            mode="live",
+            round_index=1,
+            strategy=4,
+            entry_timing="OPEN",
+            event_slug="btc-updown-5m-skip",
+            start_time=start,
+            end_time=end,
+            side="SKIP",
+            price=None,
+            order_size=0.0,
+            order_cost=0.0,
+            expected_profit=0.0,
+            result=None,
+            trade_pnl=0.0,
+            cash_pnl=-5.1824,
+            recovery_loss=2.0,
+            consecutive_losses=1,
+            skip_reason="observed_waiting_for_entry",
+        ),
+    )
+    append_trade_log(
+        log_path,
+        TradeRecord(
+            timestamp=start + timedelta(seconds=12),
+            mode="live",
+            round_index=1,
+            strategy=4,
+            entry_timing="OPEN",
+            event_slug="btc-updown-5m-skip",
+            start_time=start,
+            end_time=end,
+            side="DOWN",
+            price=0.36,
+            order_size=0.0,
+            order_cost=0.0,
+            expected_profit=0.0,
+            result=None,
+            trade_pnl=0.0,
+            cash_pnl=-5.1824,
+            recovery_loss=2.0,
+            consecutive_losses=1,
+            skip_reason="price_below_threshold",
+        ),
+    )
+
+    rows = list(csv.DictReader(log_path.open(newline="", encoding="utf-8")))
+    assert len(rows) == 1
+    assert rows[0]["side"] == "DOWN"
+    assert rows[0]["price"] == "0.36"
+    assert rows[0]["order_cost"] == "0.0"
+    assert rows[0]["skip_reason"] == "price_below_threshold"
 
 
 def test_paper_experiment_id_defaults_to_strategy_prefix():
