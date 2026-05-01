@@ -153,6 +153,20 @@ def resolved_result_from_redeemable_positions(
     return None
 
 
+def resolved_result_from_official_market(event: dict[str, Any], market: dict[str, Any]) -> str | None:
+    metadata = event.get("eventMetadata") or {}
+    if metadata.get("priceToBeat") is not None and metadata.get("finalPrice") is not None:
+        return "UP" if float(metadata["finalPrice"]) >= float(metadata["priceToBeat"]) else "DOWN"
+
+    prices = parse_outcome_prices(market.get("outcomePrices"), market.get("outcomes"))
+    up_price = prices.get("UP")
+    down_price = prices.get("DOWN")
+    is_closed = bool(event.get("closed") or market.get("closed"))
+    if is_closed and up_price is not None and down_price is not None and {up_price, down_price} == {0.0, 1.0}:
+        return "UP" if up_price > down_price else "DOWN"
+    return None
+
+
 def settle_pending_live_trade_if_needed(
     *,
     market_client: Any,
@@ -198,44 +212,30 @@ def settle_pending_live_trade_if_needed(
         )
 
     event = market_client.get_event_by_slug(strategy_state.pending_live_slug)
-    metadata = event.get("eventMetadata") or {}
     market = (event.get("markets") or [{}])[0]
-    official_position_result = resolved_result_from_redeemable_positions(
-        market_client,
-        funder=funder,
-        slug=strategy_state.pending_live_slug,
-    )
-    if official_position_result:
-        result = official_position_result
-    elif metadata.get("priceToBeat") is not None and metadata.get("finalPrice") is not None:
-        result = "UP" if float(metadata["finalPrice"]) >= float(metadata["priceToBeat"]) else "DOWN"
+    official_market_result = resolved_result_from_official_market(event, market)
+    if official_market_result:
+        result = official_market_result
     else:
+        official_position_result = resolved_result_from_redeemable_positions(
+            market_client,
+            funder=funder,
+            slug=strategy_state.pending_live_slug,
+        )
         cached_result = cached_ws_market_result(market_client, market)
-        if cached_result:
-            result = cached_result
-        else:
-            prices = parse_outcome_prices(market.get("outcomePrices"), market.get("outcomes"))
-            up_price = prices.get("UP")
-            down_price = prices.get("DOWN")
-            is_closed = bool(event.get("closed") or market.get("closed"))
-            if (
-                not is_closed
-                or up_price is None
-                or down_price is None
-                or {up_price, down_price} != {0.0, 1.0}
-            ):
-                return (
-                    strategy_state,
-                    {
-                        "status": "pending_settlement",
-                        "slug": strategy_state.pending_live_slug,
-                        "side": strategy_state.pending_live_side,
-                        "skip_reason": "round_unresolved",
-                        "pending_end_time": strategy_state.pending_live_end_time,
-                    },
-                    False,
-                )
-            result = "UP" if up_price > down_price else "DOWN"
+        result = official_position_result or cached_result
+        if not result:
+            return (
+                strategy_state,
+                {
+                    "status": "pending_settlement",
+                    "slug": strategy_state.pending_live_slug,
+                    "side": strategy_state.pending_live_side,
+                    "skip_reason": "round_unresolved",
+                    "pending_end_time": strategy_state.pending_live_end_time,
+                },
+                False,
+            )
     updated_state = apply_round_outcome(strategy_state, plan, won=(result == plan.side))
     trade_pnl = updated_state.cash_pnl - strategy_state.cash_pnl
     clear_pending_live_trade(updated_state)

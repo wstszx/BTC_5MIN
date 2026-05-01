@@ -1374,6 +1374,45 @@ class _ResolvedPositionSettlingLiveClient(_LiveMarketClient):
         ]
 
 
+class _ConflictingPositionAndOfficialResultClient(_ResolvedPositionSettlingLiveClient):
+    def get_event_by_slug(self, slug: str):
+        if slug != "btc-updown-5m-prev":
+            raise AssertionError(f"Unexpected slug {slug}")
+        return {
+            "closed": True,
+            "eventMetadata": {},
+            "markets": [
+                {
+                    "closed": True,
+                    "outcomes": '["Up","Down"]',
+                    "outcomePrices": '["0","1"]',
+                }
+            ],
+        }
+
+
+class _OfficialTerminalResultNoPositionClient(_LiveMarketClient):
+    def get_event_by_slug(self, slug: str):
+        if slug != "btc-updown-5m-prev":
+            raise AssertionError(f"Unexpected slug {slug}")
+        return {
+            "closed": True,
+            "eventMetadata": {},
+            "markets": [
+                {
+                    "closed": True,
+                    "outcomes": '["Up","Down"]',
+                    "outcomePrices": '["0","1"]',
+                }
+            ],
+        }
+
+    def get_current_positions(self, *, user: str, redeemable: bool | None = None):
+        assert user == "0xfunder"
+        assert redeemable is True
+        return []
+
+
 def test_session_state_roundtrip_preserves_pending_paper_trades(tmp_path):
     state_path = tmp_path / "session_state.json"
     state_path.write_text(
@@ -3012,6 +3051,90 @@ def test_settle_pending_live_trade_uses_official_redeemable_position_without_wai
     assert updated_strategy.cash_pnl == pytest.approx(1.0)
     assert updated_strategy.pending_live_slug is None
     assert updated_strategy.pending_live_order_id is None
+
+
+def test_settle_pending_live_trade_uses_official_terminal_result_when_position_is_not_redeemable():
+    pending_strategy = LiveStrategyState(
+        round_index=1,
+        cash_pnl=0.0,
+        recovery_loss=0.0,
+        consecutive_losses=0,
+        pending_live_slug="btc-updown-5m-prev",
+        pending_live_side="UP",
+        pending_live_price=0.5,
+        pending_live_order_size=2.0,
+        pending_live_order_cost=1.0,
+        pending_live_expected_profit=1.0,
+        pending_live_order_id="oid-prev",
+        pending_live_end_time="2026-04-02T00:00:00+00:00",
+    )
+    stub_clob = _StubClobClient(
+        order_payloads={
+            "oid-prev": {
+                "status": "filled",
+                "filled_order_size": 2.0,
+                "filled_order_cost": 1.0,
+                "avg_price": 0.5,
+            }
+        }
+    )
+
+    updated_strategy, status, settled = trader._settle_pending_live_trade_if_needed(
+        market_client=_OfficialTerminalResultNoPositionClient(),
+        clob_client=stub_clob,
+        strategy_state=pending_strategy,
+        now=datetime(2026, 4, 2, 0, 6, tzinfo=timezone.utc),
+        funder="0xfunder",
+    )
+
+    assert settled is True
+    assert status["status"] == "settled"
+    assert status["result"] == "DOWN"
+    assert status["trade_pnl"] == pytest.approx(-1.0)
+    assert updated_strategy.cash_pnl == pytest.approx(-1.0)
+    assert updated_strategy.pending_live_slug is None
+    assert updated_strategy.pending_live_order_id is None
+
+
+def test_settle_pending_live_trade_prefers_official_market_result_over_position_snapshot():
+    pending_strategy = LiveStrategyState(
+        round_index=1,
+        cash_pnl=0.0,
+        recovery_loss=0.0,
+        consecutive_losses=0,
+        pending_live_slug="btc-updown-5m-prev",
+        pending_live_side="UP",
+        pending_live_price=0.5,
+        pending_live_order_size=2.0,
+        pending_live_order_cost=1.0,
+        pending_live_expected_profit=1.0,
+        pending_live_order_id="oid-prev",
+        pending_live_end_time="2026-04-02T00:00:00+00:00",
+    )
+    stub_clob = _StubClobClient(
+        order_payloads={
+            "oid-prev": {
+                "status": "filled",
+                "filled_order_size": 2.0,
+                "filled_order_cost": 1.0,
+                "avg_price": 0.5,
+            }
+        }
+    )
+
+    updated_strategy, status, settled = trader._settle_pending_live_trade_if_needed(
+        market_client=_ConflictingPositionAndOfficialResultClient(),
+        clob_client=stub_clob,
+        strategy_state=pending_strategy,
+        now=datetime(2026, 4, 2, 0, 6, tzinfo=timezone.utc),
+        funder="0xfunder",
+    )
+
+    assert settled is True
+    assert status["result"] == "DOWN"
+    assert status["trade_pnl"] == pytest.approx(-1.0)
+    assert updated_strategy.cash_pnl == pytest.approx(-1.0)
+    assert updated_strategy.pending_live_slug is None
 
 
 def test_place_live_order_requires_private_key_without_injected_client(tmp_path):
