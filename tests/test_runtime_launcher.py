@@ -11,6 +11,10 @@ import main
 from config import AppConfig, build_config_from_env_values, load_env_file_values
 
 
+def _path_tail(value: str | Path, count: int) -> tuple[str, ...]:
+    return Path(value).parts[-count:]
+
+
 def test_main_without_args_starts_single_command_runtime(monkeypatch, tmp_path: Path):
     calls = {}
 
@@ -600,8 +604,8 @@ def test_run_single_command_runtime_starts_one_paper_worker_per_enabled_timefram
     assert [call[0] for call in calls] == ['5m', '15m']
     assert calls[0][1] == [5, 6]
     assert calls[1][1] == [1, 2]
-    assert calls[0][2].endswith('logs\\paper\\5m\\session_state.json')
-    assert calls[1][3].endswith('logs\\paper\\15m\\paper_trades.csv')
+    assert _path_tail(calls[0][2], 4) == ('logs', 'paper', '5m', 'session_state.json')
+    assert _path_tail(calls[1][3], 4) == ('logs', 'paper', '15m', 'paper_trades.csv')
 
 
 def test_run_single_command_runtime_keeps_live_single_worker_when_paper_profiles_exist(monkeypatch):
@@ -685,7 +689,12 @@ def test_run_single_command_runtime_starts_paper_and_live_when_live_enabled(monk
     exit_code = main.run_single_command_runtime()
 
     assert exit_code == 0
-    assert ('paper', '5m', 'logs\\paper\\5m\\paper_trades.csv') in calls
+    assert any(
+        worker == 'paper'
+        and timeframe == '5m'
+        and _path_tail(log_path, 4) == ('logs', 'paper', '5m', 'paper_trades.csv')
+        for worker, timeframe, log_path in calls
+    )
     assert ('live', '15m', 'live_orders.csv') in calls
 
 
