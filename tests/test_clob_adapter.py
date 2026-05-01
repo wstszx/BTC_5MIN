@@ -43,6 +43,24 @@ class _OrderLookupClient:
         }
 
 
+class _TradeLookupClient:
+    def get_order(self, order_id):
+        assert order_id == "oid-split-fill"
+        return {
+            "status": "matched",
+            "size_matched": "3.0",
+            "price": "0.60",
+        }
+
+    def get_trades(self, params=None):
+        assert params == {"order_id": "oid-split-fill"}
+        return [
+            {"order_id": "oid-split-fill", "size": "1.0", "price": "0.50"},
+            {"orderID": "oid-split-fill", "size": "2.0", "price": "0.55"},
+            {"order_id": "other-order", "size": "9.0", "price": "0.99"},
+        ]
+
+
 def test_clob_adapter_reads_available_balance_from_nested_payload():
     balance = read_available_live_balance(
         cfg=AppConfig(live_private_key="pk", live_funder="0xfunder"),
@@ -86,6 +104,22 @@ def test_clob_adapter_builds_verified_pending_live_trade_plan_from_fill_payload(
     assert plan.order_size == pytest.approx(2.0)
     assert plan.order_cost == pytest.approx(1.0)
     assert plan.expected_profit == pytest.approx(1.0)
+
+
+def test_clob_adapter_prefers_official_trade_fills_over_order_limit_price():
+    state = LiveStrategyState(
+        pending_live_side="UP",
+        pending_live_order_id="oid-split-fill",
+    )
+
+    plan = build_verified_pending_live_trade_plan(state, clob_client=_TradeLookupClient())
+
+    assert plan is not None
+    assert plan.side == "UP"
+    assert plan.order_size == pytest.approx(3.0)
+    assert plan.order_cost == pytest.approx(1.6)
+    assert plan.price == pytest.approx(1.6 / 3.0)
+    assert plan.expected_profit == pytest.approx(1.4)
 
 
 def test_trader_reexports_clob_adapter_helpers(monkeypatch):

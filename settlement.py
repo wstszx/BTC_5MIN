@@ -115,12 +115,51 @@ def cached_ws_market_result(market_client: Any, market: dict[str, Any]) -> str:
     return outcome if outcome in {"UP", "DOWN"} else ""
 
 
+def resolved_result_from_redeemable_positions(
+    market_client: Any,
+    *,
+    funder: str | None,
+    slug: str,
+) -> str | None:
+    target_user = str(funder or "").strip().lower()
+    if not target_user:
+        return None
+    get_positions = getattr(market_client, "get_current_positions", None)
+    if not callable(get_positions):
+        return None
+    positions = get_positions(user=target_user, redeemable=True)
+    if not isinstance(positions, list):
+        return None
+    for row in positions:
+        if not isinstance(row, dict):
+            continue
+        row_slug = str(row.get("eventSlug") or row.get("event_slug") or "").strip()
+        if row_slug != slug:
+            continue
+        row_user = str(row.get("proxyWallet") or row.get("user") or row.get("owner") or "").strip().lower()
+        if row_user and row_user != target_user:
+            continue
+        if not bool(row.get("redeemable")):
+            continue
+        try:
+            size = float(row.get("size") or 0)
+        except (TypeError, ValueError):
+            continue
+        if size <= 0:
+            continue
+        outcome = normalize_outcome_label(str(row.get("outcome") or ""))
+        if outcome in {"UP", "DOWN"}:
+            return outcome
+    return None
+
+
 def settle_pending_live_trade_if_needed(
     *,
     market_client: Any,
     clob_client: Any | None,
     strategy_state: LiveStrategyState,
     now: datetime,
+    funder: str | None = None,
     pending_plan_resolver=build_verified_pending_live_trade_plan,
 ) -> tuple[LiveStrategyState, dict[str, Any] | None, bool]:
     if not strategy_state.pending_live_slug:
@@ -161,7 +200,14 @@ def settle_pending_live_trade_if_needed(
     event = market_client.get_event_by_slug(strategy_state.pending_live_slug)
     metadata = event.get("eventMetadata") or {}
     market = (event.get("markets") or [{}])[0]
-    if metadata.get("priceToBeat") is not None and metadata.get("finalPrice") is not None:
+    official_position_result = resolved_result_from_redeemable_positions(
+        market_client,
+        funder=funder,
+        slug=strategy_state.pending_live_slug,
+    )
+    if official_position_result:
+        result = official_position_result
+    elif metadata.get("priceToBeat") is not None and metadata.get("finalPrice") is not None:
         result = "UP" if float(metadata["finalPrice"]) >= float(metadata["priceToBeat"]) else "DOWN"
     else:
         cached_result = cached_ws_market_result(market_client, market)

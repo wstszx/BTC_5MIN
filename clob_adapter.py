@@ -69,6 +69,110 @@ def coerce_positive_float(raw: Any) -> float | None:
     return value
 
 
+def _payload_items(payload: Any) -> list[dict[str, Any]]:
+    if isinstance(payload, list):
+        return [item for item in payload if isinstance(item, dict)]
+    if isinstance(payload, dict):
+        for key in ("data", "trades", "value", "results"):
+            items = payload.get(key)
+            if isinstance(items, list):
+                return [item for item in items if isinstance(item, dict)]
+    return []
+
+
+def _trade_matches_order(trade: dict[str, Any], order_id: str) -> bool:
+    candidate = (
+        trade.get("order_id")
+        or trade.get("orderID")
+        or trade.get("orderId")
+        or trade.get("id")
+    )
+    if candidate is not None and str(candidate).strip() == order_id:
+        return True
+    for key in ("maker_orders", "makerOrders", "orders"):
+        orders = trade.get(key)
+        if not isinstance(orders, list):
+            continue
+        for order in orders:
+            if not isinstance(order, dict):
+                continue
+            nested_id = order.get("order_id") or order.get("orderID") or order.get("orderId") or order.get("id")
+            if nested_id is not None and str(nested_id).strip() == order_id:
+                return True
+    return False
+
+
+def _read_official_order_trades(clob_client: Any, order_id: str) -> list[dict[str, Any]]:
+    for method_name in ("get_trades", "getTrades"):
+        get_trades = getattr(clob_client, method_name, None)
+        if not callable(get_trades):
+            continue
+        for params in ({"order_id": order_id}, {"orderID": order_id}, {"orderId": order_id}):
+            try:
+                payload = get_trades(params)
+            except TypeError:
+                continue
+            items = [
+                trade
+                for trade in _payload_items(payload)
+                if _trade_matches_order(trade, order_id)
+            ]
+            if items:
+                return items
+    return []
+
+
+def _trade_size_and_price(trade: dict[str, Any]) -> tuple[float | None, float | None]:
+    size = coerce_positive_float(
+        trade.get("size")
+        or trade.get("filled_size")
+        or trade.get("filledSize")
+        or trade.get("matched_size")
+        or trade.get("matchedSize")
+    )
+    price = coerce_positive_float(
+        trade.get("price")
+        or trade.get("fill_price")
+        or trade.get("fillPrice")
+        or trade.get("avg_price")
+        or trade.get("avgPrice")
+    )
+    return size, price
+
+
+def build_trade_plan_from_official_trades(
+    strategy_state: LiveStrategyState,
+    *,
+    clob_client: Any,
+) -> TradePlan | None:
+    order_id = str(strategy_state.pending_live_order_id or "").strip()
+    if not order_id:
+        return None
+
+    total_size = 0.0
+    total_cost = 0.0
+    for trade in _read_official_order_trades(clob_client, order_id):
+        size, price = _trade_size_and_price(trade)
+        if size is None or price is None or not 0 < price < 1:
+            continue
+        total_size += size
+        total_cost += size * price
+
+    if total_size <= 0 or total_cost <= 0:
+        return None
+    fill_price = total_cost / total_size
+    if not 0 < fill_price < 1:
+        return None
+    return TradePlan(
+        True,
+        side=strategy_state.pending_live_side,
+        price=fill_price,
+        order_size=total_size,
+        order_cost=total_cost,
+        expected_profit=total_size * (1 - fill_price),
+    )
+
+
 def extract_live_order_id(response: Any) -> str | None:
     if not isinstance(response, dict):
         return None
@@ -240,6 +344,10 @@ def build_verified_pending_live_trade_plan(
     get_order = getattr(clob_client, "get_order", None)
     if not callable(get_order):
         return None
+
+    official_trade_plan = build_trade_plan_from_official_trades(strategy_state, clob_client=clob_client)
+    if official_trade_plan is not None:
+        return official_trade_plan
 
     order_payload = get_order(strategy_state.pending_live_order_id)
     if not isinstance(order_payload, dict):

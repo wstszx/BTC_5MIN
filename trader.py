@@ -272,6 +272,7 @@ def place_live_order(
         clob_client=live_client,
         strategy_state=strategy_state,
         now=now,
+        funder=cfg.live_funder,
     )
     _apply_live_strategy_state_to_session_state(state, strategy_state)
     if pending_status is not None and pending_status["status"] == "pending_settlement":
@@ -887,6 +888,7 @@ def run_live_trading(
                         clob_client=live_client,
                         strategy_state=strategy_state,
                         now=now,
+                        funder=cfg.live_funder,
                     )
                     if pending_status is not None and pending_status.get("status") == "settled":
                         _append_settled_live_trade_log(
