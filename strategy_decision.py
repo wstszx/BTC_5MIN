@@ -31,6 +31,22 @@ def resolve_quote_price(side: str, quote: MarketQuote) -> float | None:
     raise ValueError(f"Unsupported side: {side}")
 
 
+def entry_price_skip_reason(
+    *,
+    strategy_prefix: str,
+    price: float | None,
+    min_entry_price: float | None,
+    max_entry_price: float | None,
+) -> str | None:
+    if price is None:
+        return None
+    if min_entry_price is not None and price < min_entry_price:
+        return f"{strategy_prefix}_price_too_low"
+    if max_entry_price is not None and price > max_entry_price:
+        return f"{strategy_prefix}_price_too_high"
+    return None
+
+
 def resolve_signal_up_price(quote: MarketQuote) -> float | None:
     # For signal direction, prefer traded/last price to reduce orderbook ask spikes noise.
     return quote.up_price if quote.up_price is not None else quote.up_best_ask
@@ -227,11 +243,18 @@ def resolve_side_from_strategy(
         if is_valid_signal_price(state.signal_round_open_up_price) and is_valid_signal_price(signal_current_up_price):
             signal_delta = signal_current_up_price - state.signal_round_open_up_price
         if cfg.strategy_id in {7, 8}:
+            strategy_prefix = "strategy7" if cfg.strategy_id == 7 else "strategy8"
             candidate_price = resolve_quote_price(state.signal_round_locked_side, quote)
-            if candidate_price is not None and candidate_price > cfg.strategy7_max_entry_price:
+            price_skip_reason = entry_price_skip_reason(
+                strategy_prefix=strategy_prefix,
+                price=candidate_price,
+                min_entry_price=getattr(cfg, "min_entry_price", None),
+                max_entry_price=getattr(cfg, "max_entry_price", None),
+            )
+            if price_skip_reason is not None:
                 return SideDecision(
                     side=None,
-                    reason="strategy7_price_too_high" if cfg.strategy_id == 7 else "strategy8_price_too_high",
+                    reason=price_skip_reason,
                     signal_open_up_price=state.signal_round_open_up_price,
                     signal_current_up_price=signal_current_up_price,
                     signal_threshold=cfg.strategy7_momentum_threshold,
@@ -370,10 +393,16 @@ def resolve_side_from_strategy(
             resolved_side = "UP" if momentum_delta > 0 else "DOWN"
             decision_reason = None
         candidate_price = resolve_quote_price(resolved_side, quote)
-        if candidate_price is not None and candidate_price > cfg.strategy7_max_entry_price:
+        price_skip_reason = entry_price_skip_reason(
+            strategy_prefix=strategy_prefix,
+            price=candidate_price,
+            min_entry_price=getattr(cfg, "min_entry_price", None),
+            max_entry_price=getattr(cfg, "max_entry_price", None),
+        )
+        if price_skip_reason is not None:
             return SideDecision(
                 side=None,
-                reason=f"{strategy_prefix}_price_too_high",
+                reason=price_skip_reason,
                 signal_open_up_price=signal_open_up_price,
                 signal_current_up_price=signal_current_up_price,
                 signal_threshold=cfg.strategy7_momentum_threshold,

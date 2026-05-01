@@ -50,9 +50,11 @@ _FLOAT_CONFIG_KEYS: frozenset[str] = frozenset(
         "PAPER_SIMULATED_WALLET_BALANCE",
         "TARGET_PROFIT",
         "BASE_ORDER_COST",
+        "MIN_STAKE",
         "MAX_STAKE",
         "MAX_PRICE_THRESHOLD",
         "MIN_PRICE_THRESHOLD",
+        "MIN_ENTRY_PRICE",
         "SIGNAL_MOMENTUM_THRESHOLD",
         "SIGNAL_DYNAMIC_THRESHOLD_K",
         "OFI_THRESHOLD",
@@ -401,6 +403,7 @@ class PaperTimeframeProfile:
     bet_sizing_mode: str
     base_order_cost: float
     max_consecutive_losses: int
+    min_stake: float | None
     max_stake: float | None
     open_delay_seconds: int
     signal_momentum_threshold: float
@@ -408,6 +411,8 @@ class PaperTimeframeProfile:
     binance_signal_stale_seconds: float
     strategy7_ofi_threshold: float
     strategy7_momentum_threshold: float
+    min_entry_price: float | None
+    max_entry_price: float
     strategy7_max_entry_price: float
 
 
@@ -418,6 +423,7 @@ class LiveStrategyProfile:
     bet_sizing_mode: str
     base_order_cost: float
     max_consecutive_losses: int
+    min_stake: float | None
     max_stake: float | None
     open_delay_seconds: int
     signal_momentum_threshold: float
@@ -430,6 +436,7 @@ class LiveStrategyProfile:
     signal_lock_before_entry_seconds: int
     max_stake_skip_alert_threshold: int
     ofi_threshold: float
+    min_entry_price: float | None
     max_entry_price: float
     binance_signal_stale_seconds: float
     strategy7_ofi_threshold: float
@@ -448,6 +455,7 @@ def _base_live_profile_for_strategy(cfg: AppConfig, strategy_id: int) -> LiveStr
         bet_sizing_mode=cfg.bet_sizing_mode,
         base_order_cost=cfg.base_order_cost,
         max_consecutive_losses=cfg.max_consecutive_losses,
+        min_stake=cfg.min_stake,
         max_stake=cfg.max_stake,
         open_delay_seconds=cfg.open_delay_seconds,
         signal_momentum_threshold=cfg.signal_momentum_threshold,
@@ -460,6 +468,7 @@ def _base_live_profile_for_strategy(cfg: AppConfig, strategy_id: int) -> LiveStr
         signal_lock_before_entry_seconds=cfg.signal_lock_before_entry_seconds,
         max_stake_skip_alert_threshold=cfg.max_stake_skip_alert_threshold,
         ofi_threshold=cfg.ofi_threshold,
+        min_entry_price=cfg.min_entry_price,
         max_entry_price=cfg.max_entry_price,
         binance_signal_stale_seconds=cfg.binance_signal_stale_seconds,
         strategy7_ofi_threshold=cfg.strategy7_ofi_threshold,
@@ -473,13 +482,17 @@ def _base_live_profile_for_strategy(cfg: AppConfig, strategy_id: int) -> LiveStr
 
 
 def _cap_profile_safety_limits(cfg: AppConfig, profile: LiveStrategyProfile) -> LiveStrategyProfile:
+    if cfg.min_stake is not None and profile.min_stake is not None:
+        profile.min_stake = max(profile.min_stake, cfg.min_stake)
     if cfg.max_stake is not None and profile.max_stake is not None:
         profile.max_stake = min(profile.max_stake, cfg.max_stake)
     return profile
 
 
 def _profile_for_strategy_prefix(cfg: AppConfig, strategy_id: int, prefix: str) -> LiveStrategyProfile:
+    min_stake_key = f"{prefix}_MIN_STAKE"
     max_stake_key = f"{prefix}_MAX_STAKE"
+    legacy_strategy7_max_entry_key = f"{prefix}_STRATEGY7_MAX_ENTRY_PRICE"
 
     return _cap_profile_safety_limits(
         cfg,
@@ -489,6 +502,7 @@ def _profile_for_strategy_prefix(cfg: AppConfig, strategy_id: int, prefix: str) 
             bet_sizing_mode=(os.getenv(f"{prefix}_BET_SIZING_MODE") or cfg.bet_sizing_mode).upper(),
             base_order_cost=_env_float(f"{prefix}_BASE_ORDER_COST", cfg.base_order_cost),
             max_consecutive_losses=_env_int(f"{prefix}_MAX_CONSECUTIVE_LOSSES", cfg.max_consecutive_losses),
+            min_stake=_env_optional_float(min_stake_key) if os.getenv(min_stake_key) is not None else cfg.min_stake,
             max_stake=_env_optional_float(max_stake_key) if os.getenv(max_stake_key) is not None else cfg.max_stake,
             open_delay_seconds=_env_int(f"{prefix}_OPEN_DELAY_SECONDS", cfg.open_delay_seconds),
             signal_momentum_threshold=_env_float(f"{prefix}_SIGNAL_MOMENTUM_THRESHOLD", cfg.signal_momentum_threshold),
@@ -522,7 +536,15 @@ def _profile_for_strategy_prefix(cfg: AppConfig, strategy_id: int, prefix: str) 
                 cfg.max_stake_skip_alert_threshold,
             ),
             ofi_threshold=_env_float(f"{prefix}_OFI_THRESHOLD", cfg.ofi_threshold),
-            max_entry_price=_env_float(f"{prefix}_MAX_ENTRY_PRICE", cfg.max_entry_price),
+            min_entry_price=_env_optional_float(f"{prefix}_MIN_ENTRY_PRICE")
+            if os.getenv(f"{prefix}_MIN_ENTRY_PRICE") is not None
+            else cfg.min_entry_price,
+            max_entry_price=_env_float(
+                f"{prefix}_MAX_ENTRY_PRICE",
+                _env_float(legacy_strategy7_max_entry_key, cfg.max_entry_price)
+                if strategy_id in {7, 8} and os.getenv(legacy_strategy7_max_entry_key) is not None
+                else cfg.max_entry_price,
+            ),
             binance_signal_stale_seconds=_env_float(
                 f"{prefix}_BINANCE_SIGNAL_STALE_SECONDS",
                 cfg.binance_signal_stale_seconds,
@@ -581,6 +603,7 @@ class AppConfig:
     bet_sizing_mode: str = field(default_factory=lambda: (os.getenv("BET_SIZING_MODE") or "FIXED_BASE_COST").upper())
     base_order_cost: float = field(default_factory=lambda: _env_float("BASE_ORDER_COST", 1.0))
     max_consecutive_losses: int = field(default_factory=lambda: _env_int("MAX_CONSECUTIVE_LOSSES", 6))
+    min_stake: float | None = field(default_factory=lambda: _env_optional_float("MIN_STAKE"))
     max_stake: float | None = field(default_factory=lambda: _env_optional_float("MAX_STAKE"))
     max_price_threshold: float = field(default_factory=lambda: _env_float("MAX_PRICE_THRESHOLD", 0.65))
     signal_momentum_threshold: float = field(default_factory=lambda: _env_float("SIGNAL_MOMENTUM_THRESHOLD", 0.015))
@@ -593,8 +616,15 @@ class AppConfig:
     signal_lock_before_entry_seconds: int = field(default_factory=lambda: _env_int("SIGNAL_LOCK_BEFORE_ENTRY_SECONDS", 20))
     max_stake_skip_alert_threshold: int = field(default_factory=lambda: _env_int("MAX_STAKE_SKIP_ALERT_THRESHOLD", 5))
     min_price_threshold: float | None = field(default_factory=lambda: _env_optional_float('MIN_PRICE_THRESHOLD'))
+    min_entry_price: float | None = field(
+        default_factory=lambda: _env_optional_float("MIN_ENTRY_PRICE")
+        if os.getenv("MIN_ENTRY_PRICE") is not None
+        else _env_optional_float("MIN_PRICE_THRESHOLD")
+    )
     ofi_threshold: float = field(default_factory=lambda: _env_float('OFI_THRESHOLD', 0.65))
-    max_entry_price: float = field(default_factory=lambda: _env_float('MAX_ENTRY_PRICE', 0.56))
+    max_entry_price: float = field(
+        default_factory=lambda: _env_float("MAX_ENTRY_PRICE", _env_float("MAX_PRICE_THRESHOLD", 0.56))
+    )
     strategy7_ofi_threshold: float = field(default_factory=lambda: _env_float("STRATEGY7_OFI_THRESHOLD", 0.7))
     strategy7_momentum_threshold: float = field(default_factory=lambda: _env_float("STRATEGY7_MOMENTUM_THRESHOLD", 0.025))
     strategy7_max_entry_price: float = field(default_factory=lambda: _env_float("STRATEGY7_MAX_ENTRY_PRICE", 0.54))
@@ -662,6 +692,8 @@ class AppConfig:
     live_profiles: dict[int, LiveStrategyProfile] = field(init=False)
 
     def __post_init__(self) -> None:
+        if os.getenv("MAX_ENTRY_PRICE") is None and self.strategy7_max_entry_price != 0.54:
+            self.max_entry_price = self.strategy7_max_entry_price
         if not self.paper_timeframes:
             self.paper_timeframes = _env_paper_timeframes(self.market_timeframe)
         raw_strategy_ids = os.getenv(STRATEGY_IDS)
@@ -705,6 +737,13 @@ class AppConfig:
                     if use_unified_strategy_config
                     else _env_int(f"{prefix}_MAX_CONSECUTIVE_LOSSES", self.max_consecutive_losses)
                 ),
+                min_stake=(
+                    self.min_stake
+                    if use_unified_strategy_config
+                    else _env_optional_float(f"{prefix}_MIN_STAKE")
+                    if os.getenv(f"{prefix}_MIN_STAKE") is not None
+                    else self.min_stake
+                ),
                 max_stake=(
                     self.max_stake
                     if use_unified_strategy_config
@@ -747,6 +786,18 @@ class AppConfig:
                         f"{prefix}_STRATEGY7_MOMENTUM_THRESHOLD",
                         self.strategy7_momentum_threshold,
                     )
+                ),
+                min_entry_price=(
+                    self.min_entry_price
+                    if use_unified_strategy_config
+                    else _env_optional_float(f"{prefix}_MIN_ENTRY_PRICE")
+                    if os.getenv(f"{prefix}_MIN_ENTRY_PRICE") is not None
+                    else self.min_entry_price
+                ),
+                max_entry_price=(
+                    self.max_entry_price
+                    if use_unified_strategy_config
+                    else _env_float(f"{prefix}_MAX_ENTRY_PRICE", self.max_entry_price)
                 ),
                 strategy7_max_entry_price=(
                     self.strategy7_max_entry_price

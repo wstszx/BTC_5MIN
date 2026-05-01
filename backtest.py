@@ -263,7 +263,7 @@ def run_backtest(csv_path: Path, cfg: AppConfig | None = None) -> BacktestResult
                 state.round_index += 1
                 continue
         price = _select_entry_price(row, side, cfg.entry_timing)
-        if cfg.strategy_id in {7, 8} and price is not None and price > cfg.strategy7_max_entry_price:
+        if cfg.strategy_id in {7, 8} and price is not None and price > getattr(cfg, "max_entry_price", cfg.max_price_threshold):
             strategy_prefix = "strategy7" if cfg.strategy_id == 7 else "strategy8"
             records.append(
                 _build_record(
@@ -289,7 +289,11 @@ def run_backtest(csv_path: Path, cfg: AppConfig | None = None) -> BacktestResult
             side=side,
             price=price,
             target_profit=cfg.target_profit,
+            min_entry_price=getattr(cfg, "min_entry_price", getattr(cfg, "min_price_threshold", None)),
+            max_entry_price=getattr(cfg, "max_entry_price", cfg.max_price_threshold),
+            min_price_threshold=getattr(cfg, "min_price_threshold", None),
             max_price_threshold=cfg.max_price_threshold,
+            min_stake=getattr(cfg, "min_stake", None),
             max_stake=cfg.max_stake,
             max_consecutive_losses=cfg.max_consecutive_losses,
             bet_sizing_mode=cfg.bet_sizing_mode,

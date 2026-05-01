@@ -261,7 +261,7 @@ def _simulate_segment(
         if price is None or price <= 0 or price >= 1:
             skipped += 1
             continue
-        if strategy_id in {7, 8} and price > cfg.strategy7_max_entry_price:
+        if strategy_id in {7, 8} and price > getattr(cfg, "max_entry_price", cfg.max_price_threshold):
             skipped += 1
             continue
         if price > cfg.max_price_threshold:

@@ -1468,20 +1468,20 @@ def test_dashboard_assets_rebalance_main_columns_for_config_and_decision():
     assert 'class="panel left-stack config-stack"' in html
     assert 'class="panel center-stack decision-stack"' in html
     assert 'class="stack right-stack monitor-stack"' not in html
-    assert 'grid-template-columns: 380px minmax(0, 1fr);' in css
+    assert 'grid-template-columns: minmax(560px, 1.42fr) minmax(360px, 0.82fr);' in css
 
 
 def test_dashboard_assets_use_two_column_primary_layout():
     css = dashboard._dashboard_css()
 
-    assert 'grid-template-columns: 380px minmax(0, 1fr);' in css
+    assert 'grid-template-columns: minmax(560px, 1.42fr) minmax(360px, 0.82fr);' in css
 
 
 def test_dashboard_assets_mid_width_layout_keeps_config_and_decision_columns():
     css = dashboard._dashboard_css()
 
     assert '@media (max-width: 1450px) {' in css
-    assert 'grid-template-columns: 340px minmax(0, 1fr);' in css
+    assert 'grid-template-columns: minmax(500px, 1.28fr) minmax(340px, 0.9fr);' in css
 
 
 def test_dashboard_assets_remove_visible_config_status_block():
@@ -1588,7 +1588,7 @@ def test_dashboard_assets_responsive_layout_preserves_priority_order():
     css = dashboard._dashboard_css()
 
     assert '@media (max-width: 1450px) {' in css
-    assert 'grid-template-columns: 340px minmax(0, 1fr);' in css
+    assert 'grid-template-columns: minmax(500px, 1.28fr) minmax(340px, 0.9fr);' in css
     assert '@media (max-width: 1024px) {' in css
     assert '.layout { grid-template-columns: 1fr; }' in css
 
@@ -2801,7 +2801,7 @@ def test_dashboard_update_config_notifies_runtime_reload_after_market_timeframe_
                 'BINANCE_SIGNAL_STALE_SECONDS': '2.0',
                 'STRATEGY7_OFI_THRESHOLD': '0.50',
                 'STRATEGY7_MOMENTUM_THRESHOLD': '0.005',
-                'STRATEGY7_MAX_ENTRY_PRICE': '0.55',
+                'MAX_ENTRY_PRICE': '0.55',
                 'STRATEGY7_MIN_SIGNAL_GAP': '0.01',
                 'STRATEGY7_CONFIRM_BEFORE_ENTRY_SECONDS': '3',
                 'STRATEGY7_LATE_CONFIRM_STRONG_SIGNAL_GAP': '0.03',
@@ -3041,7 +3041,7 @@ def test_dashboard_config_payload_includes_strategy7_fields(tmp_path: Path):
         assert payload['labels']['STRATEGY7_LATE_CONFIRM_RELAX_SECONDS'] == '策略7 强信号放宽秒数'
         assert payload['field_scope']['STRATEGY7_OFI_THRESHOLD'] == 'strategy_7_only'
         assert payload['field_scope']['STRATEGY7_LATE_CONFIRM_STRONG_SIGNAL_GAP'] == 'strategy_7_only'
-        assert 'STRATEGY7_MAX_ENTRY_PRICE' in payload['editable_keys']
+        assert 'MAX_ENTRY_PRICE' in payload['editable_keys']
         assert 'STRATEGY7_LATE_CONFIRM_RELAX_SECONDS' in payload['editable_keys']
     finally:
         state.close()
@@ -3056,7 +3056,7 @@ def test_dashboard_update_config_accepts_strategy7_values(tmp_path: Path):
             'PAPER_STRATEGY_IDS': '7',
             'STRATEGY7_OFI_THRESHOLD': '0.7',
             'STRATEGY7_MOMENTUM_THRESHOLD': '0.025',
-            'STRATEGY7_MAX_ENTRY_PRICE': '0.54',
+            'MAX_ENTRY_PRICE': '0.54',
             'STRATEGY7_MIN_SIGNAL_GAP': '0.03',
             'STRATEGY7_CONFIRM_BEFORE_ENTRY_SECONDS': '12',
             'STRATEGY7_LATE_CONFIRM_STRONG_SIGNAL_GAP': '0.02',
@@ -3064,6 +3064,7 @@ def test_dashboard_update_config_accepts_strategy7_values(tmp_path: Path):
         })
         assert payload['env_values']['STRATEGY_ID'] == '7'
         assert payload['env_values']['STRATEGY7_OFI_THRESHOLD'] == '0.7'
+        assert payload['env_values']['MAX_ENTRY_PRICE'] == '0.54'
         assert payload['env_values']['STRATEGY7_CONFIRM_BEFORE_ENTRY_SECONDS'] == '12'
         assert payload['env_values']['STRATEGY7_LATE_CONFIRM_STRONG_SIGNAL_GAP'] == '0.02'
         assert payload['env_values']['STRATEGY7_LATE_CONFIRM_RELAX_SECONDS'] == '4.0'

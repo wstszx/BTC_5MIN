@@ -81,6 +81,22 @@ def test_build_trade_plan_skips_when_order_cost_exceeds_max_stake():
     assert plan.skip_reason == "order_cost_above_max_stake"
 
 
+def test_build_trade_plan_skips_when_order_cost_below_min_stake():
+    state = SessionState()
+    plan = build_trade_plan(
+        state=state,
+        side="UP",
+        price=0.5,
+        target_profit=0.5,
+        max_price_threshold=0.65,
+        min_stake=0.75,
+        max_stake=10,
+        max_consecutive_losses=8,
+    )
+    assert plan.should_trade is False
+    assert plan.skip_reason == "order_cost_below_min_stake"
+
+
 def test_build_trade_plan_does_not_skip_when_daily_realized_pnl_is_negative():
     state = SessionState(daily_realized_pnl=-20)
     plan = build_trade_plan(

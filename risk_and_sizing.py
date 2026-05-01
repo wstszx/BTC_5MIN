@@ -36,10 +36,13 @@ def build_trade_plan(
     side: str,
     price: float | None,
     target_profit: float,
-    min_price_threshold: float | None = None,
-    max_price_threshold: float,
     max_stake: float | None,
     max_consecutive_losses: int,
+    min_entry_price: float | None = None,
+    max_entry_price: float | None = None,
+    min_price_threshold: float | None = None,
+    max_price_threshold: float | None = None,
+    min_stake: float | None = None,
     bet_sizing_mode: str = "TARGET_PROFIT",
     base_order_cost: float = 1.0,
 ) -> TradePlan:
@@ -58,10 +61,13 @@ def build_trade_plan(
     if not validate_price(price):
         return TradePlan(False, side=side, price=price, skip_reason="invalid_price")
 
-    if min_price_threshold is not None and price < min_price_threshold:
+    effective_min_entry_price = min_entry_price if min_entry_price is not None else min_price_threshold
+    effective_max_entry_price = max_entry_price if max_entry_price is not None else max_price_threshold
+
+    if effective_min_entry_price is not None and price < effective_min_entry_price:
         return TradePlan(False, side=side, price=price, skip_reason='price_below_threshold')
 
-    if price > max_price_threshold:
+    if effective_max_entry_price is not None and price > effective_max_entry_price:
         return TradePlan(False, side=side, price=price, skip_reason="price_above_threshold")
     mode = bet_sizing_mode.upper()
     if mode == "FIXED_BASE_COST":
@@ -81,6 +87,9 @@ def build_trade_plan(
         expected_profit = order_size * (1 - price)
     else:
         return TradePlan(False, side=side, price=price, skip_reason="invalid_bet_sizing_mode")
+
+    if min_stake is not None and order_cost < min_stake:
+        return TradePlan(False, side=side, price=price, skip_reason="order_cost_below_min_stake")
 
     if max_stake is not None and order_cost > max_stake:
         return TradePlan(False, side=side, price=price, skip_reason="order_cost_above_max_stake")

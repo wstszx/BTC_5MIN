@@ -24,6 +24,7 @@ def test_strategy_config_layout_can_collapse_inside_left_panel():
 
     assert "grid-template-columns: repeat(auto-fit, minmax(min(100%, 150px), 1fr));" in css
     assert ".strategy-profile-grid {" in css
-    assert "grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr));" in css
+    assert "grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr));" in css
+    assert "grid-template-columns: repeat(auto-fit, minmax(min(100%, 150px), 1fr));" in css
     assert ".strategy-profile-field {" in css
     assert "grid-template-columns: minmax(0, 1fr);" in css

@@ -250,24 +250,29 @@ PAPER_PROFILE_EDITABLE_FIELDS: tuple[str, ...] = (
     "TARGET_PROFIT",
     "BET_SIZING_MODE",
     "BASE_ORDER_COST",
+    "MIN_STAKE",
     "MAX_CONSECUTIVE_LOSSES",
     "MAX_STAKE",
+    "MIN_ENTRY_PRICE",
+    "MAX_ENTRY_PRICE",
     "OPEN_DELAY_SECONDS",
     "SIGNAL_MOMENTUM_THRESHOLD",
     "OFI_THRESHOLD",
     "BINANCE_SIGNAL_STALE_SECONDS",
     "STRATEGY7_OFI_THRESHOLD",
     "STRATEGY7_MOMENTUM_THRESHOLD",
-    "STRATEGY7_MAX_ENTRY_PRICE",
 )
 
 STRATEGY_PROFILE_EDITABLE_FIELDS: tuple[str, ...] = (
     "TARGET_PROFIT",
     "BET_SIZING_MODE",
     "BASE_ORDER_COST",
+    "MIN_STAKE",
+    "MAX_STAKE",
+    "MIN_ENTRY_PRICE",
+    "MAX_ENTRY_PRICE",
     "MAX_CONSECUTIVE_LOSSES",
     "OPEN_DELAY_SECONDS",
-    "MAX_STAKE",
     "SIGNAL_MOMENTUM_THRESHOLD",
     "SIGNAL_WEAK_SIGNAL_MODE",
     "SIGNAL_FALLBACK_STRATEGY_ID",
@@ -280,7 +285,6 @@ STRATEGY_PROFILE_EDITABLE_FIELDS: tuple[str, ...] = (
     "BINANCE_SIGNAL_STALE_SECONDS",
     "STRATEGY7_OFI_THRESHOLD",
     "STRATEGY7_MOMENTUM_THRESHOLD",
-    "STRATEGY7_MAX_ENTRY_PRICE",
     "STRATEGY7_MIN_SIGNAL_GAP",
     "STRATEGY7_CONFIRM_BEFORE_ENTRY_SECONDS",
     "STRATEGY7_LATE_CONFIRM_STRONG_SIGNAL_GAP",
@@ -291,6 +295,10 @@ STRATEGY_PROFILE_COMMON_FIELDS: tuple[str, ...] = (
     "TARGET_PROFIT",
     "BET_SIZING_MODE",
     "BASE_ORDER_COST",
+    "MIN_STAKE",
+    "MAX_STAKE",
+    "MIN_ENTRY_PRICE",
+    "MAX_ENTRY_PRICE",
     "MAX_CONSECUTIVE_LOSSES",
     "OPEN_DELAY_SECONDS",
 )
@@ -358,7 +366,6 @@ def _strategy_profile_field_names(strategy_id: int | str) -> list[str]:
                 "BINANCE_SIGNAL_STALE_SECONDS",
                 "STRATEGY7_OFI_THRESHOLD",
                 "STRATEGY7_MOMENTUM_THRESHOLD",
-                "STRATEGY7_MAX_ENTRY_PRICE",
                 "STRATEGY7_MIN_SIGNAL_GAP",
                 "STRATEGY7_CONFIRM_BEFORE_ENTRY_SECONDS",
                 "STRATEGY7_LATE_CONFIRM_STRONG_SIGNAL_GAP",
@@ -393,7 +400,10 @@ def _cfg_for_paper_timeframe(cfg: AppConfig, timeframe: str) -> AppConfig:
         bet_sizing_mode=profile.bet_sizing_mode,
         base_order_cost=profile.base_order_cost,
         max_consecutive_losses=profile.max_consecutive_losses,
+        min_stake=profile.min_stake,
         max_stake=profile.max_stake,
+        min_entry_price=profile.min_entry_price,
+        max_entry_price=profile.max_entry_price,
         open_delay_seconds=profile.open_delay_seconds,
         signal_momentum_threshold=profile.signal_momentum_threshold,
         ofi_threshold=profile.ofi_threshold,
@@ -944,10 +954,11 @@ def _field_groups() -> list[dict[str, Any]]:
                 "BASE_ORDER_COST",
                 "PAPER_SIMULATED_WALLET_BALANCE",
                 "MAX_CONSECUTIVE_LOSSES",
+                "MIN_STAKE",
                 "MAX_STAKE",
-                "MAX_PRICE_THRESHOLD",
+                "MIN_ENTRY_PRICE",
+                "MAX_ENTRY_PRICE",
                 "OFI_THRESHOLD",
-                "STRATEGY7_MAX_ENTRY_PRICE",
             ],
         },
         {
@@ -1010,7 +1021,7 @@ TIMEFRAME_PRESETS: dict[str, dict[str, dict[str, str]]] = {
         "strategy7": {
             "STRATEGY7_OFI_THRESHOLD": "0.58",
             "STRATEGY7_MOMENTUM_THRESHOLD": "0.008",
-            "STRATEGY7_MAX_ENTRY_PRICE": "0.54",
+            "MAX_ENTRY_PRICE": "0.54",
             "STRATEGY7_MIN_SIGNAL_GAP": "0.015",
             "STRATEGY7_CONFIRM_BEFORE_ENTRY_SECONDS": "2",
             "STRATEGY7_LATE_CONFIRM_STRONG_SIGNAL_GAP": "0.035",
@@ -1036,7 +1047,7 @@ TIMEFRAME_PRESETS: dict[str, dict[str, dict[str, str]]] = {
         "strategy7": {
             "STRATEGY7_OFI_THRESHOLD": "0.50",
             "STRATEGY7_MOMENTUM_THRESHOLD": "0.005",
-            "STRATEGY7_MAX_ENTRY_PRICE": "0.55",
+            "MAX_ENTRY_PRICE": "0.55",
             "STRATEGY7_MIN_SIGNAL_GAP": "0.01",
             "STRATEGY7_CONFIRM_BEFORE_ENTRY_SECONDS": "3",
             "STRATEGY7_LATE_CONFIRM_STRONG_SIGNAL_GAP": "0.03",
@@ -1082,14 +1093,16 @@ class DashboardState:
         "TARGET_PROFIT",
         "BET_SIZING_MODE",
         "BASE_ORDER_COST",
+        "MIN_STAKE",
         "PAPER_SIMULATED_WALLET_BALANCE",
         "MAX_CONSECUTIVE_LOSSES",
         "MAX_STAKE",
+        "MIN_ENTRY_PRICE",
+        "MAX_ENTRY_PRICE",
         "MAX_PRICE_THRESHOLD",
         "OFI_THRESHOLD",
         "STRATEGY7_OFI_THRESHOLD",
         "STRATEGY7_MOMENTUM_THRESHOLD",
-        "STRATEGY7_MAX_ENTRY_PRICE",
         "STRATEGY7_MIN_SIGNAL_GAP",
         "STRATEGY7_CONFIRM_BEFORE_ENTRY_SECONDS",
         "STRATEGY7_LATE_CONFIRM_STRONG_SIGNAL_GAP",
@@ -1144,14 +1157,16 @@ class DashboardState:
         "TARGET_PROFIT": "每次目标净利",
         "BET_SIZING_MODE": "下注模式",
         "BASE_ORDER_COST": "固定起始下注金额",
+        "MIN_STAKE": "单笔最小下注金额",
         "PAPER_SIMULATED_WALLET_BALANCE": "纸面模拟钱包余额",
         "MAX_CONSECUTIVE_LOSSES": "连亏重置轮数",
         "MAX_STAKE": "单笔最大下注金额",
+        "MIN_ENTRY_PRICE": "最低买入价格",
+        "MAX_ENTRY_PRICE": "最高买入价格",
         "MAX_PRICE_THRESHOLD": "最高买入价格阈值",
         "OFI_THRESHOLD": "盘口失衡阈值",
         "STRATEGY7_OFI_THRESHOLD": "策略7 盘口失衡阈值",
         "STRATEGY7_MOMENTUM_THRESHOLD": "策略7 动量阈值",
-        "STRATEGY7_MAX_ENTRY_PRICE": "策略7 最高入场价",
         "STRATEGY7_MIN_SIGNAL_GAP": "策略7 最小信号优势",
         "STRATEGY7_CONFIRM_BEFORE_ENTRY_SECONDS": "策略7 最晚确认秒数",
         "STRATEGY7_LATE_CONFIRM_STRONG_SIGNAL_GAP": "策略7 强信号额外优势",
@@ -1217,14 +1232,16 @@ class DashboardState:
         "TARGET_PROFIT": "target_profit",
         "BET_SIZING_MODE": "bet_sizing_mode",
         "BASE_ORDER_COST": "base_order_cost",
+        "MIN_STAKE": "min_stake",
         "PAPER_SIMULATED_WALLET_BALANCE": "paper_simulated_wallet_balance",
         "MAX_CONSECUTIVE_LOSSES": "max_consecutive_losses",
         "MAX_STAKE": "max_stake",
+        "MIN_ENTRY_PRICE": "min_entry_price",
+        "MAX_ENTRY_PRICE": "max_entry_price",
         "MAX_PRICE_THRESHOLD": "max_price_threshold",
         "OFI_THRESHOLD": "ofi_threshold",
         "STRATEGY7_OFI_THRESHOLD": "strategy7_ofi_threshold",
         "STRATEGY7_MOMENTUM_THRESHOLD": "strategy7_momentum_threshold",
-        "STRATEGY7_MAX_ENTRY_PRICE": "strategy7_max_entry_price",
         "STRATEGY7_MIN_SIGNAL_GAP": "strategy7_min_signal_gap",
         "STRATEGY7_CONFIRM_BEFORE_ENTRY_SECONDS": "strategy7_confirm_before_entry_seconds",
         "STRATEGY7_LATE_CONFIRM_STRONG_SIGNAL_GAP": "strategy7_late_confirm_strong_signal_gap",
@@ -1267,14 +1284,16 @@ class DashboardState:
     FLOAT_CONFIG_KEYS: tuple[str, ...] = (
         "TARGET_PROFIT",
         "BASE_ORDER_COST",
+        "MIN_STAKE",
         "PAPER_SIMULATED_WALLET_BALANCE",
         "MAX_STAKE",
+        "MIN_ENTRY_PRICE",
+        "MAX_ENTRY_PRICE",
         "MAX_PRICE_THRESHOLD",
         "BINANCE_SIGNAL_STALE_SECONDS",
         "OFI_THRESHOLD",
         "STRATEGY7_OFI_THRESHOLD",
         "STRATEGY7_MOMENTUM_THRESHOLD",
-        "STRATEGY7_MAX_ENTRY_PRICE",
         "STRATEGY7_MIN_SIGNAL_GAP",
         "STRATEGY7_LATE_CONFIRM_STRONG_SIGNAL_GAP",
         "STRATEGY7_LATE_CONFIRM_RELAX_SECONDS",
@@ -1323,7 +1342,6 @@ class DashboardState:
         "SIGNAL_LOCK_BEFORE_ENTRY_SECONDS": "strategy_5_only",
         "STRATEGY7_OFI_THRESHOLD": "strategy_7_only",
         "STRATEGY7_MOMENTUM_THRESHOLD": "strategy_7_only",
-        "STRATEGY7_MAX_ENTRY_PRICE": "strategy_7_only",
         "STRATEGY7_MIN_SIGNAL_GAP": "strategy_7_only",
         "STRATEGY7_CONFIRM_BEFORE_ENTRY_SECONDS": "strategy_7_only",
         "STRATEGY7_LATE_CONFIRM_STRONG_SIGNAL_GAP": "strategy_7_only",
@@ -1356,14 +1374,16 @@ class DashboardState:
         "LIVE_AUTO_REDEEM_INITIAL_BACKOFF_SECONDS": "自动赎回失败后的首次退避等待秒数。",
         "LIVE_AUTO_REDEEM_MAX_BACKOFF_SECONDS": "自动赎回重试之间的最大退避上限秒数。",
         "BASE_ORDER_COST": "仅固定金额模式使用；获胜后策略会重置回这个起始下注金额。",
+        "MIN_STAKE": "单笔订单允许投入的最小 USDC；低于它时会跳过本轮。",
         "PAPER_SIMULATED_WALLET_BALANCE": "仅纸面模式使用，作为 dry-run 的模拟钱包余额；纸面不会读取真实钱包，但会经过与实盘相同的预算检查节点。",
         "MAX_CONSECUTIVE_LOSSES": "连续亏损达到这个次数后，策略会执行一次止损重置。",
         "MAX_STAKE": "单笔订单允许投入的最大 USDC；超过后会直接跳过本轮。",
+        "MIN_ENTRY_PRICE": "目标方向价格低于该值时不入场；留空则不设置下限。",
+        "MAX_ENTRY_PRICE": "目标方向价格高于该值时不入场。",
         "MAX_PRICE_THRESHOLD": "目标方向价格高于该阈值时不入场。",
         "OFI_THRESHOLD": "策略 6 的 Binance OFI 最小强度要求，低于该阈值直接跳过。",
         "STRATEGY7_OFI_THRESHOLD": "策略 7 对 Binance OFI 的最小强度要求，低于该阈值直接跳过。",
         "STRATEGY7_MOMENTUM_THRESHOLD": "策略 7 对 Polymarket 轮内动量确认的最小要求。",
-        "STRATEGY7_MAX_ENTRY_PRICE": "策略 7 的更严格入场价格上限，高于该价格不入场。",
         "STRATEGY7_MIN_SIGNAL_GAP": "策略 7 要求 OFI 和动量超过阈值的最小额外优势，避免擦线交易。",
         "STRATEGY7_CONFIRM_BEFORE_ENTRY_SECONDS": "策略 7 需要在计划入场前至少提前这么多秒完成双信号确认。",
         "STRATEGY7_LATE_CONFIRM_STRONG_SIGNAL_GAP": "策略 7 只有在 OFI 和动量都额外强于阈值时，才允许走晚确认放宽通道。",
@@ -1791,7 +1811,10 @@ class DashboardState:
                     "bet_sizing_mode": profile.bet_sizing_mode,
                     "base_order_cost": _fmt_env(profile.base_order_cost),
                     "max_consecutive_losses": _fmt_env(profile.max_consecutive_losses),
+                    "min_stake": _fmt_env(profile.min_stake) if profile.min_stake is not None else "",
                     "max_stake": _fmt_env(profile.max_stake) if profile.max_stake is not None else "",
+                    "min_entry_price": _fmt_env(profile.min_entry_price) if profile.min_entry_price is not None else "",
+                    "max_entry_price": _fmt_env(profile.max_entry_price),
                     "open_delay_seconds": _fmt_env(profile.open_delay_seconds),
                     "signal_momentum_threshold": _fmt_env(profile.signal_momentum_threshold),
                     "ofi_threshold": _fmt_env(profile.ofi_threshold),
@@ -2073,6 +2096,9 @@ class DashboardState:
                     max_price_threshold=effective_cfg.max_price_threshold,
                     max_stake=effective_cfg.max_stake,
                     max_consecutive_losses=effective_cfg.max_consecutive_losses,
+                    min_stake=getattr(effective_cfg, "min_stake", None),
+                    min_entry_price=getattr(effective_cfg, "min_entry_price", getattr(effective_cfg, "min_price_threshold", None)),
+                    max_entry_price=getattr(effective_cfg, "max_entry_price", effective_cfg.max_price_threshold),
                     bet_sizing_mode=effective_cfg.bet_sizing_mode,
                     base_order_cost=effective_cfg.base_order_cost,
                 )
@@ -3422,7 +3448,7 @@ body::before {
   padding: 14px;
   display: grid;
   gap: 14px;
-  grid-template-columns: 380px minmax(0, 1fr);
+  grid-template-columns: minmax(560px, 1.42fr) minmax(360px, 0.82fr);
   align-items: start;
 }
 
@@ -4022,6 +4048,16 @@ input.input-compact {
   gap: 10px;
 }
 
+.strategy-profile-editor {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr));
+}
+
+.strategy-profile-editor > .strategy-profile-title,
+.strategy-profile-editor > .strategy-profile-subtitle,
+.strategy-profile-editor > .empty {
+  grid-column: 1 / -1;
+}
+
 .strategy-profile-card {
   border: 1px solid rgba(90, 144, 255, 0.24);
   border-radius: 10px;
@@ -4053,7 +4089,7 @@ input.input-compact {
 
 .strategy-profile-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 150px), 1fr));
   gap: 8px;
 }
 
@@ -4311,7 +4347,7 @@ tr:hover td { background: rgba(50, 88, 131, 0.1); }
 
 @media (max-width: 1450px) {
   .layout {
-    grid-template-columns: 340px minmax(0, 1fr);
+    grid-template-columns: minmax(500px, 1.28fr) minmax(340px, 0.9fr);
   }
 
   .report-card-body {
@@ -4528,7 +4564,7 @@ const HELP_SECTIONS = {
           '策略 1-4 是固定节奏策略，没有额外信号门槛，但仍受价格、下注金额、连续亏损和预算限制。',
           '策略 5 使用动量信号，SIGNAL_MOMENTUM_THRESHOLD 不满足时会跳过；价格不可用也会跳过。',
           '策略 6 使用 Binance OFI，OFI_THRESHOLD 不满足、信号过期或不可用时都会跳过。',
-          '策略 7 同时要求 OFI 和动量同向，受 STRATEGY7_OFI_THRESHOLD、STRATEGY7_MOMENTUM_THRESHOLD、STRATEGY7_MAX_ENTRY_PRICE 和确认时间限制影响。',
+          '策略 7 同时要求 OFI 和动量同向，受 STRATEGY7_OFI_THRESHOLD、STRATEGY7_MOMENTUM_THRESHOLD、MAX_ENTRY_PRICE 和确认时间限制影响。',
         ],
       },
       {
@@ -4613,6 +4649,7 @@ const REASON_LABELS = {
   invalid_price: '价格无效',
   invalid_base_order_cost: '固定起始下注金额无效',
   invalid_bet_sizing_mode: '下注模式无效',
+  order_cost_below_min_stake: '下单金额低于单笔下限',
   order_cost_above_max_stake: '下单金额超过单笔上限',
   order_size_not_positive: '下单份额无效',
   max_consecutive_losses_reached: '达到连续亏损重置阈值',
@@ -4628,6 +4665,7 @@ const REASON_LABELS = {
   strategy7_momentum_too_weak: '策略7 动量信号过弱',
   strategy7_signal_conflict: '盘口失衡与动量需同向确认',
   strategy7_entry_too_late: '策略7 确认出现过晚',
+  strategy7_price_too_low: '策略7 入场价格过低',
   strategy7_price_too_high: '策略7 入场价格过高',
   strategy7_confidence_too_low: '策略7 信号优势不足',
   strategy8_signal_unavailable: '策略8 信号不可用',
@@ -4637,6 +4675,7 @@ const REASON_LABELS = {
   strategy8_market_state_weak: '策略8 市场状态不明确',
   strategy8_conflict_reversal: '策略8 强冲突反转入场',
   strategy8_entry_too_late: '策略8 确认出现过晚',
+  strategy8_price_too_low: '策略8 入场价格过低',
   strategy8_price_too_high: '策略8 入场价格过高',
   awaiting_fill_confirmation: '等待成交确认',
   round_in_progress: '轮次仍在进行中',
@@ -4660,13 +4699,15 @@ const CONFIG_KEY_NAMES = {
   TARGET_PROFIT: '每次目标净利',
   BET_SIZING_MODE: '下注模式',
   BASE_ORDER_COST: '固定起始下注金额',
+  MIN_STAKE: '单笔最小下注金额',
   PAPER_SIMULATED_WALLET_BALANCE: '纸面模拟钱包余额',
   MAX_CONSECUTIVE_LOSSES: '连亏重置轮数',
   MAX_STAKE: '单笔最大下注金额',
+  MIN_ENTRY_PRICE: '最低买入价格',
+  MAX_ENTRY_PRICE: '最高买入价格',
   MAX_PRICE_THRESHOLD: '最高买入价格阈值',
   STRATEGY7_OFI_THRESHOLD: '策略7 盘口失衡阈值',
   STRATEGY7_MOMENTUM_THRESHOLD: '策略7 动量阈值',
-  STRATEGY7_MAX_ENTRY_PRICE: '策略7 最高入场价',
   STRATEGY7_MIN_SIGNAL_GAP: '策略7 最小信号优势',
   STRATEGY7_CONFIRM_BEFORE_ENTRY_SECONDS: '策略7 最晚确认秒数',
   SIGNAL_MOMENTUM_THRESHOLD: '动量阈值',
@@ -5597,15 +5638,17 @@ function renderPaperProfiles(payload) {
     'TARGET_PROFIT',
     'BET_SIZING_MODE',
     'BASE_ORDER_COST',
+    'MIN_STAKE',
     'MAX_CONSECUTIVE_LOSSES',
     'MAX_STAKE',
+    'MIN_ENTRY_PRICE',
+    'MAX_ENTRY_PRICE',
     'OPEN_DELAY_SECONDS',
     'SIGNAL_MOMENTUM_THRESHOLD',
     'OFI_THRESHOLD',
     'BINANCE_SIGNAL_STALE_SECONDS',
     'STRATEGY7_OFI_THRESHOLD',
     'STRATEGY7_MOMENTUM_THRESHOLD',
-    'STRATEGY7_MAX_ENTRY_PRICE',
   ];
 
   node.innerHTML = ''
@@ -5631,14 +5674,16 @@ function renderPaperProfiles(payload) {
               : fieldName === 'BET_SIZING_MODE' ? 'bet_sizing_mode'
               : fieldName === 'BASE_ORDER_COST' ? 'base_order_cost'
               : fieldName === 'MAX_CONSECUTIVE_LOSSES' ? 'max_consecutive_losses'
+              : fieldName === 'MIN_STAKE' ? 'min_stake'
               : fieldName === 'MAX_STAKE' ? 'max_stake'
+              : fieldName === 'MIN_ENTRY_PRICE' ? 'min_entry_price'
+              : fieldName === 'MAX_ENTRY_PRICE' ? 'max_entry_price'
               : fieldName === 'OPEN_DELAY_SECONDS' ? 'open_delay_seconds'
               : fieldName === 'SIGNAL_MOMENTUM_THRESHOLD' ? 'signal_momentum_threshold'
               : fieldName === 'OFI_THRESHOLD' ? 'ofi_threshold'
               : fieldName === 'BINANCE_SIGNAL_STALE_SECONDS' ? 'binance_signal_stale_seconds'
               : fieldName === 'STRATEGY7_OFI_THRESHOLD' ? 'strategy7_ofi_threshold'
-              : fieldName === 'STRATEGY7_MOMENTUM_THRESHOLD' ? 'strategy7_momentum_threshold'
-              : 'strategy7_max_entry_price'
+              : 'strategy7_momentum_threshold'
             ] ?? '');
         const options = selectOptions[scopedKey] || selectOptions[fieldName] || null;
         const controlHtml = Array.isArray(options)
@@ -6227,9 +6272,12 @@ function isCompactConfigField(key) {
   return [
     'TARGET_PROFIT',
     'BASE_ORDER_COST',
+    'MIN_STAKE',
     'PAPER_SIMULATED_WALLET_BALANCE',
     'MAX_CONSECUTIVE_LOSSES',
     'MAX_STAKE',
+    'MIN_ENTRY_PRICE',
+    'MAX_ENTRY_PRICE',
     'MAX_PRICE_THRESHOLD',
     'SIGNAL_MOMENTUM_THRESHOLD',
     'SIGNAL_FALLBACK_STRATEGY_ID',
