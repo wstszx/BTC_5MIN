@@ -3662,7 +3662,7 @@ body::before {
 
 .group-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 150px), 1fr));
   gap: 10px;
 }
 
@@ -3684,6 +3684,8 @@ body::before {
   font-size: 11px;
   color: var(--muted);
   line-height: 1.45;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .field input,
@@ -3700,6 +3702,7 @@ input.input-compact {
   padding: 6px 8px;
   font-size: 12px;
   font-family: var(--mono);
+  min-width: 0;
 }
 
 .field input.input-compact,
@@ -4024,6 +4027,7 @@ input.input-compact {
   border-radius: 10px;
   padding: 10px;
   background: rgba(6, 12, 22, 0.72);
+  min-width: 0;
 }
 
 .strategy-profile-head {
@@ -4031,6 +4035,8 @@ input.input-compact {
   justify-content: space-between;
   align-items: flex-start;
   gap: 10px;
+  flex-wrap: wrap;
+  min-width: 0;
 }
 
 .strategy-profile-title {
@@ -4047,21 +4053,28 @@ input.input-compact {
 
 .strategy-profile-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr));
   gap: 8px;
 }
 
 .strategy-profile-field {
   min-width: 0;
   display: grid;
-  grid-template-columns: minmax(90px, 1fr) minmax(92px, auto) auto;
+  grid-template-columns: minmax(0, 1fr);
   gap: 6px;
-  align-items: center;
+  align-items: stretch;
   font-size: 11px;
 }
 
 .strategy-profile-field label {
   color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+.strategy-profile-field .chip {
+  justify-self: start;
+  max-width: 100%;
+  white-space: normal;
   overflow-wrap: anywhere;
 }
 

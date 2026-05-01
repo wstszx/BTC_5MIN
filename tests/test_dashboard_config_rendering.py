@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from dashboard import DashboardState, _dashboard_js
+from dashboard import DashboardState, _dashboard_css, _dashboard_js
 
 
 def test_render_config_builds_display_values_before_using_them():
@@ -17,3 +17,13 @@ def test_dashboard_config_metadata_includes_live_strategy_ids(tmp_path: Path):
         assert payload["labels"]["LIVE_STRATEGY_IDS"] == "实盘策略组合"
     finally:
         state.close()
+
+
+def test_strategy_config_layout_can_collapse_inside_left_panel():
+    css = _dashboard_css()
+
+    assert "grid-template-columns: repeat(auto-fit, minmax(min(100%, 150px), 1fr));" in css
+    assert ".strategy-profile-grid {" in css
+    assert "grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr));" in css
+    assert ".strategy-profile-field {" in css
+    assert "grid-template-columns: minmax(0, 1fr);" in css
