@@ -167,6 +167,55 @@ def resolved_result_from_official_market(event: dict[str, Any], market: dict[str
     return None
 
 
+def resolve_pending_live_result(
+    *,
+    market_client: Any,
+    funder: str | None,
+    slug: str,
+) -> tuple[str | None, dict[str, Any] | None]:
+    event = market_client.get_event_by_slug(slug)
+    market = (event.get("markets") or [{}])[0]
+    official_market_result = resolved_result_from_official_market(event, market)
+    if official_market_result:
+        return official_market_result, None
+
+    official_position_result = resolved_result_from_redeemable_positions(
+        market_client,
+        funder=funder,
+        slug=slug,
+    )
+    cached_result = cached_ws_market_result(market_client, market)
+    result = official_position_result or cached_result
+    if result:
+        return result, None
+    return None, {
+        "status": "pending_settlement",
+        "slug": slug,
+        "skip_reason": "round_unresolved",
+    }
+
+
+def build_frozen_pending_live_plan(strategy_state: LiveStrategyState) -> TradePlan | None:
+    if strategy_state.pending_live_side not in {"UP", "DOWN"}:
+        return None
+    if strategy_state.pending_live_price is None:
+        return None
+    if strategy_state.pending_live_order_size is None or strategy_state.pending_live_order_size <= 0:
+        return None
+    if strategy_state.pending_live_order_cost is None or strategy_state.pending_live_order_cost <= 0:
+        return None
+    if strategy_state.pending_live_expected_profit is None:
+        return None
+    return TradePlan(
+        True,
+        side=strategy_state.pending_live_side,
+        price=strategy_state.pending_live_price,
+        order_size=strategy_state.pending_live_order_size,
+        order_cost=strategy_state.pending_live_order_cost,
+        expected_profit=strategy_state.pending_live_expected_profit,
+    )
+
+
 def settle_pending_live_trade_if_needed(
     *,
     market_client: Any,
@@ -196,46 +245,47 @@ def settle_pending_live_trade_if_needed(
             False,
         )
 
+    result, unresolved_status = resolve_pending_live_result(
+        market_client=market_client,
+        funder=funder,
+        slug=strategy_state.pending_live_slug,
+    )
+
     plan = pending_plan_resolver(strategy_state, clob_client=clob_client)
     if plan is None:
+        if result:
+            plan = build_frozen_pending_live_plan(strategy_state)
+        if plan is None:
+            skip_reason = "awaiting_fill_confirmation"
+            status_payload = unresolved_status or {
+                "status": "pending_settlement",
+                "slug": strategy_state.pending_live_slug,
+                "skip_reason": skip_reason,
+            }
+            status_payload.update(
+                {
+                    "status": "pending_settlement",
+                    "slug": strategy_state.pending_live_slug,
+                    "side": strategy_state.pending_live_side,
+                    "skip_reason": skip_reason,
+                    "pending_end_time": strategy_state.pending_live_end_time,
+                    "order_id": strategy_state.pending_live_order_id,
+                }
+            )
+            return strategy_state, status_payload, False
+
+    if not result:
         return (
             strategy_state,
             {
                 "status": "pending_settlement",
                 "slug": strategy_state.pending_live_slug,
                 "side": strategy_state.pending_live_side,
-                "skip_reason": "awaiting_fill_confirmation",
+                "skip_reason": "round_unresolved",
                 "pending_end_time": strategy_state.pending_live_end_time,
-                "order_id": strategy_state.pending_live_order_id,
             },
             False,
         )
-
-    event = market_client.get_event_by_slug(strategy_state.pending_live_slug)
-    market = (event.get("markets") or [{}])[0]
-    official_market_result = resolved_result_from_official_market(event, market)
-    if official_market_result:
-        result = official_market_result
-    else:
-        official_position_result = resolved_result_from_redeemable_positions(
-            market_client,
-            funder=funder,
-            slug=strategy_state.pending_live_slug,
-        )
-        cached_result = cached_ws_market_result(market_client, market)
-        result = official_position_result or cached_result
-        if not result:
-            return (
-                strategy_state,
-                {
-                    "status": "pending_settlement",
-                    "slug": strategy_state.pending_live_slug,
-                    "side": strategy_state.pending_live_side,
-                    "skip_reason": "round_unresolved",
-                    "pending_end_time": strategy_state.pending_live_end_time,
-                },
-                False,
-            )
     updated_state = apply_round_outcome(strategy_state, plan, won=(result == plan.side))
     trade_pnl = updated_state.cash_pnl - strategy_state.cash_pnl
     clear_pending_live_trade(updated_state)
