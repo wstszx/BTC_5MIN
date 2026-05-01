@@ -1,6 +1,6 @@
 import json
 import requests
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from config import AppConfig
 from polymarket_api import PolymarketClient
@@ -388,3 +388,47 @@ def test_ws_subscribe_assets_skips_duplicate_subscription_for_same_set():
     assert client._ws_app is not None
     assert len(client._ws_app.sent) == 0
     assert client._ws_subscribed_assets == {"same-a", "same-b"}
+
+
+def test_ws_subscribe_assets_resets_stale_open_connection_before_duplicate_check():
+    class _StubApp:
+        def __init__(self):
+            self.closed = False
+
+        def close(self):
+            self.closed = True
+
+    class _AliveThread:
+        def is_alive(self):
+            return True
+
+    cfg = AppConfig(ws_enabled=True, ws_trade_guard_stale_seconds=1.0)
+    client = PolymarketClient(cfg)
+    old_app = _StubApp()
+    now = datetime.now(timezone.utc)
+    client._ws_app = old_app
+    client._ws_thread = _AliveThread()
+    client._ws_opened_at = now
+    client._ws_last_message_at = now - timedelta(seconds=5)
+    client._ws_subscribed_assets = {"same-a", "same-b"}
+    client._ws_quotes_by_asset["same-a"] = {"last_price": 0.5, "updated_at": now - timedelta(seconds=5)}
+
+    ensure_calls = 0
+
+    def fake_ensure_ws_connection():
+        nonlocal ensure_calls
+        ensure_calls += 1
+
+    client._ensure_ws_connection = fake_ensure_ws_connection  # type: ignore[method-assign]
+
+    client._ws_subscribe_assets(["same-b", "same-a"])
+
+    assert ensure_calls == 1
+    assert old_app.closed is True
+    assert client._ws_app is None
+    assert client._ws_thread is None
+    assert client._ws_subscribed_assets == set()
+    assert client._ws_quotes_by_asset == {}
+    stats = client.get_ws_runtime_stats()
+    assert stats["ws_connected"] is False
+    assert stats["ws_current_error"] == "ws_stale_reconnecting"

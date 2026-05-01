@@ -92,6 +92,7 @@ from runtime_helpers import (
 )
 from clob_adapter import (
     OrderExecutionResult,
+    build_verified_pending_live_trade_plan as _build_verified_pending_live_trade_plan,
     create_live_clob_client as _create_live_clob_client,
     execute_order_plan as _adapter_execute_order_plan,
     is_live_fok_not_filled_error as _is_live_fok_not_filled_error,
@@ -230,6 +231,47 @@ def _execute_order_plan(
         balance_error=balance_error,
         client_factory=_create_live_clob_client,
     )
+
+
+def _plan_with_verified_live_fill(
+    *,
+    plan: TradePlan,
+    side: str,
+    order_id: str | None,
+    clob_client: Any | None,
+    max_entry_price: float | None = None,
+    strategy_id: int | None = None,
+    slug: str | None = None,
+) -> TradePlan:
+    if not order_id or clob_client is None:
+        return plan
+    try:
+        verified_plan = _build_verified_pending_live_trade_plan(
+            LiveStrategyState(
+                pending_live_side=side,
+                pending_live_order_id=order_id,
+            ),
+            clob_client=clob_client,
+        )
+    except Exception as exc:
+        _runtime_log(f"live order fill lookup failed order_id={order_id}: {exc}")
+        return plan
+    if verified_plan is None:
+        return plan
+    if (
+        max_entry_price is not None
+        and verified_plan.price is not None
+        and verified_plan.price > max_entry_price
+    ):
+        _runtime_log(
+            "official_fill_price_above_max_entry_price"
+            + " order_id=" + str(order_id)
+            + " strategy=" + str(strategy_id or "")
+            + " round=" + str(slug or "")
+            + " fill_price=" + f"{verified_plan.price:.6f}"
+            + " max_entry_price=" + str(max_entry_price)
+        )
+    return verified_plan
 
 
 def _sleep_until_round_end(
@@ -755,6 +797,15 @@ def place_live_order(
             "signal_locked": side_decision.signal_locked,
         }
 
+    executed_plan = _plan_with_verified_live_fill(
+        plan=plan,
+        side=side,
+        order_id=order_id,
+        clob_client=live_client,
+        max_entry_price=getattr(cfg, "max_entry_price", None),
+        strategy_id=cfg.strategy_id,
+        slug=target_round.slug,
+    )
     append_trade_log(
         log_path,
         TradeRecord(
@@ -767,10 +818,10 @@ def place_live_order(
             start_time=target_round.start_time,
             end_time=target_round.end_time,
             side=side,
-            price=plan.price,
-            order_size=plan.order_size,
-            order_cost=plan.order_cost,
-            expected_profit=plan.expected_profit,
+            price=executed_plan.price,
+            order_size=executed_plan.order_size,
+            order_cost=executed_plan.order_cost,
+            expected_profit=executed_plan.expected_profit,
             result=None,
             trade_pnl=0.0,
             cash_pnl=state.cash_pnl,
@@ -781,10 +832,10 @@ def place_live_order(
     )
     state.pending_live_slug = target_round.slug
     state.pending_live_side = side
-    state.pending_live_price = plan.price
-    state.pending_live_order_size = plan.order_size
-    state.pending_live_order_cost = plan.order_cost
-    state.pending_live_expected_profit = plan.expected_profit
+    state.pending_live_price = executed_plan.price
+    state.pending_live_order_size = executed_plan.order_size
+    state.pending_live_order_cost = executed_plan.order_cost
+    state.pending_live_expected_profit = executed_plan.expected_profit
     state.pending_live_order_id = order_id
     state.pending_live_end_time = target_round.end_time.isoformat()
     state.round_index += 1
@@ -797,10 +848,10 @@ def place_live_order(
         "slug": target_round.slug,
         "side": side,
         "token_id": token_id,
-        "price": price,
-        "order_size": plan.order_size,
-        "order_cost": plan.order_cost,
-        "expected_profit": plan.expected_profit,
+        "price": executed_plan.price,
+        "order_size": executed_plan.order_size,
+        "order_cost": executed_plan.order_cost,
+        "expected_profit": executed_plan.expected_profit,
         "order_type": cfg.live_order_type.upper(),
         "order_id": order_id,
         "response": response,
@@ -1468,6 +1519,15 @@ def run_live_trading(
                                 }
                             )
                             continue
+                        executed_plan = _plan_with_verified_live_fill(
+                            plan=plan,
+                            side=side,
+                            order_id=execution.order_id,
+                            clob_client=live_client,
+                            max_entry_price=getattr(strategy_cfg, "max_entry_price", None),
+                            strategy_id=strategy_id,
+                            slug=target_round.slug,
+                        )
                         append_trade_log(
                             log_path,
                             TradeRecord(
@@ -1480,10 +1540,10 @@ def run_live_trading(
                                 start_time=target_round.start_time,
                                 end_time=target_round.end_time,
                                 side=side,
-                                price=plan.price,
-                                order_size=plan.order_size,
-                                order_cost=plan.order_cost,
-                                expected_profit=plan.expected_profit,
+                                price=executed_plan.price,
+                                order_size=executed_plan.order_size,
+                                order_cost=executed_plan.order_cost,
+                                expected_profit=executed_plan.expected_profit,
                                 result=None,
                                 trade_pnl=0.0,
                                 cash_pnl=strategy_state.cash_pnl,
@@ -1494,10 +1554,10 @@ def run_live_trading(
                         )
                         strategy_state.pending_live_slug = target_round.slug
                         strategy_state.pending_live_side = side
-                        strategy_state.pending_live_price = plan.price
-                        strategy_state.pending_live_order_size = plan.order_size
-                        strategy_state.pending_live_order_cost = plan.order_cost
-                        strategy_state.pending_live_expected_profit = plan.expected_profit
+                        strategy_state.pending_live_price = executed_plan.price
+                        strategy_state.pending_live_order_size = executed_plan.order_size
+                        strategy_state.pending_live_order_cost = executed_plan.order_cost
+                        strategy_state.pending_live_expected_profit = executed_plan.expected_profit
                         strategy_state.pending_live_order_id = execution.order_id
                         strategy_state.pending_live_end_time = target_round.end_time.isoformat()
                         strategy_state.round_index += 1
@@ -1510,10 +1570,10 @@ def run_live_trading(
                                 "slug": target_round.slug,
                                 "side": side,
                                 "token_id": token_id,
-                                "price": price,
-                                "order_size": plan.order_size,
-                                "order_cost": plan.order_cost,
-                                "expected_profit": plan.expected_profit,
+                                "price": executed_plan.price,
+                                "order_size": executed_plan.order_size,
+                                "order_cost": executed_plan.order_cost,
+                                "expected_profit": executed_plan.expected_profit,
                                 "order_type": strategy_cfg.live_order_type.upper(),
                                 "order_id": execution.order_id,
                                 "response": execution.response,

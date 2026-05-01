@@ -420,6 +420,34 @@ class PolymarketClient:
             self._ws_opened_at = None
             self._ws_subscribed_assets.clear()
 
+    def _reset_stale_ws_connection_if_needed(self) -> None:
+        with self._ws_lock:
+            opened = self._ws_opened_at
+            last_message = self._ws_last_message_at
+            if opened is None or not isinstance(last_message, datetime):
+                return
+            age = (datetime.now(timezone.utc) - last_message).total_seconds()
+            if age <= max(0.0, float(self.config.ws_trade_guard_stale_seconds)):
+                return
+            app = self._ws_app
+            self._ws_ping_stop.set()
+            self._ws_app = None
+            self._ws_thread = None
+            self._ws_ping_thread = None
+            self._ws_opened_at = None
+            self._ws_last_message_at = None
+            self._ws_last_ping_at = None
+            self._ws_last_pong_at = None
+            self._ws_current_error = "ws_stale_reconnecting"
+            self._ws_last_error = "ws_stale_reconnecting"
+            self._ws_subscribed_assets.clear()
+            self._ws_quotes_by_asset.clear()
+        if app is not None:
+            try:
+                app.close()
+            except Exception:
+                pass
+
     def _ensure_ws_connection(self) -> None:
         if not self.config.ws_enabled:
             return
@@ -480,6 +508,7 @@ class PolymarketClient:
             return
 
         desired_assets = sorted(set(asset_ids))
+        self._reset_stale_ws_connection_if_needed()
         self._ensure_ws_connection()
 
         with self._ws_lock:

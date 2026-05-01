@@ -2307,6 +2307,88 @@ def test_place_live_order_submits_market_order_with_injected_clob(tmp_path):
     assert len(stub_clob.posted_orders) == 1
 
 
+def test_place_live_order_logs_official_fill_price_after_submission(tmp_path):
+    cfg = AppConfig(live_trading_enabled=True)
+    stub_clob = _StubClobClient(
+        order_payloads={
+            "oid-123": {
+                "status": "filled",
+                "filled_order_size": "2.0",
+                "filled_order_cost": "1.06",
+                "avg_price": "0.53",
+            }
+        }
+    )
+    state_path = tmp_path / "state.json"
+    log_path = tmp_path / "live.csv"
+
+    result = place_live_order(
+        cfg=cfg,
+        market_client=_LiveMarketClient(),
+        clob_client=stub_clob,
+        state_path=state_path,
+        log_path=log_path,
+    )
+
+    state = load_session_state(state_path)
+    rows = list(csv.DictReader(log_path.open(newline="", encoding="utf-8")))
+
+    assert result["status"] == "submitted"
+    assert result["price"] == pytest.approx(0.53)
+    assert result["order_size"] == pytest.approx(2.0)
+    assert result["order_cost"] == pytest.approx(1.06)
+    assert state.pending_live_price == pytest.approx(0.53)
+    assert state.pending_live_order_size == pytest.approx(2.0)
+    assert state.pending_live_order_cost == pytest.approx(1.06)
+    assert rows[-1]["price"] == "0.53"
+    assert rows[-1]["order_size"] == "2.0"
+    assert rows[-1]["order_cost"] == "1.06"
+
+
+def test_place_live_order_audits_official_fill_above_max_entry_price(tmp_path, monkeypatch):
+    class _InsideCapLiveMarketClient(_LiveMarketClient):
+        def quote_from_market(self, _market):
+            return MarketQuote(
+                slug="btc-updown-5m-test",
+                up_price=0.52,
+                down_price=0.48,
+                up_best_ask=0.53,
+                fetched_at=datetime.now(timezone.utc),
+            )
+
+    messages: list[str] = []
+    monkeypatch.setattr("trader._runtime_log", messages.append)
+    cfg = AppConfig(live_trading_enabled=True, max_entry_price=0.54)
+    stub_clob = _StubClobClient(
+        order_payloads={
+            "oid-123": {
+                "status": "filled",
+                "filled_order_size": "2.0",
+                "filled_order_cost": "1.12",
+                "avg_price": "0.56",
+            }
+        }
+    )
+    state_path = tmp_path / "state.json"
+    log_path = tmp_path / "live.csv"
+
+    result = place_live_order(
+        cfg=cfg,
+        market_client=_InsideCapLiveMarketClient(),
+        clob_client=stub_clob,
+        state_path=state_path,
+        log_path=log_path,
+    )
+
+    rows = list(csv.DictReader(log_path.open(newline="", encoding="utf-8")))
+
+    assert result["status"] == "submitted"
+    assert result["price"] == pytest.approx(0.56)
+    assert rows[-1]["price"] == "0.56"
+    assert any("official_fill_price_above_max_entry_price" in message for message in messages)
+    assert any("max_entry_price=0.54" in message for message in messages)
+
+
 def test_place_live_order_rejects_submission_response_without_acceptance(tmp_path):
     cfg = AppConfig(live_trading_enabled=True)
     stub_clob = _StubClobClient(post_response={"success": False, "errorMsg": "rejected"})
