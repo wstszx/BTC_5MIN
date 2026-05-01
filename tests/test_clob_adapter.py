@@ -61,6 +61,30 @@ class _TradeLookupClient:
         ]
 
 
+class _SdkTradeLookupClient:
+    def __init__(self) -> None:
+        self.calls = []
+
+    def get_order(self, order_id):
+        assert order_id == "oid-sdk-fill"
+        return {
+            "status": "matched",
+            "size_matched": "3.0",
+            "price": "0.60",
+        }
+
+    def get_trades(self, params=None, only_first_page=False):
+        self.calls.append((params, only_first_page))
+        if isinstance(params, dict):
+            raise AttributeError("'dict' object has no attribute 'market'")
+        assert params is None
+        assert only_first_page is True
+        return [
+            {"order_id": "oid-sdk-fill", "size": "1.0", "price": "0.50"},
+            {"orderID": "oid-sdk-fill", "size": "2.0", "price": "0.55"},
+        ]
+
+
 def test_clob_adapter_reads_available_balance_from_nested_payload():
     balance = read_available_live_balance(
         cfg=AppConfig(live_private_key="pk", live_funder="0xfunder"),
@@ -120,6 +144,23 @@ def test_clob_adapter_prefers_official_trade_fills_over_order_limit_price():
     assert plan.order_cost == pytest.approx(1.6)
     assert plan.price == pytest.approx(1.6 / 3.0)
     assert plan.expected_profit == pytest.approx(1.4)
+
+
+def test_clob_adapter_falls_back_to_sdk_trade_lookup_when_dict_params_are_not_supported():
+    client = _SdkTradeLookupClient()
+    state = LiveStrategyState(
+        pending_live_side="UP",
+        pending_live_order_id="oid-sdk-fill",
+    )
+
+    plan = build_verified_pending_live_trade_plan(state, clob_client=client)
+
+    assert plan is not None
+    assert plan.order_size == pytest.approx(3.0)
+    assert plan.order_cost == pytest.approx(1.6)
+    assert plan.price == pytest.approx(1.6 / 3.0)
+    assert client.calls[0][0] == {"order_id": "oid-sdk-fill"}
+    assert client.calls[-1] == (None, True)
 
 
 def test_trader_reexports_clob_adapter_helpers(monkeypatch):

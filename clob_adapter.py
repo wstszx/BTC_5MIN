@@ -110,7 +110,7 @@ def _read_official_order_trades(clob_client: Any, order_id: str) -> list[dict[st
         for params in ({"order_id": order_id}, {"orderID": order_id}, {"orderId": order_id}):
             try:
                 payload = get_trades(params)
-            except TypeError:
+            except (AttributeError, TypeError):
                 continue
             items = [
                 trade
@@ -119,6 +119,22 @@ def _read_official_order_trades(clob_client: Any, order_id: str) -> list[dict[st
             ]
             if items:
                 return items
+        try:
+            payload = get_trades(None, only_first_page=True)
+        except TypeError:
+            try:
+                payload = get_trades()
+            except (AttributeError, TypeError):
+                continue
+        except AttributeError:
+            continue
+        items = [
+            trade
+            for trade in _payload_items(payload)
+            if _trade_matches_order(trade, order_id)
+        ]
+        if items:
+            return items
     return []
 
 
