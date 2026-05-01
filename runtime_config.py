@@ -7,9 +7,6 @@ from clob_adapter import resolve_live_order_type
 
 
 def paper_strategy_ids_for_runtime(cfg: AppConfig) -> list[int]:
-    strategy_ids = list(getattr(cfg, "strategy_ids", []) or [])
-    if strategy_ids:
-        return strategy_ids
     strategy_ids = list(getattr(cfg, "paper_strategy_ids", []) or [])
     if strategy_ids:
         return strategy_ids
@@ -17,9 +14,6 @@ def paper_strategy_ids_for_runtime(cfg: AppConfig) -> list[int]:
 
 
 def live_strategy_ids_for_runtime(cfg: AppConfig) -> list[int]:
-    strategy_ids = list(getattr(cfg, "strategy_ids", []) or [])
-    if strategy_ids:
-        return strategy_ids
     strategy_ids = list(getattr(cfg, "live_strategy_ids", []) or [])
     if strategy_ids:
         return strategy_ids

@@ -65,7 +65,7 @@ def test_build_config_uses_paper_strategy_ids_when_present():
     assert cfg.paper_strategy_ids == [6, 2, 1]
 
 
-def test_build_config_uses_strategy_ids_as_canonical_paper_and_live_list():
+def test_build_config_keeps_paper_and_live_strategy_ids_separate_from_legacy_strategy_ids():
     cfg = build_config_from_env_values(
         {
             'STRATEGY_ID': '2',
@@ -76,9 +76,17 @@ def test_build_config_uses_strategy_ids_as_canonical_paper_and_live_list():
     )
 
     assert cfg.strategy_ids == [8, 7, 3]
+    assert cfg.paper_strategy_ids == [1, 2]
+    assert cfg.live_strategy_ids == [6]
+    assert list(cfg.live_profiles) == [6]
+
+
+def test_build_config_uses_legacy_strategy_ids_only_when_split_strategy_ids_are_missing():
+    cfg = build_config_from_env_values({'STRATEGY_ID': '2', 'STRATEGY_IDS': '8,7,8,3'})
+
+    assert cfg.strategy_ids == [8, 7, 3]
     assert cfg.paper_strategy_ids == [8, 7, 3]
     assert cfg.live_strategy_ids == [8, 7, 3]
-    assert list(cfg.live_profiles) == [8, 7, 3]
 
 
 def test_build_config_falls_back_to_strategy_id_for_paper():
@@ -125,11 +133,12 @@ def test_build_config_applies_live_strategy_profile_overrides():
     assert cfg.live_profiles[2].signal_weak_signal_mode == 'SKIP'
 
 
-def test_build_config_applies_strategy_overrides_with_unified_strategy_ids_and_global_stake_cap():
+def test_build_config_applies_strategy_overrides_with_split_strategy_ids_and_global_stake_cap():
     cfg = build_config_from_env_values(
         {
             'STRATEGY_ID': '3',
-            'STRATEGY_IDS': '3,7',
+            'PAPER_STRATEGY_IDS': '3,7',
+            'LIVE_STRATEGY_IDS': '3,7',
             'MIN_STAKE': '1',
             'MAX_STAKE': '20',
             'BASE_ORDER_COST': '2',

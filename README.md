@@ -54,18 +54,18 @@ Credential split:
 - `POLYMARKET_BUILDER_*` and `POLYMARKET_RELAYER_*` are for official gasless live redeem only.
 - Direct Polygon `web3` redeem is not a supported runtime path.
 
-### Unified strategy selection
+### Split strategy selection
 
-The dashboard now exposes one visible strategy selector: **基础策略**. `STRATEGY_IDS` is the canonical strategy list for both paper and live mode, so switching modes keeps the same strategy behavior and parameters. The older mode-specific keys are still parsed for compatibility:
+The dashboard exposes one visible strategy panel, but it edits the strategy list for the active mode. Paper and live strategy choices are stored separately:
 
-- `STRATEGY_IDS` drives both paper and live strategy selection when present.
-- `PAPER_STRATEGY_IDS` is used only as a legacy fallback when `STRATEGY_IDS` is absent.
-- `LIVE_STRATEGY_IDS` is used only as a legacy fallback when `STRATEGY_IDS` is absent.
+- `PAPER_STRATEGY_IDS` drives paper trading and paper reports.
+- `LIVE_STRATEGY_IDS` drives live trading and live reports.
+- `STRATEGY_IDS` is retained only as a legacy fallback when the split key for a mode is missing.
 - `STRATEGY_ID` tracks the primary strategy used for the current dashboard view.
 
 Strategy 8 is available as a state-switching strategy. It uses the same OFI and momentum inputs as strategy 7, follows trend agreement, uses strong OFI/momentum conflict as a reversal state, and skips unclear market states.
 
-Legacy paper timeframe/profile keys are still parsed for compatibility, but they are no longer the primary dashboard editing path. Use `MARKET_TIMEFRAME` for the active 5m/15m market and the unified strategy selector for strategy changes.
+Legacy paper timeframe/profile keys are still parsed for compatibility, but they are no longer the primary dashboard editing path. Use `MARKET_TIMEFRAME` for the active 5m/15m market and the strategy panel for mode-specific strategy changes.
 
 ## 3. Run the supported runtime
 

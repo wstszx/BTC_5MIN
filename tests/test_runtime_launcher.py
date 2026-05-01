@@ -764,10 +764,11 @@ def test_runtime_manager_keeps_dashboard_online_while_switch_pending(tmp_path):
     assert snapshot.switch_state == 'pending'
 
 
-def test_readme_mentions_unified_strategy_selection():
+def test_readme_mentions_split_strategy_selection():
     text = Path('README.md').read_text(encoding='utf-8')
 
-    assert 'Unified strategy selection' in text
+    assert 'Split strategy selection' in text
     assert 'PAPER_STRATEGY_IDS' in text
     assert 'LIVE_STRATEGY_IDS' in text
+    assert 'STRATEGY_IDS` is retained only as a legacy fallback' in text
     assert 'Legacy paper timeframe/profile keys are still parsed for compatibility' in text

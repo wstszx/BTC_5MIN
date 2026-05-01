@@ -514,11 +514,11 @@ def test_dashboard_assets_mode_selector_propagates_into_save_payload_path():
 def test_dashboard_assets_use_unified_strategy_selection():
     js = _dashboard_js()
 
-    assert "return 'STRATEGY_IDS';" in js
-    assert "const legacyKey = mode === 'live' ? 'LIVE_STRATEGY_IDS' : 'PAPER_STRATEGY_IDS';" in js
-    assert "return legacyKey;" in js
+    assert "function strategyListKeyForMode(mode) {" in js
+    assert "return normalized === 'live' ? 'LIVE_STRATEGY_IDS' : 'PAPER_STRATEGY_IDS';" in js
+    assert "return strategyListKeyForMode(mode);" in js
     assert "const multiKey = activeStrategyListKey(payload, values);" in js
-    assert "const selectedRaw = parseStrategyIdList((values && values[multiKey]) ?? envValues[multiKey] ?? '');" in js
+    assert "const legacySelectedRaw = parseStrategyIdList((values && values.STRATEGY_IDS) ?? envValues.STRATEGY_IDS ?? '');" in js
     assert "strategyOptionLabel(multiKey, opt, payload)" in js
     assert "const selectedStrategyList = domStrategyListKey === multiKey" in js
 
@@ -1712,7 +1712,7 @@ def test_dashboard_assets_refresh_shared_selector_still_updates_summary_and_rece
     assert "await Promise.allSettled([refreshSummary(), refreshRecent()]);" in js
     assert "const strategy = encodeURIComponent(effectivePaperSummaryStrategyFilter());" in js
     assert "const strategy = encodeURIComponent(effectivePaperRecentStrategyFilter());" in js
-    assert "const multiKey = activeStrategyListKey(payload, (payload && payload.env_values) || {});" in js
+    assert "const multiKey = strategyListKeyForMode(effectiveReportMode());" in js
 
 
 def test_dashboard_assets_use_strategy_panel_for_unified_strategy_selection():

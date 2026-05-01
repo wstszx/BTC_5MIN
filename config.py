@@ -697,12 +697,15 @@ class AppConfig:
         if not self.paper_timeframes:
             self.paper_timeframes = _env_paper_timeframes(self.market_timeframe)
         raw_strategy_ids = os.getenv(STRATEGY_IDS)
+        legacy_strategy_ids: list[int] = []
         if not self.strategy_ids and raw_strategy_ids is not None and raw_strategy_ids.strip():
             self.strategy_ids = _parse_strategy_id_list(raw_strategy_ids, fallback=self.strategy_id)
-        use_unified_strategy_config = bool(self.strategy_ids)
-        if use_unified_strategy_config:
-            self.paper_strategy_ids = list(self.strategy_ids)
-            self.live_strategy_ids = list(self.strategy_ids)
+        if raw_strategy_ids is not None and raw_strategy_ids.strip() and self.strategy_ids:
+            legacy_strategy_ids = list(self.strategy_ids)
+        if os.getenv(PAPER_STRATEGY_IDS) is None and legacy_strategy_ids:
+            self.paper_strategy_ids = list(legacy_strategy_ids)
+        if os.getenv(LIVE_STRATEGY_IDS) is None and legacy_strategy_ids:
+            self.live_strategy_ids = list(legacy_strategy_ids)
         elif not self.live_strategy_ids:
             self.live_strategy_ids = _parse_strategy_id_list(os.getenv(LIVE_STRATEGY_IDS), fallback=self.strategy_id)
         self.paper_profiles = {}
@@ -712,100 +715,48 @@ class AppConfig:
             self.paper_profiles[timeframe] = PaperTimeframeProfile(
                 timeframe=timeframe,
                 strategy_id=strategy_id,
-                paper_strategy_ids=(
-                    list(self.strategy_ids)
-                    if use_unified_strategy_config
-                    else _paper_profile_strategy_ids(prefix, self.paper_strategy_ids, strategy_id)
-                ),
-                target_profit=(
-                    self.target_profit
-                    if use_unified_strategy_config
-                    else _env_float(f"{prefix}_TARGET_PROFIT", self.target_profit)
-                ),
-                bet_sizing_mode=(
-                    self.bet_sizing_mode
-                    if use_unified_strategy_config
-                    else (os.getenv(f"{prefix}_BET_SIZING_MODE") or self.bet_sizing_mode).upper()
-                ),
-                base_order_cost=(
-                    self.base_order_cost
-                    if use_unified_strategy_config
-                    else _env_float(f"{prefix}_BASE_ORDER_COST", self.base_order_cost)
-                ),
-                max_consecutive_losses=(
-                    self.max_consecutive_losses
-                    if use_unified_strategy_config
-                    else _env_int(f"{prefix}_MAX_CONSECUTIVE_LOSSES", self.max_consecutive_losses)
-                ),
+                paper_strategy_ids=_paper_profile_strategy_ids(prefix, self.paper_strategy_ids, strategy_id),
+                target_profit=_env_float(f"{prefix}_TARGET_PROFIT", self.target_profit),
+                bet_sizing_mode=(os.getenv(f"{prefix}_BET_SIZING_MODE") or self.bet_sizing_mode).upper(),
+                base_order_cost=_env_float(f"{prefix}_BASE_ORDER_COST", self.base_order_cost),
+                max_consecutive_losses=_env_int(f"{prefix}_MAX_CONSECUTIVE_LOSSES", self.max_consecutive_losses),
                 min_stake=(
-                    self.min_stake
-                    if use_unified_strategy_config
-                    else _env_optional_float(f"{prefix}_MIN_STAKE")
+                    _env_optional_float(f"{prefix}_MIN_STAKE")
                     if os.getenv(f"{prefix}_MIN_STAKE") is not None
                     else self.min_stake
                 ),
                 max_stake=(
-                    self.max_stake
-                    if use_unified_strategy_config
-                    else _env_optional_float(f"{prefix}_MAX_STAKE")
+                    _env_optional_float(f"{prefix}_MAX_STAKE")
                     if os.getenv(f"{prefix}_MAX_STAKE") is not None
                     else self.max_stake
                 ),
-                open_delay_seconds=(
-                    self.open_delay_seconds
-                    if use_unified_strategy_config
-                    else _env_int(f"{prefix}_OPEN_DELAY_SECONDS", self.open_delay_seconds)
+                open_delay_seconds=_env_int(f"{prefix}_OPEN_DELAY_SECONDS", self.open_delay_seconds),
+                signal_momentum_threshold=_env_float(
+                    f"{prefix}_SIGNAL_MOMENTUM_THRESHOLD",
+                    self.signal_momentum_threshold,
                 ),
-                signal_momentum_threshold=(
-                    self.signal_momentum_threshold
-                    if use_unified_strategy_config
-                    else _env_float(f"{prefix}_SIGNAL_MOMENTUM_THRESHOLD", self.signal_momentum_threshold)
+                ofi_threshold=_env_float(f"{prefix}_OFI_THRESHOLD", self.ofi_threshold),
+                binance_signal_stale_seconds=_env_float(
+                    f"{prefix}_BINANCE_SIGNAL_STALE_SECONDS",
+                    self.binance_signal_stale_seconds,
                 ),
-                ofi_threshold=(
-                    self.ofi_threshold
-                    if use_unified_strategy_config
-                    else _env_float(f"{prefix}_OFI_THRESHOLD", self.ofi_threshold)
+                strategy7_ofi_threshold=_env_float(
+                    f"{prefix}_STRATEGY7_OFI_THRESHOLD",
+                    self.strategy7_ofi_threshold,
                 ),
-                binance_signal_stale_seconds=(
-                    self.binance_signal_stale_seconds
-                    if use_unified_strategy_config
-                    else _env_float(
-                        f"{prefix}_BINANCE_SIGNAL_STALE_SECONDS",
-                        self.binance_signal_stale_seconds,
-                    )
-                ),
-                strategy7_ofi_threshold=(
-                    self.strategy7_ofi_threshold
-                    if use_unified_strategy_config
-                    else _env_float(f"{prefix}_STRATEGY7_OFI_THRESHOLD", self.strategy7_ofi_threshold)
-                ),
-                strategy7_momentum_threshold=(
-                    self.strategy7_momentum_threshold
-                    if use_unified_strategy_config
-                    else _env_float(
-                        f"{prefix}_STRATEGY7_MOMENTUM_THRESHOLD",
-                        self.strategy7_momentum_threshold,
-                    )
+                strategy7_momentum_threshold=_env_float(
+                    f"{prefix}_STRATEGY7_MOMENTUM_THRESHOLD",
+                    self.strategy7_momentum_threshold,
                 ),
                 min_entry_price=(
-                    self.min_entry_price
-                    if use_unified_strategy_config
-                    else _env_optional_float(f"{prefix}_MIN_ENTRY_PRICE")
+                    _env_optional_float(f"{prefix}_MIN_ENTRY_PRICE")
                     if os.getenv(f"{prefix}_MIN_ENTRY_PRICE") is not None
                     else self.min_entry_price
                 ),
-                max_entry_price=(
-                    self.max_entry_price
-                    if use_unified_strategy_config
-                    else _env_float(f"{prefix}_MAX_ENTRY_PRICE", self.max_entry_price)
-                ),
-                strategy7_max_entry_price=(
-                    self.strategy7_max_entry_price
-                    if use_unified_strategy_config
-                    else _env_float(
-                        f"{prefix}_STRATEGY7_MAX_ENTRY_PRICE",
-                        self.strategy7_max_entry_price,
-                    )
+                max_entry_price=_env_float(f"{prefix}_MAX_ENTRY_PRICE", self.max_entry_price),
+                strategy7_max_entry_price=_env_float(
+                    f"{prefix}_STRATEGY7_MAX_ENTRY_PRICE",
+                    self.strategy7_max_entry_price,
                 ),
             )
         self.paper_strategy_profiles = {

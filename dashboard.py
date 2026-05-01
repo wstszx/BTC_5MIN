@@ -5070,28 +5070,14 @@ function activeConfigModeFromValues(payload, values) {
   return buildLiveToggleValue(mergedValues) === 'true' ? 'live' : 'paper';
 }
 
+function strategyListKeyForMode(mode) {
+  const normalized = String(mode || '').toLowerCase();
+  return normalized === 'live' ? 'LIVE_STRATEGY_IDS' : 'PAPER_STRATEGY_IDS';
+}
+
 function activeStrategyListKey(payload, values) {
-  const envValues = (payload && payload.env_values) || {};
-  const selectOptions = (payload && payload.select_options) || {};
-  const editableKeys = (payload && payload.editable_keys) || [];
-  const unifiedValue = String((values && values.STRATEGY_IDS) ?? envValues.STRATEGY_IDS ?? '').trim();
-  if (unifiedValue) {
-    return 'STRATEGY_IDS';
-  }
   const mode = activeConfigModeFromValues(payload, values);
-  const legacyKey = mode === 'live' ? 'LIVE_STRATEGY_IDS' : 'PAPER_STRATEGY_IDS';
-  const legacyValue = String((values && values[legacyKey]) ?? envValues[legacyKey] ?? '').trim();
-  if (legacyValue) {
-    return legacyKey;
-  }
-  if (
-    Object.prototype.hasOwnProperty.call(envValues, 'STRATEGY_IDS') ||
-    Object.prototype.hasOwnProperty.call(selectOptions, 'STRATEGY_IDS') ||
-    editableKeys.indexOf('STRATEGY_IDS') >= 0
-  ) {
-    return 'STRATEGY_IDS';
-  }
-  return legacyKey;
+  return strategyListKeyForMode(mode);
 }
 
 function resolveUnifiedStrategySelection(payload, values) {
@@ -5100,7 +5086,9 @@ function resolveUnifiedStrategySelection(payload, values) {
   const selectOptions = ((payload || {}).select_options || {});
   const options = (selectOptions[multiKey] || selectOptions.STRATEGY_ID || selectOptions.PAPER_STRATEGY_IDS || []).map((item) => String(item));
   const focusRaw = String((values && values.STRATEGY_ID) ?? envValues.STRATEGY_ID ?? options[0] ?? '');
-  const selectedRaw = parseStrategyIdList((values && values[multiKey]) ?? envValues[multiKey] ?? '');
+  const splitSelectedRaw = parseStrategyIdList((values && values[multiKey]) ?? envValues[multiKey] ?? '');
+  const legacySelectedRaw = parseStrategyIdList((values && values.STRATEGY_IDS) ?? envValues.STRATEGY_IDS ?? '');
+  const selectedRaw = splitSelectedRaw.length > 0 ? splitSelectedRaw : legacySelectedRaw;
   const selected = selectedRaw.filter((item) => options.indexOf(item) >= 0);
   const focus = selected.length > 0
     ? (selected.indexOf(focusRaw) >= 0 ? focusRaw : selected[0])
@@ -5182,7 +5170,7 @@ function renderStrategyPanel(payload, values) {
 
   const summary = document.createElement('div');
   summary.className = 'strategy-panel-summary';
-  summary.textContent = '\u52fe\u9009' + formatModeLabel(activeConfigModeFromValues(payload, values)) + '\u8fd0\u884c\u7b56\u7565\uff0c\u5e76\u6307\u5b9a\u4e00\u4e2a\u4e3b\u7b56\u7565\u7528\u4e8e\u5f53\u524d\u9875\u9762\u67e5\u770b\u4e0e\u7b56\u7565\u8bf4\u660e\u3002';
+  summary.textContent = '\u6b63\u5728\u7f16\u8f91' + formatModeLabel(activeConfigModeFromValues(payload, values)) + '\u7b56\u7565\u7ec4\u5408\uff08' + unified.multiKey + '\uff09\uff0c\u7eb8\u9762\u548c\u5b9e\u76d8\u4e92\u4e0d\u5171\u4eab\u3002';
   panelNode.appendChild(summary);
 
   const list = document.createElement('div');
@@ -5395,7 +5383,7 @@ function effectiveReportMode() {
 function configuredPaperReportStrategyOptions() {
   const payload = state.config || {};
   const envValues = (payload && payload.env_values) || {};
-  const multiKey = activeStrategyListKey(payload, (payload && payload.env_values) || {});
+  const multiKey = strategyListKeyForMode(effectiveReportMode());
   const selectOptions = ((payload || {}).select_options) || {};
   const strategyOptions = ((selectOptions[multiKey] || selectOptions.STRATEGY_ID || selectOptions.PAPER_STRATEGY_IDS || [])).map((item) => String(item));
   const draftValues = currentUnifiedStrategyDraftForReport();
@@ -5437,7 +5425,7 @@ function normalizePaperReportStrategyFilter(value, options) {
 
 function paperReportStrategyOptions() {
   const payload = state.config || {};
-  const multiKey = activeStrategyListKey(payload, (payload && payload.env_values) || {});
+  const multiKey = strategyListKeyForMode(effectiveReportMode());
   const selectOptions = ((payload || {}).select_options) || {};
   const strategyOptions = ((selectOptions[multiKey] || selectOptions.STRATEGY_ID || selectOptions.PAPER_STRATEGY_IDS || [])).map((item) => String(item));
   const strategyView = ((state.market || {}).strategy_view) || {};
