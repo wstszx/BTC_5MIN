@@ -24,6 +24,12 @@ from dashboard import (
 from models import MarketQuote, MarketWindow
 from runtime_control import RuntimeControl
 
+PLAYWRIGHT_CLI_PACKAGE = "@playwright/cli@1.59.1"
+
+
+def _playwright_cli_command(npx_path: str, session: str, *args: str) -> list[str]:
+    return [npx_path, "--yes", "--package", PLAYWRIGHT_CLI_PACKAGE, "playwright-cli", f"-s={session}", *args]
+
 
 def test_create_dashboard_runtime_uses_requested_env_file(tmp_path: Path):
     runtime = create_dashboard_runtime(host="127.0.0.1", port=0, env_file=tmp_path / ".env.dashboard")
@@ -66,6 +72,14 @@ def test_dashboard_runtime_shutdown_close_idempotent(tmp_path: Path):
     runtime.close()
     thread.join(timeout=2)
     assert not thread.is_alive()
+
+
+def test_dashboard_browser_regressions_pin_playwright_cli_version():
+    source = Path(__file__).read_text(encoding="utf-8")
+    old_unpinned_package = "'--package', " + "'@playwright/cli'"
+
+    assert PLAYWRIGHT_CLI_PACKAGE in source
+    assert old_unpinned_package not in source
 
 
 def test_write_env_file_uses_atomic_replace(monkeypatch, tmp_path: Path):
@@ -3370,7 +3384,7 @@ def test_dashboard_report_strategy_selection_survives_market_refresh_browser_reg
 
     def pw(*args: str) -> str:
         completed = subprocess.run(
-            [npx_path, '--yes', '--package', '@playwright/cli', 'playwright-cli', f'-s={session}', *args],
+            _playwright_cli_command(npx_path, session, *args),
             cwd=str(Path.cwd()),
             capture_output=True,
             text=True,
@@ -3415,7 +3429,7 @@ def test_dashboard_report_strategy_selection_survives_market_refresh_browser_reg
     finally:
         try:
             subprocess.run(
-                [npx_path, '--yes', '--package', '@playwright/cli', 'playwright-cli', f'-s={session}', 'close'],
+                _playwright_cli_command(npx_path, session, 'close'),
                 cwd=str(Path.cwd()),
                 capture_output=True,
                 text=True,
@@ -3572,7 +3586,7 @@ def test_dashboard_report_strategy_selector_reflects_saved_paper_strategy_ids_br
 
     def pw(*args: str) -> str:
         completed = subprocess.run(
-            [npx_path, '--yes', '--package', '@playwright/cli', 'playwright-cli', f'-s={session}', *args],
+            _playwright_cli_command(npx_path, session, *args),
             cwd=str(Path.cwd()),
             capture_output=True,
             text=True,
@@ -3660,7 +3674,7 @@ def test_dashboard_report_strategy_selector_reflects_saved_paper_strategy_ids_br
     finally:
         try:
             subprocess.run(
-                [npx_path, '--yes', '--package', '@playwright/cli', 'playwright-cli', f'-s={session}', 'close'],
+                _playwright_cli_command(npx_path, session, 'close'),
                 cwd=str(Path.cwd()),
                 capture_output=True,
                 text=True,
@@ -3818,7 +3832,7 @@ def test_dashboard_report_strategy_switch_ignores_stale_browser_responses(tmp_pa
 
     def pw(*args: str) -> str:
         completed = subprocess.run(
-            [npx_path, '--yes', '--package', '@playwright/cli', 'playwright-cli', f'-s={session}', *args],
+            _playwright_cli_command(npx_path, session, *args),
             cwd=str(Path.cwd()),
             capture_output=True,
             text=True,
@@ -3902,7 +3916,7 @@ def test_dashboard_report_strategy_switch_ignores_stale_browser_responses(tmp_pa
     finally:
         try:
             subprocess.run(
-                [npx_path, '--yes', '--package', '@playwright/cli', 'playwright-cli', f'-s={session}', 'close'],
+                _playwright_cli_command(npx_path, session, 'close'),
                 cwd=str(Path.cwd()),
                 capture_output=True,
                 text=True,
