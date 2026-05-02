@@ -1493,6 +1493,7 @@ def run_live_trading(
                                     recovery_loss=strategy_state.recovery_loss,
                                     consecutive_losses=strategy_state.consecutive_losses,
                                     skip_reason=execution.skip_reason,
+                                    balance_error=execution.balance_error,
                                     **_signal_record_kwargs(side_decision),
                                 ),
                             )

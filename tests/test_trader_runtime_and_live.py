@@ -1161,10 +1161,11 @@ def test_run_live_trading_treats_transient_balance_ssl_error_as_unavailable_budg
         stop_event=stop_event,
     )
 
-    rows = (tmp_path / "live_orders.csv").read_text(encoding="utf-8").splitlines()
+    rows = list(csv.DictReader((tmp_path / "live_orders.csv").open(newline="", encoding="utf-8")))
     assert result["status"] == "stopped"
-    assert len(rows) == 2
-    assert "live_wallet_balance_unavailable" in rows[1]
+    assert len(rows) == 1
+    assert rows[0]["skip_reason"] == "live_wallet_balance_unavailable"
+    assert "UNEXPECTED_EOF_WHILE_READING" in rows[0]["balance_error"]
 
 
 def test_run_live_trading_reports_pending_live_order_blocks_switch(tmp_path):

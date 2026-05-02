@@ -81,6 +81,23 @@ def merge_live_trade_log_rows(existing: dict[str, str], incoming: dict[str, Any]
     return merged
 
 
+def _can_migrate_header(existing_header: list[str], fieldnames: list[str]) -> bool:
+    if not existing_header:
+        return False
+    if len(existing_header) > len(fieldnames):
+        return False
+    if len(fieldnames) - len(existing_header) > 3:
+        return False
+    return fieldnames[: len(existing_header)] == existing_header
+
+
+def _rewrite_with_fieldnames(path: Path, rows: list[dict[str, Any]], fieldnames: list[str]) -> None:
+    with path.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(rows)
+
+
 def append_trade_log(path: Path, record: TradeRecord) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     row = asdict(record)
@@ -94,9 +111,14 @@ def append_trade_log(path: Path, record: TradeRecord) -> None:
         with path.open("r", newline="", encoding="utf-8") as handle:
             existing_header = next(csv.reader(handle), [])
         if existing_header and existing_header != fieldnames:
-            legacy_path = path.with_name(f"{path.stem}_legacy_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}{path.suffix}")
-            path.replace(legacy_path)
-            write_header = True
+            if _can_migrate_header(existing_header, fieldnames):
+                with path.open("r", newline="", encoding="utf-8") as handle:
+                    existing_rows = list(csv.DictReader(handle))
+                _rewrite_with_fieldnames(path, existing_rows, fieldnames)
+            else:
+                legacy_path = path.with_name(f"{path.stem}_legacy_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}{path.suffix}")
+                path.replace(legacy_path)
+                write_header = True
 
     upsert_key = live_trade_log_upsert_key(row)
     if upsert_key is not None and path.exists() and not write_header:
@@ -109,10 +131,7 @@ def append_trade_log(path: Path, record: TradeRecord) -> None:
             if row_has_result(existing_row):
                 continue
             existing_rows[index] = merge_live_trade_log_rows(existing_row, row, fieldnames)
-            with path.open("w", newline="", encoding="utf-8") as handle:
-                writer = csv.DictWriter(handle, fieldnames=fieldnames)
-                writer.writeheader()
-                writer.writerows(existing_rows)
+            _rewrite_with_fieldnames(path, existing_rows, fieldnames)
             return
 
     with path.open("a", newline="", encoding="utf-8") as handle:

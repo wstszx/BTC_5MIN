@@ -757,6 +757,15 @@ def test_dashboard_assets_highlight_recent_missed_entry_rows():
     assert '.skip-reason-badge {' in css
     assert '.skip-reason-badge.missed-entry {' in css
 
+
+def test_dashboard_assets_show_balance_error_in_recent_reason_title():
+    js = _dashboard_js()
+
+    assert "const balanceError = String(row.balance_error || '').trim();" in js
+    assert "const reasonTitle = balanceError ? (reasonText(row.skip_reason) + ' / ' + balanceError) : reasonText(row.skip_reason);" in js
+    assert "'<td title=\"' + esc(reasonTitle) + '\">' + reasonHtml + '</td>'" in js
+
+
 def test_dashboard_assets_show_serial_waiting_hint_for_pending_paper_trades():
     html = _dashboard_html()
     js = _dashboard_js()

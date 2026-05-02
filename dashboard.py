@@ -7381,6 +7381,8 @@ function renderRecent(payload) {
     const checkCls = row.result_check_status === 'match' ? 'trade-up' : ((row.result_check_status === 'mismatch') ? 'trade-down' : 'trade-skip');
     const checkTitle = '官方结果: ' + (row.resolved_expected_result || '--') + (row.result_check_error ? (' · 错误: ' + row.result_check_error) : '');
     const rowClass = isPending ? 'recent-pending' : (isMissedEntry ? 'recent-missed-entry' : '');
+    const balanceError = String(row.balance_error || '').trim();
+    const reasonTitle = balanceError ? (reasonText(row.skip_reason) + ' / ' + balanceError) : reasonText(row.skip_reason);
     const reasonHtml = isMissedEntry
       ? ('<span class="skip-reason-badge missed-entry">' + esc(reasonText(row.skip_reason)) + '</span>')
       : esc(reasonText(row.skip_reason));
@@ -7399,7 +7401,7 @@ function renderRecent(payload) {
       '<td>' + esc(fmtNum(row.resolved_final_price, 2)) + '</td>' +
       '<td class="' + esc(pnlCls) + '">' + esc(fmtPnl(row.trade_pnl, 4)) + '</td>' +
       '<td class="' + esc(cashCls) + '">' + esc(fmtPnl(row.cash_pnl, 4)) + '</td>' +
-      '<td>' + reasonHtml + '</td>' +
+      '<td title="' + esc(reasonTitle) + '">' + reasonHtml + '</td>' +
       '<td>' + esc(fmtPnl(row.signal_delta, 4)) + '</td>' +
       '</tr>';
   }).join('');

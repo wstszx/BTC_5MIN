@@ -92,6 +92,7 @@ class TradeRecord:
     signal_locked: bool = False
     signal_reason: str | None = None
     experiment_id: str | None = None
+    balance_error: str | None = None
 
 
 @dataclass(slots=True)
