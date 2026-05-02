@@ -4779,6 +4779,7 @@ const HELP_FAQ = [
 
 const STORAGE_KEYS = {
   showInternalKeys: 'dashboard_show_internal_keys',
+  reportMode: 'dashboard_report_mode',
 };
 
 const STRATEGY_LABELS = {
@@ -4939,17 +4940,21 @@ function loadUiPrefs() {
     const raw = localStorage.getItem(STORAGE_KEYS.showInternalKeys);
     if (raw === null) {
       state.showInternalKeys = false;
-      return;
+    } else {
+      state.showInternalKeys = raw === '1';
     }
-    state.showInternalKeys = raw === '1';
+    const storedReportMode = localStorage.getItem(STORAGE_KEYS.reportMode);
+    state.reportMode = storedReportMode === 'live' ? 'live' : 'paper';
   } catch (_err) {
     state.showInternalKeys = false;
+    state.reportMode = 'paper';
   }
 }
 
 function saveUiPrefs() {
   try {
     localStorage.setItem(STORAGE_KEYS.showInternalKeys, state.showInternalKeys ? '1' : '0');
+    localStorage.setItem(STORAGE_KEYS.reportMode, effectiveReportMode());
   } catch (_err) {
     // Ignore storage failures (private mode / storage disabled)
   }
@@ -5688,6 +5693,7 @@ function renderSharedPaperReportStrategySelector() {
     modeNode.value = effectiveReportMode();
     modeNode.onchange = async () => {
       state.reportMode = modeNode.value === 'live' ? 'live' : 'paper';
+      saveUiPrefs();
       state.paperSummaryStrategyFilter = '';
       state.paperRecentStrategyFilter = '';
       renderSharedPaperReportStrategySelector();

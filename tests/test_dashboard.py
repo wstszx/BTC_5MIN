@@ -1477,6 +1477,16 @@ def test_dashboard_assets_switch_report_endpoints_by_selected_mode():
     assert "renderSharedPaperReportStrategySelector();" in js
 
 
+def test_dashboard_assets_persist_report_mode_across_page_reload():
+    js = _dashboard_js()
+
+    assert "reportMode: 'dashboard_report_mode'" in js
+    assert "const storedReportMode = localStorage.getItem(STORAGE_KEYS.reportMode);" in js
+    assert "state.reportMode = storedReportMode === 'live' ? 'live' : 'paper';" in js
+    assert "localStorage.setItem(STORAGE_KEYS.reportMode, effectiveReportMode());" in js
+    assert "saveUiPrefs();" in js
+
+
 def test_dashboard_assets_localize_recent_panel_by_running_mode():
     js = _dashboard_js()
 
