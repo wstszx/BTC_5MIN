@@ -4864,6 +4864,7 @@ const REASON_LABELS = {
   strategy8_entry_too_late: '策略8 确认出现过晚',
   strategy8_price_too_low: '策略8 入场价格过低',
   strategy8_price_too_high: '策略8 入场价格过高',
+  live_fok_not_filled: '策略7 实时 FOK 订单未成交',
   awaiting_fill_confirmation: '等待成交确认',
   round_in_progress: '轮次仍在进行中',
   round_unresolved: '轮次尚未结算',
