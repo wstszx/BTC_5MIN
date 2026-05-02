@@ -101,12 +101,83 @@ class _SdkTradeLookupClient:
         self.calls.append((params, only_first_page))
         if isinstance(params, dict):
             raise AttributeError("'dict' object has no attribute 'market'")
-        assert params is None
+        if params is not None:
+            return []
         assert only_first_page is True
         return [
             {"order_id": "oid-sdk-fill", "size": "1.0", "price": "0.50"},
             {"orderID": "oid-sdk-fill", "size": "2.0", "price": "0.55"},
         ]
+
+
+class _OfficialTakerTradeLookupClient:
+    def get_order(self, order_id):
+        assert order_id == "oid-official-taker"
+        return {
+            "status": "matched",
+            "size_matched": "3.0",
+            "price": "0.60",
+        }
+
+    def get_trades(self, params=None, only_first_page=False):
+        if params is not None:
+            raise AttributeError("'dict' object has no attribute 'market'")
+        assert only_first_page is True
+        return [
+            {"taker_order_id": "oid-official-taker", "size": "1.0", "price": "0.49"},
+            {"takerOrderId": "oid-official-taker", "size": "2.0", "price": "0.52"},
+            {"taker_order_id": "other-order", "size": "9.0", "price": "0.99"},
+        ]
+
+
+class _OfficialMakerTradeLookupClient:
+    def get_order(self, order_id):
+        assert order_id == "oid-official-maker"
+        return {
+            "status": "matched",
+            "size_matched": "4.0",
+            "price": "0.60",
+        }
+
+    def get_trades(self, params=None, only_first_page=False):
+        if params is not None:
+            raise AttributeError("'dict' object has no attribute 'market'")
+        assert only_first_page is True
+        return [
+            {
+                "size": "4.0",
+                "price": "0.51",
+                "maker_orders": [
+                    {"order_id": "oid-official-maker"},
+                    {"order_id": "other-order"},
+                ],
+            },
+        ]
+
+
+class _AssociatedTradesLookupClient:
+    def get_order(self, order_id):
+        assert order_id == "oid-associated"
+        return {
+            "status": "matched",
+            "size_matched": "3.0",
+            "price": "0.60",
+            "associate_trades": ["trade-a", "trade-b"],
+        }
+
+    def get_trades(self, params=None, only_first_page=False):
+        if isinstance(params, dict):
+            raise AttributeError("'dict' object has no attribute 'market'")
+        trade_id = getattr(params, "id", None)
+        if trade_id == "oid-associated":
+            return []
+        if trade_id == "trade-a":
+            return [{"id": "trade-a", "taker_order_id": "oid-associated", "size": "1.0", "price": "0.48"}]
+        if trade_id == "trade-b":
+            return [{"id": "trade-b", "taker_order_id": "oid-associated", "size": "2.0", "price": "0.51"}]
+        assert params is None
+        assert only_first_page is True
+        return []
 
 
 def test_clob_adapter_reads_available_balance_from_nested_payload():
@@ -204,6 +275,48 @@ def test_clob_adapter_falls_back_to_sdk_trade_lookup_when_dict_params_are_not_su
     assert plan.price == pytest.approx(1.6 / 3.0)
     assert client.calls[0][0] == {"order_id": "oid-sdk-fill"}
     assert client.calls[-1] == (None, True)
+
+
+def test_clob_adapter_matches_official_taker_order_id_trade_fills():
+    state = LiveStrategyState(
+        pending_live_side="UP",
+        pending_live_order_id="oid-official-taker",
+    )
+
+    plan = build_verified_pending_live_trade_plan(state, clob_client=_OfficialTakerTradeLookupClient())
+
+    assert plan is not None
+    assert plan.order_size == pytest.approx(3.0)
+    assert plan.order_cost == pytest.approx(1.53)
+    assert plan.price == pytest.approx(1.53 / 3.0)
+
+
+def test_clob_adapter_matches_official_maker_order_trade_fills():
+    state = LiveStrategyState(
+        pending_live_side="UP",
+        pending_live_order_id="oid-official-maker",
+    )
+
+    plan = build_verified_pending_live_trade_plan(state, clob_client=_OfficialMakerTradeLookupClient())
+
+    assert plan is not None
+    assert plan.order_size == pytest.approx(4.0)
+    assert plan.order_cost == pytest.approx(2.04)
+    assert plan.price == pytest.approx(0.51)
+
+
+def test_clob_adapter_fetches_associated_trade_ids_before_using_order_limit_price():
+    state = LiveStrategyState(
+        pending_live_side="UP",
+        pending_live_order_id="oid-associated",
+    )
+
+    plan = build_verified_pending_live_trade_plan(state, clob_client=_AssociatedTradesLookupClient())
+
+    assert plan is not None
+    assert plan.order_size == pytest.approx(3.0)
+    assert plan.order_cost == pytest.approx(1.5)
+    assert plan.price == pytest.approx(0.5)
 
 
 def test_trader_reexports_clob_adapter_helpers(monkeypatch):

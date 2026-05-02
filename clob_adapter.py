@@ -93,6 +93,10 @@ def _trade_matches_order(trade: dict[str, Any], order_id: str) -> bool:
         trade.get("order_id")
         or trade.get("orderID")
         or trade.get("orderId")
+        or trade.get("taker_order_id")
+        or trade.get("takerOrderId")
+        or trade.get("taker_orderID")
+        or trade.get("takerOrderID")
         or trade.get("id")
     )
     if candidate is not None and str(candidate).strip() == order_id:
@@ -110,7 +114,34 @@ def _trade_matches_order(trade: dict[str, Any], order_id: str) -> bool:
     return False
 
 
-def _read_official_order_trades(clob_client: Any, order_id: str) -> list[dict[str, Any]]:
+def _official_order_associated_trade_ids(order_payload: dict[str, Any] | None) -> list[str]:
+    if not isinstance(order_payload, dict):
+        return []
+    raw_values = (
+        order_payload.get("associate_trades")
+        or order_payload.get("associateTrades")
+        or order_payload.get("associated_trades")
+        or order_payload.get("associatedTrades")
+        or []
+    )
+    if isinstance(raw_values, (str, int)):
+        raw_values = [raw_values]
+    if not isinstance(raw_values, list):
+        return []
+    trade_ids: list[str] = []
+    for raw_value in raw_values:
+        trade_id = str(raw_value or "").strip()
+        if trade_id:
+            trade_ids.append(trade_id)
+    return trade_ids
+
+
+def _read_official_order_trades(
+    clob_client: Any,
+    order_id: str,
+    *,
+    order_payload: dict[str, Any] | None = None,
+) -> list[dict[str, Any]]:
     for method_name in ("get_trades", "getTrades"):
         get_trades = getattr(clob_client, method_name, None)
         if not callable(get_trades):
@@ -127,6 +158,33 @@ def _read_official_order_trades(clob_client: Any, order_id: str) -> list[dict[st
             ]
             if items:
                 return items
+        try:
+            from py_clob_client_v2 import TradeParams
+
+            payload = get_trades(TradeParams(id=order_id), only_first_page=True)
+        except (ImportError, AttributeError, TypeError):
+            pass
+        else:
+            items = [
+                trade
+                for trade in _payload_items(payload)
+                if _trade_matches_order(trade, order_id)
+            ]
+            if items:
+                return items
+        associated_items: list[dict[str, Any]] = []
+        for trade_id in _official_order_associated_trade_ids(order_payload):
+            try:
+                payload = get_trades(TradeParams(id=trade_id), only_first_page=True)
+            except (NameError, AttributeError, TypeError):
+                break
+            associated_items.extend(
+                trade
+                for trade in _payload_items(payload)
+                if _trade_matches_order(trade, order_id)
+            )
+        if associated_items:
+            return associated_items
         try:
             payload = get_trades(None, only_first_page=True)
         except TypeError:
@@ -168,6 +226,7 @@ def build_trade_plan_from_official_trades(
     strategy_state: LiveStrategyState,
     *,
     clob_client: Any,
+    order_payload: dict[str, Any] | None = None,
 ) -> TradePlan | None:
     order_id = str(strategy_state.pending_live_order_id or "").strip()
     if not order_id:
@@ -175,7 +234,7 @@ def build_trade_plan_from_official_trades(
 
     total_size = 0.0
     total_cost = 0.0
-    for trade in _read_official_order_trades(clob_client, order_id):
+    for trade in _read_official_order_trades(clob_client, order_id, order_payload=order_payload):
         size, price = _trade_size_and_price(trade)
         if size is None or price is None or not 0 < price < 1:
             continue
@@ -369,13 +428,17 @@ def build_verified_pending_live_trade_plan(
     if not callable(get_order):
         return None
 
-    official_trade_plan = build_trade_plan_from_official_trades(strategy_state, clob_client=clob_client)
-    if official_trade_plan is not None:
-        return official_trade_plan
-
     order_payload = get_order(strategy_state.pending_live_order_id)
     if not isinstance(order_payload, dict):
         return None
+
+    official_trade_plan = build_trade_plan_from_official_trades(
+        strategy_state,
+        clob_client=clob_client,
+        order_payload=order_payload,
+    )
+    if official_trade_plan is not None:
+        return official_trade_plan
 
     status = str(order_payload.get("status") or "").strip().lower()
     has_fill_markers = any(
