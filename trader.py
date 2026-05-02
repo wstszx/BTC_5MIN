@@ -1042,6 +1042,29 @@ def run_live_trading(
                         }
                     )
 
+            if pending_strategy_ids:
+                _sync_legacy_live_state_fields(state, managed_strategy_ids)
+                save_session_state(state_path, state)
+                result = {
+                    "status": "pending_settlement",
+                    "slug": state.live_strategies[pending_strategy_ids[0]].pending_live_slug,
+                    "strategies": strategy_results,
+                    "remaining_live_budget": None,
+                }
+                _update_runtime_control(
+                    runtime_control,
+                    current_round_slug=state.live_strategies[pending_strategy_ids[0]].pending_live_slug,
+                    round_in_progress=True,
+                    safe_to_switch=False,
+                    pending_live_order=True,
+                    **_runtime_alert_changes_for_live_result(result),
+                )
+                if _safe_stop_requested(stop_when_safe):
+                    return result
+                if not _sleep_if_not_stopped(stop_event, _poll_interval_for_live_result(cfg=cfg, result=result)):
+                    return {"status": "stopped"}
+                continue
+
             try:
                 remaining_live_budget: float | None = _read_available_live_balance(cfg=cfg, clob_client=live_client)
                 balance_read_error: str | None = None

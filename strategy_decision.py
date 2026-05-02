@@ -372,7 +372,11 @@ def resolve_side_from_strategy(
                 0.0,
                 effective_confirm_before_entry_seconds - max(0.0, float(cfg.strategy7_late_confirm_relax_seconds)),
             )
-        if entry_time is not None and (entry_time - now).total_seconds() < effective_confirm_before_entry_seconds:
+        if (
+            entry_time is not None
+            and effective_confirm_before_entry_seconds > 0
+            and (entry_time - now).total_seconds() < effective_confirm_before_entry_seconds
+        ):
             return SideDecision(
                 side=None,
                 reason=f"{strategy_prefix}_entry_too_late",

@@ -242,6 +242,7 @@ def run_backtest(csv_path: Path, cfg: AppConfig | None = None) -> BacktestResult
             if (
                 quote_fetched_at is not None
                 and entry_time is not None
+                and effective_confirm_before_entry_seconds > 0
                 and (entry_time - quote_fetched_at).total_seconds() < effective_confirm_before_entry_seconds
             ):
                 records.append(

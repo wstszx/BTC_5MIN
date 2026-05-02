@@ -66,3 +66,48 @@ def test_strategy7_uses_general_max_entry_price():
 
     assert decision.side is None
     assert decision.reason == "strategy7_price_too_high"
+
+
+def test_strategy7_zero_confirm_window_allows_entry_inside_grace_window():
+    now = datetime(2026, 4, 30, 1, 0, 13, tzinfo=timezone.utc)
+    window = MarketWindow(
+        event_id="e1",
+        market_id="m1",
+        slug="s1",
+        title="BTC",
+        start_time=datetime(2026, 4, 30, 1, 0, tzinfo=timezone.utc),
+        end_time=datetime(2026, 4, 30, 1, 5, tzinfo=timezone.utc),
+    )
+    cfg = build_config_from_env_values(
+        {
+            "STRATEGY_ID": "7",
+            "OPEN_DELAY_SECONDS": "12",
+            "ENTRY_GRACE_SECONDS": "18",
+            "STRATEGY7_OFI_THRESHOLD": "0.5",
+            "STRATEGY7_MOMENTUM_THRESHOLD": "0.01",
+            "STRATEGY7_MIN_SIGNAL_GAP": "0.0",
+            "STRATEGY7_CONFIRM_BEFORE_ENTRY_SECONDS": "0",
+            "BINANCE_SIGNAL_STALE_SECONDS": "10.0",
+        }
+    )
+    state = SessionState(signal_round_slug="s1", signal_round_open_up_price=0.50)
+    quote = MarketQuote(
+        slug="s1",
+        up_price=0.54,
+        up_best_ask=0.54,
+        strategy6_ofi_score=0.7,
+        strategy6_signal_at=now,
+    )
+
+    decision = resolve_side_from_strategy(
+        cfg=cfg,
+        state=state,
+        slug="s1",
+        quote=quote,
+        window=window,
+        entry_time=window.start_time + timedelta(seconds=cfg.open_delay_seconds),
+        now=now,
+    )
+
+    assert decision.side == "UP"
+    assert decision.reason is None

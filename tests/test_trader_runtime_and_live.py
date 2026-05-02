@@ -1220,6 +1220,71 @@ def test_run_live_trading_reports_pending_live_order_blocks_switch(tmp_path):
     assert result['status'] == 'pending_settlement'
 
 
+def test_run_live_trading_does_not_evaluate_new_orders_while_any_live_order_is_pending(tmp_path, monkeypatch):
+    state_path = tmp_path / "live_state.json"
+    state_path.write_text(
+        json.dumps(
+            {
+                "live_strategies": {
+                    "7": {
+                        "round_index": 4,
+                        "cash_pnl": 0.0,
+                        "recovery_loss": 0.0,
+                        "consecutive_losses": 0,
+                        "pending_live_slug": "btc-updown-5m-prev",
+                        "pending_live_side": "UP",
+                        "pending_live_price": 0.5,
+                        "pending_live_order_size": 2.0,
+                        "pending_live_order_cost": 1.0,
+                        "pending_live_expected_profit": 1.0,
+                        "pending_live_order_id": "oid-prev",
+                        "pending_live_end_time": "2099-01-01T00:00:00+00:00",
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    evaluation_calls = {"side": 0, "plan": 0}
+
+    def fail_if_strategy_evaluated(**kwargs):
+        evaluation_calls["side"] += 1
+        return SideDecision(side="UP")
+
+    def fail_if_plan_built(*args, **kwargs):
+        evaluation_calls["plan"] += 1
+        return TradePlan(
+            True,
+            "UP",
+            price=0.55,
+            order_size=2.0,
+            order_cost=1.0,
+            expected_profit=1.0,
+        )
+
+    monkeypatch.setattr("trader._resolve_side_from_strategy", fail_if_strategy_evaluated)
+    monkeypatch.setattr("trader.build_trade_plan", fail_if_plan_built)
+
+    result = run_live_trading(
+        AppConfig(
+            trade_mode="live",
+            live_trading_enabled=True,
+            live_private_key="pk",
+            live_funder="0xfunder",
+            strategy_id=3,
+            live_strategy_ids=[3, 7],
+        ),
+        market_client=_LiveMarketClient(),
+        clob_client=_StubClobClient(),
+        state_path=state_path,
+        log_path=tmp_path / "live_orders.csv",
+        stop_when_safe=lambda: True,
+    )
+
+    assert result["status"] == "pending_settlement"
+    assert evaluation_calls == {"side": 0, "plan": 0}
+
+
 def test_run_live_trading_keeps_removed_pending_live_strategy_managed(tmp_path):
     control = RuntimeControl(initial_mode='live')
     state_path = tmp_path / 'live_state.json'
