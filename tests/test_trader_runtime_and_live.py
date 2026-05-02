@@ -4326,12 +4326,13 @@ def test_strategy7_rechecks_max_entry_price_after_lock():
     assert state.signal_round_locked_side == "UP"
 
 
-def test_strategy7_skips_when_signals_conflict():
+def test_strategy7_uses_weighted_score_when_signals_conflict():
     now = datetime.now(timezone.utc)
     cfg = AppConfig(
         strategy_id=7,
         strategy7_ofi_threshold=0.65,
         strategy7_momentum_threshold=0.02,
+        strategy7_min_signal_gap=0.01,
     )
     state = SessionState(round_index=0, signal_round_slug="s1", signal_round_open_up_price=0.50)
     quote = MarketQuote(
@@ -4345,8 +4346,8 @@ def test_strategy7_skips_when_signals_conflict():
 
     decision = _resolve_side_from_strategy(cfg=cfg, state=state, slug="s1", quote=quote, now=now)
 
-    assert decision.side is None
-    assert decision.reason == "strategy7_signal_conflict"
+    assert decision.side == "UP"
+    assert decision.reason == "strategy7_weighted_conflict"
 
 
 def test_strategy7_skips_when_confirmation_is_too_late():

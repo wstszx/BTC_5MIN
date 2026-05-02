@@ -3358,10 +3358,12 @@ def test_dashboard_assets_include_strategy7_copy_and_reasons(tmp_path: Path):
         state.close()
 
         assert payload['strategy_catalog']['7']['label'] == '盘口+动量共识'
-    assert payload['strategy_catalog']['7']['summary'] == '只有币安盘口失衡和预测市场动量同向时才允许交易。'
+    assert payload['strategy_catalog']['7']['summary'] == '币安盘口失衡与预测市场动量同向时加分，冲突时按加权评分决定方向。'
     assert 'strategy7_signal_conflict' in js
+    assert 'strategy7_weighted_conflict' in js
     assert 'strategy7_confidence_too_low' in js
     assert '盘口失衡与动量需同向确认' in js
+    assert '策略7 冲突信号按权重确认' in js
     assert '策略7 盘口失衡阈值' in js
     assert 'id=strategy7Panel' in html
     assert 'strategy7Agreement' in html
