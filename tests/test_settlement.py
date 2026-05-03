@@ -1,7 +1,11 @@
 from __future__ import annotations
 
 from models import PendingPaperTrade, SessionState
-from settlement import resolved_result_from_official_market, settle_pending_paper_trade
+from settlement import (
+    resolve_pending_live_result,
+    resolved_result_from_official_market,
+    settle_pending_paper_trade,
+)
 from trader import _settle_pending_paper_trade
 
 
@@ -48,7 +52,7 @@ def test_settlement_resolves_pending_paper_trade_and_trader_reexports_helper():
     assert _settle_pending_paper_trade is settle_pending_paper_trade
 
 
-def test_live_official_result_waits_for_final_price_when_price_to_beat_is_known():
+def test_official_result_uses_terminal_prices_when_final_price_is_missing():
     event = {
         "closed": True,
         "eventMetadata": {"priceToBeat": 78360.42348},
@@ -59,4 +63,127 @@ def test_live_official_result_waits_for_final_price_when_price_to_beat_is_known(
         "outcomePrices": '["1", "0"]',
     }
 
+    assert resolved_result_from_official_market(event, market) == "UP"
+
+
+def test_official_result_waits_when_terminal_prices_are_not_final():
+    event = {
+        "closed": True,
+        "eventMetadata": {"priceToBeat": 78360.42348},
+    }
+    market = {
+        "closed": True,
+        "outcomes": '["Up", "Down"]',
+        "outcomePrices": '["0.99", "0.01"]',
+    }
+
     assert resolved_result_from_official_market(event, market) is None
+
+
+def test_official_result_waits_when_closed_flag_is_not_boolean_true():
+    event = {
+        "closed": "false",
+        "eventMetadata": {"priceToBeat": 78360.42348},
+    }
+    market = {
+        "closed": "false",
+        "outcomes": '["Up", "Down"]',
+        "outcomePrices": '["1", "0"]',
+    }
+
+    assert resolved_result_from_official_market(event, market) is None
+
+
+def test_live_result_uses_official_clob_token_winner_when_final_price_is_missing():
+    class _Client:
+        def get_event_by_slug(self, slug: str):
+            return {
+                "slug": slug,
+                "closed": True,
+                "eventMetadata": {"priceToBeat": 78360.42348},
+                "markets": [
+                    {
+                        "conditionId": "cond-1",
+                        "closed": True,
+                        "outcomes": '["Up", "Down"]',
+                        "outcomePrices": '["1", "0"]',
+                    }
+                ],
+            }
+
+        def get_market_by_slug(self, slug: str):
+            return {
+                "conditionId": "cond-1",
+                "closed": True,
+                "eventMetadata": {"priceToBeat": 78360.42348},
+                "outcomes": '["Up", "Down"]',
+                "outcomePrices": '["1", "0"]',
+            }
+
+        def get_clob_market_by_condition_id(self, condition_id: str):
+            assert condition_id == "cond-1"
+            return {
+                "closed": True,
+                "tokens": [
+                    {"outcome": "Up", "winner": True},
+                    {"outcome": "Down", "winner": False},
+                ],
+            }
+
+    result, status = resolve_pending_live_result(
+        market_client=_Client(),
+        funder=None,
+        slug="btc-updown-5m-settled",
+    )
+
+    assert result == "UP"
+    assert status is None
+
+
+def test_live_result_waits_when_gamma_terminal_prices_have_no_official_winner():
+    class _Client:
+        def get_event_by_slug(self, slug: str):
+            return {
+                "slug": slug,
+                "closed": True,
+                "eventMetadata": {"priceToBeat": 78360.42348},
+                "markets": [
+                    {
+                        "conditionId": "cond-1",
+                        "closed": True,
+                        "outcomes": '["Up", "Down"]',
+                        "outcomePrices": '["1", "0"]',
+                    }
+                ],
+            }
+
+        def get_market_by_slug(self, slug: str):
+            return {
+                "conditionId": "cond-1",
+                "closed": True,
+                "eventMetadata": {"priceToBeat": 78360.42348},
+                "outcomes": '["Up", "Down"]',
+                "outcomePrices": '["1", "0"]',
+            }
+
+        def get_clob_market_by_condition_id(self, condition_id: str):
+            return {
+                "closed": True,
+                "tokens": [
+                    {"outcome": "Up", "winner": False},
+                    {"outcome": "Down", "winner": False},
+                ],
+            }
+
+    result, status = resolve_pending_live_result(
+        market_client=_Client(),
+        funder=None,
+        slug="btc-updown-5m-unresolved",
+    )
+
+    assert result is None
+    assert status == {
+        "status": "pending_settlement",
+        "slug": "btc-updown-5m-unresolved",
+        "skip_reason": "round_unresolved",
+    }

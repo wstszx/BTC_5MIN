@@ -229,6 +229,10 @@ def _sync_live_state_ledger_from_trade_log(
             if ledger_state is None:
                 continue
             ledger_state["seen"] = True
+            if str(row.get("stop_loss_triggered") or "").strip().lower() == "true":
+                ledger_state["recovery_loss"] = 0.0
+                ledger_state["consecutive_losses"] = 0
+                continue
             result = str(row.get("result") or "").strip().upper()
             side = str(row.get("side") or "").strip().upper()
             if result not in {"UP", "DOWN"} or side not in {"UP", "DOWN"}:
@@ -268,6 +272,10 @@ def _sync_live_state_ledger_from_trade_log(
         strategy_state.recovery_loss = float(ledger_state["recovery_loss"])
         strategy_state.consecutive_losses = int(ledger_state["consecutive_losses"])
     _sync_legacy_live_state_fields(state, active_strategy_ids)
+
+
+def _side_decision_log_price(side_decision: SideDecision) -> float | None:
+    return side_decision.candidate_price
 
 
 def _runtime_backoff_seconds(cfg: AppConfig, consecutive_errors: int) -> int:
@@ -497,7 +505,7 @@ def place_live_order(
                     start_time=target_round.start_time,
                     end_time=target_round.end_time,
                     side="SKIP",
-                    price=None,
+                    price=_side_decision_log_price(side_decision),
                     order_size=0.0,
                     order_cost=0.0,
                     expected_profit=0.0,
@@ -1340,7 +1348,7 @@ def run_live_trading(
                                         start_time=target_round.start_time,
                                         end_time=target_round.end_time,
                                         side="SKIP",
-                                        price=None,
+                                        price=_side_decision_log_price(side_decision),
                                         order_size=0.0,
                                         order_cost=0.0,
                                         expected_profit=0.0,
@@ -2055,7 +2063,7 @@ def run_paper_trading(
                             start_time=target_round.start_time,
                             end_time=target_round.end_time,
                             side="SKIP",
-                            price=None,
+                            price=_side_decision_log_price(side_decision),
                             order_size=0.0,
                             order_cost=0.0,
                             expected_profit=0.0,

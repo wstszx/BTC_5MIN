@@ -156,6 +156,69 @@ def test_sync_live_state_ledger_from_trade_log_uses_reconciled_loss(tmp_path: Pa
     assert state.cash_pnl == pytest.approx(0.8000006)
 
 
+def test_sync_live_state_ledger_from_trade_log_respects_stop_loss_reset(tmp_path: Path):
+    live_csv = tmp_path / "live_orders.csv"
+    with live_csv.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(
+            handle,
+            fieldnames=[
+                "strategy",
+                "end_time",
+                "side",
+                "order_cost",
+                "expected_profit",
+                "result",
+                "skip_reason",
+                "stop_loss_triggered",
+            ],
+        )
+        writer.writeheader()
+        for order_cost in ("1.2", "2.8"):
+            writer.writerow(
+                {
+                    "strategy": "7",
+                    "end_time": "2026-05-03T04:00:00+00:00",
+                    "side": "UP",
+                    "order_cost": order_cost,
+                    "expected_profit": "1.0",
+                    "result": "DOWN",
+                    "skip_reason": "",
+                    "stop_loss_triggered": "False",
+                }
+            )
+        writer.writerow(
+            {
+                "strategy": "7",
+                "end_time": "2026-05-03T04:05:00+00:00",
+                "side": "UP",
+                "order_cost": "0.0",
+                "expected_profit": "0.0",
+                "result": "",
+                "skip_reason": "max_consecutive_losses_reached",
+                "stop_loss_triggered": "True",
+            }
+        )
+
+    state = SessionState(
+        recovery_loss=4.0,
+        consecutive_losses=2,
+        live_strategies={
+            7: LiveStrategyState(
+                recovery_loss=4.0,
+                consecutive_losses=2,
+            )
+        },
+    )
+
+    _sync_live_state_ledger_from_trade_log(state, live_csv=live_csv, active_strategy_ids=[7])
+
+    live_state = state.live_strategies[7]
+    assert live_state.recovery_loss == 0.0
+    assert live_state.consecutive_losses == 0
+    assert state.recovery_loss == 0.0
+    assert state.consecutive_losses == 0
+
+
 def test_requirements_pin_runtime_dependencies():
     requirements = [
         line.strip()
@@ -1702,10 +1765,21 @@ class _TerminalPricesSettlingLiveClient(_LiveMarketClient):
             "eventMetadata": {},
             "markets": [
                 {
+                    "conditionId": "cond-prev",
                     "closed": True,
                     "outcomes": '["Up","Down"]',
                     "outcomePrices": '["0","1"]',
                 }
+            ],
+        }
+
+    def get_clob_market_by_condition_id(self, condition_id: str):
+        assert condition_id == "cond-prev"
+        return {
+            "closed": True,
+            "tokens": [
+                {"outcome": "Up", "winner": False},
+                {"outcome": "Down", "winner": True},
             ],
         }
 
@@ -1750,10 +1824,21 @@ class _ConflictingPositionAndOfficialResultClient(_ResolvedPositionSettlingLiveC
             "eventMetadata": {},
             "markets": [
                 {
+                    "conditionId": "cond-prev",
                     "closed": True,
                     "outcomes": '["Up","Down"]',
                     "outcomePrices": '["0","1"]',
                 }
+            ],
+        }
+
+    def get_clob_market_by_condition_id(self, condition_id: str):
+        assert condition_id == "cond-prev"
+        return {
+            "closed": True,
+            "tokens": [
+                {"outcome": "Up", "winner": False},
+                {"outcome": "Down", "winner": True},
             ],
         }
 
@@ -1767,10 +1852,21 @@ class _OfficialTerminalResultNoPositionClient(_LiveMarketClient):
             "eventMetadata": {},
             "markets": [
                 {
+                    "conditionId": "cond-prev",
                     "closed": True,
                     "outcomes": '["Up","Down"]',
                     "outcomePrices": '["0","1"]',
                 }
+            ],
+        }
+
+    def get_clob_market_by_condition_id(self, condition_id: str):
+        assert condition_id == "cond-prev"
+        return {
+            "closed": True,
+            "tokens": [
+                {"outcome": "Up", "winner": False},
+                {"outcome": "Down", "winner": True},
             ],
         }
 
@@ -1827,6 +1923,7 @@ class _TerminalPricesWithoutFinalPriceClient(_LiveMarketClient):
             "markets": [
                 {
                     "slug": slug,
+                    "conditionId": "cond-prev",
                     "closed": False,
                     "outcomes": '["Up","Down"]',
                     "outcomePrices": '["0.49","0.51"]',
@@ -1839,10 +1936,21 @@ class _TerminalPricesWithoutFinalPriceClient(_LiveMarketClient):
             raise AssertionError(f"Unexpected market slug {slug}")
         return {
             "slug": slug,
+            "conditionId": "cond-prev",
             "closed": True,
             "eventMetadata": {"priceToBeat": 100.0},
             "outcomes": '["Up","Down"]',
             "outcomePrices": '["0","1"]',
+        }
+
+    def get_clob_market_by_condition_id(self, condition_id: str):
+        assert condition_id == "cond-prev"
+        return {
+            "closed": True,
+            "tokens": [
+                {"outcome": "Up", "winner": False},
+                {"outcome": "Down", "winner": True},
+            ],
         }
 
     def get_current_positions(self, *, user: str, redeemable: bool | None = None):
@@ -3565,6 +3673,52 @@ def test_run_live_trading_marks_signal_skip_round_processed_like_paper(tmp_path,
     assert rows[0]["skip_reason"] == "signal_unavailable"
 
 
+def test_run_live_trading_logs_candidate_price_for_signal_price_skip(tmp_path, monkeypatch):
+    state_path = tmp_path / "live_state.json"
+    log_path = tmp_path / "live_orders.csv"
+    stub_clob = _StubClobClient(balance_payload={"available": 3.0})
+
+    def fake_sleep(_seconds):
+        stop_event.set()
+
+    monkeypatch.setattr("trader.time.sleep", fake_sleep)
+    monkeypatch.setattr(
+        "trader._resolve_side_from_strategy",
+        lambda **kwargs: SideDecision(
+            side=None,
+            reason="strategy7_price_too_high",
+            candidate_side="DOWN",
+            candidate_price=0.57,
+        ),
+    )
+
+    stop_event = threading.Event()
+    result = run_live_trading(
+        AppConfig(
+            trade_mode="live",
+            live_trading_enabled=True,
+            live_private_key="pk",
+            live_funder="0xfunder",
+            strategy_id=7,
+            live_strategy_ids=[7],
+            open_delay_seconds=0,
+            poll_interval_seconds=1,
+        ),
+        market_client=_LiveMarketClient(),
+        clob_client=stub_clob,
+        state_path=state_path,
+        log_path=log_path,
+        stop_event=stop_event,
+    )
+
+    rows = list(csv.DictReader(log_path.open(newline="", encoding="utf-8")))
+    assert result["status"] == "stopped"
+    assert stub_clob.created_orders == []
+    assert rows[0]["side"] == "SKIP"
+    assert rows[0]["price"] == "0.57"
+    assert rows[0]["skip_reason"] == "strategy7_price_too_high"
+
+
 def test_run_live_trading_logs_observed_round_before_entry_without_submitting(tmp_path, monkeypatch):
     stop_event = threading.Event()
     stub_clob = _StubClobClient(balance_payload={"available": 3.0})
@@ -4254,7 +4408,7 @@ def test_settle_pending_live_trade_uses_official_market_endpoint_when_event_endp
     assert updated_strategy.pending_live_order_id is None
 
 
-def test_settle_pending_live_trade_waits_when_only_terminal_prices_are_available_for_price_to_beat_market():
+def test_settle_pending_live_trade_uses_clob_winner_when_final_price_is_missing():
     pending_strategy = LiveStrategyState(
         round_index=4,
         cash_pnl=0.0,
@@ -4288,11 +4442,12 @@ def test_settle_pending_live_trade_waits_when_only_terminal_prices_are_available
         funder="0xfunder",
     )
 
-    assert settled is False
-    assert status["status"] == "pending_settlement"
-    assert status["skip_reason"] == "round_unresolved"
-    assert updated_strategy.cash_pnl == pytest.approx(0.0)
-    assert updated_strategy.pending_live_slug == "btc-updown-5m-prev"
+    assert settled is True
+    assert status["status"] == "settled"
+    assert status["result"] == "DOWN"
+    assert status["trade_pnl"] == pytest.approx(-1.0)
+    assert updated_strategy.cash_pnl == pytest.approx(-1.0)
+    assert updated_strategy.pending_live_slug is None
 
 
 def test_settle_pending_live_trade_does_not_use_ws_only_resolution_for_live_settlement():
@@ -4733,6 +4888,8 @@ def test_strategy7_rechecks_max_entry_price_after_lock():
 
     assert second.side is None
     assert second.reason == "strategy7_price_too_high"
+    assert second.candidate_side == "UP"
+    assert second.candidate_price == pytest.approx(0.58)
     assert second.signal_locked is True
     assert state.signal_round_locked_side == "UP"
 

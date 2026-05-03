@@ -21,6 +21,8 @@ from strategy import (
 class SideDecision:
     side: str | None
     reason: str | None = None
+    candidate_side: str | None = None
+    candidate_price: float | None = None
     signal_open_up_price: float | None = None
     signal_current_up_price: float | None = None
     signal_threshold: float | None = None
@@ -260,6 +262,8 @@ def resolve_side_from_strategy(
                 return SideDecision(
                     side=None,
                     reason=price_skip_reason,
+                    candidate_side=state.signal_round_locked_side,
+                    candidate_price=candidate_price,
                     signal_open_up_price=state.signal_round_open_up_price,
                     signal_current_up_price=signal_current_up_price,
                     signal_threshold=cfg.strategy7_momentum_threshold,
@@ -411,6 +415,8 @@ def resolve_side_from_strategy(
             return SideDecision(
                 side=None,
                 reason=price_skip_reason,
+                candidate_side=resolved_side,
+                candidate_price=candidate_price,
                 signal_open_up_price=signal_open_up_price,
                 signal_current_up_price=signal_current_up_price,
                 signal_threshold=cfg.strategy7_momentum_threshold,

@@ -232,6 +232,31 @@ def _collapse_live_recent_rows(rows: list[dict[str, str]]) -> list[dict[str, str
     return collapsed
 
 
+def _backfill_strategy_price_skip_price(row: dict[str, str]) -> dict[str, str]:
+    if str(row.get("price") or "").strip():
+        return row
+    skip_reason = str(row.get("skip_reason") or "").strip()
+    if skip_reason not in {
+        "strategy7_price_too_low",
+        "strategy7_price_too_high",
+        "strategy8_price_too_low",
+        "strategy8_price_too_high",
+    }:
+        return row
+    current_up_price = _optional_float(row.get("signal_current_up_price"))
+    signal_delta = _optional_float(row.get("signal_delta"))
+    if current_up_price is None or signal_delta is None:
+        return row
+    candidate_price = current_up_price if signal_delta > 0 else 1 - current_up_price
+    updated = dict(row)
+    updated["price"] = str(candidate_price)
+    return updated
+
+
+def _backfill_recent_strategy_price_skip_prices(rows: list[dict[str, str]]) -> list[dict[str, str]]:
+    return [_backfill_strategy_price_skip_price(row) for row in rows]
+
+
 def _normalize_timeframe_filter(timeframe: str | None, *, fallback: str = "5m") -> str:
     raw = str(timeframe or fallback).strip().lower()
     return raw if raw in {"5m", "15m"} else fallback
@@ -719,8 +744,6 @@ def _validate_recent_trade_row(
         except Exception as exc:
             resolved['result_check_status'] = 'error'
             resolved['result_check_error'] = _result_validation_error_text(exc)
-            if validation_cache is not None:
-                validation_cache[cache_key] = dict(resolved)
             if should_validate_result:
                 validated['result_check_status'] = 'error'
                 validated['result_check_error'] = resolved['result_check_error']
@@ -2624,6 +2647,7 @@ class DashboardState:
             close = getattr(client, "close", None)
             if callable(close):
                 close()
+        rows = _backfill_recent_strategy_price_skip_prices(rows)
         rows = [_with_recent_round_display_time(row, target_timeframe) for row in rows]
         return {
             "csv_path": str(live_csv),

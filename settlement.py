@@ -163,17 +163,42 @@ def _truthy_position_flag(value: Any) -> bool:
     return False
 
 
+def _is_officially_closed(*values: Any) -> bool:
+    return any(value is True for value in values)
+
+
+def resolved_result_from_clob_token_winner(market_client: Any, market: dict[str, Any]) -> str | None:
+    get_clob_market = getattr(market_client, "get_clob_market_by_condition_id", None)
+    if not callable(get_clob_market):
+        return None
+    condition_id = str(market.get("conditionId") or market.get("condition_id") or "").strip()
+    if not condition_id:
+        return None
+    try:
+        clob_market = get_clob_market(condition_id)
+    except Exception:
+        return None
+    if not isinstance(clob_market, dict) or clob_market.get("closed") is not True:
+        return None
+    tokens = clob_market.get("tokens")
+    if not isinstance(tokens, list):
+        return None
+    winners = [token for token in tokens if isinstance(token, dict) and token.get("winner") is True]
+    if len(winners) != 1:
+        return None
+    outcome = normalize_outcome_label(str(winners[0].get("outcome") or ""))
+    return outcome if outcome in {"UP", "DOWN"} else None
+
+
 def resolved_result_from_official_market(event: dict[str, Any], market: dict[str, Any]) -> str | None:
     metadata = event.get("eventMetadata") or {}
     if metadata.get("priceToBeat") is not None and metadata.get("finalPrice") is not None:
         return "UP" if float(metadata["finalPrice"]) >= float(metadata["priceToBeat"]) else "DOWN"
-    if metadata.get("priceToBeat") is not None:
-        return None
 
     prices = parse_outcome_prices(market.get("outcomePrices"), market.get("outcomes"))
     up_price = prices.get("UP")
     down_price = prices.get("DOWN")
-    is_closed = bool(event.get("closed") or market.get("closed"))
+    is_closed = _is_officially_closed(event.get("closed"), market.get("closed"))
     if is_closed and up_price is not None and down_price is not None and {up_price, down_price} == {0.0, 1.0}:
         return "UP" if up_price > down_price else "DOWN"
     return None
@@ -201,6 +226,44 @@ def resolved_result_from_official_market_endpoint(market_client: Any, slug: str)
     return resolved_result_from_official_market(event, market)
 
 
+def resolved_live_result_from_official_sources(
+    market_client: Any,
+    event: dict[str, Any],
+    market: dict[str, Any],
+) -> str | None:
+    metadata = event.get("eventMetadata") or {}
+    if metadata.get("priceToBeat") is not None and metadata.get("finalPrice") is not None:
+        return "UP" if float(metadata["finalPrice"]) >= float(metadata["priceToBeat"]) else "DOWN"
+
+    result = resolved_result_from_clob_token_winner(market_client, market)
+    if result:
+        return result
+
+    endpoint_market = None
+    get_market = getattr(market_client, "get_market_by_slug", None)
+    slug = str(event.get("slug") or market.get("slug") or "").strip()
+    if callable(get_market) and slug:
+        try:
+            endpoint_market = get_market(slug)
+        except Exception:
+            endpoint_market = None
+    if not isinstance(endpoint_market, dict):
+        return None
+
+    endpoint_event = {
+        "slug": slug,
+        "closed": endpoint_market.get("closed"),
+        "eventMetadata": endpoint_market.get("eventMetadata") or {},
+    }
+    if endpoint_event["eventMetadata"].get("priceToBeat") is not None and endpoint_event["eventMetadata"].get("finalPrice") is not None:
+        return (
+            "UP"
+            if float(endpoint_event["eventMetadata"]["finalPrice"]) >= float(endpoint_event["eventMetadata"]["priceToBeat"])
+            else "DOWN"
+        )
+    return resolved_result_from_clob_token_winner(market_client, endpoint_market)
+
+
 def resolve_pending_live_result(
     *,
     market_client: Any,
@@ -209,13 +272,9 @@ def resolve_pending_live_result(
 ) -> tuple[str | None, dict[str, Any] | None]:
     event = market_client.get_event_by_slug(slug)
     market = (event.get("markets") or [{}])[0]
-    official_market_result = resolved_result_from_official_market(event, market)
+    official_market_result = resolved_live_result_from_official_sources(market_client, event, market)
     if official_market_result:
         return official_market_result, None
-
-    official_market_endpoint_result = resolved_result_from_official_market_endpoint(market_client, slug)
-    if official_market_endpoint_result:
-        return official_market_endpoint_result, None
 
     official_position_result = resolved_result_from_redeemable_positions(
         market_client,

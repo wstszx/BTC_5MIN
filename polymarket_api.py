@@ -711,6 +711,10 @@ class PolymarketClient:
         payload = self._get_json(f"/markets/slug/{slug}", base_url=self.config.gamma_api_base)
         return payload if isinstance(payload, dict) else {}
 
+    def get_clob_market_by_condition_id(self, condition_id: str) -> dict[str, Any]:
+        payload = self._get_json(f"/markets/{condition_id}", base_url=self.config.clob_api_base)
+        return payload if isinstance(payload, dict) else {}
+
     def get_current_positions(
         self,
         *,

@@ -1105,6 +1105,35 @@ def test_dashboard_live_recent_orders_reads_live_specific_csv(tmp_path: Path):
         os.chdir(old_cwd)
 
 
+def test_dashboard_live_recent_orders_backfills_strategy_price_skip_price(tmp_path: Path):
+    old_cwd = Path.cwd()
+    os.chdir(tmp_path)
+    state = DashboardState(env_file=tmp_path / ".env.dashboard")
+    try:
+        live_csv = tmp_path / "logs" / "live_orders.csv"
+        live_csv.parent.mkdir(parents=True, exist_ok=True)
+        live_csv.write_text(
+            "timestamp,mode,round_index,strategy,entry_timing,event_slug,start_time,end_time,side,price,"
+            "order_size,order_cost,expected_profit,result,trade_pnl,cash_pnl,recovery_loss,consecutive_losses,"
+            "stop_loss_triggered,skip_reason,signal_open_up_price,signal_current_up_price,signal_threshold,"
+            "signal_delta,signal_locked,signal_reason\n"
+            "2026-05-03T14:20:00+00:00,live,395,7,OPEN,btc-updown-5m-1777818000,"
+            "2026-05-03T14:20:00+00:00,2026-05-03T14:25:00+00:00,SKIP,,0.0,0.0,0.0,,"
+            "0.0,-7.4015,18.6799,7,False,strategy7_price_too_low,0.685,0.615,0.0064,"
+            "-0.0700,False,strategy7_price_too_low\n",
+            encoding="utf-8",
+        )
+
+        payload = state.get_live_recent_orders_payload(limit=10, strategy=7)
+
+        row = payload["rows"][0]
+        assert row["price"] == "0.385"
+        assert row["skip_reason"] == "strategy7_price_too_low"
+    finally:
+        state.close()
+        os.chdir(old_cwd)
+
+
 def test_dashboard_live_recent_orders_filters_by_strategy(tmp_path: Path):
     old_cwd = Path.cwd()
     os.chdir(tmp_path)
@@ -2955,7 +2984,7 @@ def test_recent_trades_payload_validates_from_official_token_winner(tmp_path: Pa
         os.chdir(old_cwd)
 
 
-def test_recent_trades_payload_caches_official_lookup_errors(tmp_path: Path, monkeypatch):
+def test_recent_trades_payload_does_not_cache_official_lookup_errors(tmp_path: Path, monkeypatch):
     old_cwd = Path.cwd()
     os.chdir(tmp_path)
     calls: list[str] = []
@@ -2985,7 +3014,7 @@ def test_recent_trades_payload_caches_official_lookup_errors(tmp_path: Path, mon
         first = state.get_recent_trades_payload(limit=10)['rows'][0]
         second = state.get_recent_trades_payload(limit=10)['rows'][0]
 
-        assert calls == ['btc-updown-15m-1777130100']
+        assert calls == ['btc-updown-15m-1777130100', 'btc-updown-15m-1777130100']
         assert first['result_check_status'] == 'error'
         assert first['result_check_error'] == 'RuntimeError: gamma timeout'
         assert second['result_check_status'] == 'error'
