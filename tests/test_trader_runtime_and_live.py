@@ -1404,6 +1404,83 @@ def test_run_live_trading_does_not_evaluate_new_orders_while_any_live_order_is_p
     assert evaluation_calls == {"side": 0, "plan": 0}
 
 
+def test_run_live_trading_keeps_pending_and_blocks_new_orders_when_settlement_errors(tmp_path, monkeypatch):
+    state_path = tmp_path / "live_state.json"
+    state_path.write_text(
+        json.dumps(
+            {
+                "live_strategies": {
+                    "7": {
+                        "round_index": 4,
+                        "cash_pnl": 0.0,
+                        "recovery_loss": 0.0,
+                        "consecutive_losses": 0,
+                        "pending_live_slug": "btc-updown-5m-prev",
+                        "pending_live_side": "UP",
+                        "pending_live_price": 0.5,
+                        "pending_live_order_size": 2.0,
+                        "pending_live_order_cost": 1.0,
+                        "pending_live_expected_profit": 1.0,
+                        "pending_live_order_id": "oid-prev",
+                        "pending_live_end_time": "2026-04-02T00:00:00+00:00",
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    evaluation_calls = {"side": 0, "plan": 0}
+
+    class _SettlementErrorLiveClient(_LiveMarketClient):
+        def get_event_by_slug(self, slug: str):
+            raise ValueError(f"broken settlement payload for {slug}")
+
+    def fail_if_strategy_evaluated(**kwargs):
+        evaluation_calls["side"] += 1
+        return SideDecision(side="UP")
+
+    def fail_if_plan_built(*args, **kwargs):
+        evaluation_calls["plan"] += 1
+        return TradePlan(
+            True,
+            "UP",
+            price=0.55,
+            order_size=2.0,
+            order_cost=1.0,
+            expected_profit=1.0,
+        )
+
+    monkeypatch.setattr("trader._resolve_side_from_strategy", fail_if_strategy_evaluated)
+    monkeypatch.setattr("trader.build_trade_plan", fail_if_plan_built)
+
+    result = run_live_trading(
+        AppConfig(
+            trade_mode="live",
+            live_trading_enabled=True,
+            live_private_key="pk",
+            live_funder="0xfunder",
+            strategy_id=3,
+            live_strategy_ids=[3, 7],
+        ),
+        market_client=_SettlementErrorLiveClient(),
+        clob_client=_StubClobClient(),
+        state_path=state_path,
+        log_path=tmp_path / "live_orders.csv",
+        stop_when_safe=lambda: True,
+    )
+
+    reloaded = load_session_state(state_path, effective_live_strategy_ids=[3, 7])
+    strategy_result = next(item for item in result["strategies"] if item["strategy_id"] == 7)
+
+    assert result["status"] == "pending_settlement"
+    assert strategy_result["status"] == "pending_settlement"
+    assert strategy_result["skip_reason"] == "settlement_error"
+    assert "broken settlement payload" in strategy_result["error"]
+    assert evaluation_calls == {"side": 0, "plan": 0}
+    assert reloaded.live_strategies[7].pending_live_slug == "btc-updown-5m-prev"
+    assert reloaded.live_strategies[7].pending_live_order_id == "oid-prev"
+
+
 def test_run_live_trading_keeps_removed_pending_live_strategy_managed(tmp_path):
     control = RuntimeControl(initial_mode='live')
     state_path = tmp_path / 'live_state.json'
@@ -2359,6 +2436,76 @@ def test_run_paper_trading_waits_for_pending_settlement_before_next_round(tmp_pa
     state = load_session_state(state_path)
     assert result['status'] == 'stopped'
     assert state.round_index == 1
+    assert len(state.pending_paper_trades) == 1
+    assert state.pending_paper_trades[0].event_slug == 'btc-updown-5m-paper-prev'
+    assert not (tmp_path / 'paper.csv').exists()
+
+
+def test_run_paper_trading_keeps_pending_when_settlement_errors(tmp_path, monkeypatch):
+    stop_event = threading.Event()
+
+    def fake_sleep(_seconds):
+        stop_event.set()
+
+    monkeypatch.setattr('trader.time.sleep', fake_sleep)
+
+    state_path = tmp_path / 'state.json'
+    state_path.write_text(
+        json.dumps(
+            {
+                'round_index': 1,
+                'cash_pnl': 0.0,
+                'recovery_loss': 0.0,
+                'consecutive_losses': 0,
+                'consecutive_max_stake_skips': 0,
+                'signal_round_slug': None,
+                'signal_round_open_up_price': None,
+                'signal_round_locked_side': None,
+                'stop_loss_count': 0,
+                'daily_realized_pnl': 0.0,
+                'current_day': '2026-04-06',
+                'pending_paper_trades': [
+                    {
+                        'round_index': 0,
+                        'event_slug': 'btc-updown-5m-paper-prev',
+                        'start_time': '2026-04-06T06:00:00+00:00',
+                        'end_time': '2026-04-06T06:05:00+00:00',
+                        'side': 'UP',
+                        'price': 0.5,
+                        'order_size': 2.0,
+                        'order_cost': 1.0,
+                        'expected_profit': 1.0,
+                        'strategy': 2,
+                        'entry_timing': 'OPEN',
+                        'signal_open_up_price': None,
+                        'signal_current_up_price': None,
+                        'signal_threshold': None,
+                        'signal_delta': None,
+                        'signal_locked': False,
+                        'signal_reason': None,
+                        'queued_at': '2026-04-06T06:00:05+00:00',
+                    }
+                ],
+            }
+        ),
+        encoding='utf-8',
+    )
+
+    class _BrokenSettlementPaperClient(_ImmediatePaperRoundClient):
+        def get_event_by_slug(self, slug: str):
+            raise ValueError(f"broken settlement payload for {slug}")
+
+    result = run_paper_trading(
+        AppConfig(strategy_id=2, poll_interval_seconds=1),
+        client=_BrokenSettlementPaperClient(),
+        state_path=state_path,
+        log_path=tmp_path / 'paper.csv',
+        stop_when_safe=lambda: True,
+        stop_event=stop_event,
+    )
+
+    state = load_session_state(state_path)
+    assert result['status'] == 'pending_settlement'
     assert len(state.pending_paper_trades) == 1
     assert state.pending_paper_trades[0].event_slug == 'btc-updown-5m-paper-prev'
     assert not (tmp_path / 'paper.csv').exists()

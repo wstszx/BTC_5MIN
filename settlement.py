@@ -396,7 +396,13 @@ def settle_pending_paper_trades(
                 _runtime_log("round=" + item.event_slug + " pending resolution")
                 remaining.append(item)
                 continue
-            raise
+            _runtime_log("round=" + item.event_slug + " settlement error: " + str(exc))
+            remaining.append(item)
+            continue
+        except Exception as exc:
+            _runtime_log("round=" + item.event_slug + " settlement error: " + str(exc))
+            remaining.append(item)
+            continue
 
         updated_state = next_state
         append_trade_log(

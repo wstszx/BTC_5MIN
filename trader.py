@@ -1127,14 +1127,30 @@ def run_live_trading(
                     _runtime_log(
                         f"live strategy {strategy_id} settlement error: {exc}"
                     )
-                    strategy_results.append(
-                        {
-                            "strategy_id": strategy_id,
-                            "status": "error",
-                            "phase": "settlement",
-                            "error": str(exc),
-                        }
-                    )
+                    if _strategy_has_pending_live_trade(strategy_state):
+                        pending_strategy_ids.append(strategy_id)
+                        strategy_results.append(
+                            {
+                                "strategy_id": strategy_id,
+                                "status": "pending_settlement",
+                                "phase": "settlement",
+                                "slug": strategy_state.pending_live_slug,
+                                "side": strategy_state.pending_live_side,
+                                "skip_reason": "settlement_error",
+                                "pending_end_time": strategy_state.pending_live_end_time,
+                                "order_id": strategy_state.pending_live_order_id,
+                                "error": str(exc),
+                            }
+                        )
+                    else:
+                        strategy_results.append(
+                            {
+                                "strategy_id": strategy_id,
+                                "status": "error",
+                                "phase": "settlement",
+                                "error": str(exc),
+                            }
+                        )
 
             if pending_strategy_ids:
                 _sync_legacy_live_state_fields(state, managed_strategy_ids)

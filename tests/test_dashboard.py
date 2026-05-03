@@ -1414,6 +1414,96 @@ def test_dashboard_live_recent_orders_does_not_reconcile_live_result_before_fina
         os.chdir(old_cwd)
 
 
+def test_live_recent_orders_rechecks_cached_price_to_beat_result_once_final_price_is_available(tmp_path: Path, monkeypatch):
+    old_cwd = Path.cwd()
+    os.chdir(tmp_path)
+
+    class StubClient:
+        def __init__(self, cfg):
+            self.config = cfg
+
+        def close(self) -> None:
+            return
+
+        def get_event_by_slug(self, slug: str):
+            return {
+                "id": "evt-live",
+                "slug": slug,
+                "eventMetadata": {
+                    "priceToBeat": 78162.12343472004,
+                    "finalPrice": 78125.08147901503,
+                },
+                "markets": [
+                    {
+                        "id": "mkt-live",
+                        "outcomes": '["Up", "Down"]',
+                        "outcomePrices": '["0", "1"]',
+                        "closed": True,
+                    }
+                ],
+            }
+
+    monkeypatch.setattr(dashboard, "PolymarketClient", StubClient)
+    state = DashboardState(env_file=tmp_path / ".env.dashboard")
+    try:
+        state._result_validation_cache["btc-updown-5m-1777777200"] = {
+            "resolved_price_to_beat": "78162.12343472004",
+            "resolved_final_price": "",
+            "resolved_expected_result": "UP",
+            "result_check_status": "",
+        }
+        logs_dir = tmp_path / "logs"
+        live_csv = logs_dir / "live_orders.csv"
+        state_path = logs_dir / "live_session_state.json"
+        logs_dir.mkdir(parents=True, exist_ok=True)
+        live_csv.write_text(
+            "timestamp,mode,round_index,strategy,entry_timing,event_slug,start_time,end_time,side,price,order_size,order_cost,expected_profit,result,trade_pnl,cash_pnl,recovery_loss,consecutive_losses,stop_loss_triggered,skip_reason,signal_open_up_price,signal_current_up_price,signal_threshold,signal_delta,signal_locked,signal_reason,experiment_id,balance_error\n"
+            "2026-05-03T03:00:04.517165+00:00,live,263,7,OPEN,btc-updown-5m-1777777200,2026-05-03T03:00:00+00:00,2026-05-03T03:05:00+00:00,UP,0.52,13.03846,6.779999200000001,6.2584608,UP,6.2584608,13.407004879999995,0.0,0,False,,0.505,0.555,0.0064,0.050000000000000044,False,,,\n",
+            encoding="utf-8",
+        )
+        state_path.write_text(
+            json.dumps(
+                {
+                    "round_index": 264,
+                    "cash_pnl": 13.407004879999995,
+                    "recovery_loss": 0.0,
+                    "consecutive_losses": 0,
+                    "daily_realized_pnl": 13.407004879999995,
+                    "live_strategies": {
+                        "7": {
+                            "round_index": 264,
+                            "cash_pnl": 13.407004879999995,
+                            "recovery_loss": 0.0,
+                            "consecutive_losses": 0,
+                            "daily_realized_pnl": 13.407004879999995,
+                        }
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        payload = state.get_live_recent_orders_payload(limit=10, strategy=7)
+        row = payload["rows"][0]
+        persisted_row = next(csv.DictReader(live_csv.open(newline="", encoding="utf-8")))
+        state_payload = json.loads(state_path.read_text(encoding="utf-8"))
+
+        assert row["result"] == "DOWN"
+        assert row["resolved_expected_result"] == "DOWN"
+        assert row["result_check_status"] == "match"
+        assert persisted_row["result"] == "DOWN"
+        assert persisted_row["trade_pnl"] == "-6.779999200000001"
+        assert persisted_row["cash_pnl"] == "-6.779999200000001"
+        assert persisted_row["recovery_loss"] == "6.779999200000001"
+        assert persisted_row["consecutive_losses"] == "1"
+        assert state_payload["live_strategies"]["7"]["cash_pnl"] == -6.779999200000001
+        assert state_payload["live_strategies"]["7"]["recovery_loss"] == 6.779999200000001
+        assert state_payload["live_strategies"]["7"]["consecutive_losses"] == 1
+    finally:
+        state.close()
+        os.chdir(old_cwd)
+
+
 def test_dashboard_live_recent_orders_only_validates_submitted_orders_but_prices_all_rows(tmp_path: Path, monkeypatch):
     old_cwd = Path.cwd()
     os.chdir(tmp_path)

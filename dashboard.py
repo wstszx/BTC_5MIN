@@ -653,6 +653,21 @@ def _should_validate_trade_result(row: dict[str, str], *, fill_missing_result: b
     return bool(fill_missing_result or not missing_result)
 
 
+def _cached_validation_result_is_stale(
+    row: dict[str, str],
+    resolved: dict[str, str],
+    *,
+    fill_missing_result: bool,
+) -> bool:
+    if not resolved:
+        return False
+    if not (fill_missing_result or str(row.get("mode") or "").strip().lower() == "live"):
+        return False
+    if not str(resolved.get("resolved_price_to_beat") or "").strip():
+        return False
+    return not str(resolved.get("resolved_final_price") or "").strip()
+
+
 def _validate_recent_trade_row(
     row: dict[str, str],
     *,
@@ -686,6 +701,12 @@ def _validate_recent_trade_row(
 
     cache_key = slug
     resolved = dict((validation_cache or {}).get(cache_key) or {})
+    if _cached_validation_result_is_stale(
+        validated,
+        resolved,
+        fill_missing_result=fill_missing_result,
+    ):
+        resolved = {}
     if not resolved:
         resolved = {
             'resolved_price_to_beat': '',
