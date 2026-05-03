@@ -39,6 +39,7 @@ from polymarket_api import (
 from risk_and_sizing import build_trade_plan
 from strategy import get_side_for_round
 from runtime_control import RuntimeControl
+from runtime_helpers import session_day_key
 from state_manager import load_session_state, save_session_state
 from trader import (
     _entry_window_missed,
@@ -823,6 +824,18 @@ def _live_float_value(row: dict[str, str], key: str) -> float:
     return _optional_float(row.get(key)) or 0.0
 
 
+def _live_row_session_day(row: dict[str, str]) -> str:
+    for key in ("end_time", "start_time", "timestamp"):
+        raw_value = str(row.get(key) or "").strip()
+        if not raw_value:
+            continue
+        try:
+            return session_day_key(datetime.fromisoformat(raw_value))
+        except ValueError:
+            continue
+    return ""
+
+
 def _live_row_counts_for_ledger(row: dict[str, str], result: str) -> bool:
     side = str(row.get("side") or "").strip().upper()
     if result not in {"UP", "DOWN"} or side not in {"UP", "DOWN"}:
@@ -834,6 +847,8 @@ def _live_row_counts_for_ledger(row: dict[str, str], result: str) -> bool:
 
 def _recompute_live_ledger_rows(rows: list[dict[str, str]]) -> dict[str, dict[str, float | int]]:
     states: dict[str, dict[str, float | int]] = {}
+    latest_days: dict[str, str] = {}
+    trade_deltas: list[tuple[str, str, float]] = []
     for row in rows:
         strategy_id = str(row.get("strategy") or "").strip()
         if not strategy_id:
@@ -862,13 +877,22 @@ def _recompute_live_ledger_rows(rows: list[dict[str, str]]) -> dict[str, dict[st
             else:
                 trade_pnl = -order_cost
                 state["cash_pnl"] = float(state["cash_pnl"]) + trade_pnl
-                state["daily_realized_pnl"] = float(state["daily_realized_pnl"]) + trade_pnl
                 state["recovery_loss"] = float(state["recovery_loss"]) + order_cost
                 state["consecutive_losses"] = int(state["consecutive_losses"]) + 1
+            session_day = _live_row_session_day(row)
+            if session_day:
+                latest_days[strategy_id] = max(latest_days.get(strategy_id, ""), session_day)
+                trade_deltas.append((strategy_id, session_day, trade_pnl))
         row["trade_pnl"] = str(trade_pnl)
         row["cash_pnl"] = str(state["cash_pnl"])
         row["recovery_loss"] = str(state["recovery_loss"])
         row["consecutive_losses"] = str(state["consecutive_losses"])
+    for strategy_id, latest_day in latest_days.items():
+        states[strategy_id]["daily_realized_pnl"] = sum(
+            trade_pnl
+            for delta_strategy_id, session_day, trade_pnl in trade_deltas
+            if delta_strategy_id == strategy_id and session_day == latest_day
+        )
     return states
 
 

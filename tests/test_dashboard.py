@@ -19,6 +19,7 @@ from dashboard import (
     DashboardState,
     _dashboard_html,
     _dashboard_js,
+    _auto_reconcile_live_ledger,
     _write_env_file,
     create_dashboard_runtime,
 )
@@ -263,6 +264,127 @@ def test_recent_trades_payload_handles_missing_csv(tmp_path: Path):
     finally:
         state.close()
         os.chdir(old_cwd)
+
+
+def test_auto_reconcile_live_ledger_updates_session_state_for_numeric_strategy_id(tmp_path: Path):
+    class StubClient:
+        def get_event_by_slug(self, slug: str):
+            return {
+                "eventMetadata": {
+                    "priceToBeat": "78627.34",
+                    "finalPrice": "78652.09",
+                },
+                "markets": [],
+            }
+
+    fieldnames = [
+        "timestamp",
+        "mode",
+        "round_index",
+        "strategy",
+        "entry_timing",
+        "event_slug",
+        "start_time",
+        "end_time",
+        "side",
+        "price",
+        "order_size",
+        "order_cost",
+        "expected_profit",
+        "result",
+        "trade_pnl",
+        "cash_pnl",
+        "recovery_loss",
+        "consecutive_losses",
+        "stop_loss_triggered",
+        "skip_reason",
+    ]
+    live_csv = tmp_path / "live_orders.csv"
+    with live_csv.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerow(
+            {
+                "timestamp": "2026-05-03T00:30:01+00:00",
+                "mode": "live",
+                "round_index": "235",
+                "strategy": "7",
+                "entry_timing": "OPEN",
+                "event_slug": "btc-updown-5m-1777768200",
+                "start_time": "2026-05-03T00:30:00+00:00",
+                "end_time": "2026-05-03T00:35:00+00:00",
+                "side": "DOWN",
+                "price": "0.51",
+                "order_size": "2.35294",
+                "order_cost": "1.1999994",
+                "expected_profit": "1.1529406",
+                "result": "DOWN",
+                "trade_pnl": "1.1529406",
+                "cash_pnl": "10.75171118",
+                "recovery_loss": "0.0",
+                "consecutive_losses": "0",
+                "stop_loss_triggered": "False",
+                "skip_reason": "",
+            }
+        )
+        writer.writerow(
+            {
+                "timestamp": "2026-05-03T00:40:02+00:00",
+                "mode": "live",
+                "round_index": "237",
+                "strategy": "7",
+                "entry_timing": "OPEN",
+                "event_slug": "btc-updown-5m-1777768800",
+                "start_time": "2026-05-03T00:40:00+00:00",
+                "end_time": "2026-05-03T00:45:00+00:00",
+                "side": "SKIP",
+                "order_cost": "0.0",
+                "expected_profit": "0.0",
+                "trade_pnl": "0.0",
+                "cash_pnl": "10.75171118",
+                "recovery_loss": "0.0",
+                "consecutive_losses": "0",
+                "stop_loss_triggered": "False",
+                "skip_reason": "strategy7_price_too_high",
+            }
+        )
+
+    state_path = tmp_path / "live_session_state.json"
+    state_path.write_text(
+        json.dumps(
+            {
+                "cash_pnl": 10.75171118,
+                "daily_realized_pnl": 1.1529406,
+                "recovery_loss": 0.0,
+                "consecutive_losses": 0,
+                "live_strategies": {
+                    "7": {
+                        "cash_pnl": 10.75171118,
+                        "daily_realized_pnl": 1.1529406,
+                        "recovery_loss": 0.0,
+                        "consecutive_losses": 0,
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    changed = _auto_reconcile_live_ledger(
+        live_csv=live_csv,
+        state_path=state_path,
+        client=StubClient(),
+        validation_cache={},
+        active_strategy_id=7,
+    )
+
+    assert changed == 1
+    payload = json.loads(state_path.read_text(encoding="utf-8"))
+    assert payload["cash_pnl"] == pytest.approx(-1.1999994)
+    assert payload["daily_realized_pnl"] == pytest.approx(-1.1999994)
+    assert payload["recovery_loss"] == pytest.approx(1.1999994)
+    assert payload["consecutive_losses"] == 1
+    assert payload["live_strategies"]["7"]["cash_pnl"] == pytest.approx(-1.1999994)
 
 
 def test_market_payload_marks_entry_window_missed_for_current_round(tmp_path: Path, monkeypatch):

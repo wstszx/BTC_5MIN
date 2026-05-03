@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import csv
 import os
 import threading
 import time
@@ -179,6 +180,94 @@ def _load_session_state_for_live_runtime(path: Path, strategy_ids: list[int]) ->
         return load_session_state(path, effective_live_strategy_ids=strategy_ids)
     except TypeError:
         return load_session_state(path)
+
+
+def _trade_log_float(row: dict[str, str], key: str) -> float:
+    try:
+        return float(row.get(key) or 0.0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _trade_log_session_day(row: dict[str, str]) -> str:
+    for key in ("end_time", "start_time", "timestamp"):
+        raw_value = str(row.get(key) or "").strip()
+        if not raw_value:
+            continue
+        try:
+            return _session_day_key(datetime.fromisoformat(raw_value))
+        except ValueError:
+            continue
+    return ""
+
+
+def _sync_live_state_ledger_from_trade_log(
+    state: SessionState,
+    *,
+    live_csv: Path,
+    active_strategy_ids: list[int],
+) -> None:
+    if not live_csv.exists():
+        return
+    ledger_states = {
+        strategy_id: {
+            "cash_pnl": 0.0,
+            "daily_realized_pnl": 0.0,
+            "recovery_loss": 0.0,
+            "consecutive_losses": 0,
+            "seen": False,
+        }
+        for strategy_id in active_strategy_ids
+    }
+    with live_csv.open("r", newline="", encoding="utf-8") as handle:
+        for row in csv.DictReader(handle):
+            try:
+                strategy_id = int(str(row.get("strategy") or "").strip())
+            except ValueError:
+                continue
+            ledger_state = ledger_states.get(strategy_id)
+            if ledger_state is None:
+                continue
+            ledger_state["seen"] = True
+            result = str(row.get("result") or "").strip().upper()
+            side = str(row.get("side") or "").strip().upper()
+            if result not in {"UP", "DOWN"} or side not in {"UP", "DOWN"}:
+                continue
+            if str(row.get("skip_reason") or "").strip():
+                continue
+            order_cost = _trade_log_float(row, "order_cost")
+            if order_cost <= 0:
+                continue
+            expected_profit = _trade_log_float(row, "expected_profit")
+            if result == side:
+                ledger_state["cash_pnl"] += expected_profit
+                trade_pnl = expected_profit
+                ledger_state["recovery_loss"] = 0.0
+                ledger_state["consecutive_losses"] = 0
+            else:
+                trade_pnl = -order_cost
+                ledger_state["cash_pnl"] += trade_pnl
+                ledger_state["recovery_loss"] += order_cost
+                ledger_state["consecutive_losses"] += 1
+            session_day = _trade_log_session_day(row)
+            if session_day:
+                if session_day > str(ledger_state.get("current_day") or ""):
+                    ledger_state["current_day"] = session_day
+                    ledger_state["daily_realized_pnl"] = 0.0
+                if session_day == ledger_state.get("current_day"):
+                    ledger_state["daily_realized_pnl"] += trade_pnl
+
+    for strategy_id, ledger_state in ledger_states.items():
+        if not ledger_state["seen"]:
+            continue
+        strategy_state = state.live_strategies.get(strategy_id)
+        if strategy_state is None:
+            continue
+        strategy_state.cash_pnl = float(ledger_state["cash_pnl"])
+        strategy_state.daily_realized_pnl = float(ledger_state["daily_realized_pnl"])
+        strategy_state.recovery_loss = float(ledger_state["recovery_loss"])
+        strategy_state.consecutive_losses = int(ledger_state["consecutive_losses"])
+    _sync_legacy_live_state_fields(state, active_strategy_ids)
 
 
 def _runtime_backoff_seconds(cfg: AppConfig, consecutive_errors: int) -> int:
@@ -978,6 +1067,11 @@ def run_live_trading(
             state = _load_session_state_for_live_runtime(state_path, configured_strategy_ids)
             _ensure_live_strategy_state_map(state, configured_strategy_ids)
             managed_strategy_ids = _managed_live_strategy_ids(configured_strategy_ids, state)
+            _sync_live_state_ledger_from_trade_log(
+                state,
+                live_csv=log_path,
+                active_strategy_ids=managed_strategy_ids,
+            )
             strategy_results: list[dict[str, Any]] = []
             pending_strategy_ids: list[int] = []
             handled_strategy_ids: set[int] = set()

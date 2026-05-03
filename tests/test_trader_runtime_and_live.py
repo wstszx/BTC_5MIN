@@ -33,6 +33,7 @@ from redeem_worker import (
 from trader import (
     SideDecision,
     _resolve_side_from_strategy,
+    _sync_live_state_ledger_from_trade_log,
     _update_max_stake_skip_streak,
     append_trade_log,
     load_session_state,
@@ -76,6 +77,83 @@ def test_requirements_use_py_clob_client_v2_dependency():
 
     assert any(line.startswith('py-clob-client-v2') for line in requirements)
     assert 'py-clob-client' not in requirements
+
+
+def test_sync_live_state_ledger_from_trade_log_uses_reconciled_loss(tmp_path: Path):
+    live_csv = tmp_path / "live_orders.csv"
+    with live_csv.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(
+            handle,
+            fieldnames=[
+                "strategy",
+                "end_time",
+                "side",
+                "order_cost",
+                "expected_profit",
+                "result",
+                "skip_reason",
+            ],
+        )
+        writer.writeheader()
+        writer.writerow(
+            {
+                "strategy": "7",
+                "end_time": "2026-05-02T10:05:00+00:00",
+                "side": "UP",
+                "order_cost": "1.0",
+                "expected_profit": "2.0",
+                "result": "UP",
+                "skip_reason": "",
+            }
+        )
+        writer.writerow(
+            {
+                "strategy": "7",
+                "end_time": "2026-05-03T00:35:00+00:00",
+                "side": "DOWN",
+                "order_cost": "1.1999994",
+                "expected_profit": "1.1529406",
+                "result": "UP",
+                "skip_reason": "",
+            }
+        )
+        writer.writerow(
+            {
+                "strategy": "7",
+                "end_time": "2026-05-03T00:45:00+00:00",
+                "side": "SKIP",
+                "order_cost": "0.0",
+                "expected_profit": "0.0",
+                "result": "",
+                "skip_reason": "strategy7_price_too_high",
+            }
+        )
+
+    state = SessionState(
+        cash_pnl=10.75171118,
+        daily_realized_pnl=1.1529406,
+        recovery_loss=0.0,
+        consecutive_losses=0,
+        live_strategies={
+            7: LiveStrategyState(
+                cash_pnl=10.75171118,
+                daily_realized_pnl=1.1529406,
+                recovery_loss=0.0,
+                consecutive_losses=0,
+                pending_live_slug="btc-updown-5m-current",
+            )
+        },
+    )
+
+    _sync_live_state_ledger_from_trade_log(state, live_csv=live_csv, active_strategy_ids=[7])
+
+    live_state = state.live_strategies[7]
+    assert live_state.cash_pnl == pytest.approx(0.8000006)
+    assert live_state.daily_realized_pnl == pytest.approx(-1.1999994)
+    assert live_state.recovery_loss == pytest.approx(1.1999994)
+    assert live_state.consecutive_losses == 1
+    assert live_state.pending_live_slug == "btc-updown-5m-current"
+    assert state.cash_pnl == pytest.approx(0.8000006)
 
 
 def test_requirements_pin_runtime_dependencies():
