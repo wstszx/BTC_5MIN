@@ -276,6 +276,20 @@ class _TransientLiveMarketDiscoveryClient(_LiveMarketClient):
         return None, None
 
 
+class _TransientLiveMarketQuoteClient(_LiveMarketClient):
+    def __init__(self):
+        self.market_calls = 0
+
+    def get_market_by_slug(self, slug: str):
+        self.market_calls += 1
+        if self.market_calls == 1:
+            raise RuntimeError(
+                "Unable to fetch https://gamma-api.polymarket.com/markets/slug/btc-updown-5m-test after 4 attempts: "
+                "('Connection aborted.', ConnectionResetError(10054, '远程主机强迫关闭了一个现有的连接。', None, 10054, None))"
+            )
+        return super().get_market_by_slug(slug)
+
+
 class _MissedEntryNoNextLiveClient(_LiveMarketClient):
     def find_current_and_next_rounds(self, *, now):
         window = MarketWindow(
@@ -1081,6 +1095,36 @@ def test_run_live_trading_retries_transient_market_discovery_ssl_error(tmp_path,
 
     assert result["status"] == "stopped"
     assert market_client.calls == 2
+    assert attempts["sleeps"] == [1, 1]
+
+
+def test_run_live_trading_retries_transient_market_quote_reset_error(tmp_path, monkeypatch):
+    attempts = {"sleeps": []}
+    market_client = _TransientLiveMarketQuoteClient()
+
+    def fake_sleep_if_not_stopped(_stop_event, seconds):
+        attempts["sleeps"].append(seconds)
+        return len(attempts["sleeps"]) == 1
+
+    monkeypatch.setattr("trader._sleep_if_not_stopped", fake_sleep_if_not_stopped)
+
+    result = run_live_trading(
+        AppConfig(
+            trade_mode="live",
+            live_trading_enabled=True,
+            live_private_key="pk",
+            live_funder="0xfunder",
+            poll_interval_seconds=1,
+            runtime_error_backoff_base_seconds=1,
+        ),
+        market_client=market_client,
+        clob_client=_StubClobClient(),
+        state_path=tmp_path / "live_state.json",
+        log_path=tmp_path / "live_orders.csv",
+    )
+
+    assert result["status"] == "stopped"
+    assert market_client.market_calls == 2
     assert attempts["sleeps"] == [1, 1]
 
 

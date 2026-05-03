@@ -1077,25 +1077,41 @@ def run_live_trading(
                 remaining_live_budget = None
                 balance_read_error = str(exc)
 
+            pending_live_order = any(
+                _strategy_has_pending_live_trade(state.live_strategies.get(strategy_id))
+                for strategy_id in managed_strategy_ids
+            )
+            current_round_slug = next(
+                (
+                    state.live_strategies[strategy_id].pending_live_slug
+                    for strategy_id in managed_strategy_ids
+                    if _strategy_has_pending_live_trade(state.live_strategies.get(strategy_id))
+                ),
+                None,
+            )
+
             try:
                 current_round, next_round = market_client.find_current_and_next_rounds(now=now)
+                current_entry_time = _entry_time_for_round(cfg, current_round) if current_round is not None else None
+                should_log_missed_current_round = (
+                    current_round is not None
+                    and next_round is not None
+                    and current_entry_time is not None
+                    and _entry_window_missed(now, current_entry_time, grace_seconds=cfg.entry_grace_seconds)
+                )
+                target_round = (
+                    current_round
+                    if should_log_missed_current_round
+                    else _select_target_round(cfg, now=now, current_round=current_round, next_round=next_round)
+                )
+                if target_round is not None:
+                    market = market_client.get_market_by_slug(target_round.slug)
+                    quote = market_client.quote_from_market(market)
             except Exception as exc:
                 if not _is_retryable_live_io_error(exc):
                     raise
                 consecutive_errors += 1
                 backoff = _runtime_backoff_seconds(cfg, consecutive_errors)
-                pending_live_order = any(
-                    _strategy_has_pending_live_trade(state.live_strategies.get(strategy_id))
-                    for strategy_id in managed_strategy_ids
-                )
-                current_round_slug = next(
-                    (
-                        state.live_strategies[strategy_id].pending_live_slug
-                        for strategy_id in managed_strategy_ids
-                        if _strategy_has_pending_live_trade(state.live_strategies.get(strategy_id))
-                    ),
-                    None,
-                )
                 _sync_legacy_live_state_fields(state, managed_strategy_ids)
                 save_session_state(state_path, state)
                 _runtime_log(
@@ -1117,18 +1133,7 @@ def run_live_trading(
                 if not _sleep_if_not_stopped(stop_event, backoff):
                     return {"status": "stopped"}
                 continue
-            current_entry_time = _entry_time_for_round(cfg, current_round) if current_round is not None else None
-            should_log_missed_current_round = (
-                current_round is not None
-                and next_round is not None
-                and current_entry_time is not None
-                and _entry_window_missed(now, current_entry_time, grace_seconds=cfg.entry_grace_seconds)
-            )
-            target_round = (
-                current_round
-                if should_log_missed_current_round
-                else _select_target_round(cfg, now=now, current_round=current_round, next_round=next_round)
-            )
+            consecutive_errors = 0
             if target_round is None:
                 for strategy_id in configured_strategy_ids:
                     if strategy_id in handled_strategy_ids:
@@ -1148,8 +1153,6 @@ def run_live_trading(
                 }
             else:
                 entry_time = _entry_time_for_round(cfg, target_round)
-                market = market_client.get_market_by_slug(target_round.slug)
-                quote = market_client.quote_from_market(market)
                 print('[live] quote {' + _describe_quote_source(quote) + '}', flush=True)
                 print('[live] ws_runtime {' + _describe_ws_runtime(market_client) + '}', flush=True)
                 for strategy_id in configured_strategy_ids:
