@@ -5500,7 +5500,6 @@ function renderStrategyProfileEditor(payload, values) {
       const label = String((field || {}).label || CONFIG_KEY_NAMES[baseKey] || baseKey);
       const options = Array.isArray((field || {}).options) ? field.options : [];
       const attrs = ' data-strategy-config-key="' + esc(key) + '"' +
-        ' data-strategy-config-explicit="' + (explicit ? 'true' : 'false') + '"' +
         ' data-strategy-config-inherited-value="' + esc(inheritedValue) + '"';
       const control = options.length > 0
         ? ('<select class="input-compact"' + attrs + '>' + options.map((opt) => {
@@ -5508,7 +5507,7 @@ function renderStrategyProfileEditor(payload, values) {
             return '<option value="' + esc(opt) + '"' + selectedAttr + '>' + esc(strategyOptionLabel(baseKey, opt, payload)) + '</option>';
           }).join('') + '</select>')
         : ('<input class="input-compact" type="text" value="' + esc(value) + '"' + attrs + '>');
-      const chip = explicit ? '<span class="chip warn">单独配置</span>' : '<span class="chip">继承全局</span>';
+      const chip = explicit ? '<span class="chip warn">策略专属</span>' : '<span class="chip">默认模板</span>';
       return '<div class="strategy-profile-field">' +
         '<label>' + esc(label) + '</label>' +
         control +
@@ -7017,11 +7016,7 @@ function collectConfigValues(options) {
       return;
     }
     const value = String(node.value ?? '').trim();
-    const inheritedValue = String(node.getAttribute('data-strategy-config-inherited-value') || '');
-    const explicit = String(node.getAttribute('data-strategy-config-explicit') || '') === 'true';
-    if (explicit || value !== inheritedValue) {
-      payload[key] = value;
-    }
+    payload[key] = value;
   });
   if (settings.includeUnified === false) {
     return payload;

@@ -634,6 +634,17 @@ def test_dashboard_assets_mode_selector_propagates_into_save_payload_path():
     assert "payload[multiKey] = unifiedValues[multiKey];" in js
 
 
+def test_dashboard_strategy_profile_editor_saves_strategy_fields_as_dedicated_config():
+    js = _dashboard_js()
+
+    assert "payload[key] = value;" in js
+    assert "data-strategy-config-explicit" not in js
+    assert "策略专属" in js
+    assert "默认模板" in js
+    assert "单独配置" not in js
+    assert "继承全局" not in js
+
+
 def test_dashboard_assets_use_unified_strategy_selection():
     js = _dashboard_js()
 
