@@ -606,7 +606,7 @@ def test_submit_live_strategy_order_prefers_v2_create_and_post_market_order():
     assert not hasattr(captured['order_args'], 'fee_rate_bps')
 
 
-def test_settle_pending_paper_trade_uses_cached_ws_market_resolution():
+def test_settle_pending_paper_trade_does_not_use_cached_ws_market_resolution():
     class _WsResolvedClient:
         def get_event_by_slug(self, slug: str):
             return {
@@ -640,15 +640,12 @@ def test_settle_pending_paper_trade_uses_cached_ws_market_resolution():
         entry_timing='OPEN',
     )
 
-    updated_state, result, trade_pnl = trader._settle_pending_paper_trade(
-        client=_WsResolvedClient(),
-        state=state,
-        item=item,
-    )
-
-    assert result == 'DOWN'
-    assert trade_pnl == pytest.approx(1.1)
-    assert updated_state.cash_pnl == pytest.approx(1.1)
+    with pytest.raises(RuntimeError, match="is not resolved yet"):
+        trader._settle_pending_paper_trade(
+            client=_WsResolvedClient(),
+            state=state,
+            item=item,
+        )
 
 def test_redeemable_positions_filters_live_user_and_required_fields():
     class _RedeemablePositionsClient:
@@ -1729,6 +1726,44 @@ class _OfficialMarketEndpointFallbackClient(_LiveMarketClient):
         return {
             "slug": slug,
             "closed": True,
+            "eventMetadata": {
+                "priceToBeat": 100.0,
+                "finalPrice": 90.0,
+            },
+            "outcomes": '["Up","Down"]',
+            "outcomePrices": '["0","1"]',
+        }
+
+    def get_current_positions(self, *, user: str, redeemable: bool | None = None):
+        assert user == "0xfunder"
+        assert redeemable is True
+        return []
+
+
+class _TerminalPricesWithoutFinalPriceClient(_LiveMarketClient):
+    def get_event_by_slug(self, slug: str):
+        if slug != "btc-updown-5m-prev":
+            raise AssertionError(f"Unexpected slug {slug}")
+        return {
+            "closed": False,
+            "eventMetadata": {"priceToBeat": 100.0},
+            "markets": [
+                {
+                    "slug": slug,
+                    "closed": False,
+                    "outcomes": '["Up","Down"]',
+                    "outcomePrices": '["0.49","0.51"]',
+                }
+            ],
+        }
+
+    def get_market_by_slug(self, slug: str):
+        if slug != "btc-updown-5m-prev":
+            raise AssertionError(f"Unexpected market slug {slug}")
+        return {
+            "slug": slug,
+            "closed": True,
+            "eventMetadata": {"priceToBeat": 100.0},
             "outcomes": '["Up","Down"]',
             "outcomePrices": '["0","1"]',
         }
@@ -4072,6 +4107,47 @@ def test_settle_pending_live_trade_uses_official_market_endpoint_when_event_endp
     assert updated_strategy.pending_live_order_id is None
 
 
+def test_settle_pending_live_trade_waits_when_only_terminal_prices_are_available_for_price_to_beat_market():
+    pending_strategy = LiveStrategyState(
+        round_index=4,
+        cash_pnl=0.0,
+        recovery_loss=0.0,
+        consecutive_losses=0,
+        pending_live_slug="btc-updown-5m-prev",
+        pending_live_side="UP",
+        pending_live_price=0.5,
+        pending_live_order_size=2.0,
+        pending_live_order_cost=1.0,
+        pending_live_expected_profit=1.0,
+        pending_live_order_id="oid-prev",
+        pending_live_end_time="2026-04-02T00:00:00+00:00",
+    )
+    stub_clob = _StubClobClient(
+        order_payloads={
+            "oid-prev": {
+                "status": "filled",
+                "filled_order_size": 2.0,
+                "filled_order_cost": 1.0,
+                "avg_price": 0.5,
+            }
+        }
+    )
+
+    updated_strategy, status, settled = trader._settle_pending_live_trade_if_needed(
+        market_client=_TerminalPricesWithoutFinalPriceClient(),
+        clob_client=stub_clob,
+        strategy_state=pending_strategy,
+        now=datetime(2026, 4, 2, 0, 6, tzinfo=timezone.utc),
+        funder="0xfunder",
+    )
+
+    assert settled is False
+    assert status["status"] == "pending_settlement"
+    assert status["skip_reason"] == "round_unresolved"
+    assert updated_strategy.cash_pnl == pytest.approx(0.0)
+    assert updated_strategy.pending_live_slug == "btc-updown-5m-prev"
+
+
 def test_settle_pending_live_trade_does_not_use_ws_only_resolution_for_live_settlement():
     pending_strategy = LiveStrategyState(
         round_index=4,
@@ -6228,7 +6304,7 @@ def test_run_paper_trading_near_entry_fast_poll_uses_shorter_sleep(tmp_path, mon
 
 
 
-def test_run_paper_trading_multi_strategy_settles_ready_strategy_without_blocking_others(tmp_path, monkeypatch):
+def test_run_paper_trading_multi_strategy_pending_settlement_blocks_new_round(tmp_path, monkeypatch):
     stop_event = threading.Event()
 
     def fake_sleep(_seconds):
@@ -6320,7 +6396,7 @@ def test_run_paper_trading_multi_strategy_settles_ready_strategy_without_blockin
         encoding="utf-8",
     )
 
-    class _MultiStrategySettlementClient(_NoMarketClient):
+    class _MultiStrategySettlementClient(_LiveMarketClient):
         def get_event_by_slug(self, slug: str):
             if slug == "btc-updown-5m-paper-s1":
                 return {"eventMetadata": {"priceToBeat": None, "finalPrice": None}}
@@ -6340,10 +6416,95 @@ def test_run_paper_trading_multi_strategy_settles_ready_strategy_without_blockin
     assert result["status"] == "stopped"
     assert len(state.paper_strategies[1].pending_paper_trades) == 1
     assert state.paper_strategies[6].pending_paper_trades == []
+    assert state.paper_strategies[6].last_processed_paper_event_slug is None
     rows = log_path.read_text(encoding="utf-8").splitlines()
     assert len(rows) == 2
     assert "btc-updown-5m-paper-s6" in rows[1]
-    assert ",6,OPEN,btc-updown-5m-paper-s6," in rows[1]
+    assert "btc-updown-5m-test" not in log_path.read_text(encoding="utf-8")
+
+
+def test_run_paper_trading_does_not_use_ws_only_resolution_for_pending_settlement(tmp_path):
+    state_path = tmp_path / 'state.json'
+    state_path.write_text(
+        json.dumps(
+            {
+                'round_index': 1,
+                'cash_pnl': 0.0,
+                'recovery_loss': 0.0,
+                'consecutive_losses': 0,
+                'consecutive_max_stake_skips': 0,
+                'signal_round_slug': None,
+                'signal_round_open_up_price': None,
+                'signal_round_locked_side': None,
+                'stop_loss_count': 0,
+                'daily_realized_pnl': 0.0,
+                'current_day': '2026-04-06',
+                'pending_live_slug': None,
+                'pending_live_side': None,
+                'pending_live_price': None,
+                'pending_live_order_size': None,
+                'pending_live_order_cost': None,
+                'pending_live_expected_profit': None,
+                'pending_live_order_id': None,
+                'pending_live_end_time': None,
+                'pending_paper_trades': [
+                    {
+                        'round_index': 0,
+                        'event_slug': 'btc-updown-5m-paper-prev',
+                        'start_time': '2026-04-06T06:00:00+00:00',
+                        'end_time': '2026-04-06T06:05:00+00:00',
+                        'side': 'DOWN',
+                        'price': 0.4,
+                        'order_size': 2.5,
+                        'order_cost': 1.0,
+                        'expected_profit': 1.5,
+                        'strategy': 2,
+                        'entry_timing': 'OPEN',
+                        'signal_open_up_price': None,
+                        'signal_current_up_price': None,
+                        'signal_threshold': None,
+                        'signal_delta': None,
+                        'signal_locked': False,
+                        'signal_reason': None,
+                        'queued_at': '2026-04-06T06:00:05+00:00',
+                    }
+                ],
+            }
+        ),
+        encoding='utf-8',
+    )
+
+    class _WsOnlyPaperClient(_NoMarketClient):
+        def get_event_by_slug(self, slug: str):
+            assert slug == 'btc-updown-5m-paper-prev'
+            return {
+                'closed': False,
+                'eventMetadata': {},
+                'markets': [
+                    {
+                        'closed': False,
+                        'outcomes': '["Up","Down"]',
+                        'outcomePrices': '["0.2","0.8"]',
+                    }
+                ],
+            }
+
+        def get_ws_market_resolution(self, _market):
+            return {'winning_outcome': 'DOWN'}
+
+    result = run_paper_trading(
+        AppConfig(poll_interval_seconds=1),
+        client=_WsOnlyPaperClient(),
+        state_path=state_path,
+        log_path=tmp_path / 'paper.csv',
+        stop_when_safe=lambda: True,
+    )
+
+    state = load_session_state(state_path)
+    assert result['status'] == 'pending_settlement'
+    assert len(state.pending_paper_trades) == 1
+    assert state.pending_paper_trades[0].event_slug == 'btc-updown-5m-paper-prev'
+    assert not (tmp_path / 'paper.csv').exists()
 
 
 def test_run_paper_trading_persists_active_challenger_pending_state(tmp_path, monkeypatch):

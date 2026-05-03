@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from models import PendingPaperTrade, SessionState
-from settlement import settle_pending_paper_trade
+from settlement import resolved_result_from_official_market, settle_pending_paper_trade
 from trader import _settle_pending_paper_trade
 
 
@@ -46,3 +46,17 @@ def test_settlement_resolves_pending_paper_trade_and_trader_reexports_helper():
     assert trade_pnl == 1.0
     assert updated_state.cash_pnl == 1.0
     assert _settle_pending_paper_trade is settle_pending_paper_trade
+
+
+def test_live_official_result_waits_for_final_price_when_price_to_beat_is_known():
+    event = {
+        "closed": True,
+        "eventMetadata": {"priceToBeat": 78360.42348},
+    }
+    market = {
+        "closed": True,
+        "outcomes": '["Up", "Down"]',
+        "outcomePrices": '["1", "0"]',
+    }
+
+    assert resolved_result_from_official_market(event, market) is None

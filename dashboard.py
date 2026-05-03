@@ -569,8 +569,11 @@ def _token_outcome(token: dict[str, Any]) -> str:
     )
 
 
-def _official_winning_outcome(event_payload: dict[str, Any]) -> str:
+def _official_winning_outcome(event_payload: dict[str, Any], *, require_final_price: bool = False) -> str:
     market = (event_payload.get("markets") or [{}])[0]
+    metadata = event_payload.get("eventMetadata") or {}
+    if require_final_price and metadata.get("priceToBeat") is not None and metadata.get("finalPrice") is None:
+        return ""
     outcome_keys = (
         "winning_outcome",
         "winningOutcome",
@@ -720,7 +723,11 @@ def _validate_recent_trade_row(
         if final_price is not None:
             resolved['resolved_final_price'] = str(final_price)
 
-        official_result = _official_winning_outcome(event_payload)
+        live_result_validation = str(validated.get("mode") or "").strip().lower() == "live"
+        official_result = _official_winning_outcome(
+            event_payload,
+            require_final_price=fill_missing_result or live_result_validation,
+        )
         if not official_result and price_to_beat is not None and final_price is not None:
             official_result = "UP" if final_price >= price_to_beat else "DOWN"
 

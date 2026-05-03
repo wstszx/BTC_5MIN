@@ -1309,6 +1309,111 @@ def test_dashboard_live_recent_orders_resolves_official_result_fields(tmp_path: 
         os.chdir(old_cwd)
 
 
+def test_dashboard_live_recent_orders_waits_for_final_price_when_price_to_beat_known(tmp_path: Path, monkeypatch):
+    old_cwd = Path.cwd()
+    os.chdir(tmp_path)
+
+    class StubClient:
+        def __init__(self, cfg):
+            self.config = cfg
+
+        def close(self) -> None:
+            return
+
+        def get_event_by_slug(self, slug: str):
+            return {
+                "id": "evt-live",
+                "slug": slug,
+                "eventMetadata": {
+                    "priceToBeat": 78360.42348,
+                },
+                "markets": [
+                    {
+                        "id": "mkt-live",
+                        "outcomes": '["Up", "Down"]',
+                        "outcomePrices": '["1", "0"]',
+                        "closed": True,
+                    }
+                ],
+            }
+
+    monkeypatch.setattr(dashboard, "PolymarketClient", StubClient)
+    state = DashboardState(env_file=tmp_path / ".env.dashboard")
+    try:
+        live_csv = tmp_path / "logs" / "live_orders.csv"
+        live_csv.parent.mkdir(parents=True, exist_ok=True)
+        live_csv.write_text(
+            "timestamp,mode,round_index,strategy,entry_timing,event_slug,start_time,end_time,side,price,order_size,order_cost,expected_profit,result,trade_pnl,cash_pnl,recovery_loss,consecutive_losses,stop_loss_triggered,skip_reason,signal_open_up_price,signal_current_up_price,signal_threshold,signal_delta,signal_locked,signal_reason\n"
+            "2026-05-03T01:15:07+00:00,live,244,7,OPEN,btc-updown-5m-1777770900,2026-05-03T01:15:00+00:00,2026-05-03T01:20:00+00:00,UP,0.56,2.142856,1.19999936,0.94285664,,0.0,9.59877118,0.0,0,False,,,,,,False,\n",
+            encoding="utf-8",
+        )
+
+        payload = state.get_live_recent_orders_payload(limit=10)
+        row = payload["rows"][0]
+
+        assert row["result"] == ""
+        assert row["resolved_expected_result"] == ""
+        assert row["result_check_status"] == "official_pending"
+        assert row["trade_pnl"] == "0.0"
+        assert row["cash_pnl"] == "9.59877118"
+    finally:
+        state.close()
+        os.chdir(old_cwd)
+
+
+def test_dashboard_live_recent_orders_does_not_reconcile_live_result_before_final_price(tmp_path: Path, monkeypatch):
+    old_cwd = Path.cwd()
+    os.chdir(tmp_path)
+
+    class StubClient:
+        def __init__(self, cfg):
+            self.config = cfg
+
+        def close(self) -> None:
+            return
+
+        def get_event_by_slug(self, slug: str):
+            return {
+                "id": "evt-live",
+                "slug": slug,
+                "eventMetadata": {
+                    "priceToBeat": 78360.42348,
+                },
+                "markets": [
+                    {
+                        "id": "mkt-live",
+                        "outcomes": '["Up", "Down"]',
+                        "outcomePrices": '["0", "1"]',
+                        "closed": True,
+                    }
+                ],
+            }
+
+    monkeypatch.setattr(dashboard, "PolymarketClient", StubClient)
+    state = DashboardState(env_file=tmp_path / ".env.dashboard")
+    try:
+        live_csv = tmp_path / "logs" / "live_orders.csv"
+        live_csv.parent.mkdir(parents=True, exist_ok=True)
+        live_csv.write_text(
+            "timestamp,mode,round_index,strategy,entry_timing,event_slug,start_time,end_time,side,price,order_size,order_cost,expected_profit,result,trade_pnl,cash_pnl,recovery_loss,consecutive_losses,stop_loss_triggered,skip_reason,signal_open_up_price,signal_current_up_price,signal_threshold,signal_delta,signal_locked,signal_reason\n"
+            "2026-05-03T01:15:07+00:00,live,244,7,OPEN,btc-updown-5m-1777770900,2026-05-03T01:15:00+00:00,2026-05-03T01:20:00+00:00,UP,0.56,2.142856,1.19999936,0.94285664,UP,0.94285664,10.54162782,0.0,0,False,,,,,,False,\n",
+            encoding="utf-8",
+        )
+
+        payload = state.get_live_recent_orders_payload(limit=10)
+        row = payload["rows"][0]
+        persisted_row = next(csv.DictReader(live_csv.open(newline="", encoding="utf-8")))
+
+        assert row["result"] == "UP"
+        assert row["resolved_expected_result"] == ""
+        assert row["result_check_status"] == "official_pending"
+        assert persisted_row["result"] == "UP"
+        assert persisted_row["trade_pnl"] == "0.94285664"
+    finally:
+        state.close()
+        os.chdir(old_cwd)
+
+
 def test_dashboard_live_recent_orders_only_validates_submitted_orders_but_prices_all_rows(tmp_path: Path, monkeypatch):
     old_cwd = Path.cwd()
     os.chdir(tmp_path)

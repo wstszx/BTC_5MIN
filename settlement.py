@@ -167,6 +167,8 @@ def resolved_result_from_official_market(event: dict[str, Any], market: dict[str
     metadata = event.get("eventMetadata") or {}
     if metadata.get("priceToBeat") is not None and metadata.get("finalPrice") is not None:
         return "UP" if float(metadata["finalPrice"]) >= float(metadata["priceToBeat"]) else "DOWN"
+    if metadata.get("priceToBeat") is not None:
+        return None
 
     prices = parse_outcome_prices(market.get("outcomePrices"), market.get("outcomes"))
     up_price = prices.get("UP")
@@ -191,6 +193,11 @@ def resolved_result_from_official_market_endpoint(market_client: Any, slug: str)
         "closed": market.get("closed"),
         "eventMetadata": market.get("eventMetadata") or {},
     }
+    if not event["eventMetadata"] and isinstance(market.get("events"), list):
+        for item in market.get("events") or []:
+            if isinstance(item, dict) and item.get("eventMetadata"):
+                event["eventMetadata"] = item.get("eventMetadata") or {}
+                break
     return resolved_result_from_official_market(event, market)
 
 
@@ -353,27 +360,12 @@ def settle_pending_paper_trade(
     item: PendingPaperTrade,
 ) -> tuple[SessionState, str, float]:
     event = client.get_event_by_slug(item.event_slug)
-    metadata = event.get("eventMetadata") or {}
     market = (event.get("markets") or [{}])[0]
-    if metadata.get("priceToBeat") is not None and metadata.get("finalPrice") is not None:
-        result = "UP" if float(metadata["finalPrice"]) >= float(metadata["priceToBeat"]) else "DOWN"
-    else:
-        cached_result = cached_ws_market_result(client, market)
-        if cached_result:
-            result = cached_result
-        else:
-            prices = parse_outcome_prices(market.get("outcomePrices"), market.get("outcomes"))
-            up_price = prices.get("UP")
-            down_price = prices.get("DOWN")
-            is_closed = bool(event.get("closed") or market.get("closed"))
-            if (
-                not is_closed
-                or up_price is None
-                or down_price is None
-                or {up_price, down_price} != {0.0, 1.0}
-            ):
-                raise RuntimeError(f"Round {item.event_slug} is not resolved yet.")
-            result = "UP" if up_price > down_price else "DOWN"
+    result = resolved_result_from_official_market(event, market)
+    if not result:
+        result = resolved_result_from_official_market_endpoint(client, item.event_slug)
+    if not result:
+        raise RuntimeError(f"Round {item.event_slug} is not resolved yet.")
     plan = build_frozen_pending_paper_plan(item)
     updated_state = apply_round_outcome(state, plan, won=(result == item.side))
     trade_pnl = updated_state.cash_pnl - state.cash_pnl

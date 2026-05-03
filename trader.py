@@ -1913,6 +1913,15 @@ def run_paper_trading(
                 )
                 if _safe_stop_requested(stop_when_safe):
                     return {"status": "pending_settlement"}
+                if not _sleep_if_not_stopped(
+                    stop_event,
+                    _poll_interval_for_live_result(
+                        cfg=cfg,
+                        result={"status": "pending_settlement"},
+                    ),
+                ):
+                    return {"status": "stopped"}
+                continue
             elif _safe_stop_requested(stop_when_safe):
                 _update_runtime_control(
                     runtime_control,
