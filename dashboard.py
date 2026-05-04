@@ -4572,6 +4572,7 @@ const state = {
   paperSummaryStrategyFilter: null,
   paperRecentStrategyFilter: null,
   reportMode: 'paper',
+  reportModeUserSelected: false,
   paperTimeframeFilter: '',
   countdownSnapshotAtMs: null,
   countdownBaseSeconds: null,
@@ -4938,9 +4939,11 @@ function loadUiPrefs() {
     }
     const storedReportMode = localStorage.getItem(STORAGE_KEYS.reportMode);
     state.reportMode = storedReportMode === 'live' ? 'live' : 'paper';
+    state.reportModeUserSelected = false;
   } catch (_err) {
     state.showInternalKeys = false;
     state.reportMode = 'paper';
+    state.reportModeUserSelected = false;
   }
 }
 
@@ -5563,6 +5566,18 @@ function effectiveReportMode() {
   return state.reportMode === 'live' ? 'live' : 'paper';
 }
 
+function syncReportModeWithRuntime(payload) {
+  if (state.reportModeUserSelected) {
+    return;
+  }
+  const runtime = (payload && payload.runtime_status) || {};
+  const runtimeMode = String(runtime.active_mode || runtime.running_mode || '').toLowerCase();
+  if (runtimeMode !== 'live' && runtimeMode !== 'paper') {
+    return;
+  }
+  state.reportMode = runtimeMode === 'live' ? 'live' : 'paper';
+}
+
 function configuredPaperReportStrategyOptions() {
   const payload = state.config || {};
   const envValues = (payload && payload.env_values) || {};
@@ -5685,6 +5700,7 @@ function renderSharedPaperReportStrategySelector() {
     modeNode.value = effectiveReportMode();
     modeNode.onchange = async () => {
       state.reportMode = modeNode.value === 'live' ? 'live' : 'paper';
+      state.reportModeUserSelected = true;
       saveUiPrefs();
       state.paperSummaryStrategyFilter = '';
       state.paperRecentStrategyFilter = '';
@@ -6665,6 +6681,7 @@ function shouldConfirmLiveModeSwitch(previousMode, nextMode) {
 
 function renderConfig(payload) {
   state.config = payload;
+  syncReportModeWithRuntime(payload);
   state.paperTimeframeFilter = effectivePaperTimeframeFilter();
   applyTimeframeCopy(payload);
   renderConfigWarnings(payload);

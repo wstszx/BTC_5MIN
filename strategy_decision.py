@@ -172,12 +172,24 @@ def is_strategy6_signal_stale(*, quote: MarketQuote, now: datetime, stale_second
     return (now - signal_at).total_seconds() > max(0.0, stale_seconds)
 
 
+def format_binance_signal_error(exc: Exception) -> str:
+    message = f"{type(exc).__name__}: {exc}"
+    response = getattr(exc, "response", None)
+    response_text = str(getattr(response, "text", "") or "").strip()
+    if response_text:
+        if len(response_text) > 500:
+            response_text = response_text[:500] + "..."
+        message += f" | response={response_text}"
+    return message
+
+
 def apply_strategy6_signal_to_quote(
     *,
     cfg: AppConfig,
     quote: MarketQuote,
     binance_signal_service: BinanceDepth5SignalService | None,
     now: datetime | None = None,
+    diagnostic_log: Callable[[str], None] | None = None,
 ) -> None:
     if cfg.strategy_id not in {6, 7} or binance_signal_service is None:
         return
@@ -186,7 +198,9 @@ def apply_strategy6_signal_to_quote(
     if latest is None or (now - latest.signal_at).total_seconds() > max(0.0, cfg.binance_signal_stale_seconds):
         try:
             refreshed = binance_signal_service.refresh_from_rest(now=now)
-        except Exception:
+        except Exception as exc:
+            if diagnostic_log is not None:
+                diagnostic_log(f"binance signal refresh failed: {format_binance_signal_error(exc)}")
             refreshed = None
         if refreshed is not None:
             latest = refreshed

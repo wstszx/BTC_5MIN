@@ -437,7 +437,12 @@ def place_live_order(
     entry_time = _entry_time_for_round(cfg, target_round)
     market = market_client.get_market_by_slug(target_round.slug)
     quote = market_client.quote_from_market(market)
-    _apply_strategy6_signal_to_quote(cfg=cfg, quote=quote, binance_signal_service=binance_signal_service)
+    _apply_strategy6_signal_to_quote(
+        cfg=cfg,
+        quote=quote,
+        binance_signal_service=binance_signal_service,
+        diagnostic_log=_runtime_log,
+    )
     print('[live] quote {' + _describe_quote_source(quote) + '}', flush=True)
     print('[live] ws_runtime {' + _describe_ws_runtime(market_client) + '}', flush=True)
     side_decision = _resolve_side_from_strategy(
@@ -1314,6 +1319,7 @@ def run_live_trading(
                             cfg=strategy_cfg,
                             quote=strategy_quote,
                             binance_signal_service=binance_signal_service,
+                            diagnostic_log=_runtime_log,
                         )
                         side_decision = _resolve_side_from_strategy(
                             cfg=strategy_cfg,
@@ -1996,6 +2002,7 @@ def run_paper_trading(
                     cfg=strategy_cfg,
                     quote=strategy_quote,
                     binance_signal_service=binance_signal_service,
+                    diagnostic_log=_runtime_log,
                 )
                 _runtime_log('strategy=' + str(strategy_id) + ' round=' + target_round.slug + ' quote {' + _describe_quote_source(strategy_quote) + '}')
                 _runtime_log('strategy=' + str(strategy_id) + ' round=' + target_round.slug + ' ws_runtime {' + _describe_ws_runtime(client) + '}')
@@ -2368,6 +2375,7 @@ def run_paper_trading(
                     cfg=strategy_cfg,
                     quote=strategy_quote,
                     binance_signal_service=binance_signal_service,
+                    diagnostic_log=_runtime_log,
                 )
                 side_decision = _resolve_side_from_strategy(
                     cfg=strategy_cfg,

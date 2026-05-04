@@ -1498,6 +1498,18 @@ def test_dashboard_assets_persist_report_mode_across_page_reload():
     assert "saveUiPrefs();" in js
 
 
+def test_dashboard_assets_auto_select_live_report_mode_until_user_changes_it():
+    js = _dashboard_js()
+
+    assert "reportModeUserSelected: false" in js
+    assert "function syncReportModeWithRuntime(payload)" in js
+    assert "state.reportModeUserSelected = false;" in js
+    assert "if (state.reportModeUserSelected) {" in js
+    assert "state.reportMode = runtimeMode === 'live' ? 'live' : 'paper';" in js
+    assert "syncReportModeWithRuntime(payload);" in js
+    assert "state.reportModeUserSelected = true;" in js
+
+
 def test_dashboard_assets_localize_recent_panel_by_running_mode():
     js = _dashboard_js()
 
