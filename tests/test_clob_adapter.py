@@ -180,6 +180,68 @@ class _AssociatedTradesLookupClient:
         return []
 
 
+class _PendingOfficialTradeLookupClient:
+    def get_order(self, order_id):
+        assert order_id == "oid-pending-chain"
+        return {
+            "status": "matched",
+            "size_matched": "2.0",
+            "price": "0.50",
+            "associate_trades": ["trade-pending"],
+        }
+
+    def get_trades(self, params=None, only_first_page=False):
+        if isinstance(params, dict):
+            raise AttributeError("'dict' object has no attribute 'market'")
+        trade_id = getattr(params, "id", None)
+        if trade_id == "oid-pending-chain":
+            return []
+        if trade_id == "trade-pending":
+            return [
+                {
+                    "id": "trade-pending",
+                    "taker_order_id": "oid-pending-chain",
+                    "size": "2.0",
+                    "price": "0.50",
+                    "status": "MINED",
+                }
+            ]
+        assert params is None
+        assert only_first_page is True
+        return []
+
+
+class _ConfirmedOfficialTradeLookupClient:
+    def get_order(self, order_id):
+        assert order_id == "oid-confirmed-chain"
+        return {
+            "status": "matched",
+            "size_matched": "2.0",
+            "price": "0.50",
+            "associate_trades": ["trade-confirmed"],
+        }
+
+    def get_trades(self, params=None, only_first_page=False):
+        if isinstance(params, dict):
+            raise AttributeError("'dict' object has no attribute 'market'")
+        trade_id = getattr(params, "id", None)
+        if trade_id == "oid-confirmed-chain":
+            return []
+        if trade_id == "trade-confirmed":
+            return [
+                {
+                    "id": "trade-confirmed",
+                    "taker_order_id": "oid-confirmed-chain",
+                    "size": "2.0",
+                    "price": "0.50",
+                    "status": "CONFIRMED",
+                }
+            ]
+        assert params is None
+        assert only_first_page is True
+        return []
+
+
 def test_clob_adapter_reads_available_balance_from_nested_payload():
     balance = read_available_live_balance(
         cfg=AppConfig(live_private_key="pk", live_funder="0xfunder"),
@@ -316,6 +378,39 @@ def test_clob_adapter_fetches_associated_trade_ids_before_using_order_limit_pric
     assert plan is not None
     assert plan.order_size == pytest.approx(3.0)
     assert plan.order_cost == pytest.approx(1.5)
+    assert plan.price == pytest.approx(0.5)
+
+
+def test_clob_adapter_requires_confirmed_official_trade_before_settlement_plan():
+    state = LiveStrategyState(
+        pending_live_side="UP",
+        pending_live_order_id="oid-pending-chain",
+    )
+
+    plan = build_verified_pending_live_trade_plan(
+        state,
+        clob_client=_PendingOfficialTradeLookupClient(),
+        require_confirmed_trades=True,
+    )
+
+    assert plan is None
+
+
+def test_clob_adapter_accepts_confirmed_official_trade_for_settlement_plan():
+    state = LiveStrategyState(
+        pending_live_side="UP",
+        pending_live_order_id="oid-confirmed-chain",
+    )
+
+    plan = build_verified_pending_live_trade_plan(
+        state,
+        clob_client=_ConfirmedOfficialTradeLookupClient(),
+        require_confirmed_trades=True,
+    )
+
+    assert plan is not None
+    assert plan.order_size == pytest.approx(2.0)
+    assert plan.order_cost == pytest.approx(1.0)
     assert plan.price == pytest.approx(0.5)
 
 

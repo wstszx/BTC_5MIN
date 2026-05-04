@@ -1544,6 +1544,112 @@ def test_run_live_trading_keeps_pending_and_blocks_new_orders_when_settlement_er
     assert reloaded.live_strategies[7].pending_live_order_id == "oid-prev"
 
 
+def test_run_live_trading_waits_for_confirmed_clob_trade_before_new_orders(tmp_path, monkeypatch):
+    state_path = tmp_path / "live_state.json"
+    state_path.write_text(
+        json.dumps(
+            {
+                "live_strategies": {
+                    "7": {
+                        "round_index": 4,
+                        "cash_pnl": 0.0,
+                        "recovery_loss": 0.0,
+                        "consecutive_losses": 0,
+                        "pending_live_slug": "btc-updown-5m-prev",
+                        "pending_live_side": "UP",
+                        "pending_live_price": 0.5,
+                        "pending_live_order_size": 2.0,
+                        "pending_live_order_cost": 1.0,
+                        "pending_live_expected_profit": 1.0,
+                        "pending_live_order_id": "oid-prev",
+                        "pending_live_end_time": "2026-04-02T00:00:00+00:00",
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    evaluation_calls = {"side": 0, "plan": 0}
+
+    class _PendingChainSettlementClobClient(_StubClobClient):
+        def __init__(self):
+            super().__init__(
+                order_payloads={
+                    "oid-prev": {
+                        "status": "matched",
+                        "size_matched": "2.0",
+                        "price": "0.50",
+                        "associate_trades": ["trade-pending"],
+                    }
+                }
+            )
+
+        def get_trades(self, params=None, only_first_page=False):
+            if isinstance(params, dict):
+                raise AttributeError("'dict' object has no attribute 'market'")
+            trade_id = getattr(params, "id", None)
+            if trade_id == "oid-prev":
+                return []
+            if trade_id == "trade-pending":
+                return [
+                    {
+                        "id": "trade-pending",
+                        "taker_order_id": "oid-prev",
+                        "size": "2.0",
+                        "price": "0.50",
+                        "status": "MINED",
+                    }
+                ]
+            assert params is None
+            assert only_first_page is True
+            return []
+
+    def fail_if_strategy_evaluated(**kwargs):
+        evaluation_calls["side"] += 1
+        return SideDecision(side="UP")
+
+    def fail_if_plan_built(*args, **kwargs):
+        evaluation_calls["plan"] += 1
+        return TradePlan(
+            True,
+            "UP",
+            price=0.55,
+            order_size=2.0,
+            order_cost=1.0,
+            expected_profit=1.0,
+        )
+
+    monkeypatch.setattr("trader._resolve_side_from_strategy", fail_if_strategy_evaluated)
+    monkeypatch.setattr("trader.build_trade_plan", fail_if_plan_built)
+
+    result = run_live_trading(
+        AppConfig(
+            trade_mode="live",
+            live_trading_enabled=True,
+            live_private_key="pk",
+            live_funder="0xfunder",
+            strategy_id=3,
+            live_strategy_ids=[3, 7],
+        ),
+        market_client=_SettlingLiveClient(),
+        clob_client=_PendingChainSettlementClobClient(),
+        state_path=state_path,
+        log_path=tmp_path / "live_orders.csv",
+        stop_when_safe=lambda: True,
+    )
+
+    reloaded = load_session_state(state_path, effective_live_strategy_ids=[3, 7])
+    strategy_result = next(item for item in result["strategies"] if item["strategy_id"] == 7)
+
+    assert result["status"] == "pending_settlement"
+    assert strategy_result["status"] == "pending_settlement"
+    assert strategy_result["skip_reason"] == "awaiting_fill_confirmation"
+    assert strategy_result["order_id"] == "oid-prev"
+    assert evaluation_calls == {"side": 0, "plan": 0}
+    assert reloaded.live_strategies[7].pending_live_slug == "btc-updown-5m-prev"
+    assert reloaded.live_strategies[7].pending_live_order_id == "oid-prev"
+
+
 def test_run_live_trading_keeps_removed_pending_live_strategy_managed(tmp_path):
     control = RuntimeControl(initial_mode='live')
     state_path = tmp_path / 'live_state.json'
@@ -1680,7 +1786,7 @@ class _RoundEndMarketClient(_LiveMarketClient):
 
 
 class _StubClobClient:
-    def __init__(self, *, post_response=None, order_payloads=None, balance_payload=None):
+    def __init__(self, *, post_response=None, order_payloads=None, balance_payload=None, trade_payloads=None):
         self.created_orders = []
         self.posted_orders = []
         self.post_response = post_response if post_response is not None else {"success": True, "orderID": "oid-123"}
@@ -1688,6 +1794,7 @@ class _StubClobClient:
         self.balance_payload = (
             balance_payload if balance_payload is not None else {"available": 100.0, "balance": 100.0}
         )
+        self.trade_payloads = trade_payloads or {}
 
     def create_market_order(self, order_args):
         self.created_orders.append(order_args)
@@ -1699,6 +1806,15 @@ class _StubClobClient:
 
     def get_order(self, order_id):
         return self.order_payloads.get(order_id, {})
+
+    def get_trades(self, params=None, only_first_page=False):
+        if isinstance(params, dict):
+            order_id = str(params.get("order_id") or params.get("orderID") or params.get("orderId") or "")
+            return self.trade_payloads.get(order_id, [])
+        trade_id = str(getattr(params, "id", "") or "")
+        if trade_id:
+            return self.trade_payloads.get(trade_id, [])
+        return self.trade_payloads.get(None, [])
 
     def get_balance(self):
         return self.balance_payload
@@ -1719,6 +1835,10 @@ class _SettlementTimeoutClobClient(_StubClobClient):
             "[py_clob_client_v2] request error: The read operation timed out "
             "PolyApiException[status_code=None, error_message=Request exception!]"
         )
+
+
+def _confirmed_trade(order_id: str, *, size: float = 2.0, price: float = 0.5):
+    return {"taker_order_id": order_id, "size": size, "price": price, "status": "CONFIRMED"}
 
 
 class _FokNotFilledClobClient(_StubClobClient):
@@ -3057,7 +3177,8 @@ def test_place_live_order_settles_previous_pending_trade_before_new_submission(t
                 "filled_order_cost": 1.0,
                 "avg_price": 0.5,
             }
-        }
+        },
+        trade_payloads={"oid-prev": [_confirmed_trade("oid-prev")]},
     )
     state_path = tmp_path / "state.json"
     state_path.write_text(
@@ -3124,7 +3245,8 @@ def test_place_live_order_settles_previous_pending_trade_from_terminal_outcome_p
                 "filled_order_cost": 1.0,
                 "avg_price": 0.5,
             }
-        }
+        },
+        trade_payloads={"oid-prev": [_confirmed_trade("oid-prev")]},
     )
     state_path = tmp_path / "state.json"
     state_path.write_text(
@@ -3182,7 +3304,8 @@ def test_place_live_order_syncs_live_strategy_map_before_persisting(tmp_path):
                 "filled_order_cost": 1.0,
                 "avg_price": 0.5,
             }
-        }
+        },
+        trade_payloads={"oid-prev": [_confirmed_trade("oid-prev")]},
     )
     state_path = tmp_path / "state.json"
     state_path.write_text(
@@ -3281,7 +3404,10 @@ def test_place_live_order_syncs_live_strategy_map_before_persisting(tmp_path):
 
 def test_place_live_order_waits_for_previous_pending_trade_settlement(tmp_path):
     cfg = AppConfig(live_trading_enabled=True, max_stake=25.0)
-    stub_clob = _StubClobClient(order_payloads={"oid-prev": {"status": "filled"}})
+    stub_clob = _StubClobClient(
+        order_payloads={"oid-prev": {"status": "filled"}},
+        trade_payloads={"oid-prev": [_confirmed_trade("oid-prev", size=1.9607843137254901, price=0.51)]},
+    )
     state_path = tmp_path / "state.json"
     state_path.write_text(
         json.dumps(
@@ -3319,7 +3445,7 @@ def test_place_live_order_waits_for_previous_pending_trade_settlement(tmp_path):
     )
 
     assert result["status"] == "pending_settlement"
-    assert result["skip_reason"] == "awaiting_fill_confirmation"
+    assert result["skip_reason"] == "round_unresolved"
     assert stub_clob.created_orders == []
 
 
@@ -4140,7 +4266,8 @@ def test_settle_pending_live_trade_operates_on_single_strategy_state():
                 "filled_order_cost": 1.0,
                 "avg_price": 0.5,
             }
-        }
+        },
+        trade_payloads={"oid-prev": [_confirmed_trade("oid-prev")]},
     )
 
     updated_strategy, status, settled = trader._settle_pending_live_trade_if_needed(
@@ -4195,7 +4322,8 @@ def test_settle_pending_live_trade_uses_official_redeemable_position_without_wai
                 "filled_order_cost": 1.0,
                 "avg_price": 0.5,
             }
-        }
+        },
+        trade_payloads={"oid-prev": [_confirmed_trade("oid-prev")]},
     )
 
     updated_strategy, status, settled = trader._settle_pending_live_trade_if_needed(
@@ -4267,7 +4395,8 @@ def test_settle_pending_live_trade_ignores_string_false_redeemable_position():
                 "filled_order_cost": 1.0,
                 "avg_price": 0.5,
             }
-        }
+        },
+        trade_payloads={"oid-prev": [_confirmed_trade("oid-prev")]},
     )
 
     updated_strategy, status, settled = trader._settle_pending_live_trade_if_needed(
@@ -4308,7 +4437,8 @@ def test_settle_pending_live_trade_uses_official_terminal_result_when_position_i
                 "filled_order_cost": 1.0,
                 "avg_price": 0.5,
             }
-        }
+        },
+        trade_payloads={"oid-prev": [_confirmed_trade("oid-prev")]},
     )
 
     updated_strategy, status, settled = trader._settle_pending_live_trade_if_needed(
@@ -4343,7 +4473,10 @@ def test_settle_pending_live_trade_uses_frozen_pending_plan_when_official_result
         pending_live_order_id="oid-prev",
         pending_live_end_time="2026-04-02T00:00:00+00:00",
     )
-    stub_clob = _StubClobClient(order_payloads={"oid-prev": {"status": "filled"}})
+    stub_clob = _StubClobClient(
+        order_payloads={"oid-prev": {"status": "filled"}},
+        trade_payloads={"oid-prev": [_confirmed_trade("oid-prev", size=1.9607843137254901, price=0.51)]},
+    )
 
     updated_strategy, status, settled = trader._settle_pending_live_trade_if_needed(
         market_client=_OfficialTerminalResultNoPositionClient(),
@@ -4388,7 +4521,8 @@ def test_settle_pending_live_trade_uses_official_market_endpoint_when_event_endp
                 "filled_order_cost": 1.0,
                 "avg_price": 0.5,
             }
-        }
+        },
+        trade_payloads={"oid-prev": [_confirmed_trade("oid-prev")]},
     )
 
     updated_strategy, status, settled = trader._settle_pending_live_trade_if_needed(
@@ -4431,7 +4565,8 @@ def test_settle_pending_live_trade_uses_clob_winner_when_final_price_is_missing(
                 "filled_order_cost": 1.0,
                 "avg_price": 0.5,
             }
-        }
+        },
+        trade_payloads={"oid-prev": [_confirmed_trade("oid-prev")]},
     )
 
     updated_strategy, status, settled = trader._settle_pending_live_trade_if_needed(
@@ -4473,7 +4608,8 @@ def test_settle_pending_live_trade_does_not_use_ws_only_resolution_for_live_sett
                 "filled_order_cost": 2.39999944,
                 "avg_price": 0.38,
             }
-        }
+        },
+        trade_payloads={"oid-prev": [_confirmed_trade("oid-prev", size=6.315788, price=0.38)]},
     )
 
     updated_strategy, status, settled = trader._settle_pending_live_trade_if_needed(
@@ -4514,7 +4650,8 @@ def test_settle_pending_live_trade_prefers_official_market_result_over_position_
                 "filled_order_cost": 1.0,
                 "avg_price": 0.5,
             }
-        }
+        },
+        trade_payloads={"oid-prev": [_confirmed_trade("oid-prev")]},
     )
 
     updated_strategy, status, settled = trader._settle_pending_live_trade_if_needed(

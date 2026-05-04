@@ -346,12 +346,19 @@ def settle_pending_live_trade_if_needed(
         slug=strategy_state.pending_live_slug,
     )
 
-    plan = pending_plan_resolver(strategy_state, clob_client=clob_client)
+    try:
+        plan = pending_plan_resolver(
+            strategy_state,
+            clob_client=clob_client,
+            require_confirmed_trades=True,
+        )
+    except TypeError:
+        plan = pending_plan_resolver(strategy_state, clob_client=clob_client)
     if plan is None:
-        if result:
+        if result and not strategy_state.pending_live_order_id:
             plan = build_frozen_pending_live_plan(strategy_state)
         if plan is None:
-            skip_reason = "awaiting_fill_confirmation"
+            skip_reason = "awaiting_fill_confirmation" if result else "round_unresolved"
             status_payload = unresolved_status or {
                 "status": "pending_settlement",
                 "slug": strategy_state.pending_live_slug,

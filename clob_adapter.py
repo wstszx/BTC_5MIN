@@ -222,11 +222,20 @@ def _trade_size_and_price(trade: dict[str, Any]) -> tuple[float | None, float | 
     return size, price
 
 
+def _trade_status(trade: dict[str, Any]) -> str:
+    return str(trade.get("status") or trade.get("trade_status") or trade.get("tradeStatus") or "").strip().upper()
+
+
+def _is_confirmed_trade(trade: dict[str, Any]) -> bool:
+    return _trade_status(trade) == "CONFIRMED"
+
+
 def build_trade_plan_from_official_trades(
     strategy_state: LiveStrategyState,
     *,
     clob_client: Any,
     order_payload: dict[str, Any] | None = None,
+    require_confirmed_trades: bool = False,
 ) -> TradePlan | None:
     order_id = str(strategy_state.pending_live_order_id or "").strip()
     if not order_id:
@@ -235,6 +244,8 @@ def build_trade_plan_from_official_trades(
     total_size = 0.0
     total_cost = 0.0
     for trade in _read_official_order_trades(clob_client, order_id, order_payload=order_payload):
+        if require_confirmed_trades and not _is_confirmed_trade(trade):
+            continue
         size, price = _trade_size_and_price(trade)
         if size is None or price is None or not 0 < price < 1:
             continue
@@ -416,6 +427,7 @@ def build_verified_pending_live_trade_plan(
     strategy_state: LiveStrategyState,
     *,
     clob_client: Any | None,
+    require_confirmed_trades: bool = False,
 ) -> TradePlan | None:
     if strategy_state.pending_live_side not in {"UP", "DOWN"}:
         raise RuntimeError("Pending live trade is missing a valid side.")
@@ -436,9 +448,13 @@ def build_verified_pending_live_trade_plan(
         strategy_state,
         clob_client=clob_client,
         order_payload=order_payload,
+        require_confirmed_trades=require_confirmed_trades,
     )
     if official_trade_plan is not None:
         return official_trade_plan
+
+    if require_confirmed_trades:
+        return None
 
     status = str(order_payload.get("status") or "").strip().lower()
     has_fill_markers = any(
