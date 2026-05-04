@@ -32,11 +32,6 @@ Dashboard saves write back to `.env.dashboard`, and mode changes also update the
 - `POLYMARKET_API_KEY`
 - `POLYMARKET_API_SECRET`
 - `POLYMARKET_API_PASSPHRASE`
-- `POLYMARKET_BUILDER_API_KEY`
-- `POLYMARKET_BUILDER_SECRET`
-- `POLYMARKET_BUILDER_PASSPHRASE`
-- `POLYMARKET_RELAYER_API_KEY`
-- `POLYMARKET_RELAYER_API_KEY_ADDRESS`
 
 Trading mode safety rules:
 
@@ -51,8 +46,8 @@ Trading mode safety rules:
 Credential split:
 
 - `POLYMARKET_API_*` is for CLOB live trading only.
-- `POLYMARKET_BUILDER_*` and `POLYMARKET_RELAYER_*` are for official gasless live redeem only.
-- Direct Polygon `web3` redeem is not a supported runtime path.
+- This program does not submit redeem transactions. If Polymarket auto redeem is enabled on the account, redemption is handled outside this runtime.
+- The ledger only auto-corrects from conservative official settlement signals: `finalPrice`, CLOB `tokens[].winner`, or a redeemable position for the live funder.
 
 ### Split strategy selection
 

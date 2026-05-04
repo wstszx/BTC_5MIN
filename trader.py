@@ -123,13 +123,6 @@ from strategy_state_sync import (
     sync_legacy_live_state_fields as _sync_legacy_live_state_fields,
     sync_legacy_paper_state_fields as _sync_legacy_paper_state_fields,
 )
-from redeem_worker import (
-    load_live_redeem_state,
-    run_live_redeem_worker,
-    save_live_redeem_state,
-)
-
-
 def _binance_signal_service_url(cfg: AppConfig) -> str:
     return cfg.binance_ws_url.rstrip("/") + "/" + cfg.binance_depth_stream.lstrip("/")
 

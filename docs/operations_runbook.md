@@ -29,23 +29,12 @@ Key fields to review:
 - `POLYMARKET_API_KEY`
 - `POLYMARKET_API_SECRET`
 - `POLYMARKET_API_PASSPHRASE`
-- `POLYMARKET_BUILDER_API_KEY`
-- `POLYMARKET_BUILDER_SECRET`
-- `POLYMARKET_BUILDER_PASSPHRASE`
-- `POLYMARKET_RELAYER_API_KEY`
-- `POLYMARKET_RELAYER_API_KEY_ADDRESS`
-- `LIVE_AUTO_REDEEM_ENABLED`
-- `LIVE_AUTO_REDEEM_POLL_SECONDS`
-- `LIVE_AUTO_REDEEM_MAX_RETRIES`
-- `LIVE_AUTO_REDEEM_INITIAL_BACKOFF_SECONDS`
-- `LIVE_AUTO_REDEEM_MAX_BACKOFF_SECONDS`
-- `LIVE_AUTO_REDEEM_DRY_RUN`
 
 Credential note:
 
 - `POLYMARKET_API_*` is only for live CLOB trading.
-- `POLYMARKET_BUILDER_*` and `POLYMARKET_RELAYER_*` are only for official gasless live redeem.
-- Direct Polygon `web3` redeem is no longer a supported runtime path.
+- This runtime does not submit redeem transactions. If Polymarket auto redeem is enabled on the account, redemption is handled by Polymarket outside the bot.
+- Ledger correction waits for conservative official signals: `finalPrice`, CLOB `tokens[].winner`, or a redeemable position for `POLYMARKET_FUNDER`.
 
 Trading mode rules:
 
@@ -74,17 +63,11 @@ This command starts the configured trading loop and the local dashboard together
 
 Open [http://127.0.0.1:8787/](http://127.0.0.1:8787/) in your browser to inspect the current quote, signal reasoning, risk controls, and the live config editor. Every save from the editor updates `.env.dashboard`. The editor shows a single `启用实盘` switch, and it labels `POLYMARKET_FUNDER` as `实盘钱包地址`.
 
-The runtime status card now also includes live auto redeem status when the runtime is in live mode or auto redeem is enabled:
-
 - `Target Mode`: the mode saved in `.env.dashboard`.
 - `Running Mode`: the worker mode that is actually running now.
 - `Switch Pending`: whether the saved mode and running mode still differ.
 - `Live Ready`: whether live mode passes credential validation.
 - `Validation`: the current validation error, if live mode is blocked.
-- `Auto Redeem`: whether live auto redeem is enabled for the active config.
-- `Redeem Auth Mode`: whether redeem is configured through Builder credentials, Relayer key credentials, or still unconfigured.
-- `Pending Redeems`: current redeemable positions waiting in `live_redeem_state.json`.
-- `Last Result / Last Attempt / Last Submission Id / Last Tx Hash`: the latest redeem worker outcome, attempt time, relayer submission id, and tx hash when available.
 
 Supporting files and directories:
 
@@ -92,7 +75,6 @@ Supporting files and directories:
 - `logs/session_state.json`: tracks rounds, cumulative PnL, and streak counters. Delete it to reset paper-trading state.
 - `logs/live_orders.csv`: live order log used when the active worker is in live mode.
 - `logs/live_session_state.json`: live-mode runtime state used when the active worker is in live mode.
-- `logs/live_redeem_state.json`: live auto redeem worker state, including retry scheduling, latest result, relayer submission metadata, and tx hash tracking when available.
 - `data/`: stores history exports and research outputs.
 
 ## 5. Stop

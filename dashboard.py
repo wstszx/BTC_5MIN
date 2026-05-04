@@ -36,6 +36,10 @@ from polymarket_api import (
     normalize_outcome_label,
     parse_outcome_prices,
 )
+from settlement import (
+    resolved_result_from_redeemable_positions,
+    resolved_live_result_from_official_sources,
+)
 from risk_and_sizing import build_trade_plan
 from strategy import get_side_for_round
 from runtime_control import RuntimeControl
@@ -51,10 +55,7 @@ from trader import (
     _ws_is_stale_for_trade,
     resolve_quote_price,
 )
-from redeem_worker import (
-    load_live_redeem_state,
-    validate_live_runtime_config,
-)
+from runtime_config import validate_live_runtime_config
 
 
 _POLYMARKET_CLIENT_CLASS = PolymarketClient
@@ -768,10 +769,17 @@ def _validate_recent_trade_row(
             resolved['resolved_final_price'] = str(final_price)
 
         live_result_validation = str(validated.get("mode") or "").strip().lower() == "live"
-        official_result = _official_winning_outcome(
-            event_payload,
-            require_final_price=fill_missing_result or live_result_validation,
-        )
+        if live_result_validation:
+            market = (event_payload.get("markets") or [{}])[0]
+            official_result = resolved_live_result_from_official_sources(client, event_payload, market) or ""
+            if not official_result:
+                funder = getattr(getattr(client, "config", None), "live_funder", None)
+                official_result = resolved_result_from_redeemable_positions(client, funder=funder, slug=slug) or ""
+        else:
+            official_result = _official_winning_outcome(
+                event_payload,
+                require_final_price=fill_missing_result,
+            )
         if not official_result and price_to_beat is not None and final_price is not None:
             official_result = "UP" if final_price >= price_to_beat else "DOWN"
 
@@ -873,6 +881,17 @@ def _live_result_value(row: dict[str, str]) -> str:
 
 def _live_float_value(row: dict[str, str], key: str) -> float:
     return _optional_float(row.get(key)) or 0.0
+
+
+def _refresh_live_row_trade_pnl_from_result(row: dict[str, str]) -> dict[str, str]:
+    refreshed = dict(row)
+    result = _live_result_value(refreshed)
+    side = str(refreshed.get("side") or "").strip().upper()
+    if result and side in {"UP", "DOWN"}:
+        order_cost = _live_float_value(refreshed, "order_cost")
+        expected_profit = _live_float_value(refreshed, "expected_profit")
+        refreshed["trade_pnl"] = str(expected_profit if result == side else -order_cost)
+    return refreshed
 
 
 def _live_row_session_day(row: dict[str, str]) -> str:
@@ -1158,17 +1177,6 @@ def _field_groups() -> list[dict[str, Any]]:
                 "POLYMARKET_API_KEY",
                 "POLYMARKET_API_SECRET",
                 "POLYMARKET_API_PASSPHRASE",
-                "POLYMARKET_BUILDER_API_KEY",
-                "POLYMARKET_BUILDER_SECRET",
-                "POLYMARKET_BUILDER_PASSPHRASE",
-                "POLYMARKET_RELAYER_API_KEY",
-                "POLYMARKET_RELAYER_API_KEY_ADDRESS",
-                "LIVE_AUTO_REDEEM_ENABLED",
-                "LIVE_AUTO_REDEEM_DRY_RUN",
-                "LIVE_AUTO_REDEEM_POLL_SECONDS",
-                "LIVE_AUTO_REDEEM_MAX_RETRIES",
-                "LIVE_AUTO_REDEEM_INITIAL_BACKOFF_SECONDS",
-                "LIVE_AUTO_REDEEM_MAX_BACKOFF_SECONDS",
             ],
         },
         {
@@ -1303,17 +1311,6 @@ class DashboardState:
         "POLYMARKET_API_KEY",
         "POLYMARKET_API_SECRET",
         "POLYMARKET_API_PASSPHRASE",
-        "POLYMARKET_BUILDER_API_KEY",
-        "POLYMARKET_BUILDER_SECRET",
-        "POLYMARKET_BUILDER_PASSPHRASE",
-        "POLYMARKET_RELAYER_API_KEY",
-        "POLYMARKET_RELAYER_API_KEY_ADDRESS",
-        "LIVE_AUTO_REDEEM_ENABLED",
-        "LIVE_AUTO_REDEEM_DRY_RUN",
-        "LIVE_AUTO_REDEEM_POLL_SECONDS",
-        "LIVE_AUTO_REDEEM_MAX_RETRIES",
-        "LIVE_AUTO_REDEEM_INITIAL_BACKOFF_SECONDS",
-        "LIVE_AUTO_REDEEM_MAX_BACKOFF_SECONDS",
         "STRATEGY_ID",
         "STRATEGY_IDS",
         "LIVE_STRATEGY_IDS",
@@ -1367,17 +1364,6 @@ class DashboardState:
         "POLYMARKET_API_KEY": "官方 API 访问密钥",
         "POLYMARKET_API_SECRET": "官方 API 签名密钥",
         "POLYMARKET_API_PASSPHRASE": "官方 API 通行口令",
-        "POLYMARKET_BUILDER_API_KEY": "Builder 自动赎回接口密钥",
-        "POLYMARKET_BUILDER_SECRET": "Builder 自动赎回签名密钥",
-        "POLYMARKET_BUILDER_PASSPHRASE": "Builder 自动赎回口令",
-        "POLYMARKET_RELAYER_API_KEY": "Relayer 接口密钥",
-        "POLYMARKET_RELAYER_API_KEY_ADDRESS": "Relayer 密钥地址",
-        "LIVE_AUTO_REDEEM_ENABLED": "实盘自动赎回",
-        "LIVE_AUTO_REDEEM_DRY_RUN": "自动赎回演练模式",
-        "LIVE_AUTO_REDEEM_POLL_SECONDS": "自动赎回轮询秒数",
-        "LIVE_AUTO_REDEEM_MAX_RETRIES": "自动赎回最大重试次数",
-        "LIVE_AUTO_REDEEM_INITIAL_BACKOFF_SECONDS": "自动赎回初始退避秒数",
-        "LIVE_AUTO_REDEEM_MAX_BACKOFF_SECONDS": "自动赎回最大退避秒数",
         "STRATEGY_ID": "基础策略",
         "STRATEGY_IDS": "统一策略组合",
         "LIVE_STRATEGY_IDS": "实盘策略组合",
@@ -1421,8 +1407,6 @@ class DashboardState:
         "TRADE_MODE": ["paper", "live"],
         "MARKET_TIMEFRAME": ["5m", "15m"],
         "LIVE_TRADING_ENABLED": ["true", "false"],
-        "LIVE_AUTO_REDEEM_ENABLED": ["false", "true"],
-        "LIVE_AUTO_REDEEM_DRY_RUN": ["false", "true"],
         "STRATEGY_ID": SUPPORTED_STRATEGY_SELECT_OPTIONS,
         "STRATEGY_IDS": SUPPORTED_STRATEGY_SELECT_OPTIONS,
         "LIVE_STRATEGY_IDS": SUPPORTED_STRATEGY_SELECT_OPTIONS,
@@ -1442,17 +1426,6 @@ class DashboardState:
         "POLYMARKET_API_KEY": "live_api_key",
         "POLYMARKET_API_SECRET": "live_api_secret",
         "POLYMARKET_API_PASSPHRASE": "live_api_passphrase",
-        "POLYMARKET_BUILDER_API_KEY": "live_redeem_builder_api_key",
-        "POLYMARKET_BUILDER_SECRET": "live_redeem_builder_secret",
-        "POLYMARKET_BUILDER_PASSPHRASE": "live_redeem_builder_passphrase",
-        "POLYMARKET_RELAYER_API_KEY": "live_redeem_relayer_api_key",
-        "POLYMARKET_RELAYER_API_KEY_ADDRESS": "live_redeem_relayer_api_key_address",
-        "LIVE_AUTO_REDEEM_ENABLED": "live_auto_redeem_enabled",
-        "LIVE_AUTO_REDEEM_DRY_RUN": "live_auto_redeem_dry_run",
-        "LIVE_AUTO_REDEEM_POLL_SECONDS": "live_auto_redeem_poll_seconds",
-        "LIVE_AUTO_REDEEM_MAX_RETRIES": "live_auto_redeem_max_retries",
-        "LIVE_AUTO_REDEEM_INITIAL_BACKOFF_SECONDS": "live_auto_redeem_initial_backoff_seconds",
-        "LIVE_AUTO_REDEEM_MAX_BACKOFF_SECONDS": "live_auto_redeem_max_backoff_seconds",
         "STRATEGY_ID": "strategy_id",
         "STRATEGY_IDS": "strategy_ids",
         "LIVE_STRATEGY_IDS": "live_strategy_ids",
@@ -1504,10 +1477,6 @@ class DashboardState:
         "MAX_STAKE_SKIP_ALERT_THRESHOLD",
         "WS_QUOTE_STALE_SECONDS",
         "WS_CONNECT_TIMEOUT_SECONDS",
-        "LIVE_AUTO_REDEEM_POLL_SECONDS",
-        "LIVE_AUTO_REDEEM_MAX_RETRIES",
-        "LIVE_AUTO_REDEEM_INITIAL_BACKOFF_SECONDS",
-        "LIVE_AUTO_REDEEM_MAX_BACKOFF_SECONDS",
     )
 
     FLOAT_CONFIG_KEYS: tuple[str, ...] = (
@@ -1531,18 +1500,13 @@ class DashboardState:
         "WS_TRADE_GUARD_STALE_SECONDS",
     )
 
-    BOOL_CONFIG_KEYS: tuple[str, ...] = ("LIVE_TRADING_ENABLED", "WS_ENABLED", "LIVE_AUTO_REDEEM_ENABLED", "LIVE_AUTO_REDEEM_DRY_RUN")
+    BOOL_CONFIG_KEYS: tuple[str, ...] = ("LIVE_TRADING_ENABLED", "WS_ENABLED")
     STRING_CONFIG_KEYS: tuple[str, ...] = (
         "POLYMARKET_PRIVATE_KEY",
         "POLYMARKET_FUNDER",
         "POLYMARKET_API_KEY",
         "POLYMARKET_API_SECRET",
         "POLYMARKET_API_PASSPHRASE",
-        "POLYMARKET_BUILDER_API_KEY",
-        "POLYMARKET_BUILDER_SECRET",
-        "POLYMARKET_BUILDER_PASSPHRASE",
-        "POLYMARKET_RELAYER_API_KEY",
-        "POLYMARKET_RELAYER_API_KEY_ADDRESS",
     )
     SECRET_CONFIG_KEYS: tuple[str, ...] = (
         "POLYMARKET_PRIVATE_KEY",
@@ -1550,11 +1514,6 @@ class DashboardState:
         "POLYMARKET_API_KEY",
         "POLYMARKET_API_SECRET",
         "POLYMARKET_API_PASSPHRASE",
-        "POLYMARKET_BUILDER_API_KEY",
-        "POLYMARKET_BUILDER_SECRET",
-        "POLYMARKET_BUILDER_PASSPHRASE",
-        "POLYMARKET_RELAYER_API_KEY",
-        "POLYMARKET_RELAYER_API_KEY_ADDRESS",
     )
     MASKED_SECRET_VALUE = "********"
 
@@ -1591,17 +1550,6 @@ class DashboardState:
         "POLYMARKET_API_KEY": "CLOB 实盘下单凭证，仅用于实盘下单私有接口。",
         "POLYMARKET_API_SECRET": "CLOB 实盘下单签名密钥，仅用于实盘下单私有接口。",
         "POLYMARKET_API_PASSPHRASE": "CLOB 实盘下单通行口令，仅用于实盘下单私有接口。",
-        "POLYMARKET_BUILDER_API_KEY": "官方免 Gas 赎回的 Builder 接口密钥，仅用于自动赎回。",
-        "POLYMARKET_BUILDER_SECRET": "官方免 Gas 赎回的 Builder 签名密钥，仅用于自动赎回。",
-        "POLYMARKET_BUILDER_PASSPHRASE": "官方免 Gas 赎回的 Builder 口令，仅用于自动赎回。",
-        "POLYMARKET_RELAYER_API_KEY": "官方免 Gas 赎回的 Relayer 接口密钥，仅用于自动赎回。",
-        "POLYMARKET_RELAYER_API_KEY_ADDRESS": "与 Relayer 接口密钥配套的地址，仅用于自动赎回认证。",
-        "LIVE_AUTO_REDEEM_ENABLED": "仅并行实盘使用。开启后会启动独立的自动赎回线程，扫描可赎回的获胜仓位并自动尝试赎回。",
-        "LIVE_AUTO_REDEEM_DRY_RUN": "仅在开启自动赎回后才有意义。设为 true 时，自动赎回线程仍会检测仓位、写入状态并更新监控页面，但不会发送真实的 Polygon 链上赎回交易。正常实盘请保持 false，只在首次验证或调试时临时开启。",
-        "LIVE_AUTO_REDEEM_POLL_SECONDS": "检查可赎回实盘仓位的轮询间隔，单位秒。",
-        "LIVE_AUTO_REDEEM_MAX_RETRIES": "单个 condition 在遇到临时 RPC 或链上错误时的最大重试次数。",
-        "LIVE_AUTO_REDEEM_INITIAL_BACKOFF_SECONDS": "自动赎回失败后的首次退避等待秒数。",
-        "LIVE_AUTO_REDEEM_MAX_BACKOFF_SECONDS": "自动赎回重试之间的最大退避上限秒数。",
         "BASE_ORDER_COST": "仅固定金额模式使用；获胜后策略会重置回这个起始下注金额。",
         "MIN_STAKE": "单笔订单允许投入的最小 USDC；低于它时会跳过本轮。",
         "PAPER_SIMULATED_WALLET_BALANCE": "仅纸面模式使用，作为 dry-run 的模拟钱包余额；纸面不会读取真实钱包，但会经过与实盘相同的预算检查节点。",
@@ -1913,10 +1861,10 @@ class DashboardState:
         except Exception as exc:
             live_validation_error = _localize_runtime_message(str(exc))
 
-        redeem_cfg = validated_live_cfg if validated_live_cfg is not None else self._build_config(validation_values)
-        live_strategy_ids = [str(item) for item in (getattr(redeem_cfg, "live_strategy_ids", None) or [redeem_cfg.strategy_id])]
+        live_cfg = validated_live_cfg if validated_live_cfg is not None else self._build_config(validation_values)
+        live_strategy_ids = [str(item) for item in (getattr(live_cfg, "live_strategy_ids", None) or [live_cfg.strategy_id])]
         live_session_state = load_session_state(
-            redeem_cfg.logs_dir / "live_session_state.json",
+            live_cfg.logs_dir / "live_session_state.json",
             effective_live_strategy_ids=[int(item) for item in live_strategy_ids],
         )
         live_strategy_states = {
@@ -1927,25 +1875,7 @@ class DashboardState:
             bool(state.get("pending_live_slug"))
             for strategy_id, state in live_strategy_states.items()
         )
-        redeem_state = load_live_redeem_state(redeem_cfg.logs_dir / "live_redeem_state.json")
-        redeem_runtime = redeem_state.get("runtime") if isinstance(redeem_state, dict) else {}
-        redeem_runtime = redeem_runtime if isinstance(redeem_runtime, dict) else {}
-        redeem_conditions = redeem_state.get("conditions") if isinstance(redeem_state, dict) else {}
-        redeem_conditions = redeem_conditions if isinstance(redeem_conditions, dict) else {}
-        redeem_pending_count = redeem_runtime.get("pending_redeem_count")
-        if redeem_pending_count in (None, ""):
-            redeem_pending_count = sum(
-                1
-                for raw_entry in redeem_conditions.values()
-                if isinstance(raw_entry, dict) and str(raw_entry.get("status") or "pending").strip().lower() not in {"completed", "terminal_error"}
-            )
-        try:
-            redeem_pending_count = max(0, int(redeem_pending_count or 0))
-        except (TypeError, ValueError):
-            redeem_pending_count = 0
-        redeem_enabled = bool(getattr(redeem_cfg, "live_auto_redeem_enabled", False) or redeem_runtime.get("enabled"))
-        redeem_visible = bool(redeem_enabled or active_mode == "live" or saved_mode == "live")
-        optimizer_runtime = _load_optimizer_runtime(redeem_cfg.logs_dir / "optimizer_state.json")
+        optimizer_runtime = _load_optimizer_runtime(live_cfg.logs_dir / "optimizer_state.json")
 
         return {
             "saved_mode": saved_mode,
@@ -1971,15 +1901,6 @@ class DashboardState:
                 "runtime_alert_at": runtime_snapshot.runtime_alert_at if runtime_snapshot is not None else None,
                 "live_strategy_ids": live_strategy_ids,
                 "live_strategy_states": live_strategy_states,
-            "redeem_visible": redeem_visible,
-            "redeem_enabled": redeem_enabled,
-            "redeem_auth_mode": getattr(redeem_cfg, "live_redeem_auth_mode", "unconfigured"),
-            "redeem_pending_count": redeem_pending_count,
-            "redeem_last_result": redeem_runtime.get("last_result") or None,
-            "redeem_last_attempt_at": redeem_runtime.get("last_attempt_at") or None,
-            "redeem_last_submission_id": redeem_runtime.get("last_submission_id") or None,
-            "redeem_last_submission_status": redeem_runtime.get("last_submission_status") or None,
-            "redeem_last_tx_hash": redeem_runtime.get("last_tx_hash") or None,
             "optimizer_enabled": optimizer_runtime["enabled"],
             "optimizer_last_run_at": optimizer_runtime["last_run_at"],
             "optimizer_champion_id": optimizer_runtime["champion_id"],
@@ -2610,11 +2531,13 @@ class DashboardState:
         client = PolymarketClient(cfg)
         try:
             rows = [
-                _validate_recent_trade_row(
-                    row,
-                    client=client,
-                    validation_cache=validation_cache,
-                    fill_missing_result=True,
+                _refresh_live_row_trade_pnl_from_result(
+                    _validate_recent_trade_row(
+                        row,
+                        client=client,
+                        validation_cache=validation_cache,
+                        fill_missing_result=True,
+                    )
                 )
                 for row in rows
             ]
@@ -2635,11 +2558,13 @@ class DashboardState:
                     rows = _collapse_live_recent_rows(rows)
                     rows = rows[:capped_limit]
                     rows = [
-                        _validate_recent_trade_row(
-                            row,
-                            client=client,
-                            validation_cache=validation_cache,
-                            fill_missing_result=True,
+                        _refresh_live_row_trade_pnl_from_result(
+                            _validate_recent_trade_row(
+                                row,
+                                client=client,
+                                validation_cache=validation_cache,
+                                fill_missing_result=True,
+                            )
                         )
                         for row in rows
                     ]
@@ -4696,15 +4621,6 @@ const HELP_SECTIONS = {
     intro: '先确认基础策略、下注模式和单笔最大下注金额，再连续观察 3-5 轮后再决定是否同时改多个参数。',
     sections: [
       {
-        title: '实盘自动赎回',
-        bullets: [
-          '实盘自动赎回开关只在并行实盘开启后生效，开启后会启动独立的自动赎回线程。',
-          '该线程会扫描可赎回的获胜仓位，并通过 Polygon 的 redeemPositions 方法尝试把它们转回可用余额。',
-          '当自动赎回演练模式开启时，自动赎回线程只做检测、记录和监控页面展示，不会发送真实赎回交易。',
-          '正常实盘请保持自动赎回演练模式关闭，只在首次验证或调试时临时打开。',
-        ],
-      },
-      {
         title: '先看哪里',
         bullets: [
           '先看行情与信号，确认当前轮次、方向判断和倒计时是否正常。',
@@ -6641,13 +6557,6 @@ function renderRuntimeStatus(payload) {
     ' / 目标模式 ' + formatModeLabel(payload.saved_mode || 'paper') +
     ' / 是否待切换 ' + (payload.restart_required ? '需要' : '不需要') +
     ' / 实盘就绪 ' + (payload.live_ready ? '已就绪' : '未就绪'));
-  const redeemVisible = !!(payload.redeem_visible || payload.redeem_enabled || ((payload.running_mode || payload.active_mode || 'paper') === 'live'));
-  setDisplay('runtimeRedeemRows', redeemVisible ? '' : 'none');
-  setText('runtimeRedeemEnabled', payload.redeem_enabled ? '已开启' : '未开启');
-  setText('runtimeRedeemPending', String(payload.redeem_pending_count ?? 0));
-  setText('runtimeRedeemResult', payload.redeem_last_result || '--');
-  setText('runtimeRedeemAttempt', payload.redeem_last_attempt_at ? fmtIso(payload.redeem_last_attempt_at) : '--');
-  setText('runtimeRedeemTxHash', payload.redeem_last_tx_hash || '--');
   setText('runtimeOptimizerEnabled', payload.optimizer_enabled ? '已开启' : '未开启');
   setText('runtimeOptimizerChampion', payload.optimizer_champion_id || '--');
   setText('runtimeOptimizerChallengers', String((payload.optimizer_active_challengers || []).length));
@@ -7616,5 +7525,3 @@ document.addEventListener('keydown', (event) => {
 
 document.addEventListener('DOMContentLoaded', bootstrap);
 """
-
-

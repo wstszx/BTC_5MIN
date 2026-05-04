@@ -11,7 +11,7 @@ from typing import Sequence
 from config import AppConfig, build_config_from_env_values, load_env_file_values
 from dashboard import create_dashboard_runtime
 from runtime_control import RuntimeControl
-from trader import run_live_redeem_worker, run_live_trading, run_paper_trading, validate_live_runtime_config
+from trader import run_live_trading, run_paper_trading, validate_live_runtime_config
 
 
 
@@ -307,16 +307,6 @@ def run_single_command_runtime(
         )
         live_target = lambda cfg=live_cfg, live_kwargs=live_kwargs: run_live_trading(cfg, **live_kwargs)
         worker_targets.append(('live-trading-worker', live_target))
-
-        redeem_kwargs = _build_worker_call_kwargs(
-            run_live_redeem_worker,
-            stop_event=stop_event,
-            config_provider=lambda: _cfg_for_active_mode(_config_provider(), 'live'),
-            runtime_control=_NullRuntimeControl(),
-            stop_when_safe=manager.restart_requested,
-        )
-        redeem_target = lambda cfg=live_cfg, redeem_kwargs=redeem_kwargs: run_live_redeem_worker(cfg, **redeem_kwargs)
-        worker_targets.append(('live-redeem-worker', redeem_target))
 
     dashboard_runtime = None
     dashboard_thread = None

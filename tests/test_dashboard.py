@@ -659,304 +659,32 @@ def test_dashboard_assets_use_unified_strategy_selection():
 
 
 
-def test_dashboard_config_payload_exposes_live_auto_redeem_fields(tmp_path: Path):
+def test_dashboard_config_payload_omits_live_auto_redeem_fields(tmp_path: Path):
     state = DashboardState(env_file=tmp_path / '.env.dashboard')
     try:
         payload = state.get_config_payload()
-        assert 'LIVE_AUTO_REDEEM_ENABLED' in payload['editable_keys']
-        assert 'LIVE_AUTO_REDEEM_DRY_RUN' in payload['editable_keys']
-        assert payload['labels']['LIVE_AUTO_REDEEM_ENABLED'] == '实盘自动赎回'
-        assert payload['labels']['LIVE_AUTO_REDEEM_DRY_RUN'] == '自动赎回演练模式'
-        assert payload['field_help']['LIVE_AUTO_REDEEM_ENABLED'].startswith('仅并行实盘使用')
-        assert 'Polygon 链上赎回交易' in payload['field_help']['LIVE_AUTO_REDEEM_DRY_RUN']
+
+        removed_keys = {
+            'LIVE_AUTO_REDEEM_ENABLED',
+            'LIVE_AUTO_REDEEM_DRY_RUN',
+            'LIVE_AUTO_REDEEM_POLL_SECONDS',
+            'LIVE_AUTO_REDEEM_MAX_RETRIES',
+            'LIVE_AUTO_REDEEM_INITIAL_BACKOFF_SECONDS',
+            'LIVE_AUTO_REDEEM_MAX_BACKOFF_SECONDS',
+            'POLYMARKET_BUILDER_API_KEY',
+            'POLYMARKET_BUILDER_SECRET',
+            'POLYMARKET_BUILDER_PASSPHRASE',
+            'POLYMARKET_RELAYER_API_KEY',
+            'POLYMARKET_RELAYER_API_KEY_ADDRESS',
+        }
         runtime_group = payload['field_groups'][0]
-        assert 'LIVE_AUTO_REDEEM_ENABLED' in runtime_group['keys']
-        assert 'LIVE_AUTO_REDEEM_DRY_RUN' in runtime_group['keys']
-        assert payload['select_options']['LIVE_AUTO_REDEEM_ENABLED'] == ['false', 'true']
-        assert payload['select_options']['LIVE_AUTO_REDEEM_DRY_RUN'] == ['false', 'true']
+        assert removed_keys.isdisjoint(payload['editable_keys'])
+        assert removed_keys.isdisjoint(payload['labels'])
+        assert removed_keys.isdisjoint(payload['field_help'])
+        assert removed_keys.isdisjoint(payload['select_options'])
+        assert removed_keys.isdisjoint(runtime_group['keys'])
     finally:
         state.close()
-
-
-def test_dashboard_help_center_includes_live_auto_redeem_copy():
-    js = _dashboard_js()
-
-    assert '实盘自动赎回开关' in js
-    assert '自动赎回演练模式' in js
-    assert '实盘自动赎回' in js
-    assert '演练' in js
-    assert 'Polygon' in js
-
-
-def test_dashboard_config_payload_exposes_live_strategy_ids(tmp_path: Path):
-    state = DashboardState(env_file=tmp_path / '.env.dashboard')
-    try:
-        payload = state.get_config_payload()
-        assert LIVE_STRATEGY_IDS in payload['editable_keys']
-        assert payload['labels'][LIVE_STRATEGY_IDS] == '实盘策略组合'
-        assert payload['field_help'][LIVE_STRATEGY_IDS].startswith('实盘运行时可轮询的策略列表')
-        assert payload['select_options'][LIVE_STRATEGY_IDS] == ['1', '2', '3', '4', '5', '6', '7', '8']
-        assert LIVE_STRATEGY_IDS not in payload['field_groups'][1]['keys']
-    finally:
-        state.close()
-
-
-def test_dashboard_assets_include_help_center_shell():
-    html = _dashboard_html()
-    js = _dashboard_js()
-
-    assert 'id="btnHelp"' in html
-    assert 'id="helpDrawer"' in html
-    assert 'id="helpBackdrop"' in html
-    assert "const HELP_TABS = [" in js
-    assert "helpOpen: false" in js
-    assert "helpTab: 'quickstart'" in js
-
-
-def test_dashboard_assets_include_help_center_renderers():
-    js = _dashboard_js()
-
-    assert "function renderHelpDrawer()" in js
-    assert "function renderHelpQuickStart()" in js
-    assert "function renderHelpPageGuide()" in js
-    assert "function renderHelpConfigDictionary()" in js
-    assert "function renderHelpStrategyGuide()" in js
-    assert "function renderHelpFaq()" in js
-
-
-def test_dashboard_help_center_includes_quickstart_copy():
-    js = _dashboard_js()
-
-    assert "实盘自动赎回" in js
-    assert "先看哪里" in js
-    assert "怎么安全改参数" in js
-    assert "怎么判断当前能不能跑" in js
-    assert "监控面板操作说明" in js
-    assert "运行操作手册" in js
-    assert "日常检查清单" in js
-    assert "\u9875\u9762\u5143\u7d20\u8bf4\u660e" in js
-
-
-def test_dashboard_help_center_includes_risk_limit_guide():
-    js = _dashboard_js()
-
-    assert "{ id: 'riskguide', label: '风控限制' }" in js
-    assert "function renderHelpRiskGuide()" in js
-    assert "MAX_CONSECUTIVE_LOSSES" in js
-    assert "PAPER_SIMULATED_WALLET_BALANCE" in js
-    assert "insufficient_live_wallet_balance" in js
-    assert "策略 7" in js
-
-
-def test_dashboard_help_center_reuses_strategy_and_field_metadata():
-    js = _dashboard_js()
-
-    assert "function renderHelpConfigDictionary()" in js
-    assert "function renderHelpStrategyGuide()" in js
-    assert "payload.field_groups" in js
-    assert "payload.strategy_catalog" in js
-    assert "\u4ec5\u7b56\u7565 5 \u4f7f\u7528" in js
-    assert "help-strategy-card-active" in js
-
-
-def test_dashboard_help_center_includes_faq_and_doc_links():
-    html = _dashboard_html()
-    js = _dashboard_js()
-
-    assert "\u5e38\u89c1\u95ee\u9898" in js
-    assert "docs/dashboard_runbook.md" in js or "dashboard_runbook.md" in html
-    assert "docs/operations_runbook.md" in js or "operations_runbook.md" in html
-    assert "docs/daily_ops_checklist.md" in js or "daily_ops_checklist.md" in html
-
-
-def test_dashboard_assets_surface_field_errors_after_failed_save():
-    js = _dashboard_js()
-
-    assert "field_errors" in js
-    assert "fieldErrors" in js
-    assert "validation_errors: fieldErrors" in js
-    assert "env_values: values" in js
-
-
-def test_dashboard_assets_render_config_warning_banner():
-    html = _dashboard_html()
-    css = dashboard._dashboard_css()
-    js = _dashboard_js()
-
-    assert 'id="configWarningBanner"' in html
-    assert 'id="configWarningList"' in html
-    assert '.config-warning-banner' in css
-    assert 'function renderConfigWarnings' in js
-    assert 'payload.config_warnings' in js
-    assert '配置警告' in js
-
-
-def test_dashboard_assets_include_entry_window_missed_reason_label():
-    js = _dashboard_js()
-
-    assert "entry_window_missed" in js
-    assert "observed_waiting_for_entry: '\u7b49\u5f85\u5165\u573a\u89c2\u5bdf\u4e2d'" in js
-
-
-def test_dashboard_report_strategy_all_is_sent_as_all():
-    js = _dashboard_js()
-
-    assert "if (!current) {\n    return defaultPaperReportStrategyFilter();" in js
-    assert "if (!current || current === 'all') {\n    return defaultPaperReportStrategyFilter();" not in js
-    assert "const summaryEndpoint = reportMode === 'live' ? '/api/live/summary?strategy=' + strategy" in js
-    assert "const recentEndpoint = reportMode === 'live' ? '/api/live/recent?limit=80&strategy=' + strategy" in js
-
-
-def test_dashboard_assets_use_planned_entry_copy():
-    html = _dashboard_html()
-    js = _dashboard_js()
-
-    assert "\u8ba1\u5212\u5165\u573a" in html
-    assert "\u8ddd\u79bb\u8ba1\u5212\u5165\u573a" in js
-    assert "\u5df2\u8fc7\u8ba1\u5212\u5165\u573a" in js
-
-
-def test_dashboard_market_header_prioritizes_human_time_over_slug():
-    html = _dashboard_html()
-    js = _dashboard_js()
-
-    assert 'id="marketDeadline"' in html
-    assert "function marketDeadlineText(" in js
-    assert "\u7ed3\u675f\u65f6\u95f4 --" in js
-    assert "el('marketDeadline').textContent = marketDeadlineText(round.end_time);" in js
-
-
-def test_dashboard_reason_fallback_is_human_friendly():
-    js = _dashboard_js()
-
-    assert "invalid_price" in js
-    assert "price_below_threshold" in js
-    assert "invalid_base_order_cost" in js
-    assert "invalid_bet_sizing_mode" in js
-    assert "signal_too_weak_fallback" in js
-    assert "signal_price_unavailable" in js
-    assert "signal_price_unavailable_fallback" in js
-    assert "ofi_unavailable" in js
-    assert "ofi_stale" in js
-    assert "ofi_too_weak" in js
-    assert "awaiting_fill_confirmation" in js
-    assert "round_in_progress" in js
-    assert "轮次仍在进行中" in js
-    assert "round_unresolved" in js
-    assert "轮次尚未结算" in js
-    assert "live_wallet_balance_unavailable" in js
-    assert "实盘钱包余额不可用" in js
-    assert "insufficient_live_wallet_balance" in js
-    assert "实盘钱包余额不足" in js
-    assert "market_timeframe" in js
-    assert "INVALID OPERATION" in js
-    assert "return rawReason;" in js
-
-
-
-def test_dashboard_assets_include_daily_strategy_performance_table():
-    html = _dashboard_html()
-    js = _dashboard_js()
-
-    assert "每日策略表现" in html
-    assert 'id="strategyDaysTbody"' in html
-    assert "<th>下单</th>" in html
-    assert "<th>跳过</th>" in html
-    assert "<th>胜率</th>" in html
-    assert "<th>单日盈亏</th>" in html
-    assert "<th>累计盈亏</th>" in html
-    assert "function renderStrategyDays(" in js
-    assert "payload.strategy_days" in js
-    assert "cumulative_pnl" in js
-
-
-def test_dashboard_assets_mark_pending_recent_trades_clearly():
-    js = _dashboard_js()
-
-    assert "const isPending = row.pending_status === 'pending_settlement';" in js
-    assert "const resultText = isPending ? '待结算' : (row.result || '--');" in js
-    assert "const rowClass = isPending ? 'recent-pending' : (isMissedEntry ? 'recent-missed-entry' : '');" in js
-    assert "setReportStatus('recentStatus', '明细', pendingCount > 0 ? (rows.length + ' 行 · ' + pendingCount + ' 待结算') : (rows.length + ' 行'), pendingCount > 0 ? 'warn' : 'ok');" in js
-
-def test_dashboard_assets_highlight_recent_missed_entry_rows():
-    js = _dashboard_js()
-    css = dashboard._dashboard_css()
-
-    assert "const isMissedEntry = row.skip_reason === 'entry_window_missed';" in js
-    assert "const rowClass = isPending ? 'recent-pending' : (isMissedEntry ? 'recent-missed-entry' : '');" in js
-    assert "const reasonHtml = isMissedEntry" in js
-    assert "skip-reason-badge missed-entry" in js
-    assert '.recent-missed-entry td {' in css
-    assert '.skip-reason-badge {' in css
-    assert '.skip-reason-badge.missed-entry {' in css
-
-
-def test_dashboard_assets_show_balance_error_in_recent_reason_title():
-    js = _dashboard_js()
-
-    assert "const balanceError = String(row.balance_error || '').trim();" in js
-    assert "const reasonTitle = balanceError ? (reasonText(row.skip_reason) + ' / ' + balanceError) : reasonText(row.skip_reason);" in js
-    assert "'<td title=\"' + esc(reasonTitle) + '\">' + reasonHtml + '</td>'" in js
-
-
-def test_dashboard_assets_show_serial_waiting_hint_for_pending_paper_trades():
-    html = _dashboard_html()
-    js = _dashboard_js()
-
-    assert 'id="paperSerialHint"' in html
-    assert "const pendingPaperTrades = Array.isArray(ss.pending_paper_trades) ? ss.pending_paper_trades : [];" in js
-    assert "const serialHintNode = el('paperSerialHint');" in js
-    assert "serialHintNode.textContent = pendingPaperTrades.length > 0 ? ('上一轮未结算，当前按串行模式等待，共 ' + pendingPaperTrades.length + ' 笔待结算') : '当前没有待结算轮次';" in js
-    assert "serialHintNode.className = pendingPaperTrades.length > 0 ? 'serial-hint warn' : 'serial-hint';" in js
-
-def test_dashboard_config_payload_masks_live_private_key_and_exposes_mode_fields(tmp_path: Path):
-    env_file = tmp_path / '.env.dashboard'
-    env_file.write_text(
-        'TRADE_MODE=live\n'
-        'LIVE_TRADING_ENABLED=true\n'
-        'POLYMARKET_PRIVATE_KEY=super-secret-private-key\n'
-        'POLYMARKET_FUNDER=0xfunder\n',
-        encoding='utf-8',
-    )
-    state = DashboardState(env_file=env_file)
-    try:
-        payload = state.get_config_payload()
-
-        assert 'TRADE_MODE' in payload['editable_keys']
-        assert 'LIVE_TRADING_ENABLED' in payload['editable_keys']
-        assert 'POLYMARKET_PRIVATE_KEY' in payload['editable_keys']
-        assert 'POLYMARKET_FUNDER' in payload['editable_keys']
-        assert payload['env_values']['TRADE_MODE'] == 'live'
-        assert payload['env_values']['LIVE_TRADING_ENABLED'] == 'true'
-        assert payload['env_values']['POLYMARKET_PRIVATE_KEY'] != 'super-secret-private-key'
-        assert payload['env_values']['POLYMARKET_PRIVATE_KEY']
-        assert payload['env_values']['POLYMARKET_FUNDER'] != '0xfunder'
-        assert payload['env_values']['POLYMARKET_FUNDER']
-        assert payload['runtime_status']['saved_mode'] == 'live'
-        assert payload['runtime_status']['running_mode'] == 'paper'
-        assert payload['runtime_status']['restart_required'] is True
-    finally:
-        state.close()
-
-
-def test_dashboard_config_payload_keeps_live_view_when_live_trading_switch_is_off(tmp_path: Path):
-    env_file = tmp_path / '.env.dashboard'
-    env_file.write_text(
-        'TRADE_MODE=live\n'
-        'LIVE_TRADING_ENABLED=false\n',
-        encoding='utf-8',
-    )
-    state = DashboardState(env_file=env_file)
-    try:
-        payload = state.get_config_payload()
-
-        assert payload['env_values']['TRADE_MODE'] == 'live'
-        assert payload['env_values']['LIVE_TRADING_ENABLED'] == 'false'
-        assert payload['runtime_status']['saved_mode'] == 'live'
-    finally:
-        state.close()
-
-
 
 def test_dashboard_config_payload_exposes_official_api_credential_fields(tmp_path: Path):
     env_file = tmp_path / '.env.dashboard'
@@ -985,45 +713,28 @@ def test_dashboard_config_payload_exposes_official_api_credential_fields(tmp_pat
         state.close()
 
 
-def test_dashboard_config_payload_exposes_relayer_redeem_credentials(tmp_path: Path):
-    state = DashboardState(env_file=tmp_path / '.env.dashboard')
-    try:
-        payload = state.get_config_payload()
-
-        assert 'POLYMARKET_BUILDER_API_KEY' in payload['editable_keys']
-        assert 'POLYMARKET_BUILDER_SECRET' in payload['editable_keys']
-        assert 'POLYMARKET_BUILDER_PASSPHRASE' in payload['editable_keys']
-        assert 'POLYMARKET_RELAYER_API_KEY' in payload['editable_keys']
-        assert 'POLYMARKET_RELAYER_API_KEY_ADDRESS' in payload['editable_keys']
-    finally:
-        state.close()
-
-
-def test_dashboard_runtime_payload_includes_redeem_auth_mode(tmp_path: Path):
+def test_dashboard_runtime_payload_omits_auto_redeem_status(tmp_path: Path):
     env_file = tmp_path / '.env.dashboard'
     env_file.write_text(
         'TRADE_MODE=live\n'
         'LIVE_TRADING_ENABLED=true\n'
         'POLYMARKET_PRIVATE_KEY=private-key\n'
-        'POLYMARKET_FUNDER=0xfunder\n'
-        'LIVE_AUTO_REDEEM_ENABLED=true\n'
-        'POLYMARKET_RELAYER_API_KEY=relayer-key\n'
-        'POLYMARKET_RELAYER_API_KEY_ADDRESS=0xrelayer\n',
+        'POLYMARKET_FUNDER=0xfunder\n',
         encoding='utf-8',
     )
     state = DashboardState(env_file=env_file)
     try:
         payload = state.get_config_payload()
         runtime = payload['runtime_status']
-        assert 'redeem_auth_mode' in runtime
-        assert runtime['redeem_auth_mode'] == 'relayer'
+        assert 'redeem_auth_mode' not in runtime
+        assert 'redeem_enabled' not in runtime
+        assert 'redeem_pending_count' not in runtime
     finally:
         state.close()
 
 
-def test_dashboard_help_text_distinguishes_trading_and_redeem_credentials():
-    assert '实盘下单私有接口' in DashboardState.FIELD_HELP['POLYMARKET_API_KEY']
-    assert '自动赎回' in DashboardState.FIELD_HELP['POLYMARKET_BUILDER_API_KEY']
+def test_dashboard_help_text_only_describes_trading_credentials():
+    assert '下单' in DashboardState.FIELD_HELP['POLYMARKET_API_KEY']
 
 def test_dashboard_update_config_preserves_masked_private_key_on_unrelated_save(tmp_path: Path):
     env_file = tmp_path / '.env.dashboard'
@@ -1349,7 +1060,7 @@ def test_dashboard_live_recent_orders_resolves_official_result_fields(tmp_path: 
         os.chdir(old_cwd)
 
 
-def test_dashboard_live_recent_orders_waits_for_final_price_when_price_to_beat_known(tmp_path: Path, monkeypatch):
+def test_dashboard_live_recent_orders_waits_for_official_signal_when_only_terminal_price_available(tmp_path: Path, monkeypatch):
     old_cwd = Path.cwd()
     os.chdir(tmp_path)
 
@@ -1401,7 +1112,7 @@ def test_dashboard_live_recent_orders_waits_for_final_price_when_price_to_beat_k
         os.chdir(old_cwd)
 
 
-def test_dashboard_live_recent_orders_does_not_reconcile_live_result_before_final_price(tmp_path: Path, monkeypatch):
+def test_dashboard_live_recent_orders_does_not_reconcile_from_terminal_price_only(tmp_path: Path, monkeypatch):
     old_cwd = Path.cwd()
     os.chdir(tmp_path)
 
@@ -1712,78 +1423,14 @@ def test_dashboard_html_includes_btc_favicon():
     assert 'BTC' in html
 
 
-def test_dashboard_runtime_status_includes_live_redeem_snapshot(tmp_path: Path):
-    env_file = tmp_path / '.env.dashboard'
-    env_file.write_text(
-        'TRADE_MODE=live\n'
-        'LIVE_TRADING_ENABLED=true\n'
-        'POLYMARKET_PRIVATE_KEY=super-secret-private-key\n'
-        'POLYMARKET_FUNDER=0xfunder\n'
-        'LIVE_AUTO_REDEEM_ENABLED=true\n',
-        encoding='utf-8',
-    )
-    state = DashboardState(env_file=env_file)
-    logs_dir = state._cfg.logs_dir
-    logs_dir.mkdir(parents=True, exist_ok=True)
-    (logs_dir / 'live_redeem_state.json').write_text(
-        json.dumps(
-            {
-                'conditions': {
-                    'cond-1': {
-                        'status': 'pending',
-                        'attempt_count': 1,
-                        'event_slug': 'resolved-one',
-                    },
-                    'cond-2': {
-                        'status': 'retry_wait',
-                        'attempt_count': 2,
-                        'event_slug': 'resolved-two',
-                    },
-                },
-                'runtime': {
-                    'enabled': True,
-                    'last_poll_at': '2026-04-12T08:00:00+00:00',
-                    'last_attempt_at': '2026-04-12T08:00:05+00:00',
-                    'last_result': 'submitted',
-                    'last_tx_hash': '0xabc123',
-                    'pending_redeem_count': 2,
-                },
-            }
-        ),
-        encoding='utf-8',
-    )
-    state = DashboardState(env_file=env_file)
-    try:
-        payload = state.get_config_payload()
-        runtime = payload['runtime_status']
-        assert runtime['redeem_visible'] is True
-        assert runtime['redeem_enabled'] is True
-        assert runtime['redeem_pending_count'] == 2
-        assert runtime['redeem_last_result'] == 'submitted'
-        assert runtime['redeem_last_attempt_at'] == '2026-04-12T08:00:05+00:00'
-        assert runtime['redeem_last_tx_hash'] == '0xabc123'
-    finally:
-        state.close()
-
-
-def test_dashboard_assets_include_live_redeem_runtime_rows():
+def test_dashboard_assets_omit_live_redeem_runtime_rows():
     html = _dashboard_html()
     js = _dashboard_js()
 
-    assert 'id="runtimeRedeemRows"' not in html
-    assert 'id="runtimeRedeemEnabled"' not in html
-    assert 'id="runtimeRedeemPending"' not in html
-    assert 'id="runtimeRedeemResult"' not in html
-    assert 'id="runtimeRedeemAttempt"' not in html
-    assert 'id="runtimeRedeemTxHash"' not in html
-    assert "const redeemVisible = !!(payload.redeem_visible || payload.redeem_enabled || ((payload.running_mode || payload.active_mode || 'paper') === 'live'));" in js
-    assert "setDisplay('runtimeRedeemRows', redeemVisible ? '' : 'none');" in js
-    assert "setText('runtimeRestartRequired', payload.restart_required ? '需要' : '不需要');" in js
-    assert "setText('runtimeLiveReady', payload.live_ready ? '已就绪' : '未就绪');" in js
-    assert "setText('runtimeRedeemEnabled', payload.redeem_enabled ? '已开启' : '未开启');" in js
-    assert "setText('runtimeRedeemPending', String(payload.redeem_pending_count ?? 0));" in js
-    assert "setText('runtimeRedeemResult', payload.redeem_last_result || '--');" in js
-
+    assert 'runtimeRedeem' not in html
+    assert 'runtimeRedeem' not in js
+    assert 'redeem_visible' not in js
+    assert 'redeem_pending_count' not in js
 
 def test_dashboard_assets_include_optimizer_runtime_rows():
     html = _dashboard_html()
@@ -1808,8 +1455,6 @@ def test_dashboard_assets_include_optimizer_runtime_rows():
     assert "const decision = (item || {}).promotion_decision || {};" in js
     assert "const decisionState = String(decision.state || '--');" in js
     assert "const decisionReason = String(decision.reason || '--');" in js
-    assert "setText('runtimeRedeemAttempt', payload.redeem_last_attempt_at ? fmtIso(payload.redeem_last_attempt_at) : '--');" in js
-    assert "setText('runtimeRedeemTxHash', payload.redeem_last_tx_hash || '--');" in js
 
 
 def test_dashboard_runtime_mode_labels_are_localized(tmp_path: Path):
@@ -3390,29 +3035,20 @@ def test_dashboard_paper_profile_copy_is_localized(tmp_path: Path):
     assert '独立纸面配置' in js
 
 
-def test_dashboard_config_labels_and_help_reduce_english_copy(tmp_path: Path):
+def test_dashboard_config_labels_omit_auto_redeem_credentials(tmp_path: Path):
     state = DashboardState(env_file=tmp_path / '.env.dashboard')
     try:
         payload = state.get_config_payload()
-        assert payload['labels']['POLYMARKET_BUILDER_API_KEY'] == 'Builder 自动赎回接口密钥'
-        assert payload['labels']['POLYMARKET_BUILDER_SECRET'] == 'Builder 自动赎回签名密钥'
-        assert payload['labels']['POLYMARKET_BUILDER_PASSPHRASE'] == 'Builder 自动赎回口令'
-        assert payload['labels']['POLYMARKET_RELAYER_API_KEY'] == 'Relayer 接口密钥'
-        assert payload['labels']['POLYMARKET_RELAYER_API_KEY_ADDRESS'] == 'Relayer 密钥地址'
-        assert '官方 gasless redeem 的 Builder API key' not in payload['field_help']['POLYMARKET_BUILDER_API_KEY']
-        assert '官方 gasless redeem 的 Relayer API key' not in payload['field_help']['POLYMARKET_RELAYER_API_KEY']
-        assert '仅用于自动赎回' in payload['field_help']['POLYMARKET_BUILDER_API_KEY']
-        assert '仅用于自动赎回认证' in payload['field_help']['POLYMARKET_RELAYER_API_KEY_ADDRESS']
+        assert 'POLYMARKET_BUILDER_API_KEY' not in payload['labels']
+        assert 'POLYMARKET_RELAYER_API_KEY' not in payload['labels']
+        assert 'POLYMARKET_BUILDER_API_KEY' not in payload['field_help']
+        assert 'POLYMARKET_RELAYER_API_KEY' not in payload['field_help']
     finally:
         state.close()
 
     js = _dashboard_js()
     assert 'Builder Redeem API Key' not in js
-    assert 'Builder Redeem Secret' not in js
-    assert 'Builder Redeem Passphrase' not in js
     assert 'Relayer API Key' not in js
-    assert 'Relayer Key Address' not in js
-
 
 def test_dashboard_help_center_reduces_internal_english_terms():
     js = _dashboard_js()
@@ -3423,9 +3059,6 @@ def test_dashboard_help_center_reduces_internal_english_terms():
     assert 'should_trade=true 说明当前轮次、价格、风控检查和 WS 防护都允许执行。' not in js
     assert 'should_trade=false 时先结合 skip_reason 字段一起看，不要先默认程序坏了。' not in js
     assert 'Dashboard 操作说明' not in js
-
-    assert '实盘自动赎回开关是什么意思？' in js
-    assert '自动赎回演练模式需要关闭吗？' in js
     assert '跳过原因' in js
     assert '允许下单=是' in js
     assert '允许下单=否' in js
@@ -3815,15 +3448,6 @@ def test_dashboard_report_strategy_selection_survives_market_refresh_browser_reg
                 'round_in_progress': False,
                 'safe_to_switch': True,
                 'pending_live_order': False,
-                'redeem_visible': False,
-                'redeem_enabled': False,
-                'redeem_auth_mode': 'unconfigured',
-                'redeem_pending_count': 0,
-                'redeem_last_result': None,
-                'redeem_last_attempt_at': None,
-                'redeem_last_submission_id': None,
-                'redeem_last_submission_status': None,
-                'redeem_last_tx_hash': None,
                 'optimizer_enabled': False,
                 'optimizer_last_run_at': None,
                 'optimizer_champion_id': None,
@@ -4028,15 +3652,6 @@ def test_dashboard_report_strategy_selector_reflects_saved_paper_strategy_ids_br
                 'round_in_progress': False,
                 'safe_to_switch': True,
                 'pending_live_order': False,
-                'redeem_visible': False,
-                'redeem_enabled': False,
-                'redeem_auth_mode': 'unconfigured',
-                'redeem_pending_count': 0,
-                'redeem_last_result': None,
-                'redeem_last_attempt_at': None,
-                'redeem_last_submission_id': None,
-                'redeem_last_submission_status': None,
-                'redeem_last_tx_hash': None,
                 'optimizer_enabled': False,
                 'optimizer_last_run_at': None,
                 'optimizer_champion_id': None,
@@ -4259,15 +3874,6 @@ def test_dashboard_report_strategy_switch_ignores_stale_browser_responses(tmp_pa
                 'round_in_progress': False,
                 'safe_to_switch': True,
                 'pending_live_order': False,
-                'redeem_visible': False,
-                'redeem_enabled': False,
-                'redeem_auth_mode': 'unconfigured',
-                'redeem_pending_count': 0,
-                'redeem_last_result': None,
-                'redeem_last_attempt_at': None,
-                'redeem_last_submission_id': None,
-                'redeem_last_submission_status': None,
-                'redeem_last_tx_hash': None,
                 'optimizer_enabled': False,
                 'optimizer_last_run_at': None,
                 'optimizer_champion_id': None,

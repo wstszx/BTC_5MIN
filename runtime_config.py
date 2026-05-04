@@ -49,5 +49,3 @@ def validate_live_runtime_config(cfg: AppConfig) -> None:
         raise RuntimeError("Missing POLYMARKET_FUNDER for live trading.")
     if (cfg.live_order_type or "FOK").upper() != "FOK":
         resolve_live_order_type(cfg.live_order_type)
-    if cfg.live_auto_redeem_enabled and getattr(cfg, "live_redeem_auth_mode", "unconfigured") == "unconfigured":
-        raise RuntimeError("Missing official relayer credentials for live redeem.")

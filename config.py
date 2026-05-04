@@ -39,10 +39,6 @@ _INT_CONFIG_KEYS: frozenset[str] = frozenset(
         "HISTORY_ENTRY_MAX_OFFSET_SECONDS",
         "POLYMARKET_CHAIN_ID",
         "POLYMARKET_SIGNATURE_TYPE",
-        "LIVE_AUTO_REDEEM_POLL_SECONDS",
-        "LIVE_AUTO_REDEEM_MAX_RETRIES",
-        "LIVE_AUTO_REDEEM_INITIAL_BACKOFF_SECONDS",
-        "LIVE_AUTO_REDEEM_MAX_BACKOFF_SECONDS",
     }
 )
 _FLOAT_CONFIG_KEYS: frozenset[str] = frozenset(
@@ -77,8 +73,6 @@ _BOOL_CONFIG_KEYS: frozenset[str] = frozenset(
     {
         "LIVE_TRADING_ENABLED",
         "WS_ENABLED",
-        "LIVE_AUTO_REDEEM_ENABLED",
-        "LIVE_AUTO_REDEEM_DRY_RUN",
     }
 )
 _SELECT_CONFIG_OPTIONS: dict[str, tuple[str, ...]] = {
@@ -673,21 +667,10 @@ class AppConfig:
     live_api_key: str | None = field(default_factory=lambda: os.getenv("POLYMARKET_API_KEY"))
     live_api_secret: str | None = field(default_factory=lambda: os.getenv("POLYMARKET_API_SECRET"))
     live_api_passphrase: str | None = field(default_factory=lambda: os.getenv("POLYMARKET_API_PASSPHRASE"))
-    live_redeem_builder_api_key: str | None = field(default_factory=lambda: os.getenv("POLYMARKET_BUILDER_API_KEY"))
-    live_redeem_builder_secret: str | None = field(default_factory=lambda: os.getenv("POLYMARKET_BUILDER_SECRET"))
-    live_redeem_builder_passphrase: str | None = field(default_factory=lambda: os.getenv("POLYMARKET_BUILDER_PASSPHRASE"))
-    live_redeem_relayer_api_key: str | None = field(default_factory=lambda: os.getenv("POLYMARKET_RELAYER_API_KEY"))
-    live_redeem_relayer_api_key_address: str | None = field(default_factory=lambda: os.getenv("POLYMARKET_RELAYER_API_KEY_ADDRESS"))
     live_chain_id: int = field(default_factory=lambda: _env_int("POLYMARKET_CHAIN_ID", 137))
     live_signature_type: int = field(default_factory=lambda: _env_int("POLYMARKET_SIGNATURE_TYPE", 0))
     live_funder: str | None = field(default_factory=lambda: os.getenv("POLYMARKET_FUNDER"))
     live_order_type: str = field(default_factory=lambda: (os.getenv("POLYMARKET_ORDER_TYPE") or "FOK").upper())
-    live_auto_redeem_enabled: bool = field(default_factory=lambda: _env_bool("LIVE_AUTO_REDEEM_ENABLED", False))
-    live_auto_redeem_poll_seconds: int = field(default_factory=lambda: _env_int("LIVE_AUTO_REDEEM_POLL_SECONDS", 20))
-    live_auto_redeem_max_retries: int = field(default_factory=lambda: _env_int("LIVE_AUTO_REDEEM_MAX_RETRIES", 6))
-    live_auto_redeem_initial_backoff_seconds: int = field(default_factory=lambda: _env_int("LIVE_AUTO_REDEEM_INITIAL_BACKOFF_SECONDS", 30))
-    live_auto_redeem_max_backoff_seconds: int = field(default_factory=lambda: _env_int("LIVE_AUTO_REDEEM_MAX_BACKOFF_SECONDS", 300))
-    live_auto_redeem_dry_run: bool = field(default_factory=lambda: _env_bool("LIVE_AUTO_REDEEM_DRY_RUN", False))
     paper_profiles: dict[str, PaperTimeframeProfile] = field(init=False)
     paper_strategy_profiles: dict[int, LiveStrategyProfile] = field(init=False)
     live_profiles: dict[int, LiveStrategyProfile] = field(init=False)
@@ -784,15 +767,3 @@ class AppConfig:
     @property
     def series_slug_prefixes(self) -> tuple[str, ...]:
         return self.market_definition.slug_prefixes
-
-    @property
-    def live_redeem_auth_mode(self) -> str:
-        if (
-            self.live_redeem_builder_api_key
-            and self.live_redeem_builder_secret
-            and self.live_redeem_builder_passphrase
-        ):
-            return "builder"
-        if self.live_redeem_relayer_api_key and self.live_redeem_relayer_api_key_address:
-            return "relayer"
-        return "unconfigured"
