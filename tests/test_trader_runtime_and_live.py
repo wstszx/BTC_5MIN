@@ -4067,7 +4067,7 @@ def test_settle_pending_live_trade_uses_official_market_endpoint_when_event_endp
     assert updated_strategy.pending_live_order_id is None
 
 
-def test_settle_pending_live_trade_uses_clob_winner_when_final_price_is_missing():
+def test_settle_pending_live_trade_waits_for_final_price_when_price_to_beat_exists():
     pending_strategy = LiveStrategyState(
         round_index=4,
         cash_pnl=0.0,
@@ -4102,12 +4102,11 @@ def test_settle_pending_live_trade_uses_clob_winner_when_final_price_is_missing(
         funder="0xfunder",
     )
 
-    assert settled is True
-    assert status["status"] == "settled"
-    assert status["result"] == "DOWN"
-    assert status["trade_pnl"] == pytest.approx(-1.0)
-    assert updated_strategy.cash_pnl == pytest.approx(-1.0)
-    assert updated_strategy.pending_live_slug is None
+    assert settled is False
+    assert status["status"] == "pending_settlement"
+    assert status["skip_reason"] == "round_unresolved"
+    assert updated_strategy.cash_pnl == pytest.approx(0.0)
+    assert updated_strategy.pending_live_slug == "btc-updown-5m-prev"
 
 
 def test_settle_pending_live_trade_does_not_use_ws_only_resolution_for_live_settlement():

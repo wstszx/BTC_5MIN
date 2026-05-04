@@ -845,6 +845,66 @@ def test_dashboard_live_recent_orders_backfills_strategy_price_skip_price(tmp_pa
         os.chdir(old_cwd)
 
 
+def test_dashboard_live_recent_orders_does_not_validate_skip_rows(tmp_path: Path, monkeypatch):
+    old_cwd = Path.cwd()
+    os.chdir(tmp_path)
+    calls: list[str] = []
+
+    class StubClient:
+        def __init__(self, cfg):
+            self.config = cfg
+
+        def close(self) -> None:
+            return
+
+        def get_event_by_slug(self, slug: str):
+            calls.append(slug)
+            return {
+                "id": "evt-live",
+                "slug": slug,
+                "eventMetadata": {
+                    "priceToBeat": 68420.5,
+                    "finalPrice": 68501.25,
+                },
+                "markets": [
+                    {
+                        "id": "mkt-live",
+                        "outcomes": '["Up", "Down"]',
+                        "outcomePrices": '["1", "0"]',
+                    }
+                ],
+            }
+
+    monkeypatch.setattr(dashboard, "PolymarketClient", StubClient)
+    state = DashboardState(env_file=tmp_path / ".env.dashboard")
+    try:
+        live_csv = tmp_path / "logs" / "live_orders.csv"
+        live_csv.parent.mkdir(parents=True, exist_ok=True)
+        live_csv.write_text(
+            "timestamp,mode,round_index,strategy,entry_timing,event_slug,start_time,end_time,side,price,"
+            "order_size,order_cost,expected_profit,result,trade_pnl,cash_pnl,recovery_loss,consecutive_losses,"
+            "stop_loss_triggered,skip_reason,signal_open_up_price,signal_current_up_price,signal_threshold,"
+            "signal_delta,signal_locked,signal_reason\n"
+            "2026-05-04T04:35:03+00:00,live,442,7,OPEN,btc-updown-5m-1777869300,"
+            "2026-05-04T04:35:00+00:00,2026-05-04T04:40:00+00:00,SKIP,0.6,"
+            "0.0,0.0,0.0,,0.0,-7.53,2.39,2,False,strategy7_price_too_high,"
+            "0.505,0.595,0.0064,0.09,False,strategy7_price_too_high\n",
+            encoding="utf-8",
+        )
+
+        payload = state.get_live_recent_orders_payload(limit=10, strategy=7)
+
+        row = payload["rows"][0]
+        assert calls == []
+        assert row["skip_reason"] == "strategy7_price_too_high"
+        assert row["result_check_status"] == ""
+        assert row["resolved_price_to_beat"] == ""
+        assert row["resolved_final_price"] == ""
+    finally:
+        state.close()
+        os.chdir(old_cwd)
+
+
 def test_dashboard_live_recent_orders_filters_by_strategy(tmp_path: Path):
     old_cwd = Path.cwd()
     os.chdir(tmp_path)
@@ -1165,7 +1225,7 @@ def test_dashboard_live_recent_orders_does_not_reconcile_from_terminal_price_onl
         os.chdir(old_cwd)
 
 
-def test_live_recent_orders_rechecks_cached_price_to_beat_result_once_final_price_is_available(tmp_path: Path, monkeypatch):
+def test_live_recent_orders_rechecks_existing_results_and_reconciles_mismatch(tmp_path: Path, monkeypatch):
     old_cwd = Path.cwd()
     os.chdir(tmp_path)
 
@@ -1255,7 +1315,7 @@ def test_live_recent_orders_rechecks_cached_price_to_beat_result_once_final_pric
         os.chdir(old_cwd)
 
 
-def test_dashboard_live_recent_orders_only_validates_submitted_orders_but_prices_all_rows(tmp_path: Path, monkeypatch):
+def test_dashboard_live_recent_orders_only_validates_submitted_orders(tmp_path: Path, monkeypatch):
     old_cwd = Path.cwd()
     os.chdir(tmp_path)
 
@@ -1299,8 +1359,8 @@ def test_dashboard_live_recent_orders_only_validates_submitted_orders_but_prices
         skipped_row = payload["rows"][0]
         submitted_row = payload["rows"][1]
 
-        assert skipped_row["resolved_price_to_beat"] == "68420.5"
-        assert skipped_row["resolved_final_price"] == "68501.25"
+        assert skipped_row["resolved_price_to_beat"] == ""
+        assert skipped_row["resolved_final_price"] == ""
         assert skipped_row["result"] == ""
         assert skipped_row["resolved_expected_result"] == ""
         assert skipped_row["result_check_status"] == ""
@@ -1505,9 +1565,19 @@ def test_dashboard_assets_auto_select_live_report_mode_until_user_changes_it():
     assert "function syncReportModeWithRuntime(payload)" in js
     assert "state.reportModeUserSelected = false;" in js
     assert "if (state.reportModeUserSelected) {" in js
+    assert "runtime.desired_mode || runtime.saved_mode || runtime.active_mode || runtime.running_mode" in js
     assert "state.reportMode = runtimeMode === 'live' ? 'live' : 'paper';" in js
     assert "syncReportModeWithRuntime(payload);" in js
     assert "state.reportModeUserSelected = true;" in js
+
+
+def test_dashboard_assets_do_not_overlap_recent_refresh_requests():
+    js = _dashboard_js()
+
+    assert "recentRefreshInFlight: false" in js
+    assert "if (state.recentRefreshInFlight) {" in js
+    assert "state.recentRefreshInFlight = true;" in js
+    assert "state.recentRefreshInFlight = false;" in js
 
 
 def test_dashboard_assets_localize_recent_panel_by_running_mode():

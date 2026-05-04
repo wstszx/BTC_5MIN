@@ -700,6 +700,7 @@ def _validate_recent_trade_row(
     client: PolymarketClient | Any,
     validation_cache: dict[str, dict[str, str]] | None = None,
     fill_missing_result: bool = False,
+    validate_existing_result: bool = True,
 ) -> dict[str, str]:
     validated = dict(row)
     validated.setdefault('resolved_price_to_beat', '')
@@ -720,6 +721,10 @@ def _validate_recent_trade_row(
         fill_missing_result=fill_missing_result,
         missing_result=missing_result,
     )
+    if str(validated.get("mode") or "").strip().lower() == "live" and not should_validate_result:
+        return validated
+    if result in {"UP", "DOWN"} and not validate_existing_result:
+        return validated
     if not slug or (missing_result and not fill_missing_result):
         return validated
     if not _slug_matches_client_series(slug, client):
@@ -4566,6 +4571,7 @@ const state = {
   recent: null,
   summaryRequestSeq: 0,
   recentRequestSeq: 0,
+  recentRefreshInFlight: false,
   paperRuntimeCards: {},
   marketStrategyFilter: 'all',
   paperReportStrategyFilter: 'all',
@@ -5571,7 +5577,7 @@ function syncReportModeWithRuntime(payload) {
     return;
   }
   const runtime = (payload && payload.runtime_status) || {};
-  const runtimeMode = String(runtime.active_mode || runtime.running_mode || '').toLowerCase();
+  const runtimeMode = String(runtime.desired_mode || runtime.saved_mode || runtime.active_mode || runtime.running_mode || '').toLowerCase();
   if (runtimeMode !== 'live' && runtimeMode !== 'paper') {
     return;
   }
@@ -7445,6 +7451,10 @@ async function refreshSummary() {
 }
 
 async function refreshRecent() {
+  if (state.recentRefreshInFlight) {
+    return;
+  }
+  state.recentRefreshInFlight = true;
   const requestSeq = nextReportRequestSeq('recent');
   try {
     const reportMode = effectiveReportMode();
@@ -7462,6 +7472,8 @@ async function refreshRecent() {
     }
     setReportStatus('recentStatus', '明细', '刷新失败', 'err');
     console.error(err);
+  } finally {
+    state.recentRefreshInFlight = false;
   }
 }
 

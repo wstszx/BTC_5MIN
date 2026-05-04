@@ -234,9 +234,10 @@ def resolved_live_result_from_official_sources(
     metadata = event.get("eventMetadata") or {}
     if metadata.get("priceToBeat") is not None and metadata.get("finalPrice") is not None:
         return "UP" if float(metadata["finalPrice"]) >= float(metadata["priceToBeat"]) else "DOWN"
+    event_waits_for_final_price = metadata.get("priceToBeat") is not None
 
     result = resolved_result_from_clob_token_winner(market_client, market)
-    if result:
+    if result and metadata.get("priceToBeat") is None:
         return result
 
     endpoint_market = None
@@ -261,6 +262,10 @@ def resolved_live_result_from_official_sources(
             if float(endpoint_event["eventMetadata"]["finalPrice"]) >= float(endpoint_event["eventMetadata"]["priceToBeat"])
             else "DOWN"
         )
+    if event_waits_for_final_price:
+        return None
+    if endpoint_event["eventMetadata"].get("priceToBeat") is not None:
+        return None
     return resolved_result_from_clob_token_winner(market_client, endpoint_market)
 
 
@@ -275,6 +280,13 @@ def resolve_pending_live_result(
     official_market_result = resolved_live_result_from_official_sources(market_client, event, market)
     if official_market_result:
         return official_market_result, None
+    metadata = event.get("eventMetadata") or {}
+    if metadata.get("priceToBeat") is not None:
+        return None, {
+            "status": "pending_settlement",
+            "slug": slug,
+            "skip_reason": "round_unresolved",
+        }
 
     official_position_result = resolved_result_from_redeemable_positions(
         market_client,

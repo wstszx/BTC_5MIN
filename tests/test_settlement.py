@@ -94,7 +94,7 @@ def test_official_result_waits_when_closed_flag_is_not_boolean_true():
     assert resolved_result_from_official_market(event, market) is None
 
 
-def test_live_result_uses_official_clob_token_winner_when_final_price_is_missing():
+def test_live_result_waits_for_final_price_when_price_to_beat_exists_even_with_clob_winner():
     class _Client:
         def get_event_by_slug(self, slug: str):
             return {
@@ -136,8 +136,61 @@ def test_live_result_uses_official_clob_token_winner_when_final_price_is_missing
         slug="btc-updown-5m-settled",
     )
 
-    assert result == "UP"
-    assert status is None
+    assert result is None
+    assert status == {
+        "status": "pending_settlement",
+        "slug": "btc-updown-5m-settled",
+        "skip_reason": "round_unresolved",
+    }
+
+
+def test_live_result_waits_for_final_price_when_endpoint_lacks_price_to_beat_but_has_winner():
+    class _Client:
+        def get_event_by_slug(self, slug: str):
+            return {
+                "slug": slug,
+                "closed": True,
+                "eventMetadata": {"priceToBeat": 78360.42348},
+                "markets": [
+                    {
+                        "conditionId": "event-cond",
+                        "closed": True,
+                        "outcomes": '["Up", "Down"]',
+                        "outcomePrices": '["1", "0"]',
+                    }
+                ],
+            }
+
+        def get_market_by_slug(self, slug: str):
+            return {
+                "conditionId": "endpoint-cond",
+                "closed": True,
+                "eventMetadata": {},
+                "outcomes": '["Up", "Down"]',
+                "outcomePrices": '["0", "1"]',
+            }
+
+        def get_clob_market_by_condition_id(self, condition_id: str):
+            return {
+                "closed": True,
+                "tokens": [
+                    {"outcome": "Up", "winner": condition_id == "event-cond"},
+                    {"outcome": "Down", "winner": condition_id == "endpoint-cond"},
+                ],
+            }
+
+    result, status = resolve_pending_live_result(
+        market_client=_Client(),
+        funder=None,
+        slug="btc-updown-5m-endpoint-fallback",
+    )
+
+    assert result is None
+    assert status == {
+        "status": "pending_settlement",
+        "slug": "btc-updown-5m-endpoint-fallback",
+        "skip_reason": "round_unresolved",
+    }
 
 
 def test_live_result_waits_when_gamma_terminal_prices_have_no_official_winner():
