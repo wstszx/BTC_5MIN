@@ -140,10 +140,180 @@ def test_live_result_waits_for_final_price_when_price_to_beat_exists_even_with_c
 
     assert result is None
     assert status == {
-        "status": "pending_settlement",
+        "status": "awaiting_final_price",
         "slug": "btc-updown-5m-settled",
         "skip_reason": "round_unresolved",
     }
+
+
+def test_live_result_keeps_pending_when_price_to_beat_market_is_not_closed():
+    class _Client:
+        def get_event_by_slug(self, slug: str):
+            return {
+                "slug": slug,
+                "closed": False,
+                "eventMetadata": {"priceToBeat": 78360.42348},
+                "markets": [
+                    {
+                        "conditionId": "cond-1",
+                        "closed": False,
+                        "outcomes": '["Up", "Down"]',
+                        "outcomePrices": '["0.49", "0.51"]',
+                    }
+                ],
+            }
+
+        def get_market_by_slug(self, slug: str):
+            return {
+                "conditionId": "cond-1",
+                "closed": False,
+                "eventMetadata": {"priceToBeat": 78360.42348},
+                "outcomes": '["Up", "Down"]',
+                "outcomePrices": '["0.49", "0.51"]',
+            }
+
+    result, status = resolve_pending_live_result(
+        market_client=_Client(),
+        funder=None,
+        slug="btc-updown-5m-in-progress",
+    )
+
+    assert result is None
+    assert status == {
+        "status": "pending_settlement",
+        "slug": "btc-updown-5m-in-progress",
+        "skip_reason": "round_unresolved",
+    }
+
+
+def test_live_numeric_btc_round_without_final_price_does_not_use_terminal_or_redeemable_fallback():
+    class _Client:
+        def get_event_by_slug(self, slug: str):
+            return {
+                "slug": slug,
+                "closed": False,
+                "eventMetadata": None,
+                "markets": [
+                    {
+                        "conditionId": "cond-1",
+                        "closed": False,
+                        "outcomes": '["Up", "Down"]',
+                        "outcomePrices": '["0.135", "0.865"]',
+                    }
+                ],
+            }
+
+        def get_market_by_slug(self, slug: str):
+            return {
+                "conditionId": "cond-1",
+                "closed": True,
+                "eventMetadata": None,
+                "outcomes": '["Up", "Down"]',
+                "outcomePrices": '["1", "0"]',
+            }
+
+        def get_current_positions(self, *, user: str, redeemable: bool | None = None):
+            return [
+                {
+                    "eventSlug": "btc-updown-5m-1777950900",
+                    "proxyWallet": user,
+                    "redeemable": True,
+                    "size": 5,
+                    "outcome": "Down",
+                }
+            ]
+
+    result, status = resolve_pending_live_result(
+        market_client=_Client(),
+        funder="0xabc",
+        slug="btc-updown-5m-1777950900",
+    )
+
+    assert result is None
+    assert status == {
+        "status": "awaiting_final_price",
+        "slug": "btc-updown-5m-1777950900",
+        "skip_reason": "round_unresolved",
+    }
+
+
+def test_live_numeric_btc_round_requires_complete_final_price_metadata_pair():
+    class _Client:
+        def get_event_by_slug(self, slug: str):
+            return {
+                "slug": slug,
+                "closed": False,
+                "eventMetadata": {"finalPrice": 80749.08769341912},
+                "markets": [
+                    {
+                        "conditionId": "cond-1",
+                        "closed": False,
+                        "outcomes": '["Up", "Down"]',
+                        "outcomePrices": '["0", "1"]',
+                    }
+                ],
+            }
+
+        def get_market_by_slug(self, slug: str):
+            return {
+                "conditionId": "cond-1",
+                "closed": True,
+                "eventMetadata": {"finalPrice": 80749.08769341912},
+                "outcomes": '["Up", "Down"]',
+                "outcomePrices": '["0", "1"]',
+            }
+
+    result, status = resolve_pending_live_result(
+        market_client=_Client(),
+        funder=None,
+        slug="btc-updown-5m-1777950900",
+    )
+
+    assert result is None
+    assert status == {
+        "status": "awaiting_final_price",
+        "slug": "btc-updown-5m-1777950900",
+        "skip_reason": "round_unresolved",
+    }
+
+
+def test_live_numeric_btc_round_resolves_from_market_endpoint_final_price_pair():
+    class _Client:
+        def get_event_by_slug(self, slug: str):
+            return {
+                "slug": slug,
+                "closed": True,
+                "eventMetadata": None,
+                "markets": [
+                    {
+                        "conditionId": "cond-1",
+                        "closed": True,
+                        "outcomes": '["Up", "Down"]',
+                        "outcomePrices": '["0", "1"]',
+                    }
+                ],
+            }
+
+        def get_market_by_slug(self, slug: str):
+            return {
+                "conditionId": "cond-1",
+                "closed": True,
+                "eventMetadata": {
+                    "priceToBeat": 80664.57042,
+                    "finalPrice": 80749.08769341912,
+                },
+                "outcomes": '["Up", "Down"]',
+                "outcomePrices": '["0", "1"]',
+            }
+
+    result, status = resolve_pending_live_result(
+        market_client=_Client(),
+        funder=None,
+        slug="btc-updown-5m-1777950900",
+    )
+
+    assert result == "UP"
+    assert status is None
 
 
 def test_live_result_waits_for_final_price_even_after_consensus_delay():
@@ -193,7 +363,7 @@ def test_live_result_waits_for_final_price_even_after_consensus_delay():
 
     assert result is None
     assert status == {
-        "status": "pending_settlement",
+        "status": "awaiting_final_price",
         "slug": "btc-updown-5m-consensus",
         "skip_reason": "round_unresolved",
     }
@@ -246,7 +416,7 @@ def test_live_result_keeps_waiting_without_final_price_when_sources_disagree():
 
     assert result is None
     assert status == {
-        "status": "pending_settlement",
+        "status": "awaiting_final_price",
         "slug": "btc-updown-5m-consensus",
         "skip_reason": "round_unresolved",
     }
@@ -295,7 +465,7 @@ def test_live_result_waits_for_final_price_when_endpoint_lacks_price_to_beat_but
 
     assert result is None
     assert status == {
-        "status": "pending_settlement",
+        "status": "awaiting_final_price",
         "slug": "btc-updown-5m-endpoint-fallback",
         "skip_reason": "round_unresolved",
     }
@@ -344,7 +514,7 @@ def test_live_result_waits_for_final_price_when_event_lacks_price_to_beat_but_en
 
     assert result is None
     assert status == {
-        "status": "pending_settlement",
+        "status": "awaiting_final_price",
         "slug": "btc-updown-5m-endpoint-has-price-to-beat",
         "skip_reason": "round_unresolved",
     }
@@ -393,7 +563,7 @@ def test_live_result_waits_when_gamma_terminal_prices_have_no_official_winner():
 
     assert result is None
     assert status == {
-        "status": "pending_settlement",
+        "status": "awaiting_final_price",
         "slug": "btc-updown-5m-unresolved",
         "skip_reason": "round_unresolved",
     }

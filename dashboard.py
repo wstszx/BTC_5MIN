@@ -38,6 +38,7 @@ from polymarket_api import (
 )
 from settlement import (
     live_market_waits_for_final_price,
+    PROVISIONAL_LOSS_RESULT,
     resolved_result_from_redeemable_positions,
     resolved_live_result_from_official_sources,
 )
@@ -667,6 +668,29 @@ def _slug_matches_client_series(slug: str, client: PolymarketClient | Any) -> bo
     return False
 
 
+def _is_live_btc_numeric_slug(slug: str) -> bool:
+    for definition in MARKET_TIMEFRAME_DEFINITIONS.values():
+        for prefix in definition.slug_prefixes:
+            if slug.startswith(prefix) and slug[len(prefix):].isdigit():
+                return True
+    return False
+
+
+def _event_metadata_from_market_endpoint(market_payload: dict[str, Any]) -> dict[str, Any]:
+    metadata = market_payload.get("eventMetadata") or {}
+    if isinstance(metadata, dict) and metadata:
+        return metadata
+    events = market_payload.get("events")
+    if isinstance(events, list):
+        for event in events:
+            if not isinstance(event, dict):
+                continue
+            event_metadata = event.get("eventMetadata") or {}
+            if isinstance(event_metadata, dict) and event_metadata:
+                return event_metadata
+    return {}
+
+
 def _should_validate_trade_result(row: dict[str, str], *, fill_missing_result: bool, missing_result: bool) -> bool:
     side = str(row.get('side') or '').strip().upper()
     if side not in {'UP', 'DOWN'}:
@@ -757,9 +781,23 @@ def _validate_recent_trade_row(
             return validated
 
         metadata = event_payload.get("eventMetadata") or {}
+        endpoint_market_payload = None
         price_to_beat = _optional_float(metadata.get("priceToBeat"))
         final_price = _optional_float(metadata.get("finalPrice"))
-        if final_price is None:
+        live_result_validation = str(validated.get("mode") or "").strip().lower() == "live"
+        if live_result_validation and _is_live_btc_numeric_slug(slug) and (price_to_beat is None or final_price is None):
+            get_market = getattr(client, "get_market_by_slug", None)
+            if callable(get_market):
+                try:
+                    endpoint_market_payload = get_market(slug)
+                except Exception:
+                    endpoint_market_payload = None
+                if isinstance(endpoint_market_payload, dict):
+                    endpoint_metadata = _event_metadata_from_market_endpoint(endpoint_market_payload)
+                    if isinstance(endpoint_metadata, dict):
+                        price_to_beat = price_to_beat if price_to_beat is not None else _optional_float(endpoint_metadata.get("priceToBeat"))
+                        final_price = final_price if final_price is not None else _optional_float(endpoint_metadata.get("finalPrice"))
+        if final_price is None and not live_result_validation:
             read_fallback_metadata = getattr(client, "get_market_ahead_event_metadata", None)
             if callable(read_fallback_metadata):
                 try:
@@ -774,15 +812,23 @@ def _validate_recent_trade_row(
         if final_price is not None:
             resolved['resolved_final_price'] = str(final_price)
 
-        live_result_validation = str(validated.get("mode") or "").strip().lower() == "live"
         if live_result_validation:
             market = (event_payload.get("markets") or [{}])[0]
-            official_result = resolved_live_result_from_official_sources(
-                client,
-                event_payload,
-                market,
-            ) or ""
-            event_waits_for_final_price = live_market_waits_for_final_price(client, event_payload, market)
+            if endpoint_market_payload is not None and not isinstance(endpoint_market_payload, dict):
+                endpoint_market_payload = None
+            if _is_live_btc_numeric_slug(slug) and (price_to_beat is None or final_price is None):
+                official_result = ""
+                event_waits_for_final_price = True
+            elif _is_live_btc_numeric_slug(slug) and price_to_beat is not None and final_price is not None:
+                official_result = "UP" if final_price >= price_to_beat else "DOWN"
+                event_waits_for_final_price = False
+            else:
+                official_result = resolved_live_result_from_official_sources(
+                    client,
+                    event_payload,
+                    market,
+                ) or ""
+                event_waits_for_final_price = live_market_waits_for_final_price(client, event_payload, market)
             if not official_result and not event_waits_for_final_price:
                 funder = getattr(getattr(client, "config", None), "live_funder", None)
                 official_result = resolved_result_from_redeemable_positions(client, funder=funder, slug=slug) or ""
@@ -890,6 +936,11 @@ def _live_result_value(row: dict[str, str]) -> str:
     return result if result in {"UP", "DOWN"} else ""
 
 
+def _live_ledger_result_value(row: dict[str, str]) -> str:
+    result = str(row.get("result") or "").strip().upper()
+    return result if result in {"UP", "DOWN", PROVISIONAL_LOSS_RESULT} else ""
+
+
 def _live_float_value(row: dict[str, str], key: str) -> float:
     return _optional_float(row.get(key)) or 0.0
 
@@ -919,7 +970,7 @@ def _live_row_session_day(row: dict[str, str]) -> str:
 
 def _live_row_counts_for_ledger(row: dict[str, str], result: str) -> bool:
     side = str(row.get("side") or "").strip().upper()
-    if result not in {"UP", "DOWN"} or side not in {"UP", "DOWN"}:
+    if result not in {"UP", "DOWN", PROVISIONAL_LOSS_RESULT} or side not in {"UP", "DOWN"}:
         return False
     if str(row.get("skip_reason") or "").strip():
         return False
@@ -943,7 +994,7 @@ def _recompute_live_ledger_rows(rows: list[dict[str, str]]) -> dict[str, dict[st
                 "consecutive_losses": 0,
             },
         )
-        result = _live_result_value(row)
+        result = _live_ledger_result_value(row)
         trade_pnl = 0.0
         if _live_row_counts_for_ledger(row, result):
             side = str(row.get("side") or "").strip().upper()
@@ -1017,6 +1068,16 @@ def _backup_live_ledger_files(*, live_csv: Path, state_path: Path) -> None:
         )
 
 
+def _live_csv_has_provisional_loss(live_csv: Path) -> bool:
+    if not live_csv.exists():
+        return False
+    with live_csv.open("r", newline="", encoding="utf-8") as handle:
+        return any(
+            _live_ledger_result_value(row) == PROVISIONAL_LOSS_RESULT
+            for row in csv.DictReader(handle)
+        )
+
+
 def _auto_reconcile_live_ledger(
     *,
     live_csv: Path,
@@ -1024,6 +1085,7 @@ def _auto_reconcile_live_ledger(
     client: PolymarketClient | Any,
     validation_cache: dict[str, dict[str, str]] | None,
     active_strategy_id: int,
+    provisional_only: bool = False,
 ) -> int:
     if not live_csv.exists():
         return 0
@@ -1036,6 +1098,21 @@ def _auto_reconcile_live_ledger(
 
     changed = 0
     for row in rows:
+        if _live_ledger_result_value(row) == PROVISIONAL_LOSS_RESULT:
+            validated = _validate_recent_trade_row(
+                row,
+                client=client,
+                validation_cache=validation_cache,
+                fill_missing_result=True,
+            )
+            official_result = str(validated.get("resolved_expected_result") or "").strip().upper()
+            if official_result in {"UP", "DOWN"}:
+                row["result"] = official_result
+                changed += 1
+            continue
+        row_slug = str(row.get("event_slug") or "").strip()
+        if provisional_only:
+            continue
         if _live_result_value(row) not in {"UP", "DOWN"}:
             continue
         validated = _validate_recent_trade_row(
@@ -1043,6 +1120,13 @@ def _auto_reconcile_live_ledger(
             client=client,
             validation_cache=validation_cache,
         )
+        if (
+            _is_live_btc_numeric_slug(row_slug)
+            and validated.get("result_check_status") == "official_pending"
+        ):
+            row["result"] = PROVISIONAL_LOSS_RESULT
+            changed += 1
+            continue
         if validated.get("result_check_status") != "mismatch":
             continue
         official_result = str(validated.get("resolved_expected_result") or "").strip().upper()
@@ -1051,15 +1135,17 @@ def _auto_reconcile_live_ledger(
         row["result"] = official_result
         changed += 1
 
-    if changed <= 0:
+    needs_state_sync = any(_live_ledger_result_value(row) == PROVISIONAL_LOSS_RESULT for row in rows)
+    if changed <= 0 and not needs_state_sync:
         return 0
 
-    _backup_live_ledger_files(live_csv=live_csv, state_path=state_path)
     ledger_states = _recompute_live_ledger_rows(rows)
-    with live_csv.open("w", newline="", encoding="utf-8") as handle:
-        writer = csv.DictWriter(handle, fieldnames=fieldnames, extrasaction="ignore")
-        writer.writeheader()
-        writer.writerows(rows)
+    if changed > 0:
+        _backup_live_ledger_files(live_csv=live_csv, state_path=state_path)
+        with live_csv.open("w", newline="", encoding="utf-8") as handle:
+            writer = csv.DictWriter(handle, fieldnames=fieldnames, extrasaction="ignore")
+            writer.writeheader()
+            writer.writerows(rows)
     _update_live_session_state_from_ledger(
         state_path=state_path,
         ledger_states=ledger_states,
@@ -1244,6 +1330,8 @@ def _field_groups() -> list[dict[str, Any]]:
                 "WS_QUOTE_STALE_SECONDS",
                 "WS_TRADE_GUARD_STALE_SECONDS",
                 "WS_CONNECT_TIMEOUT_SECONDS",
+                "FINAL_PRICE_WAIT_SECONDS",
+                "FINAL_PRICE_POLL_INTERVAL_SECONDS",
             ],
         },
     ]
@@ -1358,6 +1446,8 @@ class DashboardState:
         "WS_QUOTE_STALE_SECONDS",
         "WS_TRADE_GUARD_STALE_SECONDS",
         "WS_CONNECT_TIMEOUT_SECONDS",
+        "FINAL_PRICE_WAIT_SECONDS",
+        "FINAL_PRICE_POLL_INTERVAL_SECONDS",
         *tuple(
             _paper_profile_config_key(timeframe, field_name)
             for timeframe in SUPPORTED_PAPER_TIMEFRAMES
@@ -1411,6 +1501,8 @@ class DashboardState:
         "WS_QUOTE_STALE_SECONDS": "行情过期秒",
         "WS_TRADE_GUARD_STALE_SECONDS": "交易防陈旧阈值秒",
         "WS_CONNECT_TIMEOUT_SECONDS": "实时连接超时秒",
+        "FINAL_PRICE_WAIT_SECONDS": "官方结算等待秒",
+        "FINAL_PRICE_POLL_INTERVAL_SECONDS": "官方结算轮询秒",
     }
 
     SELECT_OPTIONS: dict[str, list[str]] = {
@@ -1473,6 +1565,8 @@ class DashboardState:
         "WS_QUOTE_STALE_SECONDS": "ws_quote_stale_seconds",
         "WS_TRADE_GUARD_STALE_SECONDS": "ws_trade_guard_stale_seconds",
         "WS_CONNECT_TIMEOUT_SECONDS": "ws_connect_timeout_seconds",
+        "FINAL_PRICE_WAIT_SECONDS": "final_price_wait_seconds",
+        "FINAL_PRICE_POLL_INTERVAL_SECONDS": "final_price_poll_interval_seconds",
     }
 
     INT_CONFIG_KEYS: tuple[str, ...] = (
@@ -1509,6 +1603,8 @@ class DashboardState:
         "SIGNAL_MOMENTUM_THRESHOLD",
         "SIGNAL_DYNAMIC_THRESHOLD_K",
         "WS_TRADE_GUARD_STALE_SECONDS",
+        "FINAL_PRICE_WAIT_SECONDS",
+        "FINAL_PRICE_POLL_INTERVAL_SECONDS",
     )
 
     BOOL_CONFIG_KEYS: tuple[str, ...] = ("LIVE_TRADING_ENABLED", "WS_ENABLED")
@@ -1561,6 +1657,8 @@ class DashboardState:
         "POLYMARKET_API_KEY": "CLOB 实盘下单凭证，仅用于实盘下单私有接口。",
         "POLYMARKET_API_SECRET": "CLOB 实盘下单签名密钥，仅用于实盘下单私有接口。",
         "POLYMARKET_API_PASSPHRASE": "CLOB 实盘下单通行口令，仅用于实盘下单私有接口。",
+        "FINAL_PRICE_WAIT_SECONDS": "实盘轮次结束后，最多等待官方 priceToBeat + finalPrice 的秒数；过期仍未取得时，先按 PROVISIONAL_LOSS 进入下一轮 sizing。",
+        "FINAL_PRICE_POLL_INTERVAL_SECONDS": "等待官方 finalPrice 期间的快速重试间隔；建议小于 OPEN_DELAY_SECONDS，避免错过下一轮 sizing。",
         "BASE_ORDER_COST": "仅固定金额模式使用；获胜后策略会重置回这个起始下注金额。",
         "MIN_STAKE": "单笔订单允许投入的最小 USDC；低于它时会跳过本轮。",
         "PAPER_SIMULATED_WALLET_BALANCE": "仅纸面模式使用，作为 dry-run 的模拟钱包余额；纸面不会读取真实钱包，但会经过与实盘相同的预算检查节点。",
@@ -2552,13 +2650,22 @@ class DashboardState:
                 )
                 for row in rows
             ]
-            if any(row.get("result_check_status") == "mismatch" for row in rows):
+            has_recent_mismatch = any(row.get("result_check_status") == "mismatch" for row in rows)
+            has_unofficial_live_result = any(
+                _is_live_btc_numeric_slug(str(row.get("event_slug") or "").strip())
+                and _live_result_value(row) in {"UP", "DOWN"}
+                and row.get("result_check_status") == "official_pending"
+                for row in rows
+            )
+            has_provisional_loss = _live_csv_has_provisional_loss(live_csv)
+            if has_recent_mismatch or has_unofficial_live_result or has_provisional_loss:
                 corrected_count = _auto_reconcile_live_ledger(
                     live_csv=live_csv,
                     state_path=cfg.logs_dir / "live_session_state.json",
                     client=client,
                     validation_cache=validation_cache,
                     active_strategy_id=cfg.strategy_id,
+                    provisional_only=not (has_recent_mismatch or has_unofficial_live_result),
                 )
                 if corrected_count > 0:
                     rows = _tail_csv_rows(live_csv, limit=capped_limit * 6)

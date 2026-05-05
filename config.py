@@ -65,6 +65,8 @@ _FLOAT_CONFIG_KEYS: frozenset[str] = frozenset(
         "NEAR_ENTRY_POLL_WINDOW_SECONDS",
         "POLL_INTERVAL_SECONDS",
         "FAST_POLL_INTERVAL_SECONDS",
+        "FINAL_PRICE_WAIT_SECONDS",
+        "FINAL_PRICE_POLL_INTERVAL_SECONDS",
         "WS_TRADE_GUARD_STALE_SECONDS",
         "WS_PING_INTERVAL_SECONDS",
     }
@@ -640,6 +642,12 @@ class AppConfig:
     )
     fast_poll_interval_seconds: float = field(
         default_factory=lambda: _env_float("FAST_POLL_INTERVAL_SECONDS", 1.0)
+    )
+    final_price_wait_seconds: float = field(
+        default_factory=lambda: _env_float("FINAL_PRICE_WAIT_SECONDS", 4.0)
+    )
+    final_price_poll_interval_seconds: float = field(
+        default_factory=lambda: _env_float("FINAL_PRICE_POLL_INTERVAL_SECONDS", 0.75)
     )
     ws_enabled: bool = field(default_factory=lambda: _env_bool("WS_ENABLED", True))
     ws_market_url: str = field(default_factory=lambda: os.getenv("WS_MARKET_URL") or "wss://ws-subscriptions-clob.polymarket.com/ws/market")

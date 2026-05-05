@@ -34,6 +34,8 @@ from risk_skip import (
 )
 from settlement import (
     append_settled_live_trade_log as _append_settled_live_trade_log,
+    append_provisional_live_loss_trade_log as _append_provisional_live_loss_trade_log,
+    PROVISIONAL_LOSS_RESULT,
     build_frozen_pending_paper_plan as _build_frozen_pending_paper_plan,
     build_pending_live_trade_plan as _build_pending_live_trade_plan,
     cached_ws_market_result as _cached_ws_market_result,
@@ -228,7 +230,7 @@ def _sync_live_state_ledger_from_trade_log(
                 continue
             result = str(row.get("result") or "").strip().upper()
             side = str(row.get("side") or "").strip().upper()
-            if result not in {"UP", "DOWN"} or side not in {"UP", "DOWN"}:
+            if result not in {"UP", "DOWN", PROVISIONAL_LOSS_RESULT} or side not in {"UP", "DOWN"}:
                 continue
             if str(row.get("skip_reason") or "").strip():
                 continue
@@ -407,6 +409,7 @@ def place_live_order(
         strategy_state=strategy_state,
         now=now,
         funder=cfg.live_funder,
+        final_price_wait_seconds=cfg.final_price_wait_seconds,
     )
     _apply_live_strategy_state_to_session_state(state, strategy_state)
     if pending_status is not None and pending_status["status"] == "pending_settlement":
@@ -415,14 +418,24 @@ def place_live_order(
             save_session_state(state_path, state)
         return pending_status
     if settled_previous_trade and persist_state:
-        _append_settled_live_trade_log(
-            log_path=log_path,
-            cfg=cfg,
-            strategy_id=cfg.strategy_id,
-            prior_state=prior_strategy_state,
-            updated_state=strategy_state,
-            settlement_status=pending_status,
-        )
+        if pending_status is not None and pending_status.get("status") == "provisional_loss":
+            _append_provisional_live_loss_trade_log(
+                log_path=log_path,
+                cfg=cfg,
+                strategy_id=cfg.strategy_id,
+                prior_state=prior_strategy_state,
+                updated_state=strategy_state,
+                settlement_status=pending_status,
+            )
+        else:
+            _append_settled_live_trade_log(
+                log_path=log_path,
+                cfg=cfg,
+                strategy_id=cfg.strategy_id,
+                prior_state=prior_strategy_state,
+                updated_state=strategy_state,
+                settlement_status=pending_status,
+            )
         _sync_current_live_strategy_state(state, cfg.strategy_id)
         save_session_state(state_path, state)
 
@@ -1092,9 +1105,20 @@ def run_live_trading(
                         strategy_state=strategy_state,
                         now=now,
                         funder=cfg.live_funder,
+                        final_price_wait_seconds=cfg.final_price_wait_seconds,
                     )
                     if pending_status is not None and pending_status.get("status") == "settled":
                         _append_settled_live_trade_log(
+                            log_path=log_path,
+                            cfg=_cfg_for_live_strategy(cfg, strategy_id),
+                            strategy_id=strategy_id,
+                            prior_state=prior_strategy_state,
+                            updated_state=strategy_state,
+                            settlement_status=pending_status,
+                        )
+                        strategy_results.append({"strategy_id": strategy_id, **pending_status})
+                    elif pending_status is not None and pending_status.get("status") == "provisional_loss":
+                        _append_provisional_live_loss_trade_log(
                             log_path=log_path,
                             cfg=_cfg_for_live_strategy(cfg, strategy_id),
                             strategy_id=strategy_id,

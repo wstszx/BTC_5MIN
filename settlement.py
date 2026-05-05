@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+import re
 from typing import Any
 
 from clob_adapter import build_verified_pending_live_trade_plan
@@ -11,6 +12,10 @@ from polymarket_api import normalize_outcome_label, parse_iso_datetime, parse_ou
 from risk_and_sizing import apply_round_outcome, build_trade_plan
 from trade_log import append_trade_log
 from utils import _runtime_log
+
+
+PROVISIONAL_LOSS_RESULT = "PROVISIONAL_LOSS"
+_LIVE_BTC_ROUND_RE = re.compile(r"^btc-up(?:-or-)?down-(?:5m|15m)-\d+$")
 
 
 def clear_pending_live_trade(strategy_state: LiveStrategyState) -> None:
@@ -71,6 +76,57 @@ def append_settled_live_trade_log(
                 else (prior_state.pending_live_expected_profit or 0.0)
             ),
             result=str(settlement_status.get("result") or ""),
+            trade_pnl=float(settlement_status.get("trade_pnl") or 0.0),
+            cash_pnl=updated_state.cash_pnl,
+            recovery_loss=updated_state.recovery_loss,
+            consecutive_losses=updated_state.consecutive_losses,
+        ),
+    )
+
+
+def append_provisional_live_loss_trade_log(
+    *,
+    log_path: Path,
+    cfg: AppConfig,
+    strategy_id: int,
+    prior_state: LiveStrategyState,
+    updated_state: LiveStrategyState,
+    settlement_status: dict[str, Any] | None,
+) -> None:
+    if not settlement_status or settlement_status.get("status") != "provisional_loss":
+        return
+
+    end_time = parse_iso_datetime(prior_state.pending_live_end_time) or datetime.now(timezone.utc)
+    start_time = end_time - timedelta(seconds=timeframe_duration_seconds(getattr(cfg, "market_timeframe", None)))
+    append_trade_log(
+        log_path,
+        TradeRecord(
+            timestamp=datetime.now(timezone.utc),
+            mode="live",
+            round_index=max(0, prior_state.round_index - 1),
+            strategy=strategy_id,
+            entry_timing=cfg.entry_timing,
+            event_slug=str(prior_state.pending_live_slug or settlement_status.get("slug") or ""),
+            start_time=start_time,
+            end_time=end_time,
+            side=str(settlement_status.get("side") or prior_state.pending_live_side or ""),
+            price=settlement_status.get("price") if settlement_status.get("price") is not None else prior_state.pending_live_price,
+            order_size=float(
+                settlement_status.get("order_size")
+                if settlement_status.get("order_size") is not None
+                else (prior_state.pending_live_order_size or 0.0)
+            ),
+            order_cost=float(
+                settlement_status.get("order_cost")
+                if settlement_status.get("order_cost") is not None
+                else (prior_state.pending_live_order_cost or 0.0)
+            ),
+            expected_profit=float(
+                settlement_status.get("expected_profit")
+                if settlement_status.get("expected_profit") is not None
+                else (prior_state.pending_live_expected_profit or 0.0)
+            ),
+            result=PROVISIONAL_LOSS_RESULT,
             trade_pnl=float(settlement_status.get("trade_pnl") or 0.0),
             cash_pnl=updated_state.cash_pnl,
             recovery_loss=updated_state.recovery_loss,
@@ -197,6 +253,37 @@ def _metadata_waits_for_final_price(metadata: dict[str, Any]) -> bool:
     return metadata.get("priceToBeat") is not None and metadata.get("finalPrice") is None
 
 
+def _metadata_has_final_price_pair(metadata: dict[str, Any]) -> bool:
+    return metadata.get("priceToBeat") is not None and metadata.get("finalPrice") is not None
+
+
+def _is_live_btc_round_slug(slug: str | None) -> bool:
+    return bool(_LIVE_BTC_ROUND_RE.fullmatch(str(slug or "").strip()))
+
+
+def _live_btc_round_missing_final_price(
+    market_client: Any,
+    event: dict[str, Any],
+    market: dict[str, Any],
+) -> bool:
+    slug = str(event.get("slug") or market.get("slug") or "").strip()
+    if not _is_live_btc_round_slug(slug):
+        return False
+    metadata = _event_metadata(event)
+    if _metadata_has_final_price_pair(metadata):
+        return False
+    get_market = getattr(market_client, "get_market_by_slug", None)
+    if callable(get_market) and slug:
+        try:
+            endpoint_market = get_market(slug)
+        except Exception:
+            endpoint_market = None
+        if isinstance(endpoint_market, dict):
+            endpoint_metadata = _market_event_metadata(endpoint_market)
+            return not _metadata_has_final_price_pair(endpoint_metadata)
+    return True
+
+
 def _terminal_market_price_result(event: dict[str, Any], market: dict[str, Any]) -> str | None:
     prices = parse_outcome_prices(market.get("outcomePrices"), market.get("outcomes"))
     up_price = prices.get("UP")
@@ -207,11 +294,27 @@ def _terminal_market_price_result(event: dict[str, Any], market: dict[str, Any])
     return None
 
 
+def _live_event_is_closed(market_client: Any, event: dict[str, Any], market: dict[str, Any]) -> bool:
+    if _is_officially_closed(event.get("closed"), market.get("closed")):
+        return True
+    get_market = getattr(market_client, "get_market_by_slug", None)
+    slug = str(event.get("slug") or market.get("slug") or "").strip()
+    if not callable(get_market) or not slug:
+        return False
+    try:
+        endpoint_market = get_market(slug)
+    except Exception:
+        return False
+    return isinstance(endpoint_market, dict) and _is_officially_closed(endpoint_market.get("closed"))
+
+
 def live_market_waits_for_final_price(
     market_client: Any,
     event: dict[str, Any],
     market: dict[str, Any],
 ) -> bool:
+    if _live_btc_round_missing_final_price(market_client, event, market):
+        return True
     if _metadata_waits_for_final_price(_event_metadata(event)):
         return True
     get_market = getattr(market_client, "get_market_by_slug", None)
@@ -305,6 +408,8 @@ def resolved_live_result_from_official_sources(
         if endpoint_metadata_result:
             return endpoint_metadata_result
         endpoint_waits_for_final_price = _metadata_waits_for_final_price(endpoint_event["eventMetadata"])
+    if _live_btc_round_missing_final_price(market_client, event, market):
+        return None
     if event_waits_for_final_price or endpoint_waits_for_final_price:
         return None
     result = resolved_result_from_clob_token_winner(market_client, market)
@@ -329,8 +434,14 @@ def resolve_pending_live_result(
     if official_market_result:
         return official_market_result, None
     if live_market_waits_for_final_price(market_client, event, market):
+        if not _live_event_is_closed(market_client, event, market):
+            return None, {
+                "status": "pending_settlement",
+                "slug": slug,
+                "skip_reason": "round_unresolved",
+            }
         return None, {
-            "status": "pending_settlement",
+            "status": "awaiting_final_price",
             "slug": slug,
             "skip_reason": "round_unresolved",
         }
@@ -378,6 +489,7 @@ def settle_pending_live_trade_if_needed(
     now: datetime,
     funder: str | None = None,
     pending_plan_resolver=build_verified_pending_live_trade_plan,
+    final_price_wait_seconds: float = 0.0,
 ) -> tuple[LiveStrategyState, dict[str, Any] | None, bool]:
     if not strategy_state.pending_live_slug:
         return strategy_state, None, False
@@ -435,6 +547,41 @@ def settle_pending_live_trade_if_needed(
             )
             return strategy_state, status_payload, False
 
+    if not result and unresolved_status and unresolved_status.get("status") == "awaiting_final_price":
+        final_price_deadline = end_time + timedelta(seconds=max(0.0, float(final_price_wait_seconds)))
+        if now < final_price_deadline:
+            return (
+                strategy_state,
+                {
+                    "status": "pending_settlement",
+                    "slug": strategy_state.pending_live_slug,
+                    "side": strategy_state.pending_live_side,
+                    "skip_reason": "awaiting_final_price",
+                    "pending_end_time": strategy_state.pending_live_end_time,
+                    "order_id": strategy_state.pending_live_order_id,
+                    "final_price_deadline": final_price_deadline.isoformat(),
+                },
+                False,
+            )
+        updated_state = apply_round_outcome(strategy_state, plan, won=False)
+        trade_pnl = updated_state.cash_pnl - strategy_state.cash_pnl
+        clear_pending_live_trade(updated_state)
+        return (
+            updated_state,
+            {
+                "status": "provisional_loss",
+                "slug": strategy_state.pending_live_slug,
+                "side": plan.side,
+                "price": plan.price,
+                "order_size": plan.order_size,
+                "order_cost": plan.order_cost,
+                "expected_profit": plan.expected_profit,
+                "result": PROVISIONAL_LOSS_RESULT,
+                "trade_pnl": trade_pnl,
+                "pending_end_time": strategy_state.pending_live_end_time,
+            },
+            True,
+        )
     if not result:
         return (
             strategy_state,
