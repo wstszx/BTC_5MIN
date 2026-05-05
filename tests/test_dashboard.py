@@ -2663,6 +2663,183 @@ def test_recent_trades_payload_marks_official_result_pending_when_winner_unavail
         os.chdir(old_cwd)
 
 
+def test_live_recent_orders_waits_for_final_price_before_redeemable_position_result(tmp_path: Path, monkeypatch):
+    old_cwd = Path.cwd()
+    os.chdir(tmp_path)
+
+    class StubClient:
+        def __init__(self, cfg):
+            self.config = cfg
+
+        def close(self) -> None:
+            return
+
+        def get_event_by_slug(self, slug: str):
+            return {
+                "id": "evt-live",
+                "slug": slug,
+                "eventMetadata": {"priceToBeat": 80237.82148432496},
+                "markets": [
+                    {
+                        "id": "mkt-live",
+                        "conditionId": "condition-live",
+                        "outcomes": '["Up", "Down"]',
+                        "outcomePrices": '["1", "0"]',
+                        "closed": True,
+                    }
+                ],
+            }
+
+        def get_market_by_slug(self, slug: str):
+            return {
+                "conditionId": "condition-live",
+                "eventMetadata": {"priceToBeat": 80237.82148432496},
+                "outcomes": '["Up", "Down"]',
+                "outcomePrices": '["1", "0"]',
+                "closed": True,
+            }
+
+        def get_clob_market_by_condition_id(self, condition_id: str):
+            return {
+                "closed": True,
+                "tokens": [
+                    {"outcome": "Up", "winner": True},
+                    {"outcome": "Down", "winner": False},
+                ],
+            }
+
+        def get_current_positions(self, *, user: str, redeemable: bool | None = None):
+            return [
+                {
+                    "eventSlug": "btc-updown-5m-1777920000",
+                    "proxyWallet": user,
+                    "redeemable": True,
+                    "size": "1.0",
+                    "outcome": "Up",
+                }
+            ]
+
+    monkeypatch.setattr(dashboard, "PolymarketClient", StubClient)
+    env_file = tmp_path / ".env.dashboard"
+    env_file.write_text("POLYMARKET_FUNDER=0xfunder\n", encoding="utf-8")
+    state = DashboardState(env_file=env_file)
+    try:
+        logs_dir = tmp_path / "logs"
+        logs_dir.mkdir(parents=True, exist_ok=True)
+        end_time = datetime.now(timezone.utc)
+        start_time = end_time - timedelta(minutes=5)
+        (logs_dir / "live_orders.csv").write_text(
+            "timestamp,mode,round_index,strategy,entry_timing,event_slug,start_time,end_time,side,price,order_size,order_cost,expected_profit,result,trade_pnl,cash_pnl,recovery_loss,consecutive_losses,stop_loss_triggered,skip_reason,signal_open_up_price,signal_current_up_price,signal_threshold,signal_delta,signal_locked,signal_reason,experiment_id,balance_error\n"
+            f"{end_time.isoformat()},live,595,7,OPEN,btc-updown-5m-1777920000,{start_time.isoformat()},{end_time.isoformat()},UP,0.52,2.307691,1.19999932,1.10769168,UP,1.10769168,5.13996825,0.0,0,False,,0.505,0.51,,0.005,False,,,\n",
+            encoding="utf-8",
+        )
+
+        payload = state.get_live_recent_orders_payload(limit=10, strategy=7)
+        row = payload["rows"][0]
+
+        assert row["resolved_final_price"] == ""
+        assert row["resolved_expected_result"] == ""
+        assert row["result_check_status"] == "official_pending"
+    finally:
+        state.close()
+        os.chdir(old_cwd)
+
+
+def test_live_recent_orders_does_not_reconcile_without_final_price(tmp_path: Path, monkeypatch):
+    old_cwd = Path.cwd()
+    os.chdir(tmp_path)
+
+    class StubClient:
+        def __init__(self, cfg):
+            self.config = cfg
+
+        def close(self) -> None:
+            return
+
+        def get_event_by_slug(self, slug: str):
+            return {
+                "id": "evt-live",
+                "slug": slug,
+                "eventMetadata": {"priceToBeat": 80237.82148432496},
+                "markets": [
+                    {
+                        "id": "mkt-live",
+                        "conditionId": "condition-live",
+                        "outcomes": '["Up", "Down"]',
+                        "outcomePrices": '["0", "1"]',
+                        "closed": True,
+                    }
+                ],
+            }
+
+        def get_market_by_slug(self, slug: str):
+            return {
+                "conditionId": "condition-live",
+                "eventMetadata": {"priceToBeat": 80237.82148432496},
+                "outcomes": '["Up", "Down"]',
+                "outcomePrices": '["0", "1"]',
+                "closed": True,
+            }
+
+        def get_clob_market_by_condition_id(self, condition_id: str):
+            return {
+                "closed": True,
+                "tokens": [
+                    {"outcome": "Up", "winner": False},
+                    {"outcome": "Down", "winner": True},
+                ],
+            }
+
+    monkeypatch.setattr(dashboard, "PolymarketClient", StubClient)
+    state = DashboardState(env_file=tmp_path / ".env.dashboard")
+    try:
+        logs_dir = tmp_path / "logs"
+        logs_dir.mkdir(parents=True, exist_ok=True)
+        live_csv = logs_dir / "live_orders.csv"
+        state_path = logs_dir / "live_session_state.json"
+        live_csv.write_text(
+            "timestamp,mode,round_index,strategy,entry_timing,event_slug,start_time,end_time,side,price,order_size,order_cost,expected_profit,result,trade_pnl,cash_pnl,recovery_loss,consecutive_losses,stop_loss_triggered,skip_reason,signal_open_up_price,signal_current_up_price,signal_threshold,signal_delta,signal_locked,signal_reason,experiment_id,balance_error\n"
+            "2026-05-04T18:40:03+00:00,live,595,7,OPEN,btc-updown-5m-1777920000,2026-05-04T18:40:00+00:00,2026-05-04T18:45:00+00:00,UP,0.52,2.307691,1.19999932,1.10769168,UP,1.10769168,5.13996825,0.0,0,False,,0.505,0.51,,0.005,False,,,\n",
+            encoding="utf-8",
+        )
+        state_path.write_text(
+            json.dumps(
+                {
+                    "round_index": 596,
+                    "cash_pnl": 5.13996825,
+                    "recovery_loss": 0.0,
+                    "consecutive_losses": 0,
+                    "daily_realized_pnl": 5.13996825,
+                    "live_strategies": {
+                        "7": {
+                            "round_index": 596,
+                            "cash_pnl": 5.13996825,
+                            "recovery_loss": 0.0,
+                            "consecutive_losses": 0,
+                            "daily_realized_pnl": 5.13996825,
+                        }
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        payload = state.get_live_recent_orders_payload(limit=10, strategy=7)
+        row = payload["rows"][0]
+        persisted_row = next(csv.DictReader(live_csv.open(newline="", encoding="utf-8")))
+        state_payload = json.loads(state_path.read_text(encoding="utf-8"))
+
+        assert row["resolved_final_price"] == ""
+        assert row["resolved_expected_result"] == ""
+        assert row["result_check_status"] == "official_pending"
+        assert persisted_row["result"] == "UP"
+        assert persisted_row["trade_pnl"] == "1.10769168"
+        assert state_payload["live_strategies"]["7"]["cash_pnl"] == 5.13996825
+    finally:
+        state.close()
+        os.chdir(old_cwd)
+
+
 def test_recent_trades_payload_validates_from_official_token_winner(tmp_path: Path, monkeypatch):
     old_cwd = Path.cwd()
     os.chdir(tmp_path)

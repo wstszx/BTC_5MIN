@@ -37,6 +37,7 @@ from polymarket_api import (
     parse_outcome_prices,
 )
 from settlement import (
+    live_market_waits_for_final_price,
     resolved_result_from_redeemable_positions,
     resolved_live_result_from_official_sources,
 )
@@ -776,8 +777,13 @@ def _validate_recent_trade_row(
         live_result_validation = str(validated.get("mode") or "").strip().lower() == "live"
         if live_result_validation:
             market = (event_payload.get("markets") or [{}])[0]
-            official_result = resolved_live_result_from_official_sources(client, event_payload, market) or ""
-            if not official_result:
+            official_result = resolved_live_result_from_official_sources(
+                client,
+                event_payload,
+                market,
+            ) or ""
+            event_waits_for_final_price = live_market_waits_for_final_price(client, event_payload, market)
+            if not official_result and not event_waits_for_final_price:
                 funder = getattr(getattr(client, "config", None), "live_funder", None)
                 official_result = resolved_result_from_redeemable_positions(client, funder=funder, slug=slug) or ""
         else:

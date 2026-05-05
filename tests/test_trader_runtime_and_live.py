@@ -927,6 +927,79 @@ def test_run_live_trading_reports_pending_live_order_blocks_switch(tmp_path):
     assert result['status'] == 'pending_settlement'
 
 
+def test_run_live_trading_keeps_waiting_when_final_price_is_missing_even_with_consensus(tmp_path, monkeypatch):
+    state_path = tmp_path / "live_state.json"
+    state_path.write_text(
+        json.dumps(
+            {
+                "live_strategies": {
+                    "7": {
+                        "round_index": 4,
+                        "cash_pnl": 0.0,
+                        "recovery_loss": 0.0,
+                        "consecutive_losses": 0,
+                        "pending_live_slug": "btc-updown-5m-prev",
+                        "pending_live_side": "UP",
+                        "pending_live_price": 0.5,
+                        "pending_live_order_size": 2.0,
+                        "pending_live_order_cost": 1.0,
+                        "pending_live_expected_profit": 1.0,
+                        "pending_live_order_id": "oid-prev",
+                        "pending_live_end_time": "2026-05-05T00:05:00+00:00",
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr("trader._resolve_side_from_strategy", lambda **kwargs: SideDecision(side=None))
+    monkeypatch.setattr("trader._sleep_if_not_stopped", lambda _stop_event, _seconds: False)
+
+    result = run_live_trading(
+        AppConfig(
+            trade_mode="live",
+            live_trading_enabled=True,
+            live_private_key="pk",
+            live_funder="0xfunder",
+            strategy_id=7,
+            live_strategy_ids=[7],
+        ),
+        market_client=_NoFinalPriceConsensusLiveClient(),
+        clob_client=_StubClobClient(
+            order_payloads={
+                "oid-prev": {
+                    "status": "matched",
+                    "size_matched": "2.0",
+                    "price": "0.50",
+                    "associate_trades": ["trade-prev"],
+                }
+            },
+            trade_payloads={
+                "trade-prev": [
+                    {
+                        "id": "trade-prev",
+                        "taker_order_id": "oid-prev",
+                        "size": "2.0",
+                        "price": "0.50",
+                        "status": "CONFIRMED",
+                    }
+                ]
+            },
+        ),
+        state_path=state_path,
+        log_path=tmp_path / "live_orders.csv",
+        stop_event=threading.Event(),
+        stop_when_safe=lambda: True,
+    )
+
+    reloaded = load_session_state(state_path, effective_live_strategy_ids=[7])
+    assert result["status"] == "pending_settlement"
+    assert reloaded.live_strategies[7].pending_live_slug == "btc-updown-5m-prev"
+    assert reloaded.live_strategies[7].cash_pnl == pytest.approx(0.0)
+    assert not (tmp_path / "live_orders.csv").exists()
+
+
 def test_run_live_trading_does_not_evaluate_new_orders_while_any_live_order_is_pending(tmp_path, monkeypatch):
     state_path = tmp_path / "live_state.json"
     state_path.write_text(
@@ -1416,6 +1489,46 @@ class _TerminalPricesSettlingLiveClient(_LiveMarketClient):
                     "outcomePrices": '["0","1"]',
                 }
             ],
+        }
+
+    def get_clob_market_by_condition_id(self, condition_id: str):
+        assert condition_id == "cond-prev"
+        return {
+            "closed": True,
+            "tokens": [
+                {"outcome": "Up", "winner": False},
+                {"outcome": "Down", "winner": True},
+            ],
+        }
+
+
+class _NoFinalPriceConsensusLiveClient(_LiveMarketClient):
+    def get_event_by_slug(self, slug: str):
+        if slug != "btc-updown-5m-prev":
+            raise AssertionError(f"Unexpected slug {slug}")
+        return {
+            "slug": slug,
+            "closed": True,
+            "eventMetadata": {"priceToBeat": 100.0},
+            "markets": [
+                {
+                    "conditionId": "cond-prev",
+                    "closed": True,
+                    "outcomes": '["Up","Down"]',
+                    "outcomePrices": '["0","1"]',
+                }
+            ],
+        }
+
+    def get_market_by_slug(self, slug: str):
+        if slug != "btc-updown-5m-prev":
+            return super().get_market_by_slug(slug)
+        return {
+            "conditionId": "cond-prev",
+            "closed": True,
+            "events": [{"eventMetadata": {"priceToBeat": 100.0}}],
+            "outcomes": '["Up","Down"]',
+            "outcomePrices": '["0","1"]',
         }
 
     def get_clob_market_by_condition_id(self, condition_id: str):

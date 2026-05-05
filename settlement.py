@@ -167,6 +167,66 @@ def _is_officially_closed(*values: Any) -> bool:
     return any(value is True for value in values)
 
 
+def _event_metadata(event: dict[str, Any]) -> dict[str, Any]:
+    metadata = event.get("eventMetadata") or {}
+    return metadata if isinstance(metadata, dict) else {}
+
+
+def _market_event_metadata(market: dict[str, Any]) -> dict[str, Any]:
+    metadata = market.get("eventMetadata") or {}
+    if isinstance(metadata, dict) and metadata:
+        return metadata
+    events = market.get("events")
+    if isinstance(events, list):
+        for item in events:
+            if not isinstance(item, dict):
+                continue
+            event_metadata = item.get("eventMetadata") or {}
+            if isinstance(event_metadata, dict) and event_metadata:
+                return event_metadata
+    return {}
+
+
+def _metadata_result(metadata: dict[str, Any]) -> str | None:
+    if metadata.get("priceToBeat") is None or metadata.get("finalPrice") is None:
+        return None
+    return "UP" if float(metadata["finalPrice"]) >= float(metadata["priceToBeat"]) else "DOWN"
+
+
+def _metadata_waits_for_final_price(metadata: dict[str, Any]) -> bool:
+    return metadata.get("priceToBeat") is not None and metadata.get("finalPrice") is None
+
+
+def _terminal_market_price_result(event: dict[str, Any], market: dict[str, Any]) -> str | None:
+    prices = parse_outcome_prices(market.get("outcomePrices"), market.get("outcomes"))
+    up_price = prices.get("UP")
+    down_price = prices.get("DOWN")
+    is_closed = _is_officially_closed(event.get("closed"), market.get("closed"))
+    if is_closed and up_price is not None and down_price is not None and {up_price, down_price} == {0.0, 1.0}:
+        return "UP" if up_price > down_price else "DOWN"
+    return None
+
+
+def live_market_waits_for_final_price(
+    market_client: Any,
+    event: dict[str, Any],
+    market: dict[str, Any],
+) -> bool:
+    if _metadata_waits_for_final_price(_event_metadata(event)):
+        return True
+    get_market = getattr(market_client, "get_market_by_slug", None)
+    slug = str(event.get("slug") or market.get("slug") or "").strip()
+    if not callable(get_market) or not slug:
+        return False
+    try:
+        endpoint_market = get_market(slug)
+    except Exception:
+        return False
+    if not isinstance(endpoint_market, dict):
+        return False
+    return _metadata_waits_for_final_price(_market_event_metadata(endpoint_market))
+
+
 def resolved_result_from_clob_token_winner(market_client: Any, market: dict[str, Any]) -> str | None:
     get_clob_market = getattr(market_client, "get_clob_market_by_condition_id", None)
     if not callable(get_clob_market):
@@ -191,17 +251,7 @@ def resolved_result_from_clob_token_winner(market_client: Any, market: dict[str,
 
 
 def resolved_result_from_official_market(event: dict[str, Any], market: dict[str, Any]) -> str | None:
-    metadata = event.get("eventMetadata") or {}
-    if metadata.get("priceToBeat") is not None and metadata.get("finalPrice") is not None:
-        return "UP" if float(metadata["finalPrice"]) >= float(metadata["priceToBeat"]) else "DOWN"
-
-    prices = parse_outcome_prices(market.get("outcomePrices"), market.get("outcomes"))
-    up_price = prices.get("UP")
-    down_price = prices.get("DOWN")
-    is_closed = _is_officially_closed(event.get("closed"), market.get("closed"))
-    if is_closed and up_price is not None and down_price is not None and {up_price, down_price} == {0.0, 1.0}:
-        return "UP" if up_price > down_price else "DOWN"
-    return None
+    return _metadata_result(_event_metadata(event)) or _terminal_market_price_result(event, market)
 
 
 def resolved_result_from_official_market_endpoint(market_client: Any, slug: str) -> str | None:
@@ -218,11 +268,8 @@ def resolved_result_from_official_market_endpoint(market_client: Any, slug: str)
         "closed": market.get("closed"),
         "eventMetadata": market.get("eventMetadata") or {},
     }
-    if not event["eventMetadata"] and isinstance(market.get("events"), list):
-        for item in market.get("events") or []:
-            if isinstance(item, dict) and item.get("eventMetadata"):
-                event["eventMetadata"] = item.get("eventMetadata") or {}
-                break
+    if not event["eventMetadata"]:
+        event["eventMetadata"] = _market_event_metadata(market)
     return resolved_result_from_official_market(event, market)
 
 
@@ -231,14 +278,12 @@ def resolved_live_result_from_official_sources(
     event: dict[str, Any],
     market: dict[str, Any],
 ) -> str | None:
-    metadata = event.get("eventMetadata") or {}
-    if metadata.get("priceToBeat") is not None and metadata.get("finalPrice") is not None:
-        return "UP" if float(metadata["finalPrice"]) >= float(metadata["priceToBeat"]) else "DOWN"
-    event_waits_for_final_price = metadata.get("priceToBeat") is not None
-
-    result = resolved_result_from_clob_token_winner(market_client, market)
-    if result and metadata.get("priceToBeat") is None:
-        return result
+    metadata = _event_metadata(event)
+    metadata_result = _metadata_result(metadata)
+    if metadata_result:
+        return metadata_result
+    event_waits_for_final_price = _metadata_waits_for_final_price(metadata)
+    terminal_result = _terminal_market_price_result(event, market)
 
     endpoint_market = None
     get_market = getattr(market_client, "get_market_by_slug", None)
@@ -248,25 +293,28 @@ def resolved_live_result_from_official_sources(
             endpoint_market = get_market(slug)
         except Exception:
             endpoint_market = None
-    if not isinstance(endpoint_market, dict):
+    endpoint_event = None
+    endpoint_waits_for_final_price = False
+    if isinstance(endpoint_market, dict):
+        endpoint_event = {
+            "slug": slug,
+            "closed": endpoint_market.get("closed"),
+            "eventMetadata": _market_event_metadata(endpoint_market),
+        }
+        endpoint_metadata_result = _metadata_result(endpoint_event["eventMetadata"])
+        if endpoint_metadata_result:
+            return endpoint_metadata_result
+        endpoint_waits_for_final_price = _metadata_waits_for_final_price(endpoint_event["eventMetadata"])
+    if event_waits_for_final_price or endpoint_waits_for_final_price:
         return None
-
-    endpoint_event = {
-        "slug": slug,
-        "closed": endpoint_market.get("closed"),
-        "eventMetadata": endpoint_market.get("eventMetadata") or {},
-    }
-    if endpoint_event["eventMetadata"].get("priceToBeat") is not None and endpoint_event["eventMetadata"].get("finalPrice") is not None:
-        return (
-            "UP"
-            if float(endpoint_event["eventMetadata"]["finalPrice"]) >= float(endpoint_event["eventMetadata"]["priceToBeat"])
-            else "DOWN"
-        )
-    if event_waits_for_final_price:
-        return None
-    if endpoint_event["eventMetadata"].get("priceToBeat") is not None:
-        return None
-    return resolved_result_from_clob_token_winner(market_client, endpoint_market)
+    result = resolved_result_from_clob_token_winner(market_client, market)
+    if result:
+        return result
+    if isinstance(endpoint_market, dict):
+        result = resolved_result_from_clob_token_winner(market_client, endpoint_market)
+        if result:
+            return result
+    return terminal_result
 
 
 def resolve_pending_live_result(
@@ -280,8 +328,7 @@ def resolve_pending_live_result(
     official_market_result = resolved_live_result_from_official_sources(market_client, event, market)
     if official_market_result:
         return official_market_result, None
-    metadata = event.get("eventMetadata") or {}
-    if metadata.get("priceToBeat") is not None:
+    if live_market_waits_for_final_price(market_client, event, market):
         return None, {
             "status": "pending_settlement",
             "slug": slug,
