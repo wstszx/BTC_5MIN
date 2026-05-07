@@ -4811,7 +4811,7 @@ def test_strategy7_rechecks_max_entry_price_after_lock():
     assert state.signal_round_locked_side == "UP"
 
 
-def test_strategy7_uses_weighted_score_when_signals_conflict():
+def test_strategy7_skips_when_signals_conflict():
     now = datetime.now(timezone.utc)
     cfg = AppConfig(
         strategy_id=7,
@@ -4831,8 +4831,9 @@ def test_strategy7_uses_weighted_score_when_signals_conflict():
 
     decision = _resolve_side_from_strategy(cfg=cfg, state=state, slug="s1", quote=quote, now=now)
 
-    assert decision.side == "UP"
-    assert decision.reason == "strategy7_weighted_conflict"
+    assert decision.side is None
+    assert decision.reason == "strategy7_signal_conflict"
+    assert state.signal_round_locked_side is None
 
 
 def test_strategy7_skips_when_confirmation_is_too_late():

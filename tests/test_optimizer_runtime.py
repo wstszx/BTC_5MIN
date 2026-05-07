@@ -8,7 +8,7 @@ from trader import _candidate_cfg_with_params, _paper_experiment_id
 
 
 def test_optimizer_runtime_applies_candidate_params_and_trader_reexports_helpers():
-    base_cfg = AppConfig(strategy_id=7, target_profit=1.0, strategy7_max_entry_price=0.56)
+    base_cfg = AppConfig(strategy_id=7, target_profit=1.0, max_entry_price=0.65, strategy7_max_entry_price=0.56)
     candidate_cfg = candidate_cfg_with_params(
         base_cfg,
         7,
@@ -22,6 +22,7 @@ def test_optimizer_runtime_applies_candidate_params_and_trader_reexports_helpers
     assert candidate_cfg.strategy_id == 7
     assert candidate_cfg.target_profit == 1.25
     assert candidate_cfg.strategy7_max_entry_price == 0.53
+    assert candidate_cfg.max_entry_price == 0.53
     assert paper_experiment_id(5, state) == "strategy-5"
     assert state.experiment_id == "strategy-5"
     assert _candidate_cfg_with_params is candidate_cfg_with_params

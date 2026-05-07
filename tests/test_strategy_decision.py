@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
+import pytest
+
 from config import AppConfig, build_config_from_env_values
 from models import MarketQuote, MarketWindow, SessionState
 from strategy_decision import SideDecision, resolve_side_from_strategy
@@ -111,3 +113,30 @@ def test_strategy7_zero_confirm_window_allows_entry_inside_grace_window():
 
     assert decision.side == "UP"
     assert decision.reason is None
+
+
+def test_strategy7_skips_when_ofi_and_momentum_conflict():
+    now = datetime(2026, 4, 30, 1, 0, tzinfo=timezone.utc)
+    cfg = AppConfig(
+        strategy_id=7,
+        strategy7_ofi_threshold=0.5,
+        strategy7_momentum_threshold=0.01,
+        strategy7_min_signal_gap=0.0,
+        strategy7_confirm_before_entry_seconds=0,
+        binance_signal_stale_seconds=10.0,
+    )
+    state = SessionState(signal_round_slug="s1", signal_round_open_up_price=0.50)
+    quote = MarketQuote(
+        slug="s1",
+        up_price=0.47,
+        up_best_ask=0.47,
+        strategy6_ofi_score=0.7,
+        strategy6_signal_at=now,
+    )
+
+    decision = resolve_side_from_strategy(cfg=cfg, state=state, slug="s1", quote=quote, now=now)
+
+    assert decision.side is None
+    assert decision.reason == "strategy7_signal_conflict"
+    assert decision.signal_delta == pytest.approx(-0.03)
+    assert state.signal_round_locked_side is None

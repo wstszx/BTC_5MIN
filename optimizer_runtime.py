@@ -37,6 +37,8 @@ def candidate_cfg_with_params(base_cfg: AppConfig, base_strategy_id: int, params
         kwargs["strategy7_momentum_threshold"] = float(params["STRATEGY7_MOMENTUM_THRESHOLD"])
     if "STRATEGY7_MAX_ENTRY_PRICE" in params:
         kwargs["strategy7_max_entry_price"] = float(params["STRATEGY7_MAX_ENTRY_PRICE"])
+        if "MAX_ENTRY_PRICE" not in params:
+            kwargs["max_entry_price"] = float(params["STRATEGY7_MAX_ENTRY_PRICE"])
     return replace(base_cfg, **kwargs)
 
 

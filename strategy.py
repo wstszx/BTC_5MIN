@@ -58,19 +58,8 @@ def strategy7_signal_gap_ok(
     )
 
 
-def strategy7_weighted_side_for_signals(
-    *,
-    ofi_score: float,
-    momentum_delta: float,
-    ofi_threshold: float,
-    momentum_threshold: float,
-) -> str:
-    normalized_ofi = ofi_score / max(0.000001, abs(ofi_threshold))
-    normalized_momentum = momentum_delta / max(0.000001, abs(momentum_threshold))
-    weighted_score = normalized_ofi * 0.6 + normalized_momentum * 0.4
-    if weighted_score == 0:
-        weighted_score = normalized_ofi
-    return 'UP' if weighted_score > 0 else 'DOWN'
+def strategy7_signals_agree(*, ofi_score: float, momentum_delta: float) -> bool:
+    return ofi_score * momentum_delta > 0
 
 
 def strategy7_strong_signal_allows_late_confirm(
@@ -177,12 +166,9 @@ def get_side_for_round(
             signal_min_gap=min_gap,
         ):
             raise ValueError('strategy_id=7 requires signal gap above threshold')
-        return strategy7_weighted_side_for_signals(
-            ofi_score=ofi_score,
-            momentum_delta=momentum_delta,
-            ofi_threshold=threshold,
-            momentum_threshold=momentum_threshold,
-        )
+        if not strategy7_signals_agree(ofi_score=ofi_score, momentum_delta=momentum_delta):
+            raise ValueError('strategy_id=7 requires signal agreement')
+        return 'UP' if momentum_delta > 0 else 'DOWN'
 
     if strategy_id == 8:
         if ofi_score is None:

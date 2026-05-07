@@ -280,6 +280,9 @@ _CANDIDATE_PARAM_ATTR_MAP: dict[str, str] = {
     "SIGNAL_MOMENTUM_THRESHOLD": "signal_momentum_threshold",
     "OFI_THRESHOLD": "ofi_threshold",
     "MAX_ENTRY_PRICE": "max_entry_price",
+    "STRATEGY7_OFI_THRESHOLD": "strategy7_ofi_threshold",
+    "STRATEGY7_MOMENTUM_THRESHOLD": "strategy7_momentum_threshold",
+    "STRATEGY7_MAX_ENTRY_PRICE": "strategy7_max_entry_price",
 }
 
 
@@ -289,6 +292,8 @@ def _candidate_to_config(base_cfg: AppConfig, candidate: dict[str, Any]) -> AppC
         attr = _CANDIDATE_PARAM_ATTR_MAP.get(str(key))
         if attr:
             kwargs[attr] = value
+    if "strategy7_max_entry_price" in kwargs and "max_entry_price" not in kwargs:
+        kwargs["max_entry_price"] = kwargs["strategy7_max_entry_price"]
     return replace(base_cfg, **kwargs)
 
 

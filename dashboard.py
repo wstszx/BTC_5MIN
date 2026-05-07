@@ -1247,9 +1247,9 @@ def _strategy_catalog() -> dict[str, dict[str, Any]]:
         },
         "7": {
             "label": "盘口+动量共识",
-            "summary": "币安盘口失衡与预测市场动量同向时加分，冲突时按加权评分决定方向。",
+            "summary": "币安盘口失衡与预测市场动量必须同向确认，冲突时跳过。",
             "preview": ["OFI", "MOMENTUM", "THRESHOLD", "SKIP"],
-            "detail": "盘口失衡权重 60%，动量权重 40%，仍需满足信号强度与入场风控。",
+            "detail": "仅在两类信号同向、强度足够且满足入场风控时给出方向。",
         },
         "8": {
             "label": "状态切换",
@@ -2401,8 +2401,8 @@ class DashboardState:
                 "momentum_delta": side_decision.signal_delta,
                 "agreement": (
                     "agree"
-                    if selected_strategy in {7, 8} and side_decision.side in {"UP", "DOWN"} and side_decision.reason not in {"strategy7_weighted_conflict", "strategy8_conflict_reversal"}
-                    else ("conflict" if side_decision.reason in {"strategy7_signal_conflict", "strategy7_weighted_conflict", "strategy8_conflict_reversal"} else None)
+                    if selected_strategy in {7, 8} and side_decision.side in {"UP", "DOWN"} and side_decision.reason != "strategy8_conflict_reversal"
+                    else ("conflict" if side_decision.reason in {"strategy7_signal_conflict", "strategy8_conflict_reversal"} else None)
                 ),
                 "quality_gate": (
                     "passed"
@@ -4860,7 +4860,7 @@ const HELP_SECTIONS = {
           '策略 1-4 是固定节奏策略，没有额外信号门槛，但仍受价格、下注金额、连续亏损和预算限制。',
           '策略 5 使用动量信号，SIGNAL_MOMENTUM_THRESHOLD 不满足时会跳过；价格不可用也会跳过。',
           '策略 6 使用 Binance OFI，OFI_THRESHOLD 不满足、信号过期或不可用时都会跳过。',
-          '策略 7 同向时加分，冲突时按 OFI 60% / 动量 40% 加权，仍受 STRATEGY7_OFI_THRESHOLD、STRATEGY7_MOMENTUM_THRESHOLD、MAX_ENTRY_PRICE 和确认时间限制影响。',
+          '策略 7 要求 Binance OFI 与 Polymarket 动量同向确认，冲突、弱信号、过期、价格过高或确认过晚都会跳过。',
         ],
       },
       {
@@ -4962,7 +4962,6 @@ const REASON_LABELS = {
   strategy7_momentum_unavailable: '策略7 动量信号不可用',
   strategy7_momentum_too_weak: '策略7 动量信号过弱',
   strategy7_signal_conflict: '盘口失衡与动量需同向确认',
-  strategy7_weighted_conflict: '策略7 冲突信号按权重确认',
   strategy7_entry_too_late: '策略7 确认出现过晚',
   strategy7_price_too_low: '策略7 入场价格过低',
   strategy7_price_too_high: '策略7 入场价格过高',

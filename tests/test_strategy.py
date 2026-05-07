@@ -81,19 +81,18 @@ def test_strategy_6_requires_ofi_signal_context():
         get_side_for_round(6, 0)
 
 
-def test_strategy_7_uses_weighted_score_when_ofi_and_momentum_conflict():
-    side = get_side_for_round(
-        7,
-        0,
-        signal_open_up_price=0.50,
-        signal_current_up_price=0.47,
-        signal_threshold=0.02,
-        ofi_score=0.8,
-        ofi_threshold=0.65,
-        signal_min_gap=0.01,
-    )
-
-    assert side == 'UP'
+def test_strategy_7_rejects_conflicting_ofi_and_momentum():
+    with pytest.raises(ValueError, match='signal agreement'):
+        get_side_for_round(
+            7,
+            0,
+            signal_open_up_price=0.50,
+            signal_current_up_price=0.47,
+            signal_threshold=0.02,
+            ofi_score=0.8,
+            ofi_threshold=0.65,
+            signal_min_gap=0.01,
+        )
 
 
 def test_strategy_8_chooses_trend_when_ofi_and_momentum_agree():

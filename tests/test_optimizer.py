@@ -3,6 +3,7 @@ from pathlib import Path
 from datetime import datetime, timedelta, timezone
 
 from config import AppConfig
+from models import BacktestResult
 from optimizer import (
     build_candidate_configs,
     build_optimizer_state,
@@ -213,6 +214,40 @@ def test_score_candidate_with_backtest_rows_returns_backtest_metrics():
     assert "validation_score" in metrics
     assert metrics["trade_count"] >= 0
     assert metrics["validation_score"] == metrics["total_pnl"] - metrics["max_drawdown"]
+
+
+def test_score_candidate_with_backtest_rows_applies_strategy7_candidate_params(monkeypatch):
+    fixture_path = Path("tests/fixtures/sample_history.csv")
+    with fixture_path.open("r", newline="", encoding="utf-8") as handle:
+        rows = list(csv.DictReader(handle))
+    captured: dict[str, AppConfig] = {}
+
+    def fake_run_backtest(_temp_path, cfg):
+        captured["cfg"] = cfg
+        return BacktestResult(total_pnl=1.0, max_drawdown=0.25, trade_count=1)
+
+    monkeypatch.setattr("optimizer.run_backtest", fake_run_backtest)
+
+    metrics = score_candidate_with_backtest_rows(
+        {
+            "candidate_id": "cand-s7",
+            "base_strategy_id": 7,
+            "params": {
+                "STRATEGY7_OFI_THRESHOLD": 0.7,
+                "STRATEGY7_MOMENTUM_THRESHOLD": 0.025,
+                "STRATEGY7_MAX_ENTRY_PRICE": 0.53,
+            },
+        },
+        rows=rows,
+        base_cfg=AppConfig(strategy_id=7, max_entry_price=0.65),
+    )
+
+    cfg = captured["cfg"]
+    assert cfg.strategy7_ofi_threshold == 0.7
+    assert cfg.strategy7_momentum_threshold == 0.025
+    assert cfg.strategy7_max_entry_price == 0.53
+    assert cfg.max_entry_price == 0.53
+    assert metrics["validation_score"] == 0.75
 
 
 def test_run_optimizer_from_history_csv_writes_optimizer_state_from_real_history(tmp_path):

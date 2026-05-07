@@ -12,8 +12,8 @@ from models import MarketQuote, MarketWindow, SessionState
 from strategy import (
     get_side_for_round,
     strategy7_signal_gap_ok,
+    strategy7_signals_agree,
     strategy7_strong_signal_allows_late_confirm,
-    strategy7_weighted_side_for_signals,
 )
 
 
@@ -405,13 +405,17 @@ def resolve_side_from_strategy(
             )
 
         if cfg.strategy_id == 7:
-            resolved_side = strategy7_weighted_side_for_signals(
-                ofi_score=ofi_score,
-                momentum_delta=momentum_delta,
-                ofi_threshold=cfg.strategy7_ofi_threshold,
-                momentum_threshold=cfg.strategy7_momentum_threshold,
-            )
-            decision_reason = "strategy7_weighted_conflict" if ofi_score * momentum_delta <= 0 else None
+            if not strategy7_signals_agree(ofi_score=ofi_score, momentum_delta=momentum_delta):
+                return SideDecision(
+                    side=None,
+                    reason="strategy7_signal_conflict",
+                    signal_open_up_price=signal_open_up_price,
+                    signal_current_up_price=signal_current_up_price,
+                    signal_threshold=cfg.strategy7_momentum_threshold,
+                    signal_delta=momentum_delta,
+                )
+            resolved_side = "UP" if momentum_delta > 0 else "DOWN"
+            decision_reason = None
         elif cfg.strategy_id == 8 and ofi_score * momentum_delta <= 0:
             resolved_side = "UP" if ofi_score > 0 else "DOWN"
             decision_reason = "strategy8_conflict_reversal"
