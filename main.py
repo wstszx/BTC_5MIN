@@ -99,6 +99,13 @@ def _cfg_trade_mode(cfg: AppConfig, fallback: str = 'paper') -> str:
     return str(getattr(cfg, 'trade_mode', fallback) or fallback).strip().lower() or fallback
 
 
+def _effective_runtime_mode(cfg: AppConfig, fallback: str = 'paper') -> str:
+    mode = _cfg_trade_mode(cfg, fallback)
+    if mode == 'live' and not bool(getattr(cfg, 'live_trading_enabled', False)):
+        return 'paper'
+    return mode
+
+
 def _runtime_control_for_paper(
     *,
     runtime_control: RuntimeControl,
@@ -171,7 +178,7 @@ class RuntimeManager:
         self.dashboard_runtime_factory = dashboard_runtime_factory
         self.validate_live_config = validate_live_config
         self.startup_cfg = startup_cfg or _load_shared_config(self.env_file)
-        self.runtime_control = RuntimeControl(initial_mode=getattr(self.startup_cfg, 'trade_mode', 'paper'))
+        self.runtime_control = RuntimeControl(initial_mode=_effective_runtime_mode(self.startup_cfg))
         self._reload_requested = False
         self._reload_reason: str | None = None
 
@@ -379,7 +386,7 @@ def run_single_command_runtime(
             if worker_supports_runtime_control:
                 try:
                     next_cfg = _config_provider()
-                    manager.request_mode_change(_cfg_trade_mode(next_cfg, active_mode))
+                    manager.request_mode_change(_effective_runtime_mode(next_cfg, active_mode))
                     manager.poll_once()
                 except BaseException as exc:
                     startup_error = exc

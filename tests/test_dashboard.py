@@ -845,6 +845,8 @@ def test_dashboard_assets_mode_selector_propagates_into_save_payload_path():
 
     assert "const modeField = el('cfg_TRADE_MODE');" in js
     assert "modeField.value = nextMode;" in js
+    assert "const liveToggleField = el('cfg_ENABLE_LIVE_TRADING');" in js
+    assert "liveToggleField.value = nextMode === 'live' ? 'true' : 'false';" in js
     assert "const keys = ['ENABLE_LIVE_TRADING', ...(((state.config && state.config.editable_keys) || []).filter((key) => !isSingleLiveToggleKey(key)))];" in js
     assert "payload[key] = node.value;" in js
     assert "if (!expanded.TRADE_MODE) {" in js
@@ -2460,7 +2462,9 @@ def test_dashboard_assets_confirm_before_switching_to_live_mode():
     js = _dashboard_js()
 
     assert 'function shouldConfirmLiveModeSwitch(' in js
-    assert "previousMode !== 'live' && nextMode === 'live'" in js
+    assert "nextLiveEnabled = String(nextLiveEnabled || 'false').toLowerCase() === 'true';" in js
+    assert "return previousMode !== 'live' && nextMode === 'live' && nextLiveEnabled;" in js
+    assert "const nextLiveEnabled = String(values.LIVE_TRADING_ENABLED || 'false').toLowerCase() === 'true';" in js
     assert 'window.confirm(' in js
 
 
@@ -2830,6 +2834,22 @@ def test_dashboard_update_config_notifies_runtime_reload_for_market_timeframe(tm
         assert calls == ['market_timeframe']
     finally:
         state.close()
+
+
+def test_dashboard_update_config_notifies_runtime_reload_when_live_switch_changes(tmp_path: Path):
+    calls: list[str] = []
+    env_file = tmp_path / '.env.dashboard'
+    env_file.write_text('TRADE_MODE=live\nLIVE_TRADING_ENABLED=true\n', encoding='utf-8')
+    state = DashboardState(
+        env_file=env_file,
+        notify_runtime_reload=lambda reason: calls.append(reason),
+    )
+    try:
+        state.update_config({'LIVE_TRADING_ENABLED': 'false'})
+        assert calls == ['live_trading_enabled']
+    finally:
+        state.close()
+
 
 def test_dashboard_assets_format_recent_trade_round_slug_as_datetime():
     js = _dashboard_js()

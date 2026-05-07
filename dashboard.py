@@ -2204,14 +2204,21 @@ class DashboardState:
         previous_mode = None
         next_mode = None
         previous_timeframe = None
+        previous_live_enabled = None
+        next_live_enabled = None
         with self._lock:
             previous_mode = str(self._cfg.trade_mode or 'paper').strip().lower() or 'paper'
             previous_timeframe = getattr(self._cfg, 'market_timeframe', '5m')
+            previous_live_enabled = bool(getattr(self._cfg, 'live_trading_enabled', False))
             next_mode = str(self._env_values.get('TRADE_MODE') or self._cfg.trade_mode or 'paper').strip().lower() or 'paper'
         self._refresh_runtime()
         next_timeframe = getattr(self._cfg, 'market_timeframe', '5m')
-        if self.notify_runtime_reload is not None and previous_timeframe != next_timeframe:
-            self.notify_runtime_reload('market_timeframe')
+        next_live_enabled = bool(getattr(self._cfg, 'live_trading_enabled', False))
+        if self.notify_runtime_reload is not None:
+            if previous_timeframe != next_timeframe:
+                self.notify_runtime_reload('market_timeframe')
+            elif previous_live_enabled != next_live_enabled:
+                self.notify_runtime_reload('live_trading_enabled')
         if self.notify_mode_change is not None and previous_mode != next_mode:
             self.notify_mode_change(next_mode)
         return self.get_config_payload()
@@ -6697,11 +6704,16 @@ function renderConfigModeShell(payload) {
     if (modeField) {
       modeField.value = nextMode;
     }
+    const liveToggleField = el('cfg_ENABLE_LIVE_TRADING');
+    if (liveToggleField) {
+      liveToggleField.value = nextMode === 'live' ? 'true' : 'false';
+    }
     state.config = {
       ...(state.config || {}),
       env_values: {
         ...(((state.config || {}).env_values) || {}),
         TRADE_MODE: nextMode,
+        LIVE_TRADING_ENABLED: nextMode === 'live' ? 'true' : 'false',
       },
     };
     const form = el('configForm');
@@ -6842,10 +6854,11 @@ function applyTimeframePreset(timeframe) {
 }
 
 
-function shouldConfirmLiveModeSwitch(previousMode, nextMode) {
+function shouldConfirmLiveModeSwitch(previousMode, nextMode, nextLiveEnabled) {
   previousMode = String(previousMode || 'paper').toLowerCase();
   nextMode = String(nextMode || 'paper').toLowerCase();
-  return previousMode !== 'live' && nextMode === 'live';
+  nextLiveEnabled = String(nextLiveEnabled || 'false').toLowerCase() === 'true';
+  return previousMode !== 'live' && nextMode === 'live' && nextLiveEnabled;
 }
 
 function renderConfig(payload) {
@@ -7196,7 +7209,8 @@ async function saveConfig() {
     setSaveButtonState('saving');
     const previousMode = String((((state.config || {}).env_values || {}).TRADE_MODE || 'paper')).toLowerCase();
     const nextMode = String((values.TRADE_MODE || previousMode || 'paper')).toLowerCase();
-    if (shouldConfirmLiveModeSwitch(previousMode, nextMode) && !window.confirm('开启并行实盘后，纸面交易会继续运行，同时实盘会按实盘配置执行。确认继续吗？')) {
+    const nextLiveEnabled = String(values.LIVE_TRADING_ENABLED || 'false').toLowerCase() === 'true';
+    if (shouldConfirmLiveModeSwitch(previousMode, nextMode, nextLiveEnabled) && !window.confirm('开启并行实盘后，纸面交易会继续运行，同时实盘会按实盘配置执行。确认继续吗？')) {
       setChip('cfgStatus', '已取消', 'warn');
       setSaveButtonState('idle');
       return;

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import stat
 import time
 from pathlib import Path
 from uuid import uuid4
@@ -18,6 +19,11 @@ def _replace_with_retry(source: Path, target: Path) -> None:
             return
         except PermissionError as exc:
             last_error = exc
+            try:
+                if target.exists():
+                    target.chmod(target.stat().st_mode | stat.S_IWRITE)
+            except OSError:
+                pass
     assert last_error is not None
     raise last_error
 

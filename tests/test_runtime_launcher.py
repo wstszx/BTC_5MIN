@@ -369,7 +369,7 @@ def test_run_single_command_runtime_live_view_without_live_switch_starts_paper_o
     exit_code = main.run_single_command_runtime(env_file=env_file)
 
     assert exit_code == 0
-    assert dashboard_kwargs["running_trade_mode"] == "live"
+    assert dashboard_kwargs["running_trade_mode"] == "paper"
     assert paper_calls["count"] == 1
     assert live_calls["count"] == 0
 
@@ -544,6 +544,114 @@ def test_run_single_command_runtime_switches_to_live_after_safe_point(monkeypatc
     assert exit_code == 0
     assert calls[0] == ('paper', 'paper')
     assert ('live', 'live') in calls
+
+
+def test_run_single_command_runtime_switches_from_live_to_paper_when_live_disabled(monkeypatch, tmp_path: Path):
+    startup_cfg = AppConfig(
+        trade_mode='live',
+        live_trading_enabled=True,
+        live_private_key='pk',
+        live_funder='0xfunder',
+    )
+    paper_cfg = AppConfig(trade_mode='paper', live_trading_enabled=False)
+    states = {'count': 0}
+    calls: list[tuple[str, str, bool]] = []
+
+    def fake_load_shared_config(_path: Path):
+        states['count'] += 1
+        return startup_cfg if states['count'] == 1 else paper_cfg
+
+    def fake_create_dashboard_runtime(**kwargs):
+        class FakeDashboardRuntime:
+            def serve_forever(self):
+                return
+            def shutdown(self):
+                return
+            def close(self):
+                return
+        return FakeDashboardRuntime()
+
+    def fake_run_paper_trading(cfg, *, stop_event, config_provider, runtime_control=None, stop_when_safe=None):
+        calls.append(('paper', cfg.trade_mode, cfg.live_trading_enabled))
+        if not cfg.live_trading_enabled:
+            stop_event.set()
+        return {'status': 'stopped'}
+
+    def fake_run_live_trading(cfg, *, stop_event, config_provider, runtime_control=None, stop_when_safe=None):
+        calls.append(('live', cfg.trade_mode, cfg.live_trading_enabled))
+        runtime_control.update_worker_state(round_in_progress=False, safe_to_switch=True, pending_live_order=False, current_round_slug=None)
+        return {'status': 'stopped'}
+
+    monkeypatch.setattr(main, '_load_shared_config', fake_load_shared_config)
+    monkeypatch.setattr(main, 'create_dashboard_runtime', fake_create_dashboard_runtime)
+    monkeypatch.setattr(main, 'run_paper_trading', fake_run_paper_trading)
+    monkeypatch.setattr(main, 'run_live_trading', fake_run_live_trading)
+
+    exit_code = main.run_single_command_runtime(env_file=tmp_path / '.env.dashboard')
+
+    assert exit_code == 0
+    assert calls == [
+        ('paper', 'paper', True),
+        ('live', 'live', True),
+        ('paper', 'paper', False),
+    ]
+
+
+def test_run_single_command_runtime_reloads_to_paper_only_when_live_switch_disabled(monkeypatch, tmp_path: Path):
+    startup_cfg = AppConfig(
+        trade_mode='live',
+        live_trading_enabled=True,
+        live_private_key='pk',
+        live_funder='0xfunder',
+    )
+    live_view_disabled_cfg = AppConfig(trade_mode='live', live_trading_enabled=False)
+    states = {'count': 0}
+    calls: list[tuple[str, str, bool]] = []
+    runtime_reload = {'callback': None}
+
+    def fake_load_shared_config(_path: Path):
+        states['count'] += 1
+        return startup_cfg if states['count'] == 1 else live_view_disabled_cfg
+
+    def fake_create_dashboard_runtime(**kwargs):
+        runtime_reload['callback'] = kwargs.get('notify_runtime_reload')
+
+        class FakeDashboardRuntime:
+            def serve_forever(self):
+                return
+            def shutdown(self):
+                return
+            def close(self):
+                return
+
+        return FakeDashboardRuntime()
+
+    def fake_run_paper_trading(cfg, *, stop_event, config_provider, runtime_control=None, stop_when_safe=None):
+        calls.append(('paper', cfg.trade_mode, cfg.live_trading_enabled))
+        if len(calls) == 1:
+            runtime_reload['callback']('live_trading_enabled')
+            return {'status': 'stopped'}
+        stop_event.set()
+        return {'status': 'stopped'}
+
+    def fake_run_live_trading(cfg, *, stop_event, config_provider, runtime_control=None, stop_when_safe=None):
+        calls.append(('live', cfg.trade_mode, cfg.live_trading_enabled))
+        runtime_control.update_worker_state(round_in_progress=False, safe_to_switch=True, pending_live_order=False, current_round_slug=None)
+        return {'status': 'stopped', 'skip_reason': 'live_trading_disabled'}
+
+    monkeypatch.setattr(main, '_load_shared_config', fake_load_shared_config)
+    monkeypatch.setattr(main, 'create_dashboard_runtime', fake_create_dashboard_runtime)
+    monkeypatch.setattr(main, 'run_paper_trading', fake_run_paper_trading)
+    monkeypatch.setattr(main, 'run_live_trading', fake_run_live_trading)
+
+    exit_code = main.run_single_command_runtime(env_file=tmp_path / '.env.dashboard')
+
+    assert exit_code == 0
+    assert calls == [
+        ('paper', 'paper', True),
+        ('live', 'live', True),
+        ('paper', 'paper', False),
+    ]
 
 
 def test_run_single_command_runtime_restarts_worker_after_timeframe_reload_request(monkeypatch, tmp_path: Path):

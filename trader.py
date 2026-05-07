@@ -1095,6 +1095,17 @@ def run_live_trading(
             if config_provider is not None:
                 candidate_cfg = config_provider()
                 if candidate_cfg is not None:
+                    if str(getattr(candidate_cfg, "trade_mode", "") or "").strip().lower() == "live" and not bool(
+                        getattr(candidate_cfg, "live_trading_enabled", False)
+                    ):
+                        _update_runtime_control(
+                            runtime_control,
+                            current_round_slug=None,
+                            round_in_progress=False,
+                            safe_to_switch=True,
+                            pending_live_order=False,
+                        )
+                        return {"status": "stopped", "skip_reason": "live_trading_disabled"}
                     validate_live_runtime_config(candidate_cfg)
                     cfg = candidate_cfg
                     configured_strategy_ids = _live_strategy_ids_for_runtime(cfg)

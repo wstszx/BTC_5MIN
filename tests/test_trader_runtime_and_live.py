@@ -373,6 +373,18 @@ def test_save_session_state_retries_transient_windows_replace_denial(monkeypatch
     assert json.loads(state_path.read_text(encoding='utf-8'))['cash_pnl'] == 2.5
 
 
+def test_save_session_state_replaces_readonly_target_on_windows(tmp_path: Path):
+    state_path = tmp_path / 'session_state.json'
+    state_path.write_text('{"cash_pnl": 0.0}', encoding='utf-8')
+    state_path.chmod(0o444)
+
+    try:
+        save_session_state(state_path, SessionState(cash_pnl=3.75))
+        assert json.loads(state_path.read_text(encoding='utf-8'))['cash_pnl'] == 3.75
+    finally:
+        state_path.chmod(0o666)
+
+
 class _TransientPaperClient:
     def __init__(self):
         self.calls = 0
@@ -746,6 +758,30 @@ def test_run_live_trading_stops_when_stop_event_is_set(tmp_path, monkeypatch):
     )
 
     assert result['status'] == 'stopped'
+
+
+def test_run_live_trading_stops_cleanly_when_config_provider_disables_live(tmp_path):
+    runtime_control = RuntimeControl(initial_mode="live")
+
+    result = run_live_trading(
+        AppConfig(
+            trade_mode="live",
+            live_trading_enabled=True,
+            live_private_key="pk",
+            live_funder="0xfunder",
+        ),
+        market_client=_NoTradeLiveMarketClient(),
+        clob_client=_StubClobClient(),
+        state_path=tmp_path / "live_state.json",
+        log_path=tmp_path / "live_orders.csv",
+        config_provider=lambda: AppConfig(trade_mode="live", live_trading_enabled=False),
+        runtime_control=runtime_control,
+    )
+
+    snapshot = runtime_control.snapshot()
+    assert result == {"status": "stopped", "skip_reason": "live_trading_disabled"}
+    assert snapshot.safe_to_switch is True
+    assert snapshot.pending_live_order is False
 
 
 def test_run_live_trading_retries_transient_clob_client_timeout(tmp_path, monkeypatch):
