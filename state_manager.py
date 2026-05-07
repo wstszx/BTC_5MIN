@@ -30,6 +30,7 @@ _LIVE_STRATEGY_FIELD_NAMES = (
     "pending_live_expected_profit",
     "pending_live_order_id",
     "pending_live_end_time",
+    "pending_live_tracks_recovery_loss",
     "last_processed_live_event_slug",
 )
 
@@ -79,6 +80,7 @@ def live_strategy_state_from_payload(payload: dict[str, Any]) -> LiveStrategySta
         pending_live_expected_profit=payload.get("pending_live_expected_profit"),
         pending_live_order_id=payload.get("pending_live_order_id"),
         pending_live_end_time=payload.get("pending_live_end_time"),
+        pending_live_tracks_recovery_loss=payload.get("pending_live_tracks_recovery_loss", True),
         last_processed_live_event_slug=payload.get("last_processed_live_event_slug"),
     )
 

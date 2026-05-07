@@ -51,6 +51,7 @@ def test_build_candidate_configs_creates_strategy7_parameter_bundles():
 
     assert len(candidates) > 0
     assert all(candidate.base_strategy_id == 7 for candidate in candidates)
+    assert all(candidate.params["BET_SIZING_MODE"] == "FLAT_BASE_COST" for candidate in candidates)
     assert all('STRATEGY7_OFI_THRESHOLD' in candidate.params for candidate in candidates)
     assert all('STRATEGY7_MOMENTUM_THRESHOLD' in candidate.params for candidate in candidates)
     assert all('STRATEGY7_MAX_ENTRY_PRICE' in candidate.params for candidate in candidates)

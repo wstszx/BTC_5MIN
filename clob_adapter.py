@@ -264,6 +264,7 @@ def build_trade_plan_from_official_trades(
         order_size=total_size,
         order_cost=total_cost,
         expected_profit=total_size * (1 - fill_price),
+        tracks_recovery_loss=strategy_state.pending_live_tracks_recovery_loss,
     )
 
 
@@ -507,6 +508,7 @@ def build_verified_pending_live_trade_plan(
         order_size=order_size,
         order_cost=order_cost,
         expected_profit=order_size * (1 - fill_price),
+        tracks_recovery_loss=strategy_state.pending_live_tracks_recovery_loss,
     )
 
 

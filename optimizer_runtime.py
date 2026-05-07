@@ -23,6 +23,8 @@ def candidate_cfg_with_params(base_cfg: AppConfig, base_strategy_id: int, params
     kwargs: dict[str, Any] = {"strategy_id": int(base_strategy_id)}
     if "TARGET_PROFIT" in params:
         kwargs["target_profit"] = float(params["TARGET_PROFIT"])
+    if "BET_SIZING_MODE" in params:
+        kwargs["bet_sizing_mode"] = str(params["BET_SIZING_MODE"]).upper()
     if "MAX_PRICE_THRESHOLD" in params:
         kwargs["max_price_threshold"] = float(params["MAX_PRICE_THRESHOLD"])
     if "SIGNAL_MOMENTUM_THRESHOLD" in params:

@@ -204,3 +204,29 @@ def test_fixed_base_cost_mode_resets_to_base_after_win():
         base_order_cost=1.0,
     )
     assert round(reset_plan.order_cost, 4) == 1.0
+
+
+def test_flat_base_cost_mode_ignores_and_clears_recovery_loss():
+    state = SessionState(recovery_loss=3.0, consecutive_losses=2)
+    plan = build_trade_plan(
+        state=state,
+        side="UP",
+        price=0.5,
+        target_profit=0.5,
+        max_price_threshold=0.65,
+        max_stake=100,
+        max_consecutive_losses=8,
+        bet_sizing_mode="FLAT_BASE_COST",
+        base_order_cost=1.0,
+    )
+
+    assert plan.should_trade is True
+    assert round(plan.order_cost, 4) == 1.0
+    assert round(plan.order_size, 4) == 2.0
+    assert round(plan.expected_profit, 4) == 1.0
+    assert plan.tracks_recovery_loss is False
+
+    after_loss = apply_round_outcome(state, plan, won=False)
+    assert after_loss.cash_pnl == -1.0
+    assert after_loss.recovery_loss == 0.0
+    assert after_loss.consecutive_losses == 3

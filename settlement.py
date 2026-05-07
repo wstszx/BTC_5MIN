@@ -27,6 +27,7 @@ def clear_pending_live_trade(strategy_state: LiveStrategyState) -> None:
     strategy_state.pending_live_expected_profit = None
     strategy_state.pending_live_order_id = None
     strategy_state.pending_live_end_time = None
+    strategy_state.pending_live_tracks_recovery_loss = True
 
 
 def timeframe_duration_seconds(timeframe: str | None) -> int:
@@ -154,6 +155,7 @@ def build_pending_live_trade_plan(state: SessionState) -> TradePlan:
         order_size=state.pending_live_order_size,
         order_cost=state.pending_live_order_cost,
         expected_profit=state.pending_live_expected_profit,
+        tracks_recovery_loss=state.pending_live_tracks_recovery_loss,
     )
 
 
@@ -478,6 +480,7 @@ def build_frozen_pending_live_plan(strategy_state: LiveStrategyState) -> TradePl
         order_size=strategy_state.pending_live_order_size,
         order_cost=strategy_state.pending_live_order_cost,
         expected_profit=strategy_state.pending_live_expected_profit,
+        tracks_recovery_loss=strategy_state.pending_live_tracks_recovery_loss,
     )
 
 
@@ -622,6 +625,7 @@ def build_frozen_pending_paper_plan(item: PendingPaperTrade) -> TradePlan:
         order_size=item.order_size,
         order_cost=item.order_cost,
         expected_profit=item.expected_profit,
+        tracks_recovery_loss=item.tracks_recovery_loss,
     )
 
 

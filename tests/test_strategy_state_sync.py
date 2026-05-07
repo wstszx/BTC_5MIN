@@ -58,12 +58,13 @@ def test_strategy_state_sync_roundtrips_paper_strategy_state_with_base_live_fiel
         pending_paper_trades=[pending],
         experiment_id="exp-6",
     )
-    base_state = SessionState(pending_live_slug="btc-updown-5m-live")
+    base_state = SessionState(pending_live_slug="btc-updown-5m-live", pending_live_tracks_recovery_loss=False)
 
     session_state = paper_strategy_state_to_session_state(paper_state, base_state)
     restored_paper_state = session_state_to_paper_strategy_state(session_state)
 
     assert session_state.pending_live_slug == "btc-updown-5m-live"
+    assert session_state.pending_live_tracks_recovery_loss is False
     assert session_state.pending_paper_trades == [pending]
     assert restored_paper_state.round_index == 2
     assert restored_paper_state.cash_pnl == 3.5

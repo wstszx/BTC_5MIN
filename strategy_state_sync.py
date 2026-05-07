@@ -46,6 +46,7 @@ def paper_strategy_state_to_session_state(state: PaperStrategyState, base_state:
         pending_live_expected_profit=base_state.pending_live_expected_profit,
         pending_live_order_id=base_state.pending_live_order_id,
         pending_live_end_time=base_state.pending_live_end_time,
+        pending_live_tracks_recovery_loss=base_state.pending_live_tracks_recovery_loss,
         pending_paper_trades=list(state.pending_paper_trades),
         paper_strategies=dict(base_state.paper_strategies),
         live_strategies=dict(base_state.live_strategies),

@@ -269,7 +269,16 @@ def _simulate_segment(
             skipped += 1
             continue
 
-        if sizing_mode == "FIXED_BASE_COST":
+        tracks_recovery_loss = True
+        if sizing_mode == "FLAT_BASE_COST":
+            base_order_cost = cfg.base_order_cost
+            if base_order_cost <= 0:
+                skipped += 1
+                continue
+            order_cost = base_order_cost
+            order_size = order_cost / price
+            tracks_recovery_loss = False
+        elif sizing_mode == "FIXED_BASE_COST":
             base_order_cost = cfg.base_order_cost
             if base_order_cost <= 0:
                 skipped += 1
@@ -306,7 +315,10 @@ def _simulate_segment(
         else:
             pnl -= order_cost
             losses += 1
-            recovery_loss += order_cost
+            if tracks_recovery_loss:
+                recovery_loss += order_cost
+            else:
+                recovery_loss = 0.0
             consecutive_losses += 1
             max_loss_streak = max(max_loss_streak, consecutive_losses)
 

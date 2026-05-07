@@ -14,6 +14,7 @@ def test_optimizer_runtime_applies_candidate_params_and_trader_reexports_helpers
         7,
         {
             "TARGET_PROFIT": "1.25",
+            "BET_SIZING_MODE": "FLAT_BASE_COST",
             "STRATEGY7_MAX_ENTRY_PRICE": "0.53",
         },
     )
@@ -21,6 +22,7 @@ def test_optimizer_runtime_applies_candidate_params_and_trader_reexports_helpers
 
     assert candidate_cfg.strategy_id == 7
     assert candidate_cfg.target_profit == 1.25
+    assert candidate_cfg.bet_sizing_mode == "FLAT_BASE_COST"
     assert candidate_cfg.strategy7_max_entry_price == 0.53
     assert candidate_cfg.max_entry_price == 0.53
     assert paper_experiment_id(5, state) == "strategy-5"

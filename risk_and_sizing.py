@@ -70,7 +70,15 @@ def build_trade_plan(
     if effective_max_entry_price is not None and price > effective_max_entry_price:
         return TradePlan(False, side=side, price=price, skip_reason="price_above_threshold")
     mode = bet_sizing_mode.upper()
-    if mode == "FIXED_BASE_COST":
+    tracks_recovery_loss = True
+    if mode == "FLAT_BASE_COST":
+        if base_order_cost <= 0:
+            return TradePlan(False, side=side, price=price, skip_reason="invalid_base_order_cost")
+        order_cost = base_order_cost
+        order_size = order_cost / price
+        expected_profit = order_size * (1 - price)
+        tracks_recovery_loss = False
+    elif mode == "FIXED_BASE_COST":
         if base_order_cost <= 0:
             return TradePlan(False, side=side, price=price, skip_reason="invalid_base_order_cost")
         if state.recovery_loss <= 0:
@@ -101,6 +109,7 @@ def build_trade_plan(
         order_size=order_size,
         order_cost=order_cost,
         expected_profit=expected_profit,
+        tracks_recovery_loss=tracks_recovery_loss,
     )
 
 
@@ -121,6 +130,9 @@ def apply_round_outcome(state: SessionState, plan: TradePlan, *, won: bool) -> S
     trade_loss = plan.order_cost
     updated.cash_pnl -= trade_loss
     updated.daily_realized_pnl -= trade_loss
-    updated.recovery_loss += trade_loss
+    if plan.tracks_recovery_loss:
+        updated.recovery_loss += trade_loss
+    else:
+        updated.recovery_loss = 0.0
     updated.consecutive_losses += 1
     return updated

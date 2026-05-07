@@ -342,6 +342,7 @@ def _plan_with_verified_live_fill(
             LiveStrategyState(
                 pending_live_side=side,
                 pending_live_order_id=order_id,
+                pending_live_tracks_recovery_loss=plan.tracks_recovery_loss,
             ),
             clob_client=clob_client,
         )
@@ -946,6 +947,7 @@ def place_live_order(
     state.pending_live_expected_profit = executed_plan.expected_profit
     state.pending_live_order_id = order_id
     state.pending_live_end_time = target_round.end_time.isoformat()
+    state.pending_live_tracks_recovery_loss = executed_plan.tracks_recovery_loss
     state.round_index += 1
     if persist_state:
         _sync_current_live_strategy_state(state, cfg.strategy_id)
@@ -1728,6 +1730,7 @@ def run_live_trading(
                         strategy_state.pending_live_expected_profit = executed_plan.expected_profit
                         strategy_state.pending_live_order_id = execution.order_id
                         strategy_state.pending_live_end_time = target_round.end_time.isoformat()
+                        strategy_state.pending_live_tracks_recovery_loss = executed_plan.tracks_recovery_loss
                         strategy_state.round_index += 1
                         strategy_state.last_processed_live_event_slug = target_round.slug
                         state.live_strategies[strategy_id] = strategy_state

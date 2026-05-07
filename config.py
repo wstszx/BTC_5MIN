@@ -79,7 +79,7 @@ _BOOL_CONFIG_KEYS: frozenset[str] = frozenset(
 )
 _SELECT_CONFIG_OPTIONS: dict[str, tuple[str, ...]] = {
     "TRADE_MODE": ("paper", "live"),
-    "BET_SIZING_MODE": ("FIXED_BASE_COST", "TARGET_PROFIT"),
+    "BET_SIZING_MODE": ("FLAT_BASE_COST", "FIXED_BASE_COST", "TARGET_PROFIT"),
     "SIGNAL_WEAK_SIGNAL_MODE": ("SKIP", "FALLBACK", "FORCE"),
     "POLYMARKET_ORDER_TYPE": ("FOK", "FAK", "GTC", "GTD"),
 }

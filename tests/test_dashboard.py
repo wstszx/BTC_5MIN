@@ -181,6 +181,18 @@ def test_dashboard_payload_uses_effective_values_for_invalid_env_file(tmp_path: 
         state.close()
 
 
+def test_dashboard_bet_sizing_select_includes_flat_base_cost(tmp_path: Path):
+    state = DashboardState(env_file=tmp_path / ".env.dashboard")
+    try:
+        payload = state.get_config_payload()
+        assert "FLAT_BASE_COST" in payload["select_options"]["BET_SIZING_MODE"]
+    finally:
+        state.close()
+
+    js = _dashboard_js()
+    assert "纯固定金额模式" in js
+
+
 def test_recent_trades_payload_includes_pending_paper_trades(tmp_path: Path):
     old_cwd = Path.cwd()
     os.chdir(tmp_path)

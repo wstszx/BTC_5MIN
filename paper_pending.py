@@ -41,6 +41,7 @@ def build_pending_paper_trade(
         signal_reason=side_decision.reason,
         queued_at=datetime.now(timezone.utc).isoformat(),
         experiment_id=experiment_id,
+        tracks_recovery_loss=plan.tracks_recovery_loss,
     )
 
 

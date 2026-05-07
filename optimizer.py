@@ -58,6 +58,7 @@ def build_candidate_configs(
             ):
                 params = {
                     "TARGET_PROFIT": float(target_profit),
+                    "BET_SIZING_MODE": "FLAT_BASE_COST",
                     "STRATEGY7_OFI_THRESHOLD": float(ofi_threshold),
                     "STRATEGY7_MOMENTUM_THRESHOLD": float(momentum_threshold),
                     "STRATEGY7_MAX_ENTRY_PRICE": float(max_entry_price),
@@ -276,6 +277,7 @@ def refresh_optimizer_state_from_paper_results(
 
 _CANDIDATE_PARAM_ATTR_MAP: dict[str, str] = {
     "TARGET_PROFIT": "target_profit",
+    "BET_SIZING_MODE": "bet_sizing_mode",
     "MAX_PRICE_THRESHOLD": "max_price_threshold",
     "SIGNAL_MOMENTUM_THRESHOLD": "signal_momentum_threshold",
     "OFI_THRESHOLD": "ofi_threshold",

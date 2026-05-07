@@ -61,6 +61,7 @@ class TradePlan:
     expected_profit: float = 0.0
     skip_reason: str | None = None
     stop_loss_triggered: bool = False
+    tracks_recovery_loss: bool = True
 
 
 @dataclass(slots=True)
@@ -116,6 +117,7 @@ class PendingPaperTrade:
     signal_reason: str | None = None
     queued_at: str | None = None
     experiment_id: str | None = None
+    tracks_recovery_loss: bool = True
 
 
 @dataclass(slots=True)
@@ -159,6 +161,7 @@ class LiveStrategyState:
     pending_live_expected_profit: float | None = None
     pending_live_order_id: str | None = None
     pending_live_end_time: str | None = None
+    pending_live_tracks_recovery_loss: bool = True
     last_processed_live_event_slug: str | None = None
 
 
@@ -185,6 +188,7 @@ class SessionState:
     pending_live_expected_profit: float | None = None
     pending_live_order_id: str | None = None
     pending_live_end_time: str | None = None
+    pending_live_tracks_recovery_loss: bool = True
     last_processed_live_event_slug: str | None = None
     pending_paper_trades: list[PendingPaperTrade] = field(default_factory=list)
     paper_strategies: dict[int, PaperStrategyState] = field(default_factory=dict)

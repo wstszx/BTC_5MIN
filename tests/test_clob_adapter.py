@@ -294,6 +294,7 @@ def test_clob_adapter_builds_verified_pending_live_trade_plan_from_fill_payload(
     state = LiveStrategyState(
         pending_live_side="UP",
         pending_live_order_id="oid-filled",
+        pending_live_tracks_recovery_loss=False,
     )
 
     plan = build_verified_pending_live_trade_plan(state, clob_client=_OrderLookupClient())
@@ -304,6 +305,7 @@ def test_clob_adapter_builds_verified_pending_live_trade_plan_from_fill_payload(
     assert plan.order_size == pytest.approx(2.0)
     assert plan.order_cost == pytest.approx(1.0)
     assert plan.expected_profit == pytest.approx(1.0)
+    assert plan.tracks_recovery_loss is False
 
 
 def test_clob_adapter_prefers_official_trade_fills_over_order_limit_price():

@@ -2,10 +2,12 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from models import PendingPaperTrade, SessionState
+from models import LiveStrategyState, PendingPaperTrade, SessionState
 from settlement import (
+    build_frozen_pending_live_plan,
     resolve_pending_live_result,
     resolved_result_from_official_market,
+    settle_pending_live_trade_if_needed,
     settle_pending_paper_trade,
 )
 from trader import _settle_pending_paper_trade
@@ -52,6 +54,113 @@ def test_settlement_resolves_pending_paper_trade_and_trader_reexports_helper():
     assert trade_pnl == 1.0
     assert updated_state.cash_pnl == 1.0
     assert _settle_pending_paper_trade is settle_pending_paper_trade
+
+
+def test_settlement_flat_pending_paper_trade_does_not_accrue_recovery_loss():
+    class _ResolvedClient:
+        def get_event_by_slug(self, slug: str):
+            return {
+                "slug": slug,
+                "eventMetadata": {},
+                "closed": True,
+                "markets": [
+                    {
+                        "outcomes": '["Up", "Down"]',
+                        "outcomePrices": '["0", "1"]',
+                        "closed": True,
+                    }
+                ],
+            }
+
+    state = SessionState(recovery_loss=2.0, consecutive_losses=2)
+    item = PendingPaperTrade(
+        round_index=0,
+        event_slug="btc-updown-5m-flat-settled",
+        start_time="2026-04-30T01:00:00+00:00",
+        end_time="2026-04-30T01:05:00+00:00",
+        side="UP",
+        price=0.5,
+        order_size=2.0,
+        order_cost=1.0,
+        expected_profit=1.0,
+        strategy=7,
+        entry_timing="OPEN",
+        tracks_recovery_loss=False,
+    )
+
+    updated_state, result, trade_pnl = settle_pending_paper_trade(
+        client=_ResolvedClient(),
+        state=state,
+        item=item,
+    )
+
+    assert result == "DOWN"
+    assert trade_pnl == -1.0
+    assert updated_state.recovery_loss == 0.0
+    assert updated_state.consecutive_losses == 3
+
+
+def test_frozen_pending_live_plan_preserves_flat_sizing_recovery_policy():
+    state = LiveStrategyState(
+        pending_live_slug="btc-updown-5m-flat-live",
+        pending_live_side="UP",
+        pending_live_price=0.5,
+        pending_live_order_size=2.0,
+        pending_live_order_cost=1.0,
+        pending_live_expected_profit=1.0,
+        pending_live_tracks_recovery_loss=False,
+    )
+
+    plan = build_frozen_pending_live_plan(state)
+
+    assert plan is not None
+    assert plan.tracks_recovery_loss is False
+
+
+def test_settle_pending_live_trade_flat_plan_does_not_accrue_recovery_loss():
+    class _ResolvedClient:
+        def get_event_by_slug(self, slug: str):
+            return {
+                "slug": slug,
+                "eventMetadata": {},
+                "closed": True,
+                "markets": [
+                    {
+                        "outcomes": '["Up", "Down"]',
+                        "outcomePrices": '["0", "1"]',
+                        "closed": True,
+                    }
+                ],
+            }
+
+    strategy_state = LiveStrategyState(
+        round_index=1,
+        recovery_loss=2.0,
+        consecutive_losses=2,
+        pending_live_slug="btc-updown-5m-flat-live",
+        pending_live_side="UP",
+        pending_live_price=0.5,
+        pending_live_order_size=2.0,
+        pending_live_order_cost=1.0,
+        pending_live_expected_profit=1.0,
+        pending_live_end_time="2026-04-30T01:05:00+00:00",
+        pending_live_tracks_recovery_loss=False,
+    )
+
+    updated_state, status, settled = settle_pending_live_trade_if_needed(
+        market_client=_ResolvedClient(),
+        clob_client=None,
+        strategy_state=strategy_state,
+        now=datetime(2026, 4, 30, 1, 6, tzinfo=timezone.utc),
+    )
+
+    assert settled is True
+    assert status is not None
+    assert status["result"] == "DOWN"
+    assert updated_state.cash_pnl == -1.0
+    assert updated_state.recovery_loss == 0.0
+    assert updated_state.consecutive_losses == 3
+    assert updated_state.pending_live_tracks_recovery_loss is True
 
 
 def test_official_result_uses_terminal_prices_when_final_price_is_missing():
