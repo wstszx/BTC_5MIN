@@ -39,7 +39,7 @@ def cfg_for_paper_strategy(cfg: AppConfig, strategy_id: int) -> AppConfig:
 
 
 def validate_live_runtime_config(cfg: AppConfig) -> None:
-    if cfg.trade_mode != "live":
+    if cfg.trade_mode not in {"live", "both"}:
         return
     if not cfg.live_trading_enabled:
         raise RuntimeError("Live trading is disabled.")

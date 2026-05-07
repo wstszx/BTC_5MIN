@@ -101,9 +101,15 @@ def _cfg_trade_mode(cfg: AppConfig, fallback: str = 'paper') -> str:
 
 def _effective_runtime_mode(cfg: AppConfig, fallback: str = 'paper') -> str:
     mode = _cfg_trade_mode(cfg, fallback)
-    if mode == 'live' and not bool(getattr(cfg, 'live_trading_enabled', False)):
-        return 'paper'
-    return mode
+    return mode if mode in {'paper', 'live', 'both'} else fallback
+
+
+def _mode_runs_paper(mode: str) -> bool:
+    return mode in {'paper', 'both'}
+
+
+def _mode_runs_live(mode: str) -> bool:
+    return mode in {'live', 'both'}
 
 
 def _runtime_control_for_paper(
@@ -209,9 +215,9 @@ class RuntimeManager:
             return
         if snapshot.round_in_progress or not snapshot.safe_to_switch or snapshot.pending_live_order:
             return
-        if snapshot.desired_mode == 'live':
+        if _mode_runs_live(snapshot.desired_mode):
             try:
-                cfg = _load_shared_config(self.env_file)
+                cfg = _cfg_for_active_mode(_load_shared_config(self.env_file), 'live')
                 self.validate_live_config(cfg)
             except BaseException as exc:
                 self.runtime_control.mark_blocked(str(exc))
@@ -322,7 +328,7 @@ def run_single_command_runtime(
     first_worker = True
     try:
         initial_mode = manager.snapshot().active_mode
-        if getattr(startup_cfg, 'live_trading_enabled', False):
+        if _mode_runs_live(initial_mode):
             validate_live_runtime_config(_cfg_for_active_mode(startup_cfg, 'live'))
         dashboard_runtime = create_dashboard_runtime(
             host=host,
@@ -346,16 +352,22 @@ def run_single_command_runtime(
             base_cfg = startup_cfg if first_worker else _config_provider()
             first_worker = False
             worker_targets: list[tuple[str, object]] = []
-            live_enabled = bool(getattr(base_cfg, 'live_trading_enabled', False))
+            run_paper = _mode_runs_paper(active_mode)
+            run_live = _mode_runs_live(active_mode)
             worker_supports_runtime_control = (
-                'runtime_control' in inspect.signature(run_paper_trading).parameters
-                or (live_enabled and 'runtime_control' in inspect.signature(run_live_trading).parameters)
+                (run_paper and 'runtime_control' in inspect.signature(run_paper_trading).parameters)
+                or (run_live and 'runtime_control' in inspect.signature(run_live_trading).parameters)
             )
-            _append_paper_worker_targets(base_cfg, worker_targets, live_enabled=live_enabled)
-            if live_enabled:
+            if run_paper:
+                _append_paper_worker_targets(base_cfg, worker_targets, live_enabled=run_live)
+            if run_live:
                 _append_live_worker_targets(base_cfg, worker_targets)
 
-            startup_label = 'paper + live trading' if live_enabled else 'paper trading'
+            startup_label = {
+                'paper': 'paper trading',
+                'live': 'live trading',
+                'both': 'paper + live trading',
+            }.get(active_mode, f'{active_mode} trading')
             trader_threads = [
                 _spawn_runtime_worker(
                     name=name,

@@ -1556,7 +1556,7 @@ class DashboardState:
 
     SELECT_OPTIONS: dict[str, list[str]] = {
         "ENABLE_LIVE_TRADING": ["false", "true"],
-        "TRADE_MODE": ["paper", "live"],
+        "TRADE_MODE": ["paper", "live", "both"],
         "MARKET_TIMEFRAME": ["5m", "15m"],
         "LIVE_TRADING_ENABLED": ["true", "false"],
         "STRATEGY_ID": SUPPORTED_STRATEGY_SELECT_OPTIONS,
@@ -1698,7 +1698,7 @@ class DashboardState:
         "PAPER_STRATEGY_IDS": "纸面测试可同时运行多个策略，按输入顺序去重，例如 1,2,6。",
         "TARGET_PROFIT": "在目标收益模式下，这里表示每轮期望净利；在固定金额模式下，它更多用于观察研究，不直接决定首笔下注金额。",
         "BET_SIZING_MODE": "纯固定金额模式每轮只下 BASE_ORDER_COST 且不追亏；固定金额模式首笔固定但亏损后会回补；目标收益模式会根据目标净利反推下注金额。",
-        "ENABLE_LIVE_TRADING": "关闭时仅运行纸面测试；开启后，纸面交易继续运行，同时启动通过校验的实盘交易。",
+        "ENABLE_LIVE_TRADING": "运行模式选择实盘或纸面+实盘时会自动开启；关闭后只能安全运行纸面测试。",
         "MARKET_TIMEFRAME": "选择当前要玩的 Polymarket BTC 预测频次，仅支持 5 分钟和 15 分钟。",
         "OPEN_DELAY_SECONDS": "OPEN 模式下，从每轮开始后延迟多少秒再尝试入场。",
         "POLYMARKET_PRIVATE_KEY": "实盘钱包私钥，仅在并行实盘开启时需要。",
@@ -3130,9 +3130,10 @@ def _dashboard_html() -> str:
               <div id="configContextSummary" class="strategy-guide-subtitle">当前按模拟盘配置展示。</div>
             </div>
             <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
-              <select id="configModeSelect" class="input-compact" aria-label="左侧配置视角选择" title="配置视角">
-                <option value="paper">纸面视角</option>
-                <option value="live">实盘视角</option>
+              <select id="configModeSelect" class="input-compact" aria-label="运行模式选择" title="运行模式">
+                <option value="paper">纸面</option>
+                <option value="live">实盘</option>
+                <option value="both">纸面+实盘</option>
               </select>
               <select id="cfg_MARKET_TIMEFRAME" class="input-compact" aria-label="市场频次" title="市场频次">
                 <option value="5m">频次 5m</option>
@@ -4970,6 +4971,7 @@ const OPTION_LABELS = {
   TRADE_MODE: {
     paper: '模拟盘',
     live: '实盘',
+    both: '纸面+实盘',
   },
   LIVE_TRADING_ENABLED: {
     true: '开启',
@@ -5424,13 +5426,27 @@ function isPaperProfileConfigKey(key) {
   return raw === 'PAPER_TIMEFRAMES' || /^PAPER_(5M|15M)_/.test(raw);
 }
 
+function normalizeTradeMode(value) {
+  const normalized = String(value || 'paper').toLowerCase();
+  return ['paper', 'live', 'both'].indexOf(normalized) >= 0 ? normalized : 'paper';
+}
+
+function configStrategyModeForTradeMode(value) {
+  return normalizeTradeMode(value) === 'live' ? 'live' : 'paper';
+}
+
+function modeRunsLive(value) {
+  const normalized = normalizeTradeMode(value);
+  return normalized === 'live' || normalized === 'both';
+}
+
 function activeConfigModeFromValues(payload, values) {
   const envValues = (payload && payload.env_values) || {};
   const mergedValues = {
     ...envValues,
     ...(values || {}),
   };
-  return buildLiveToggleValue(mergedValues) === 'true' ? 'live' : 'paper';
+  return configStrategyModeForTradeMode(mergedValues.TRADE_MODE);
 }
 
 function strategyListKeyForMode(mode) {
@@ -6658,25 +6674,24 @@ function isCompactConfigField(key) {
 }
 
 function buildLiveToggleValue(values) {
-  const mode = String(values.TRADE_MODE || 'paper').toLowerCase();
   const enabled = String(values.LIVE_TRADING_ENABLED || 'false').toLowerCase();
-  return mode === 'live' && enabled === 'true' ? 'true' : 'false';
+  return enabled === 'true' ? 'true' : 'false';
 }
 
 function effectiveConfigMode(payload) {
   const envValues = (payload && payload.env_values) || {};
-  return String(envValues.TRADE_MODE || 'paper').toLowerCase() === 'live' ? 'live' : 'paper';
+  return normalizeTradeMode(envValues.TRADE_MODE || 'paper');
 }
 
 function renderTaskflowVisibility(mode) {
-  const normalizedMode = String(mode || 'paper').toLowerCase() === 'live' ? 'live' : 'paper';
+  const normalizedMode = normalizeTradeMode(mode);
   const paperRoot = el('paperTaskflowRoot');
   const liveRoot = el('liveTaskflowRoot');
   if (paperRoot) {
-    paperRoot.hidden = normalizedMode !== 'paper';
+    paperRoot.hidden = normalizedMode === 'live';
   }
   if (liveRoot) {
-    liveRoot.hidden = normalizedMode !== 'live';
+    liveRoot.hidden = normalizedMode === 'paper';
   }
 }
 
@@ -6699,21 +6714,21 @@ function renderConfigModeShell(payload) {
   }
   selectNode.dataset.bound = 'true';
   selectNode.addEventListener('change', () => {
-    const nextMode = String(selectNode.value || 'paper').toLowerCase() === 'live' ? 'live' : 'paper';
+    const nextMode = normalizeTradeMode(selectNode.value || 'paper');
     const modeField = el('cfg_TRADE_MODE');
     if (modeField) {
       modeField.value = nextMode;
     }
     const liveToggleField = el('cfg_ENABLE_LIVE_TRADING');
     if (liveToggleField) {
-      liveToggleField.value = nextMode === 'live' ? 'true' : 'false';
+      liveToggleField.value = modeRunsLive(nextMode) ? 'true' : 'false';
     }
     state.config = {
       ...(state.config || {}),
       env_values: {
         ...(((state.config || {}).env_values) || {}),
         TRADE_MODE: nextMode,
-        LIVE_TRADING_ENABLED: nextMode === 'live' ? 'true' : 'false',
+        LIVE_TRADING_ENABLED: modeRunsLive(nextMode) ? 'true' : 'false',
       },
     };
     const form = el('configForm');
@@ -6729,6 +6744,12 @@ function renderConfigModeShell(payload) {
 
 function expandLiveToggleValues(values) {
   const expanded = { ...values };
+  if (!expanded.TRADE_MODE) {
+    const modeSelect = el('configModeSelect');
+    if (modeSelect) {
+      expanded.TRADE_MODE = normalizeTradeMode(modeSelect.value);
+    }
+  }
   if (!Object.prototype.hasOwnProperty.call(expanded, 'ENABLE_LIVE_TRADING')) {
     return expanded;
   }
@@ -6855,10 +6876,10 @@ function applyTimeframePreset(timeframe) {
 
 
 function shouldConfirmLiveModeSwitch(previousMode, nextMode, nextLiveEnabled) {
-  previousMode = String(previousMode || 'paper').toLowerCase();
-  nextMode = String(nextMode || 'paper').toLowerCase();
+  previousMode = normalizeTradeMode(previousMode || 'paper');
+  nextMode = normalizeTradeMode(nextMode || 'paper');
   nextLiveEnabled = String(nextLiveEnabled || 'false').toLowerCase() === 'true';
-  return previousMode !== 'live' && nextMode === 'live' && nextLiveEnabled;
+  return !modeRunsLive(previousMode) && modeRunsLive(nextMode) && nextLiveEnabled;
 }
 
 function renderConfig(payload) {
@@ -7141,6 +7162,10 @@ function collectConfigValues(options) {
       continue;
     }
     payload[key] = node.value;
+  }
+  const modeSelect = el('configModeSelect');
+  if (modeSelect) {
+    payload.TRADE_MODE = normalizeTradeMode(modeSelect.value);
   }
   document.querySelectorAll('[data-strategy-config-key]').forEach((node) => {
     const key = String(node.getAttribute('data-strategy-config-key') || '');

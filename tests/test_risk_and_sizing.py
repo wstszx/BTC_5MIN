@@ -230,3 +230,21 @@ def test_flat_base_cost_mode_ignores_and_clears_recovery_loss():
     assert after_loss.cash_pnl == -1.0
     assert after_loss.recovery_loss == 0.0
     assert after_loss.consecutive_losses == 3
+
+
+def test_flat_base_cost_mode_uses_same_cost_after_loss():
+    state = SessionState(recovery_loss=1.2, consecutive_losses=1)
+    plan = build_trade_plan(
+        state=state,
+        side="DOWN",
+        price=0.54,
+        target_profit=0.8,
+        max_price_threshold=0.56,
+        max_stake=100,
+        max_consecutive_losses=8,
+        bet_sizing_mode="FLAT_BASE_COST",
+        base_order_cost=1.2,
+    )
+
+    assert plan.should_trade is True
+    assert plan.order_cost == 1.2

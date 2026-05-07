@@ -24,7 +24,7 @@ class RuntimeSnapshot:
 
 class RuntimeControl:
     _VALID_STATES = {"idle", "pending", "switching", "blocked"}
-    _MODE_MAP = {"paper": "paper", "live": "live"}
+    _MODE_MAP = {"paper": "paper", "live": "live", "both": "both"}
 
     def __init__(self, initial_mode: str) -> None:
         normalized = self._normalize_mode(initial_mode)
@@ -193,7 +193,7 @@ class RuntimeControl:
         with self._lock:
             snapshot = self._snapshot
             updates = {}
-            if normalized != "paper":
+            if normalized not in {"paper", "both"}:
                 self._paper_worker_states.clear()
             if snapshot.active_mode != normalized:
                 updates["active_mode"] = normalized

@@ -96,6 +96,12 @@ def test_build_config_from_env_values_reads_trade_mode_and_live_switches():
     assert cfg.live_chain_id == 137
 
 
+def test_build_config_from_env_values_accepts_both_trade_mode():
+    cfg = build_config_from_env_values({'TRADE_MODE': 'both'})
+
+    assert cfg.trade_mode == 'both'
+
+
 def test_build_config_from_env_values_defaults_trade_mode_to_paper():
     cfg = build_config_from_env_values({})
 
@@ -315,14 +321,14 @@ def test_run_single_command_runtime_uses_live_worker_when_trade_mode_live(monkey
 
     assert exit_code == 0
     assert load_calls[:2] == [env_file, env_file]
-    assert paper_calls['count'] == 1
+    assert paper_calls['count'] == 0
     assert live_calls['cfg'] is startup_cfg
     assert live_calls['provider_cfg'] is refreshed_cfg
     assert dashboard_runtime.shutdown_calls >= 1
     assert dashboard_runtime.close_calls == 1
 
 
-def test_run_single_command_runtime_live_view_without_live_switch_starts_paper_only(monkeypatch, tmp_path: Path):
+def test_run_single_command_runtime_live_mode_without_live_switch_fails_fast(monkeypatch, tmp_path: Path):
     env_file = tmp_path / ".env.dashboard"
     startup_cfg = AppConfig(
         trade_mode='live',
@@ -368,9 +374,9 @@ def test_run_single_command_runtime_live_view_without_live_switch_starts_paper_o
 
     exit_code = main.run_single_command_runtime(env_file=env_file)
 
-    assert exit_code == 0
-    assert dashboard_kwargs["running_trade_mode"] == "paper"
-    assert paper_calls["count"] == 1
+    assert exit_code == 1
+    assert dashboard_kwargs == {}
+    assert paper_calls["count"] == 0
     assert live_calls["count"] == 0
 
 
@@ -426,7 +432,7 @@ def test_run_single_command_runtime_does_not_start_live_redeem_worker_in_live_mo
 
     assert exit_code == 0
     assert load_calls[0] == env_file
-    assert paper_calls["count"] == 1
+    assert paper_calls["count"] == 0
     assert live_calls == {"trading": 1, "redeem": 0}
 
 
@@ -591,7 +597,6 @@ def test_run_single_command_runtime_switches_from_live_to_paper_when_live_disabl
 
     assert exit_code == 0
     assert calls == [
-        ('paper', 'paper', True),
         ('live', 'live', True),
         ('paper', 'paper', False),
     ]
@@ -599,19 +604,19 @@ def test_run_single_command_runtime_switches_from_live_to_paper_when_live_disabl
 
 def test_run_single_command_runtime_reloads_to_paper_only_when_live_switch_disabled(monkeypatch, tmp_path: Path):
     startup_cfg = AppConfig(
-        trade_mode='live',
+        trade_mode='both',
         live_trading_enabled=True,
         live_private_key='pk',
         live_funder='0xfunder',
     )
-    live_view_disabled_cfg = AppConfig(trade_mode='live', live_trading_enabled=False)
+    paper_cfg = AppConfig(trade_mode='paper', live_trading_enabled=False)
     states = {'count': 0}
     calls: list[tuple[str, str, bool]] = []
     runtime_reload = {'callback': None}
 
     def fake_load_shared_config(_path: Path):
         states['count'] += 1
-        return startup_cfg if states['count'] == 1 else live_view_disabled_cfg
+        return startup_cfg if states['count'] == 1 else paper_cfg
 
     def fake_create_dashboard_runtime(**kwargs):
         runtime_reload['callback'] = kwargs.get('notify_runtime_reload')
@@ -778,10 +783,10 @@ def test_run_single_command_runtime_keeps_live_single_worker_when_paper_profiles
     assert live_calls == ['15m']
 
 
-def test_run_single_command_runtime_starts_paper_and_live_when_live_enabled(monkeypatch):
+def test_run_single_command_runtime_starts_only_paper_when_trade_mode_is_paper_even_if_live_enabled(monkeypatch):
     cfg = build_config_from_env_values(
         {
-            'TRADE_MODE': 'live',
+            'TRADE_MODE': 'paper',
             'LIVE_TRADING_ENABLED': 'true',
             'POLYMARKET_PRIVATE_KEY': 'pk',
             'POLYMARKET_FUNDER': '0xfunder',
@@ -821,24 +826,64 @@ def test_run_single_command_runtime_starts_paper_and_live_when_live_enabled(monk
     exit_code = main.run_single_command_runtime()
 
     assert exit_code == 0
-    assert any(
-        worker == 'paper'
-        and timeframe == '5m'
-        and _path_tail(log_path, 4) == ('logs', 'paper', '5m', 'paper_trades.csv')
-        for worker, timeframe, log_path in calls
-    )
-    assert ('live', '15m', 'live_orders.csv') in calls
+    assert calls == [('paper', '5m', str(Path('logs') / 'paper' / '5m' / 'paper_trades.csv'))]
 
 
-def test_run_single_command_runtime_can_run_live_alongside_paper_mode(monkeypatch):
+def test_run_single_command_runtime_starts_only_live_when_trade_mode_is_live(monkeypatch):
     cfg = build_config_from_env_values(
         {
-            'TRADE_MODE': 'paper',
+            'TRADE_MODE': 'live',
             'LIVE_TRADING_ENABLED': 'true',
             'POLYMARKET_PRIVATE_KEY': 'pk',
             'POLYMARKET_FUNDER': '0xfunder',
             'PAPER_TIMEFRAMES': '5m',
             'PAPER_5M_STRATEGY_IDS': '5',
+            'LIVE_STRATEGY_IDS': '7',
+            'MARKET_TIMEFRAME': '15m',
+        }
+    )
+    calls: list[tuple[str, str, str]] = []
+
+    class FakeDashboardRuntime:
+        def serve_forever(self) -> None:
+            return
+
+        def shutdown(self) -> None:
+            return
+
+        def close(self) -> None:
+            return
+
+    def fake_run_paper_trading(cfg, *, stop_event, config_provider, state_path=None, log_path=None, runtime_control=None, stop_when_safe=None):
+        calls.append(('paper', cfg.trade_mode, cfg.market_timeframe))
+        return {'status': 'stopped'}
+
+    def fake_run_live_trading(cfg, *, stop_event, config_provider, runtime_control=None, stop_when_safe=None):
+        calls.append(('live', cfg.trade_mode, cfg.market_timeframe))
+        stop_event.set()
+        return {'status': 'stopped'}
+
+    monkeypatch.setattr(main, '_load_shared_config', lambda _: cfg)
+    monkeypatch.setattr(main, 'create_dashboard_runtime', lambda **_: FakeDashboardRuntime())
+    monkeypatch.setattr(main, 'run_paper_trading', fake_run_paper_trading)
+    monkeypatch.setattr(main, 'run_live_trading', fake_run_live_trading, raising=False)
+
+    exit_code = main.run_single_command_runtime()
+
+    assert exit_code == 0
+    assert calls == [('live', 'live', '15m')]
+
+
+def test_run_single_command_runtime_starts_paper_and_live_when_trade_mode_is_both(monkeypatch):
+    cfg = build_config_from_env_values(
+        {
+            'TRADE_MODE': 'both',
+            'LIVE_TRADING_ENABLED': 'true',
+            'POLYMARKET_PRIVATE_KEY': 'pk',
+            'POLYMARKET_FUNDER': '0xfunder',
+            'PAPER_TIMEFRAMES': '5m',
+            'PAPER_5M_STRATEGY_ID': '5',
+            'PAPER_5M_STRATEGY_IDS': '5,6',
             'LIVE_STRATEGY_IDS': '7',
             'MARKET_TIMEFRAME': '15m',
         }

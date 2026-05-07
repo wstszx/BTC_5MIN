@@ -803,8 +803,10 @@ def test_dashboard_assets_include_left_panel_mode_selector_shell():
     assert "function renderConfigModeShell(payload)" in js
     assert "function renderTaskflowVisibility(mode)" in js
     assert "function activeStrategyListKey(payload, values)" in js
+    assert '<option value="both">纸面+实盘</option>' in html
+    assert "function normalizeTradeMode(value)" in js
     assert "const envValues = (payload && payload.env_values) || {};" in js
-    assert "return String(envValues.TRADE_MODE || 'paper').toLowerCase() === 'live' ? 'live' : 'paper';" in js
+    assert "return configStrategyModeForTradeMode(mergedValues.TRADE_MODE);" in js
 
 
 def test_dashboard_assets_distinguish_current_and_historical_ws_errors():
@@ -828,8 +830,8 @@ def test_dashboard_assets_hide_paper_and_live_sections_by_active_mode():
 
     assert "const paperRoot = el('paperTaskflowRoot');" in js
     assert "const liveRoot = el('liveTaskflowRoot');" in js
-    assert "paperRoot.hidden = normalizedMode !== 'paper';" in js
-    assert "liveRoot.hidden = normalizedMode !== 'live';" in js
+    assert "paperRoot.hidden = normalizedMode === 'live';" in js
+    assert "liveRoot.hidden = normalizedMode === 'paper';" in js
     assert "const modeField = el('cfg_TRADE_MODE');" in js
     assert "modeField.value = nextMode;" in js
     assert "renderUnifiedStrategyToolbar(state.config || {}, currentUnifiedStrategyDraftValues());" in js
@@ -846,9 +848,10 @@ def test_dashboard_assets_mode_selector_propagates_into_save_payload_path():
     assert "const modeField = el('cfg_TRADE_MODE');" in js
     assert "modeField.value = nextMode;" in js
     assert "const liveToggleField = el('cfg_ENABLE_LIVE_TRADING');" in js
-    assert "liveToggleField.value = nextMode === 'live' ? 'true' : 'false';" in js
+    assert "liveToggleField.value = modeRunsLive(nextMode) ? 'true' : 'false';" in js
     assert "const keys = ['ENABLE_LIVE_TRADING', ...(((state.config && state.config.editable_keys) || []).filter((key) => !isSingleLiveToggleKey(key)))];" in js
     assert "payload[key] = node.value;" in js
+    assert "payload.TRADE_MODE = normalizeTradeMode(modeSelect.value);" in js
     assert "if (!expanded.TRADE_MODE) {" in js
     assert "expanded.LIVE_TRADING_ENABLED = normalized;" in js
     assert "const editableKeySet = new Set(['ENABLE_LIVE_TRADING', 'TRADE_MODE'," in js
@@ -1977,7 +1980,7 @@ def test_dashboard_runtime_mode_labels_are_localized(tmp_path: Path):
         assert payload['labels']['POLYMARKET_API_KEY'] == '官方 API 访问密钥'
         assert payload['labels']['POLYMARKET_API_SECRET'] == '官方 API 签名密钥'
         assert payload['labels']['POLYMARKET_API_PASSPHRASE'] == '官方 API 通行口令'
-        assert payload['field_help']['ENABLE_LIVE_TRADING'].startswith('关闭时仅运行纸面测试')
+        assert payload['field_help']['ENABLE_LIVE_TRADING'].startswith('运行模式选择实盘或纸面+实盘')
         assert payload['field_help']['POLYMARKET_PRIVATE_KEY'].startswith('实盘钱包私钥')
         assert payload['field_help']['POLYMARKET_FUNDER'].startswith('与私钥对应的实盘钱包地址')
         assert payload['field_help']['POLYMARKET_API_KEY'].startswith('CLOB 实盘下单凭证')
@@ -2463,7 +2466,7 @@ def test_dashboard_assets_confirm_before_switching_to_live_mode():
 
     assert 'function shouldConfirmLiveModeSwitch(' in js
     assert "nextLiveEnabled = String(nextLiveEnabled || 'false').toLowerCase() === 'true';" in js
-    assert "return previousMode !== 'live' && nextMode === 'live' && nextLiveEnabled;" in js
+    assert "return !modeRunsLive(previousMode) && modeRunsLive(nextMode) && nextLiveEnabled;" in js
     assert "const nextLiveEnabled = String(values.LIVE_TRADING_ENABLED || 'false').toLowerCase() === 'true';" in js
     assert 'window.confirm(' in js
 

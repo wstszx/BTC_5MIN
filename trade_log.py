@@ -53,14 +53,23 @@ def live_row_is_actionable_update(row: dict[str, Any]) -> bool:
     return _positive_number(row.get("order_cost")) or _positive_number(row.get("order_size"))
 
 
-def live_trade_log_upsert_key(row: dict[str, Any]) -> tuple[str, str] | None:
-    if str(row.get("mode") or "").strip().lower() != "live":
+def _mode_trade_log_upsert_key(row: dict[str, Any], mode: str) -> tuple[str, str, str] | None:
+    if str(row.get("mode") or "").strip().lower() != mode:
         return None
     strategy = str(row.get("strategy") or "").strip()
     event_slug = str(row.get("event_slug") or "").strip()
     if not strategy or not event_slug:
         return None
-    return strategy, event_slug
+    experiment_id = str(row.get("experiment_id") or "").strip()
+    return strategy, event_slug, experiment_id
+
+
+def live_trade_log_upsert_key(row: dict[str, Any]) -> tuple[str, str, str] | None:
+    return _mode_trade_log_upsert_key(row, "live")
+
+
+def paper_trade_log_upsert_key(row: dict[str, Any]) -> tuple[str, str, str] | None:
+    return _mode_trade_log_upsert_key(row, "paper")
 
 
 def merge_live_trade_log_rows(existing: dict[str, str], incoming: dict[str, Any], fieldnames: list[str]) -> dict[str, Any]:
@@ -79,6 +88,14 @@ def merge_live_trade_log_rows(existing: dict[str, str], incoming: dict[str, Any]
             continue
         merged[field_name] = incoming_value
     return merged
+
+
+def merge_paper_trade_log_rows(existing: dict[str, str], incoming: dict[str, Any], fieldnames: list[str]) -> dict[str, Any] | None:
+    existing_actionable = row_has_result(existing) or _positive_number(existing.get("order_cost")) or _positive_number(existing.get("order_size"))
+    incoming_actionable = row_has_result(incoming) or _positive_number(incoming.get("order_cost")) or _positive_number(incoming.get("order_size"))
+    if existing_actionable and not incoming_actionable:
+        return None
+    return {field_name: incoming.get(field_name, "") for field_name in fieldnames}
 
 
 def _can_migrate_header(existing_header: list[str], fieldnames: list[str]) -> bool:
@@ -131,6 +148,21 @@ def append_trade_log(path: Path, record: TradeRecord) -> None:
             if row_has_result(existing_row):
                 continue
             existing_rows[index] = merge_live_trade_log_rows(existing_row, row, fieldnames)
+            _rewrite_with_fieldnames(path, existing_rows, fieldnames)
+            return
+
+    upsert_key = paper_trade_log_upsert_key(row)
+    if upsert_key is not None and path.exists() and not write_header:
+        with path.open("r", newline="", encoding="utf-8") as handle:
+            existing_rows = list(csv.DictReader(handle))
+        for index in range(len(existing_rows) - 1, -1, -1):
+            existing_row = existing_rows[index]
+            if paper_trade_log_upsert_key(existing_row) != upsert_key:
+                continue
+            merged_row = merge_paper_trade_log_rows(existing_row, row, fieldnames)
+            if merged_row is None:
+                return
+            existing_rows[index] = merged_row
             _rewrite_with_fieldnames(path, existing_rows, fieldnames)
             return
 
