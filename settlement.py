@@ -81,6 +81,7 @@ def append_settled_live_trade_log(
             cash_pnl=updated_state.cash_pnl,
             recovery_loss=updated_state.recovery_loss,
             consecutive_losses=updated_state.consecutive_losses,
+            tracks_recovery_loss=prior_state.pending_live_tracks_recovery_loss,
         ),
     )
 
@@ -132,6 +133,7 @@ def append_provisional_live_loss_trade_log(
             cash_pnl=updated_state.cash_pnl,
             recovery_loss=updated_state.recovery_loss,
             consecutive_losses=updated_state.consecutive_losses,
+            tracks_recovery_loss=prior_state.pending_live_tracks_recovery_loss,
         ),
     )
 
@@ -709,6 +711,7 @@ def settle_pending_paper_trades(
                 signal_delta=item.signal_delta,
                 signal_locked=item.signal_locked,
                 signal_reason=item.signal_reason,
+                tracks_recovery_loss=item.tracks_recovery_loss,
             ),
         )
         _runtime_log(

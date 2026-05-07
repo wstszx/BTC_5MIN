@@ -3458,6 +3458,92 @@ def test_live_recent_orders_auto_reconciles_mismatched_result(tmp_path: Path, mo
         os.chdir(old_cwd)
 
 
+def test_live_recent_orders_auto_reconcile_does_not_restore_legacy_flat_sizing_state(tmp_path: Path, monkeypatch):
+    old_cwd = Path.cwd()
+    os.chdir(tmp_path)
+
+    class StubClient:
+        def __init__(self, cfg):
+            self.config = cfg
+
+        def close(self) -> None:
+            return
+
+        def get_event_by_slug(self, slug: str):
+            return {
+                "id": "evt-1",
+                "slug": slug,
+                "eventMetadata": {
+                    "priceToBeat": 100.0,
+                    "finalPrice": 90.0,
+                },
+                "markets": [
+                    {
+                        "id": "mkt-1",
+                        "outcomes": '["Up", "Down"]',
+                        "outcomePrices": '["0", "1"]',
+                        "closed": True,
+                    }
+                ],
+            }
+
+    monkeypatch.setattr(dashboard, "PolymarketClient", StubClient)
+    env_file = tmp_path / ".env.dashboard"
+    env_file.write_text(
+        "TRADE_MODE=live\n"
+        "STRATEGY_ID=7\n"
+        "LIVE_STRATEGY_IDS=7\n"
+        "LIVE_STRATEGY_7_BET_SIZING_MODE=FLAT_BASE_COST\n",
+        encoding="utf-8",
+    )
+    state = DashboardState(env_file=env_file)
+    try:
+        logs_dir = tmp_path / "logs"
+        logs_dir.mkdir(parents=True, exist_ok=True)
+        (logs_dir / "live_orders.csv").write_text(
+            "timestamp,mode,round_index,strategy,entry_timing,event_slug,start_time,end_time,side,price,order_size,order_cost,expected_profit,result,trade_pnl,cash_pnl,recovery_loss,consecutive_losses,stop_loss_triggered,skip_reason,signal_open_up_price,signal_current_up_price,signal_threshold,signal_delta,signal_locked,signal_reason,experiment_id\n"
+            "2026-05-01T09:35:01+00:00,live,10,7,OPEN,btc-updown-5m-1777628100,2026-05-01T09:35:00+00:00,2026-05-01T09:40:00+00:00,UP,0.55,4.0,2.2,1.8,UP,1.8,1.8,0.0,0,False,,,,,,False,,\n",
+            encoding="utf-8",
+        )
+        (logs_dir / "live_session_state.json").write_text(
+            json.dumps(
+                {
+                    "round_index": 11,
+                    "cash_pnl": 1.8,
+                    "recovery_loss": 0.0,
+                    "consecutive_losses": 0,
+                    "daily_realized_pnl": 1.8,
+                    "live_strategies": {
+                        "7": {
+                            "round_index": 11,
+                            "cash_pnl": 1.8,
+                            "recovery_loss": 0.0,
+                            "consecutive_losses": 0,
+                            "daily_realized_pnl": 1.8,
+                        }
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        state.get_live_recent_orders_payload(limit=10, strategy=7)
+
+        rows = list(csv.DictReader((logs_dir / "live_orders.csv").open(newline="", encoding="utf-8")))
+        state_payload = json.loads((logs_dir / "live_session_state.json").read_text(encoding="utf-8"))
+        assert rows[0]["result"] == "DOWN"
+        assert rows[0]["trade_pnl"] == "-2.2"
+        assert rows[0]["cash_pnl"] == "-2.2"
+        assert rows[0]["recovery_loss"] == "0.0"
+        assert rows[0]["consecutive_losses"] == "0"
+        assert state_payload["live_strategies"]["7"]["cash_pnl"] == -2.2
+        assert state_payload["live_strategies"]["7"]["recovery_loss"] == 0.0
+        assert state_payload["live_strategies"]["7"]["consecutive_losses"] == 0
+    finally:
+        state.close()
+        os.chdir(old_cwd)
+
+
 def test_live_recent_orders_auto_reconciles_provisional_loss(tmp_path: Path, monkeypatch):
     old_cwd = Path.cwd()
     os.chdir(tmp_path)

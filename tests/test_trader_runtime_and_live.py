@@ -147,6 +147,61 @@ def test_sync_live_state_ledger_from_trade_log_uses_reconciled_loss(tmp_path: Pa
     assert state.cash_pnl == pytest.approx(0.8000006)
 
 
+def test_sync_live_state_ledger_from_trade_log_does_not_restore_legacy_flat_sizing_state(tmp_path: Path):
+    live_csv = tmp_path / "live_orders.csv"
+    with live_csv.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(
+            handle,
+            fieldnames=[
+                "strategy",
+                "end_time",
+                "side",
+                "order_cost",
+                "expected_profit",
+                "result",
+                "skip_reason",
+            ],
+        )
+        writer.writeheader()
+        writer.writerow(
+            {
+                "strategy": "7",
+                "end_time": "2026-05-03T00:35:00+00:00",
+                "side": "DOWN",
+                "order_cost": "1.1999994",
+                "expected_profit": "1.1529406",
+                "result": "UP",
+                "skip_reason": "",
+            }
+        )
+
+    cfg = AppConfig(strategy_id=7, live_strategy_ids=[7], bet_sizing_mode="FLAT_BASE_COST")
+    state = SessionState(
+        cash_pnl=0.0,
+        daily_realized_pnl=0.0,
+        recovery_loss=0.0,
+        consecutive_losses=0,
+        live_strategies={
+            7: LiveStrategyState(
+                cash_pnl=0.0,
+                daily_realized_pnl=0.0,
+                recovery_loss=0.0,
+                consecutive_losses=0,
+            )
+        },
+    )
+
+    _sync_live_state_ledger_from_trade_log(state, live_csv=live_csv, active_strategy_ids=[7], cfg=cfg)
+
+    live_state = state.live_strategies[7]
+    assert live_state.cash_pnl == pytest.approx(-1.1999994)
+    assert live_state.daily_realized_pnl == pytest.approx(-1.1999994)
+    assert live_state.recovery_loss == 0.0
+    assert live_state.consecutive_losses == 0
+    assert state.recovery_loss == 0.0
+    assert state.consecutive_losses == 0
+
+
 def test_sync_live_state_ledger_from_trade_log_respects_stop_loss_reset(tmp_path: Path):
     live_csv = tmp_path / "live_orders.csv"
     with live_csv.open("w", newline="", encoding="utf-8") as handle:

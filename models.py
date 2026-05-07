@@ -94,6 +94,7 @@ class TradeRecord:
     signal_reason: str | None = None
     experiment_id: str | None = None
     balance_error: str | None = None
+    tracks_recovery_loss: bool = True
 
 
 @dataclass(slots=True)

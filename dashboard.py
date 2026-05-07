@@ -977,7 +977,43 @@ def _live_row_counts_for_ledger(row: dict[str, str], result: str) -> bool:
     return _live_float_value(row, "order_cost") > 0.0
 
 
-def _recompute_live_ledger_rows(rows: list[dict[str, str]]) -> dict[str, dict[str, float | int]]:
+def _live_strategy_uses_recovery_loss(cfg: AppConfig | None, strategy_id: str) -> bool:
+    if cfg is None:
+        return True
+    try:
+        numeric_strategy_id = int(strategy_id)
+    except (TypeError, ValueError):
+        return True
+    profile = getattr(cfg, "live_profiles", {}).get(numeric_strategy_id)
+    mode = getattr(profile, "bet_sizing_mode", getattr(cfg, "bet_sizing_mode", "FIXED_BASE_COST"))
+    return str(mode or "").strip().upper() != "FLAT_BASE_COST"
+
+
+def _live_row_explicit_tracks_recovery_loss(row: dict[str, str]) -> bool | None:
+    raw_value = row.get("tracks_recovery_loss")
+    if raw_value is not None and str(raw_value).strip():
+        return str(raw_value).strip().lower() in {"1", "true", "yes", "on"}
+    return None
+
+
+def _live_row_tracks_recovery_loss(row: dict[str, str], cfg: AppConfig | None, strategy_id: str) -> bool:
+    explicit_value = _live_row_explicit_tracks_recovery_loss(row)
+    if explicit_value is not None:
+        return explicit_value
+    return _live_strategy_uses_recovery_loss(cfg, strategy_id)
+
+
+def _live_row_tracks_loss_streak(row: dict[str, str], cfg: AppConfig | None, strategy_id: str) -> bool:
+    if _live_row_explicit_tracks_recovery_loss(row) is not None:
+        return True
+    return _live_strategy_uses_recovery_loss(cfg, strategy_id)
+
+
+def _recompute_live_ledger_rows(
+    rows: list[dict[str, str]],
+    *,
+    cfg: AppConfig | None = None,
+) -> dict[str, dict[str, float | int]]:
     states: dict[str, dict[str, float | int]] = {}
     latest_days: dict[str, str] = {}
     trade_deltas: list[tuple[str, str, float]] = []
@@ -1000,17 +1036,23 @@ def _recompute_live_ledger_rows(rows: list[dict[str, str]]) -> dict[str, dict[st
             side = str(row.get("side") or "").strip().upper()
             order_cost = _live_float_value(row, "order_cost")
             expected_profit = _live_float_value(row, "expected_profit")
+            tracks_recovery_loss = _live_row_tracks_recovery_loss(row, cfg, strategy_id)
+            tracks_loss_streak = _live_row_tracks_loss_streak(row, cfg, strategy_id)
             if result == side:
                 trade_pnl = expected_profit
                 state["cash_pnl"] = float(state["cash_pnl"]) + trade_pnl
                 state["daily_realized_pnl"] = float(state["daily_realized_pnl"]) + trade_pnl
-                state["recovery_loss"] = 0.0
-                state["consecutive_losses"] = 0
+                if tracks_recovery_loss:
+                    state["recovery_loss"] = 0.0
+                if tracks_loss_streak:
+                    state["consecutive_losses"] = 0
             else:
                 trade_pnl = -order_cost
                 state["cash_pnl"] = float(state["cash_pnl"]) + trade_pnl
-                state["recovery_loss"] = float(state["recovery_loss"]) + order_cost
-                state["consecutive_losses"] = int(state["consecutive_losses"]) + 1
+                if tracks_recovery_loss:
+                    state["recovery_loss"] = float(state["recovery_loss"]) + order_cost
+                if tracks_loss_streak:
+                    state["consecutive_losses"] = int(state["consecutive_losses"]) + 1
             session_day = _live_row_session_day(row)
             if session_day:
                 latest_days[strategy_id] = max(latest_days.get(strategy_id, ""), session_day)
@@ -1033,6 +1075,7 @@ def _update_live_session_state_from_ledger(
     state_path: Path,
     ledger_states: dict[str, dict[str, float | int]],
     active_strategy_id: int,
+    cfg: AppConfig | None = None,
 ) -> None:
     if not state_path.exists():
         return
@@ -1047,10 +1090,14 @@ def _update_live_session_state_from_ledger(
             continue
         for key in ("cash_pnl", "daily_realized_pnl", "recovery_loss", "consecutive_losses"):
             strategy_payload[key] = ledger_state[key]
+        if not _live_strategy_uses_recovery_loss(cfg, strategy_id):
+            strategy_payload["recovery_loss"] = 0.0
     active_state = ledger_states.get(str(active_strategy_id))
     if active_state is not None:
         for key in ("cash_pnl", "daily_realized_pnl", "recovery_loss", "consecutive_losses"):
             payload[key] = active_state[key]
+        if not _live_strategy_uses_recovery_loss(cfg, str(active_strategy_id)):
+            payload["recovery_loss"] = 0.0
     atomic_write_text(state_path, json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
 
 
@@ -1085,6 +1132,7 @@ def _auto_reconcile_live_ledger(
     client: PolymarketClient | Any,
     validation_cache: dict[str, dict[str, str]] | None,
     active_strategy_id: int,
+    cfg: AppConfig | None = None,
     provisional_only: bool = False,
 ) -> int:
     if not live_csv.exists():
@@ -1139,7 +1187,7 @@ def _auto_reconcile_live_ledger(
     if changed <= 0 and not needs_state_sync:
         return 0
 
-    ledger_states = _recompute_live_ledger_rows(rows)
+    ledger_states = _recompute_live_ledger_rows(rows, cfg=cfg)
     if changed > 0:
         _backup_live_ledger_files(live_csv=live_csv, state_path=state_path)
         with live_csv.open("w", newline="", encoding="utf-8") as handle:
@@ -1150,6 +1198,7 @@ def _auto_reconcile_live_ledger(
         state_path=state_path,
         ledger_states=ledger_states,
         active_strategy_id=active_strategy_id,
+        cfg=cfg,
     )
     return changed
 
@@ -2665,6 +2714,7 @@ class DashboardState:
                     client=client,
                     validation_cache=validation_cache,
                     active_strategy_id=cfg.strategy_id,
+                    cfg=cfg,
                     provisional_only=not (has_recent_mismatch or has_unofficial_live_result),
                 )
                 if corrected_count > 0:
@@ -4866,7 +4916,7 @@ const HELP_SECTIONS = {
       {
         title: '重置与告警',
         bullets: [
-          '每次亏损会增加 recovery_loss 和 consecutive_losses；获胜后会清空 recovery_loss 和 consecutive_losses。',
+          'FIXED_BASE_COST/TARGET_PROFIT 每次亏损会增加 recovery_loss 和 consecutive_losses；FLAT_BASE_COST 不累积 recovery_loss。',
           '连续亏损达到 MAX_CONSECUTIVE_LOSSES 会触发止损重置，并增加 stop_loss_count。',
           '连续因 MAX_STAKE 超额而跳过也会累积计数，达到 MAX_CONSECUTIVE_LOSSES 时会按风险门处理并重置。',
           'MAX_STAKE_SKIP_ALERT_THRESHOLD 控制连续超额跳过多少次后打印提醒。',

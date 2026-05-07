@@ -196,11 +196,40 @@ def _trade_log_session_day(row: dict[str, str]) -> str:
     return ""
 
 
+def _strategy_uses_recovery_loss(cfg: AppConfig | None, strategy_id: int) -> bool:
+    if cfg is None:
+        return True
+    profile = getattr(cfg, "live_profiles", {}).get(strategy_id)
+    mode = getattr(profile, "bet_sizing_mode", getattr(cfg, "bet_sizing_mode", "FIXED_BASE_COST"))
+    return str(mode or "").strip().upper() != "FLAT_BASE_COST"
+
+
+def _trade_log_explicit_tracks_recovery_loss(row: dict[str, str]) -> bool | None:
+    raw_value = row.get("tracks_recovery_loss")
+    if raw_value is not None and str(raw_value).strip():
+        return str(raw_value).strip().lower() in {"1", "true", "yes", "on"}
+    return None
+
+
+def _trade_log_row_tracks_recovery_loss(row: dict[str, str], cfg: AppConfig | None, strategy_id: int) -> bool:
+    explicit_value = _trade_log_explicit_tracks_recovery_loss(row)
+    if explicit_value is not None:
+        return explicit_value
+    return _strategy_uses_recovery_loss(cfg, strategy_id)
+
+
+def _trade_log_row_tracks_loss_streak(row: dict[str, str], cfg: AppConfig | None, strategy_id: int) -> bool:
+    if _trade_log_explicit_tracks_recovery_loss(row) is not None:
+        return True
+    return _strategy_uses_recovery_loss(cfg, strategy_id)
+
+
 def _sync_live_state_ledger_from_trade_log(
     state: SessionState,
     *,
     live_csv: Path,
     active_strategy_ids: list[int],
+    cfg: AppConfig | None = None,
 ) -> None:
     if not live_csv.exists():
         return
@@ -238,16 +267,22 @@ def _sync_live_state_ledger_from_trade_log(
             if order_cost <= 0:
                 continue
             expected_profit = _trade_log_float(row, "expected_profit")
+            tracks_recovery_loss = _trade_log_row_tracks_recovery_loss(row, cfg, strategy_id)
+            tracks_loss_streak = _trade_log_row_tracks_loss_streak(row, cfg, strategy_id)
             if result == side:
                 ledger_state["cash_pnl"] += expected_profit
                 trade_pnl = expected_profit
-                ledger_state["recovery_loss"] = 0.0
-                ledger_state["consecutive_losses"] = 0
+                if tracks_recovery_loss:
+                    ledger_state["recovery_loss"] = 0.0
+                if tracks_loss_streak:
+                    ledger_state["consecutive_losses"] = 0
             else:
                 trade_pnl = -order_cost
                 ledger_state["cash_pnl"] += trade_pnl
-                ledger_state["recovery_loss"] += order_cost
-                ledger_state["consecutive_losses"] += 1
+                if tracks_recovery_loss:
+                    ledger_state["recovery_loss"] += order_cost
+                if tracks_loss_streak:
+                    ledger_state["consecutive_losses"] += 1
             session_day = _trade_log_session_day(row)
             if session_day:
                 if session_day > str(ledger_state.get("current_day") or ""):
@@ -264,7 +299,10 @@ def _sync_live_state_ledger_from_trade_log(
             continue
         strategy_state.cash_pnl = float(ledger_state["cash_pnl"])
         strategy_state.daily_realized_pnl = float(ledger_state["daily_realized_pnl"])
-        strategy_state.recovery_loss = float(ledger_state["recovery_loss"])
+        if _strategy_uses_recovery_loss(cfg, strategy_id):
+            strategy_state.recovery_loss = float(ledger_state["recovery_loss"])
+        else:
+            strategy_state.recovery_loss = 0.0
         strategy_state.consecutive_losses = int(ledger_state["consecutive_losses"])
     _sync_legacy_live_state_fields(state, active_strategy_ids)
 
@@ -936,6 +974,7 @@ def place_live_order(
             cash_pnl=state.cash_pnl,
             recovery_loss=state.recovery_loss,
             consecutive_losses=state.consecutive_losses,
+            tracks_recovery_loss=executed_plan.tracks_recovery_loss,
             **_signal_record_kwargs(side_decision),
         ),
     )
@@ -1092,6 +1131,7 @@ def run_live_trading(
                 state,
                 live_csv=log_path,
                 active_strategy_ids=managed_strategy_ids,
+                cfg=cfg,
             )
             strategy_results: list[dict[str, Any]] = []
             pending_strategy_ids: list[int] = []
