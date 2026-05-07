@@ -6,7 +6,8 @@ from pathlib import Path
 from typing import Any
 
 from atomic_io import atomic_write_text
-from models import LiveStrategyState, PaperStrategyState, PendingPaperTrade, SessionState
+from live_pending import normalize_pending_live_trades
+from models import LiveStrategyState, PaperStrategyState, PendingLiveTrade, PendingPaperTrade, SessionState
 
 
 _LIVE_STRATEGY_FIELD_NAMES = (
@@ -31,6 +32,7 @@ _LIVE_STRATEGY_FIELD_NAMES = (
     "pending_live_order_id",
     "pending_live_end_time",
     "pending_live_tracks_recovery_loss",
+    "pending_live_trades",
     "last_processed_live_event_slug",
 )
 
@@ -42,6 +44,13 @@ def hydrate_pending_paper_trades(items: list[dict[str, Any]] | list[PendingPaper
     ]
 
 
+def hydrate_pending_live_trades(items: list[dict[str, Any]] | list[PendingLiveTrade] | None) -> list[PendingLiveTrade]:
+    return [
+        item if isinstance(item, PendingLiveTrade) else PendingLiveTrade(**item)
+        for item in (items or [])
+    ]
+
+
 def hydrate_paper_strategy_state(payload: dict[str, Any]) -> PaperStrategyState:
     strategy_payload = dict(payload)
     pending_key = "pending_paper_trades"
@@ -49,8 +58,14 @@ def hydrate_paper_strategy_state(payload: dict[str, Any]) -> PaperStrategyState:
     return PaperStrategyState(**strategy_payload)
 
 
-def hydrate_live_strategy_state(payload: dict[str, Any]) -> LiveStrategyState:
-    return LiveStrategyState(**dict(payload))
+def hydrate_live_strategy_state(payload: dict[str, Any], *, strategy_id: int = 0) -> LiveStrategyState:
+    strategy_payload = dict(payload)
+    strategy_payload["pending_live_trades"] = hydrate_pending_live_trades(
+        strategy_payload.get("pending_live_trades")
+    )
+    state = LiveStrategyState(**strategy_payload)
+    normalize_pending_live_trades(state, strategy_id=strategy_id)
+    return state
 
 
 def apply_live_strategy_state_to_session_state(state: SessionState, strategy_state: LiveStrategyState) -> None:
@@ -81,6 +96,7 @@ def live_strategy_state_from_payload(payload: dict[str, Any]) -> LiveStrategySta
         pending_live_order_id=payload.get("pending_live_order_id"),
         pending_live_end_time=payload.get("pending_live_end_time"),
         pending_live_tracks_recovery_loss=payload.get("pending_live_tracks_recovery_loss", True),
+        pending_live_trades=hydrate_pending_live_trades(payload.get("pending_live_trades")),
         last_processed_live_event_slug=payload.get("last_processed_live_event_slug"),
     )
 
@@ -107,7 +123,7 @@ def hydrate_live_strategy_map(payload: dict[str, Any], effective_live_strategy_i
     raw_strategy_map = payload.get("live_strategies")
     if isinstance(raw_strategy_map, dict):
         hydrated_map = {
-            int(raw_key): hydrate_live_strategy_state(raw_value)
+            int(raw_key): hydrate_live_strategy_state(raw_value, strategy_id=int(raw_key))
             for raw_key, raw_value in raw_strategy_map.items()
         }
         for strategy_id in effective_live_strategy_ids:
@@ -122,6 +138,7 @@ def hydrate_live_strategy_map(payload: dict[str, Any], effective_live_strategy_i
         }
         selected_strategy_id = trusted_legacy_live_strategy_id(payload, effective_live_strategy_ids)
         if selected_strategy_id is not None:
+            normalize_pending_live_trades(legacy_state, strategy_id=selected_strategy_id)
             hydrated_map[selected_strategy_id] = legacy_state
         return hydrated_map
 
@@ -140,17 +157,19 @@ def _load_session_state_legacy(path: Path) -> SessionState:
         item if isinstance(item, PendingPaperTrade) else PendingPaperTrade(**item)
         for item in payload.pop("pending_paper_trades", [])
     ]
+    pending_live_trades = hydrate_pending_live_trades(payload.pop("pending_live_trades", []))
     raw_live_strategy_map = payload.pop("live_strategies", {})
     live_strategies = {}
     if isinstance(raw_live_strategy_map, dict):
         live_strategies = {
-            int(raw_key): hydrate_live_strategy_state(raw_value)
+            int(raw_key): hydrate_live_strategy_state(raw_value, strategy_id=int(raw_key))
             for raw_key, raw_value in raw_live_strategy_map.items()
         }
     payload.pop("strategy_id", None)
     payload.pop("live_strategy_id", None)
     return SessionState(
         pending_paper_trades=pending_paper_trades,
+        pending_live_trades=pending_live_trades,
         live_strategies=live_strategies,
         **payload,
     )
@@ -215,6 +234,7 @@ def load_session_state(
 def clone_session_state(state: SessionState) -> SessionState:
     payload = asdict(state)
     payload["pending_paper_trades"] = hydrate_pending_paper_trades(payload.get("pending_paper_trades"))
+    payload["pending_live_trades"] = hydrate_pending_live_trades(payload.get("pending_live_trades"))
     raw_strategy_map = payload.get("paper_strategies") or {}
     payload["paper_strategies"] = {
         int(raw_key): hydrate_paper_strategy_state(raw_value)
@@ -222,7 +242,7 @@ def clone_session_state(state: SessionState) -> SessionState:
     }
     raw_live_strategy_map = payload.get("live_strategies") or {}
     payload["live_strategies"] = {
-        int(raw_key): hydrate_live_strategy_state(raw_value)
+        int(raw_key): hydrate_live_strategy_state(raw_value, strategy_id=int(raw_key))
         for raw_key, raw_value in raw_live_strategy_map.items()
     }
     return SessionState(**payload)
@@ -231,6 +251,7 @@ def clone_session_state(state: SessionState) -> SessionState:
 def copy_session_state_into(target: SessionState, source: SessionState) -> None:
     payload = asdict(source)
     payload["pending_paper_trades"] = hydrate_pending_paper_trades(payload.get("pending_paper_trades"))
+    payload["pending_live_trades"] = hydrate_pending_live_trades(payload.get("pending_live_trades"))
     raw_strategy_map = payload.get("paper_strategies") or {}
     payload["paper_strategies"] = {
         int(raw_key): hydrate_paper_strategy_state(raw_value)
@@ -238,7 +259,7 @@ def copy_session_state_into(target: SessionState, source: SessionState) -> None:
     }
     raw_live_strategy_map = payload.get("live_strategies") or {}
     payload["live_strategies"] = {
-        int(raw_key): hydrate_live_strategy_state(raw_value)
+        int(raw_key): hydrate_live_strategy_state(raw_value, strategy_id=int(raw_key))
         for raw_key, raw_value in raw_live_strategy_map.items()
     }
     for field_name, value in payload.items():

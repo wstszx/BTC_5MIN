@@ -12,6 +12,11 @@ from typing import Any
 
 from config import AppConfig
 from binance_signal import BinanceDepth5SignalService
+from live_pending import (
+    normalize_pending_live_trades as _normalize_pending_live_trades,
+    queue_pending_live_trade as _queue_pending_live_trade,
+    sync_legacy_pending_live_from_queue as _sync_legacy_pending_live_from_queue,
+)
 from models import LiveStrategyState, MarketQuote, MarketWindow, PaperStrategyState, PendingPaperTrade, SessionState, TradePlan, TradeRecord
 from optimizer_runtime import (
     candidate_cfg_with_params as _candidate_cfg_with_params,
@@ -42,6 +47,7 @@ from settlement import (
     clear_pending_live_trade as _clear_pending_live_trade,
     settle_paper_trade as _settle_paper_trade,
     settle_pending_live_trade_if_needed as _settle_pending_live_trade_if_needed,
+    settle_pending_live_trades_if_needed as _settle_pending_live_trades_if_needed,
     settle_pending_paper_trade as _settle_pending_paper_trade,
     settle_pending_paper_trades as _settle_pending_paper_trades,
     timeframe_duration_seconds as _timeframe_duration_seconds,
@@ -202,6 +208,11 @@ def _strategy_uses_recovery_loss(cfg: AppConfig | None, strategy_id: int) -> boo
     profile = getattr(cfg, "live_profiles", {}).get(strategy_id)
     mode = getattr(profile, "bet_sizing_mode", getattr(cfg, "bet_sizing_mode", "FIXED_BASE_COST"))
     return str(mode or "").strip().upper() != "FLAT_BASE_COST"
+
+
+def _strategy_can_continue_with_pending(strategy_cfg: AppConfig | None) -> bool:
+    mode = getattr(strategy_cfg, "bet_sizing_mode", "FIXED_BASE_COST")
+    return str(mode or "").strip().upper() == "FLAT_BASE_COST"
 
 
 def _trade_log_explicit_tracks_recovery_loss(row: dict[str, str]) -> bool | None:
@@ -438,43 +449,52 @@ def place_live_order(
 
     now = datetime.now(timezone.utc)
     daily_state_changed = _refresh_daily_session_state(state, now)
-    if state.pending_live_slug and live_client is None and state.pending_live_order_id and cfg.live_private_key:
+    _normalize_pending_live_trades(state, strategy_id=cfg.strategy_id, entry_timing=cfg.entry_timing)
+    if _strategy_has_pending_live_trade(
+        LiveStrategyState(pending_live_trades=list(state.pending_live_trades), pending_live_slug=state.pending_live_slug)
+    ) and live_client is None and cfg.live_private_key:
         live_client = _create_live_clob_client(cfg)
     strategy_state = _live_strategy_state_from_payload(asdict(state))
-    prior_strategy_state = replace(strategy_state)
-    strategy_state, pending_status, settled_previous_trade = _settle_pending_live_trade_if_needed(
+    strategy_state, pending_items, settled_previous_trade = _settle_pending_live_trades_if_needed(
         market_client=market_client,
         clob_client=live_client,
         strategy_state=strategy_state,
+        strategy_id=cfg.strategy_id,
         now=now,
         funder=cfg.live_funder,
+        entry_timing=cfg.entry_timing,
         final_price_wait_seconds=cfg.final_price_wait_seconds,
     )
     _apply_live_strategy_state_to_session_state(state, strategy_state)
-    if pending_status is not None and pending_status["status"] == "pending_settlement":
+    pending_status = next(
+        (status for _prior, _updated, status in pending_items if status.get("status") == "pending_settlement"),
+        None,
+    )
+    if pending_status is not None and not _strategy_can_continue_with_pending(cfg):
         if daily_state_changed and persist_state:
             _sync_current_live_strategy_state(state, cfg.strategy_id)
             save_session_state(state_path, state)
         return pending_status
     if settled_previous_trade and persist_state:
-        if pending_status is not None and pending_status.get("status") == "provisional_loss":
-            _append_provisional_live_loss_trade_log(
-                log_path=log_path,
-                cfg=cfg,
-                strategy_id=cfg.strategy_id,
-                prior_state=prior_strategy_state,
-                updated_state=strategy_state,
-                settlement_status=pending_status,
-            )
-        else:
-            _append_settled_live_trade_log(
-                log_path=log_path,
-                cfg=cfg,
-                strategy_id=cfg.strategy_id,
-                prior_state=prior_strategy_state,
-                updated_state=strategy_state,
-                settlement_status=pending_status,
-            )
+        for prior_item_state, updated_item_state, item_status in pending_items:
+            if item_status.get("status") == "provisional_loss":
+                _append_provisional_live_loss_trade_log(
+                    log_path=log_path,
+                    cfg=cfg,
+                    strategy_id=cfg.strategy_id,
+                    prior_state=prior_item_state,
+                    updated_state=updated_item_state,
+                    settlement_status=item_status,
+                )
+            elif item_status.get("status") == "settled":
+                _append_settled_live_trade_log(
+                    log_path=log_path,
+                    cfg=cfg,
+                    strategy_id=cfg.strategy_id,
+                    prior_state=prior_item_state,
+                    updated_state=updated_item_state,
+                    settlement_status=item_status,
+                )
         _sync_current_live_strategy_state(state, cfg.strategy_id)
         save_session_state(state_path, state)
 
@@ -978,15 +998,15 @@ def place_live_order(
             **_signal_record_kwargs(side_decision),
         ),
     )
-    state.pending_live_slug = target_round.slug
-    state.pending_live_side = side
-    state.pending_live_price = executed_plan.price
-    state.pending_live_order_size = executed_plan.order_size
-    state.pending_live_order_cost = executed_plan.order_cost
-    state.pending_live_expected_profit = executed_plan.expected_profit
-    state.pending_live_order_id = order_id
-    state.pending_live_end_time = target_round.end_time.isoformat()
-    state.pending_live_tracks_recovery_loss = executed_plan.tracks_recovery_loss
+    _queue_pending_live_trade(
+        state,
+        window=target_round,
+        plan=executed_plan,
+        side=side,
+        strategy_id=cfg.strategy_id,
+        entry_timing=cfg.entry_timing,
+        order_id=order_id,
+    )
     state.round_index += 1
     if persist_state:
         _sync_current_live_strategy_state(state, cfg.strategy_id)
@@ -1138,47 +1158,54 @@ def run_live_trading(
             handled_strategy_ids: set[int] = set()
             for strategy_id in managed_strategy_ids:
                 strategy_state = state.live_strategies.setdefault(strategy_id, LiveStrategyState())
+                strategy_cfg = _cfg_for_live_strategy(cfg, strategy_id)
+                can_continue_with_pending = _strategy_can_continue_with_pending(strategy_cfg)
                 try:
                     _refresh_daily_session_state(strategy_state, now)
-                    prior_strategy_state = replace(strategy_state)
-                    strategy_state, pending_status, _ = _settle_pending_live_trade_if_needed(
+                    strategy_state, pending_items, _ = _settle_pending_live_trades_if_needed(
                         market_client=market_client,
                         clob_client=live_client,
                         strategy_state=strategy_state,
+                        strategy_id=strategy_id,
                         now=now,
                         funder=cfg.live_funder,
+                        entry_timing=strategy_cfg.entry_timing,
                         final_price_wait_seconds=cfg.final_price_wait_seconds,
                     )
-                    if pending_status is not None and pending_status.get("status") == "settled":
-                        _append_settled_live_trade_log(
-                            log_path=log_path,
-                            cfg=_cfg_for_live_strategy(cfg, strategy_id),
-                            strategy_id=strategy_id,
-                            prior_state=prior_strategy_state,
-                            updated_state=strategy_state,
-                            settlement_status=pending_status,
-                        )
-                        strategy_results.append({"strategy_id": strategy_id, **pending_status})
-                    elif pending_status is not None and pending_status.get("status") == "provisional_loss":
-                        _append_provisional_live_loss_trade_log(
-                            log_path=log_path,
-                            cfg=_cfg_for_live_strategy(cfg, strategy_id),
-                            strategy_id=strategy_id,
-                            prior_state=prior_strategy_state,
-                            updated_state=strategy_state,
-                            settlement_status=pending_status,
-                        )
-                        strategy_results.append({"strategy_id": strategy_id, **pending_status})
+                    for prior_item_state, updated_item_state, pending_status in pending_items:
+                        if pending_status.get("status") == "settled":
+                            _append_settled_live_trade_log(
+                                log_path=log_path,
+                                cfg=strategy_cfg,
+                                strategy_id=strategy_id,
+                                prior_state=prior_item_state,
+                                updated_state=updated_item_state,
+                                settlement_status=pending_status,
+                            )
+                            strategy_results.append({"strategy_id": strategy_id, **pending_status})
+                        elif pending_status.get("status") == "provisional_loss":
+                            _append_provisional_live_loss_trade_log(
+                                log_path=log_path,
+                                cfg=strategy_cfg,
+                                strategy_id=strategy_id,
+                                prior_state=prior_item_state,
+                                updated_state=updated_item_state,
+                                settlement_status=pending_status,
+                            )
+                            strategy_results.append({"strategy_id": strategy_id, **pending_status})
+                        elif pending_status.get("status") == "pending_settlement":
+                            if not can_continue_with_pending:
+                                pending_strategy_ids.append(strategy_id)
+                            handled_strategy_ids.add(strategy_id)
+                            strategy_results.append({"strategy_id": strategy_id, **pending_status})
                     state.live_strategies[strategy_id] = strategy_state
-                    if pending_status is not None and pending_status.get("status") == "pending_settlement":
-                        pending_strategy_ids.append(strategy_id)
-                        handled_strategy_ids.add(strategy_id)
-                        strategy_results.append({"strategy_id": strategy_id, **pending_status})
                 except Exception as exc:
                     state.live_strategies[strategy_id] = strategy_state
                     handled_strategy_ids.add(strategy_id)
                     if _is_retryable_live_clob_error(exc):
-                        pending_strategy_ids.append(strategy_id)
+                        if not can_continue_with_pending:
+                            pending_strategy_ids.append(strategy_id)
+                        _sync_legacy_pending_live_from_queue(strategy_state)
                         _runtime_log(
                             f"live strategy {strategy_id} settlement retryable CLOB error: {exc}"
                         )
@@ -1200,7 +1227,9 @@ def run_live_trading(
                         f"live strategy {strategy_id} settlement error: {exc}"
                     )
                     if _strategy_has_pending_live_trade(strategy_state):
-                        pending_strategy_ids.append(strategy_id)
+                        if not can_continue_with_pending:
+                            pending_strategy_ids.append(strategy_id)
+                        _sync_legacy_pending_live_from_queue(strategy_state)
                         strategy_results.append(
                             {
                                 "strategy_id": strategy_id,
@@ -1762,15 +1791,15 @@ def run_live_trading(
                                 **_signal_record_kwargs(side_decision),
                             ),
                         )
-                        strategy_state.pending_live_slug = target_round.slug
-                        strategy_state.pending_live_side = side
-                        strategy_state.pending_live_price = executed_plan.price
-                        strategy_state.pending_live_order_size = executed_plan.order_size
-                        strategy_state.pending_live_order_cost = executed_plan.order_cost
-                        strategy_state.pending_live_expected_profit = executed_plan.expected_profit
-                        strategy_state.pending_live_order_id = execution.order_id
-                        strategy_state.pending_live_end_time = target_round.end_time.isoformat()
-                        strategy_state.pending_live_tracks_recovery_loss = executed_plan.tracks_recovery_loss
+                        _queue_pending_live_trade(
+                            strategy_state,
+                            window=target_round,
+                            plan=executed_plan,
+                            side=side,
+                            strategy_id=strategy_id,
+                            entry_timing=strategy_cfg.entry_timing,
+                            order_id=execution.order_id,
+                        )
                         strategy_state.round_index += 1
                         strategy_state.last_processed_live_event_slug = target_round.slug
                         state.live_strategies[strategy_id] = strategy_state
@@ -1968,7 +1997,11 @@ def run_paper_trading(
                     settled_any_pending = True
                     state_changed = True
                 state.paper_strategies[strategy_id] = _session_state_to_paper_strategy_state(strategy_session)
-                if state.paper_strategies[strategy_id].pending_paper_trades:
+                strategy_cfg = _cfg_for_paper_strategy(cfg, strategy_id)
+                if (
+                    state.paper_strategies[strategy_id].pending_paper_trades
+                    and not _strategy_can_continue_with_pending(strategy_cfg)
+                ):
                     pending_strategy_ids.append(strategy_id)
             for challenger in active_challengers:
                 strategy_state = challenger.get("_paper_state")
@@ -2056,13 +2089,16 @@ def run_paper_trading(
             for strategy_id in strategy_ids:
                 strategy_state = state.paper_strategies.setdefault(strategy_id, PaperStrategyState())
                 experiment_id = _paper_experiment_id(strategy_id, strategy_state)
-                if strategy_state.pending_paper_trades:
+                strategy_cfg = _cfg_for_paper_strategy(cfg, strategy_id)
+                if (
+                    strategy_state.pending_paper_trades
+                    and not _strategy_can_continue_with_pending(strategy_cfg)
+                ):
                     continue
                 if strategy_state.last_processed_paper_event_slug == target_round.slug:
                     any_processed = True
                     round_completed = True
                     continue
-                strategy_cfg = _cfg_for_paper_strategy(cfg, strategy_id)
                 strategy_session = _paper_strategy_state_to_session_state(strategy_state, state)
                 strategy_quote = replace(quote)
                 _apply_strategy6_signal_to_quote(
@@ -2426,8 +2462,6 @@ def run_paper_trading(
                 strategy_state = challenger.get("_paper_state")
                 if not isinstance(strategy_state, PaperStrategyState):
                     continue
-                if strategy_state.pending_paper_trades:
-                    continue
                 experiment_id = str(challenger.get("candidate_id") or "").strip() or _paper_experiment_id(
                     int(challenger.get("base_strategy_id") or 0),
                     strategy_state,
@@ -2436,6 +2470,11 @@ def run_paper_trading(
                 if base_strategy_id < 1:
                     continue
                 strategy_cfg = _candidate_cfg_with_params(cfg, base_strategy_id, challenger.get("params"))
+                if (
+                    strategy_state.pending_paper_trades
+                    and not _strategy_can_continue_with_pending(strategy_cfg)
+                ):
+                    continue
                 strategy_session = _paper_strategy_state_to_session_state(strategy_state, state)
                 strategy_quote = replace(quote)
                 _apply_strategy6_signal_to_quote(

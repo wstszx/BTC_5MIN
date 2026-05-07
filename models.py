@@ -122,6 +122,24 @@ class PendingPaperTrade:
 
 
 @dataclass(slots=True)
+class PendingLiveTrade:
+    round_index: int
+    event_slug: str
+    end_time: str
+    side: str
+    price: float
+    order_size: float
+    order_cost: float
+    expected_profit: float
+    strategy: int
+    entry_timing: str
+    order_id: str | None = None
+    start_time: str | None = None
+    queued_at: str | None = None
+    tracks_recovery_loss: bool = True
+
+
+@dataclass(slots=True)
 class PaperStrategyState:
     round_index: int = 0
     cash_pnl: float = 0.0
@@ -163,6 +181,7 @@ class LiveStrategyState:
     pending_live_order_id: str | None = None
     pending_live_end_time: str | None = None
     pending_live_tracks_recovery_loss: bool = True
+    pending_live_trades: list[PendingLiveTrade] = field(default_factory=list)
     last_processed_live_event_slug: str | None = None
 
 
@@ -190,6 +209,7 @@ class SessionState:
     pending_live_order_id: str | None = None
     pending_live_end_time: str | None = None
     pending_live_tracks_recovery_loss: bool = True
+    pending_live_trades: list[PendingLiveTrade] = field(default_factory=list)
     last_processed_live_event_slug: str | None = None
     pending_paper_trades: list[PendingPaperTrade] = field(default_factory=list)
     paper_strategies: dict[int, PaperStrategyState] = field(default_factory=dict)

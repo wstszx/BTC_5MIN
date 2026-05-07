@@ -7,7 +7,13 @@ from typing import Any
 
 from clob_adapter import build_verified_pending_live_trade_plan
 from config import AppConfig
-from models import LiveStrategyState, MarketWindow, PendingPaperTrade, SessionState, TradePlan, TradeRecord
+from live_pending import (
+    apply_pending_live_trade_to_legacy,
+    clear_legacy_pending_live_trade,
+    normalize_pending_live_trades,
+    sync_legacy_pending_live_from_queue,
+)
+from models import LiveStrategyState, MarketWindow, PendingLiveTrade, PendingPaperTrade, SessionState, TradePlan, TradeRecord
 from polymarket_api import normalize_outcome_label, parse_iso_datetime, parse_outcome_prices
 from risk_and_sizing import apply_round_outcome, build_trade_plan
 from trade_log import append_trade_log
@@ -19,15 +25,8 @@ _LIVE_BTC_ROUND_RE = re.compile(r"^btc-up(?:-or-)?down-(?:5m|15m)-\d+$")
 
 
 def clear_pending_live_trade(strategy_state: LiveStrategyState) -> None:
-    strategy_state.pending_live_slug = None
-    strategy_state.pending_live_side = None
-    strategy_state.pending_live_price = None
-    strategy_state.pending_live_order_size = None
-    strategy_state.pending_live_order_cost = None
-    strategy_state.pending_live_expected_profit = None
-    strategy_state.pending_live_order_id = None
-    strategy_state.pending_live_end_time = None
-    strategy_state.pending_live_tracks_recovery_loss = True
+    clear_legacy_pending_live_trade(strategy_state)
+    strategy_state.pending_live_trades = []
 
 
 def timeframe_duration_seconds(timeframe: str | None) -> int:
@@ -617,6 +616,78 @@ def settle_pending_live_trade_if_needed(
         },
         True,
     )
+
+
+def settle_pending_live_trades_if_needed(
+    *,
+    market_client: Any,
+    clob_client: Any | None,
+    strategy_state: LiveStrategyState,
+    strategy_id: int,
+    now: datetime,
+    funder: str | None = None,
+    entry_timing: str = "",
+    pending_plan_resolver=build_verified_pending_live_trade_plan,
+    final_price_wait_seconds: float = 0.0,
+) -> tuple[LiveStrategyState, list[tuple[LiveStrategyState, LiveStrategyState, dict[str, Any]]], bool]:
+    normalize_pending_live_trades(
+        strategy_state,
+        strategy_id=strategy_id,
+        entry_timing=entry_timing,
+    )
+    if not strategy_state.pending_live_trades:
+        return strategy_state, [], False
+
+    updated_state = strategy_state
+    statuses: list[tuple[LiveStrategyState, LiveStrategyState, dict[str, Any]]] = []
+    remaining: list[PendingLiveTrade] = []
+    changed = False
+    for item in list(updated_state.pending_live_trades):
+        single_state = LiveStrategyState(
+            round_index=max(0, item.round_index + 1),
+            cash_pnl=updated_state.cash_pnl,
+            recovery_loss=updated_state.recovery_loss,
+            consecutive_losses=updated_state.consecutive_losses,
+            consecutive_max_stake_skips=updated_state.consecutive_max_stake_skips,
+            signal_round_slug=updated_state.signal_round_slug,
+            signal_round_open_up_price=updated_state.signal_round_open_up_price,
+            signal_round_locked_side=updated_state.signal_round_locked_side,
+            strategy6_last_ofi_score=updated_state.strategy6_last_ofi_score,
+            stop_loss_count=updated_state.stop_loss_count,
+            daily_realized_pnl=updated_state.daily_realized_pnl,
+            current_day=updated_state.current_day,
+            last_processed_live_event_slug=updated_state.last_processed_live_event_slug,
+        )
+        apply_pending_live_trade_to_legacy(single_state, item)
+        prior_state = single_state
+        next_state, status, settled = settle_pending_live_trade_if_needed(
+            market_client=market_client,
+            clob_client=clob_client,
+            strategy_state=single_state,
+            now=now,
+            funder=funder,
+            pending_plan_resolver=pending_plan_resolver,
+            final_price_wait_seconds=final_price_wait_seconds,
+        )
+        if status is None:
+            remaining.append(item)
+            continue
+        statuses.append((prior_state, next_state, status))
+        if settled:
+            updated_state.cash_pnl = next_state.cash_pnl
+            updated_state.recovery_loss = next_state.recovery_loss
+            updated_state.consecutive_losses = next_state.consecutive_losses
+            updated_state.consecutive_max_stake_skips = next_state.consecutive_max_stake_skips
+            updated_state.stop_loss_count = next_state.stop_loss_count
+            updated_state.daily_realized_pnl = next_state.daily_realized_pnl
+            updated_state.current_day = next_state.current_day
+            changed = True
+            continue
+        remaining.append(item)
+
+    updated_state.pending_live_trades = remaining
+    sync_legacy_pending_live_from_queue(updated_state)
+    return updated_state, statuses, changed
 
 
 def build_frozen_pending_paper_plan(item: PendingPaperTrade) -> TradePlan:

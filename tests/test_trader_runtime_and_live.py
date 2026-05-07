@@ -1213,6 +1213,85 @@ def test_run_live_trading_does_not_evaluate_new_orders_while_any_live_order_is_p
     assert evaluation_calls == {"side": 0, "plan": 0}
 
 
+def test_run_live_strategy7_flat_continues_with_unresolved_pending_trade(tmp_path, monkeypatch):
+    stop_event = threading.Event()
+    stub_clob = _StubClobClient(balance_payload={"available": 3.0})
+
+    def fake_sleep(_seconds):
+        stop_event.set()
+
+    monkeypatch.setattr("trader.time.sleep", fake_sleep)
+    monkeypatch.setattr("trader._resolve_side_from_strategy", lambda **kwargs: SideDecision(side="UP"))
+    monkeypatch.setattr(
+        "trader.build_trade_plan",
+        lambda *args, **kwargs: TradePlan(
+            True,
+            "UP",
+            price=0.50,
+            order_size=2.0,
+            order_cost=1.0,
+            expected_profit=1.0,
+            tracks_recovery_loss=False,
+        ),
+    )
+
+    state_path = tmp_path / "live_state.json"
+    state_path.write_text(
+        json.dumps(
+            {
+                "live_strategies": {
+                    "7": {
+                        "round_index": 4,
+                        "cash_pnl": 0.0,
+                        "recovery_loss": 0.0,
+                        "consecutive_losses": 0,
+                        "pending_live_slug": "btc-updown-5m-prev",
+                        "pending_live_side": "UP",
+                        "pending_live_price": 0.5,
+                        "pending_live_order_size": 2.0,
+                        "pending_live_order_cost": 1.0,
+                        "pending_live_expected_profit": 1.0,
+                        "pending_live_order_id": "oid-prev",
+                        "pending_live_end_time": "2099-01-01T00:00:00+00:00",
+                        "pending_live_tracks_recovery_loss": False,
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = run_live_trading(
+        AppConfig(
+            trade_mode="live",
+            live_trading_enabled=True,
+            live_private_key="pk",
+            live_funder="0xfunder",
+            strategy_id=7,
+            live_strategy_ids=[7],
+            bet_sizing_mode="FLAT_BASE_COST",
+            poll_interval_seconds=1,
+        ),
+        market_client=_LiveMarketClient(),
+        clob_client=stub_clob,
+        state_path=state_path,
+        log_path=tmp_path / "live_orders.csv",
+        stop_event=stop_event,
+    )
+
+    reloaded = load_session_state(state_path, effective_live_strategy_ids=[7])
+    strategy_state = reloaded.live_strategies[7]
+    assert result["status"] == "stopped"
+    assert len(stub_clob.created_orders) == 1
+    assert strategy_state.pending_live_slug == "btc-updown-5m-test"
+    assert [item.event_slug for item in strategy_state.pending_live_trades] == [
+        "btc-updown-5m-prev",
+        "btc-updown-5m-test",
+    ]
+    assert strategy_state.pending_live_trades[0].order_id == "oid-prev"
+    assert strategy_state.pending_live_trades[1].tracks_recovery_loss is False
+
+
 def test_run_live_trading_keeps_pending_and_blocks_new_orders_when_settlement_errors(tmp_path, monkeypatch):
     state_path = tmp_path / "live_state.json"
     state_path.write_text(
@@ -2374,6 +2453,89 @@ class _ImmediatePaperRoundClient(_LiveMarketClient):
             down_token_id="down-token",
         )
         return window, None
+
+
+def test_run_paper_strategy7_flat_continues_with_unresolved_pending_trade(tmp_path, monkeypatch):
+    stop_event = threading.Event()
+
+    def fake_sleep(_seconds):
+        stop_event.set()
+
+    monkeypatch.setattr("trader.time.sleep", fake_sleep)
+    monkeypatch.setattr("trader._resolve_side_from_strategy", lambda **kwargs: SideDecision(side="UP"))
+    monkeypatch.setattr(
+        "trader.build_trade_plan",
+        lambda *args, **kwargs: TradePlan(
+            True,
+            "UP",
+            price=0.50,
+            order_size=2.0,
+            order_cost=1.0,
+            expected_profit=1.0,
+            tracks_recovery_loss=False,
+        ),
+    )
+
+    state_path = tmp_path / "state.json"
+    state_path.write_text(
+        json.dumps(
+            {
+                "paper_strategies": {
+                    "7": {
+                        "round_index": 1,
+                        "cash_pnl": 0.0,
+                        "recovery_loss": 0.0,
+                        "consecutive_losses": 0,
+                        "pending_paper_trades": [
+                            {
+                                "round_index": 0,
+                                "event_slug": "btc-updown-5m-paper-prev",
+                                "start_time": "2026-04-06T06:00:00+00:00",
+                                "end_time": "2099-04-06T06:05:00+00:00",
+                                "side": "UP",
+                                "price": 0.5,
+                                "order_size": 2.0,
+                                "order_cost": 1.0,
+                                "expected_profit": 1.0,
+                                "strategy": 7,
+                                "entry_timing": "OPEN",
+                                "queued_at": "2026-04-06T06:00:05+00:00",
+                                "tracks_recovery_loss": False,
+                            }
+                        ],
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    class _UnresolvedStrategy7PaperClient(_ImmediatePaperRoundClient):
+        def get_event_by_slug(self, slug: str):
+            assert slug == "btc-updown-5m-paper-prev"
+            return {"eventMetadata": {"priceToBeat": None, "finalPrice": None}}
+
+    result = run_paper_trading(
+        AppConfig(
+            strategy_id=7,
+            paper_strategy_ids=[7],
+            bet_sizing_mode="FLAT_BASE_COST",
+            poll_interval_seconds=1,
+        ),
+        client=_UnresolvedStrategy7PaperClient(),
+        state_path=state_path,
+        log_path=tmp_path / "paper.csv",
+        stop_event=stop_event,
+    )
+
+    state = load_session_state(state_path, effective_paper_strategy_ids=[7])
+    pending = state.paper_strategies[7].pending_paper_trades
+    assert result["status"] == "stopped"
+    assert [item.event_slug for item in pending] == [
+        "btc-updown-5m-paper-prev",
+        "btc-updown-5m-paper-now",
+    ]
+    assert pending[1].tracks_recovery_loss is False
 
 
 def test_run_paper_trading_waits_for_pending_settlement_before_next_round(tmp_path, monkeypatch):

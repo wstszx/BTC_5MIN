@@ -2,12 +2,19 @@ from __future__ import annotations
 
 from dataclasses import asdict
 
+from live_pending import normalize_pending_live_trades
 from models import LiveStrategyState, PaperStrategyState, SessionState
 from state_manager import apply_live_strategy_state_to_session_state, live_strategy_state_from_payload
 
 
 def strategy_has_pending_live_trade(strategy_state: LiveStrategyState | None) -> bool:
-    return bool(strategy_state is not None and strategy_state.pending_live_slug)
+    return bool(
+        strategy_state is not None
+        and (
+            strategy_state.pending_live_slug
+            or strategy_state.pending_live_trades
+        )
+    )
 
 
 def managed_live_strategy_ids(
@@ -47,6 +54,7 @@ def paper_strategy_state_to_session_state(state: PaperStrategyState, base_state:
         pending_live_order_id=base_state.pending_live_order_id,
         pending_live_end_time=base_state.pending_live_end_time,
         pending_live_tracks_recovery_loss=base_state.pending_live_tracks_recovery_loss,
+        pending_live_trades=list(base_state.pending_live_trades),
         pending_paper_trades=list(state.pending_paper_trades),
         paper_strategies=dict(base_state.paper_strategies),
         live_strategies=dict(base_state.live_strategies),
@@ -110,13 +118,16 @@ def ensure_live_strategy_state_map(state: SessionState, strategy_ids: list[int])
         for strategy_id in strategy_ids
     }
     if strategy_ids:
+        normalize_pending_live_trades(legacy_state, strategy_id=strategy_ids[0])
         state.live_strategies[strategy_ids[0]] = legacy_state
 
 
 def sync_current_live_strategy_state(state: SessionState, strategy_id: int) -> None:
     if not state.live_strategies and strategy_id not in state.live_strategies:
         return
-    state.live_strategies[strategy_id] = live_strategy_state_from_payload(asdict(state))
+    strategy_state = live_strategy_state_from_payload(asdict(state))
+    normalize_pending_live_trades(strategy_state, strategy_id=strategy_id)
+    state.live_strategies[strategy_id] = strategy_state
 
 
 def sync_legacy_paper_state_fields(state: SessionState, strategy_ids: list[int]) -> None:
@@ -157,4 +168,5 @@ def sync_legacy_live_state_fields(state: SessionState, strategy_ids: list[int]) 
     strategy_state = state.live_strategies.get(prioritized_strategy_ids[0])
     if strategy_state is None:
         return
+    normalize_pending_live_trades(strategy_state, strategy_id=prioritized_strategy_ids[0])
     apply_live_strategy_state_to_session_state(state, strategy_state)
