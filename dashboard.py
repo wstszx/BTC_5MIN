@@ -129,6 +129,15 @@ def _tail_csv_rows(path: Path, *, limit: int) -> list[dict[str, str]]:
     return rows
 
 
+def _all_csv_rows_newest_first(path: Path) -> list[dict[str, str]]:
+    if not path.exists():
+        return []
+    with path.open("r", newline="", encoding="utf-8") as handle:
+        rows = list(csv.DictReader(handle))
+    rows.reverse()
+    return rows
+
+
 def _normalize_strategy_filter(strategy: int | str | None) -> str | None:
     if strategy is None:
         return None
@@ -218,7 +227,7 @@ def _merge_recent_live_rows(entry_row: dict[str, str], settlement_row: dict[str,
     return merged
 
 
-def _collapse_live_recent_rows(rows: list[dict[str, str]]) -> list[dict[str, str]]:
+def _collapse_live_recent_rows(rows: list[dict[str, str]], timeframe: str | None = None) -> list[dict[str, str]]:
     collapsed: list[dict[str, str]] = []
     unresolved_index_by_key: dict[tuple[str, str], int] = {}
     for row in reversed(rows):
@@ -231,7 +240,7 @@ def _collapse_live_recent_rows(rows: list[dict[str, str]]) -> list[dict[str, str
         collapsed.append(row_copy)
         if key is not None and not _recent_row_has_result(row_copy):
             unresolved_index_by_key[key] = len(collapsed) - 1
-    collapsed.sort(key=lambda row: str(row.get("timestamp") or ""), reverse=True)
+    _sort_recent_rows_by_round(collapsed, timeframe)
     return collapsed
 
 
@@ -532,6 +541,32 @@ def _recent_row_round_display_time(row: dict[str, str], timeframe: str | None) -
     if anchor is None:
         return ""
     return _iso(_floor_to_timeframe(anchor, timeframe)) or ""
+
+
+def _recent_row_round_sort_time(row: dict[str, str], timeframe: str | None) -> datetime:
+    slug_round = _round_start_from_slug(row.get("event_slug"))
+    if slug_round is not None:
+        return slug_round
+    anchor = (
+        _parse_recent_row_datetime(row.get("start_time"))
+        or _parse_recent_row_datetime(row.get("round_display_time"))
+        or _parse_recent_row_datetime(row.get("timestamp"))
+        or _parse_recent_row_datetime(row.get("end_time"))
+    )
+    if anchor is None:
+        return datetime.min.replace(tzinfo=timezone.utc)
+    return _floor_to_timeframe(anchor, timeframe)
+
+
+def _recent_row_round_sort_key(row: dict[str, str], timeframe: str | None = None) -> tuple[datetime, str]:
+    return (
+        _recent_row_round_sort_time(row, timeframe),
+        str(row.get("timestamp") or ""),
+    )
+
+
+def _sort_recent_rows_by_round(rows: list[dict[str, str]], timeframe: str | None = None) -> None:
+    rows.sort(key=lambda row: _recent_row_round_sort_key(row, timeframe), reverse=True)
 
 
 def _with_recent_round_display_time(row: dict[str, str], timeframe: str | None) -> dict[str, str]:
@@ -2628,7 +2663,7 @@ class DashboardState:
         capped_limit = max(1, min(300, int(limit)))
         strategy_filter = _normalize_strategy_filter(strategy)
         explicit_all_strategy_filter = _is_explicit_all_strategy_filter(strategy)
-        rows = _tail_csv_rows(paper_csv, limit=capped_limit * 4)
+        rows = _all_csv_rows_newest_first(paper_csv)
         if strategy_filter is None and explicit_paper_strategy_scope and not explicit_all_strategy_filter:
             rows = _filter_trade_rows_by_strategy_ids(rows, effective_paper_strategy_ids)
         elif strategy_filter is not None:
@@ -2649,7 +2684,7 @@ class DashboardState:
         for item in filtered_pending_items:
             pending_rows.append(_pending_paper_trade_to_recent_row(item))
         merged_rows = pending_rows + rows
-        merged_rows.sort(key=lambda row: str(row.get("timestamp") or ""), reverse=True)
+        _sort_recent_rows_by_round(merged_rows, target_timeframe)
         merged_rows = merged_rows[:capped_limit]
 
         client = PolymarketClient(cfg)
@@ -2686,12 +2721,12 @@ class DashboardState:
         capped_limit = max(1, min(300, int(limit)))
         strategy_filter = _normalize_strategy_filter(strategy)
         explicit_all_strategy_filter = _is_explicit_all_strategy_filter(strategy)
-        rows = _tail_csv_rows(live_csv, limit=capped_limit * 6)
+        rows = _all_csv_rows_newest_first(live_csv)
         if strategy_filter is None and explicit_live_strategy_scope and not explicit_all_strategy_filter:
             rows = _filter_trade_rows_by_strategy_ids(rows, effective_live_strategy_ids)
         elif strategy_filter is not None:
             rows = _filter_trade_rows_by_strategy(rows, strategy_filter)
-        rows = _collapse_live_recent_rows(rows)
+        rows = _collapse_live_recent_rows(rows, target_timeframe)
         rows = rows[:capped_limit]
         client = PolymarketClient(cfg)
         try:
@@ -2725,12 +2760,12 @@ class DashboardState:
                     provisional_only=not (has_recent_mismatch or has_unofficial_live_result),
                 )
                 if corrected_count > 0:
-                    rows = _tail_csv_rows(live_csv, limit=capped_limit * 6)
+                    rows = _all_csv_rows_newest_first(live_csv)
                     if strategy_filter is None and explicit_live_strategy_scope and not explicit_all_strategy_filter:
                         rows = _filter_trade_rows_by_strategy_ids(rows, effective_live_strategy_ids)
                     elif strategy_filter is not None:
                         rows = _filter_trade_rows_by_strategy(rows, strategy_filter)
-                    rows = _collapse_live_recent_rows(rows)
+                    rows = _collapse_live_recent_rows(rows, target_timeframe)
                     rows = rows[:capped_limit]
                     rows = [
                         _refresh_live_row_trade_pnl_from_result(
@@ -3405,12 +3440,12 @@ def _dashboard_html() -> str:
 
         <section id="reportRecentSection" class="report-section">
           <div class="section-title">最近交易明细</div>
-          <div id="recentPanelDesc" class="section-desc">按时间倒序显示最近 80 条记录 · 当前策略：全部</div>
+          <div id="recentPanelDesc" class="section-desc">按轮次倒序显示最近 80 条记录 · 当前策略：全部</div>
           <div class=\"report-recent-table table-wrap\">
             <table>
               <thead>
                 <tr>
-                  <th>时间</th>
+                  <th>记录时间</th>
                   <th>轮次</th>
                   <th>策略</th>
                   <th>方向</th>
@@ -5862,13 +5897,13 @@ function recentStrategyHeaderText() {
   const modeText = reportMode === 'live' ? '\u5b9e\u76d8' : '\u7eb8\u9762';
   const timeframeText = reportMode === 'live' ? '' : (' \u00b7 \u5f53\u524d\u9891\u6b21\uff1a' + timeframe);
   if (!strategy || strategy === 'all') {
-    return '\u6309\u65f6\u95f4\u5012\u5e8f\u663e\u793a\u6700\u8fd1 80 \u6761\u8bb0\u5f55 \u00b7 \u5f53\u524d\u6a21\u5f0f\uff1a' + modeText + timeframeText + ' \u00b7 \u5f53\u524d\u7b56\u7565\uff1a\u5168\u90e8';
+    return '\u6309\u8f6e\u6b21\u5012\u5e8f\u663e\u793a\u6700\u8fd1 80 \u6761\u8bb0\u5f55 \u00b7 \u5f53\u524d\u6a21\u5f0f\uff1a' + modeText + timeframeText + ' \u00b7 \u5f53\u524d\u7b56\u7565\uff1a\u5168\u90e8';
   }
-  return '\u6309\u65f6\u95f4\u5012\u5e8f\u663e\u793a\u6700\u8fd1 80 \u6761\u8bb0\u5f55 \u00b7 \u5f53\u524d\u6a21\u5f0f\uff1a' + modeText + timeframeText + ' \u00b7 \u5f53\u524d\u7b56\u7565\uff1a\u7b56\u7565 ' + strategy;
+  return '\u6309\u8f6e\u6b21\u5012\u5e8f\u663e\u793a\u6700\u8fd1 80 \u6761\u8bb0\u5f55 \u00b7 \u5f53\u524d\u6a21\u5f0f\uff1a' + modeText + timeframeText + ' \u00b7 \u5f53\u524d\u7b56\u7565\uff1a\u7b56\u7565 ' + strategy;
   if (!strategy || strategy === 'all') {
-    return '按时间倒序显示最近 80 条记录 · 当前频次：' + timeframe + ' · 当前策略：全部';
+    return '按轮次倒序显示最近 80 条记录 · 当前频次：' + timeframe + ' · 当前策略：全部';
   }
-  return '按时间倒序显示最近 80 条记录 · 当前频次：' + timeframe + ' · 当前策略：策略 ' + strategy;
+  return '按轮次倒序显示最近 80 条记录 · 当前频次：' + timeframe + ' · 当前策略：策略 ' + strategy;
 }
 
 function renderReportModeCopy() {

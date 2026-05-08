@@ -265,6 +265,98 @@ def test_recent_trades_payload_includes_pending_paper_trades(tmp_path: Path):
         os.chdir(old_cwd)
 
 
+def test_recent_trades_payload_sorts_by_round_time_not_update_time(tmp_path: Path, monkeypatch):
+    class StubClient:
+        def __init__(self, cfg):
+            self.config = cfg
+
+        def close(self) -> None:
+            return
+
+    monkeypatch.setattr(dashboard, "PolymarketClient", StubClient)
+    old_cwd = Path.cwd()
+    os.chdir(tmp_path)
+    state = DashboardState(env_file=tmp_path / ".env.dashboard")
+    try:
+        logs_dir = tmp_path / "logs"
+        logs_dir.mkdir(parents=True, exist_ok=True)
+        (logs_dir / "paper_trades.csv").write_text(
+            "timestamp,mode,round_index,strategy,entry_timing,event_slug,start_time,end_time,side,price,"
+            "order_size,order_cost,expected_profit,result,trade_pnl,cash_pnl,recovery_loss,consecutive_losses,"
+            "stop_loss_triggered,skip_reason,signal_open_up_price,signal_current_up_price,signal_threshold,"
+            "signal_delta,signal_locked,signal_reason,experiment_id\n"
+            "2026-05-08T09:00:15+00:00,paper,326,7,OPEN,btc-updown-5m-1778230800,"
+            "2026-05-08T09:00:00+00:00,2026-05-08T09:05:00+00:00,SKIP,,0,0,0,,0,5.7,0,1,"
+            "False,strategy7_ofi_too_weak,0.475,0.555,0.416,-0.3395,False,strategy7_ofi_too_weak,strategy-7\n"
+            "2026-05-08T09:05:02+00:00,paper,325,7,OPEN,btc-updown-5m-1778230500,"
+            "2026-05-08T08:55:00+00:00,2026-05-08T09:00:00+00:00,UP,0.48,6.25,3,3.25,DOWN,"
+            "-3,2.7,0,2,False,,0.425,0.475,,0.05,True,,strategy-7\n"
+            "2026-05-08T09:05:12+00:00,paper,327,7,OPEN,btc-updown-5m-1778231100,"
+            "2026-05-08T09:05:00+00:00,2026-05-08T09:10:00+00:00,SKIP,,0,0,0,,0,2.7,0,2,"
+            "False,strategy7_ofi_too_weak,0.485,0.485,0.416,-0.2520,False,strategy7_ofi_too_weak,strategy-7\n",
+            encoding="utf-8",
+        )
+
+        payload = state.get_recent_trades_payload(limit=10, strategy=7)
+
+        assert [row["event_slug"] for row in payload["rows"]] == [
+            "btc-updown-5m-1778231100",
+            "btc-updown-5m-1778230800",
+            "btc-updown-5m-1778230500",
+        ]
+    finally:
+        state.close()
+        os.chdir(old_cwd)
+
+
+def test_recent_trades_payload_limits_after_round_time_sort(tmp_path: Path, monkeypatch):
+    class StubClient:
+        def __init__(self, cfg):
+            self.config = cfg
+
+        def close(self) -> None:
+            return
+
+    monkeypatch.setattr(dashboard, "PolymarketClient", StubClient)
+    old_cwd = Path.cwd()
+    os.chdir(tmp_path)
+    state = DashboardState(env_file=tmp_path / ".env.dashboard")
+    try:
+        logs_dir = tmp_path / "logs"
+        logs_dir.mkdir(parents=True, exist_ok=True)
+        header = (
+            "timestamp,mode,round_index,strategy,entry_timing,event_slug,start_time,end_time,side,price,"
+            "order_size,order_cost,expected_profit,result,trade_pnl,cash_pnl,recovery_loss,consecutive_losses,"
+            "stop_loss_triggered,skip_reason,signal_open_up_price,signal_current_up_price,signal_threshold,"
+            "signal_delta,signal_locked,signal_reason,experiment_id\n"
+        )
+        rows = [
+            (
+                f"2026-05-08T09:{minute:02d}:00+00:00,paper,{index},7,OPEN,btc-updown-5m-{1778230500 + index * 300},"
+                f"2026-05-08T09:{minute:02d}:00+00:00,2026-05-08T09:{minute + 5:02d}:00+00:00,SKIP,,"
+                "0,0,0,,0,0,0,0,False,strategy7_ofi_too_weak,,,,,False,strategy7_ofi_too_weak,strategy-7\n"
+            )
+            for index, minute in enumerate(range(0, 30, 5))
+        ]
+        rows.append(
+            "2026-05-08T09:59:00+00:00,paper,99,7,OPEN,btc-updown-5m-1778230500,"
+            "2026-05-08T09:00:00+00:00,2026-05-08T09:05:00+00:00,UP,0.48,6.25,3,3.25,DOWN,"
+            "-3,2.7,0,2,False,,0.425,0.475,,0.05,True,,strategy-7\n"
+        )
+        (logs_dir / "paper_trades.csv").write_text(header + "".join(rows), encoding="utf-8")
+
+        payload = state.get_recent_trades_payload(limit=3, strategy=7)
+
+        assert [row["event_slug"] for row in payload["rows"]] == [
+            "btc-updown-5m-1778232000",
+            "btc-updown-5m-1778231700",
+            "btc-updown-5m-1778231400",
+        ]
+    finally:
+        state.close()
+        os.chdir(old_cwd)
+
+
 def test_recent_trades_payload_handles_missing_csv(tmp_path: Path):
     old_cwd = Path.cwd()
     os.chdir(tmp_path)
@@ -1037,6 +1129,82 @@ def test_dashboard_live_recent_orders_reads_live_specific_csv(tmp_path: Path):
         assert payload['csv_path'].endswith('live_orders.csv')
         assert payload['rows'][0]['event_slug'] == 'slug-two'
         assert payload['rows'][1]['event_slug'] == 'slug-one'
+    finally:
+        state.close()
+        os.chdir(old_cwd)
+
+
+def test_live_recent_orders_sort_by_round_time_not_update_time(tmp_path: Path):
+    old_cwd = Path.cwd()
+    os.chdir(tmp_path)
+    state = DashboardState(env_file=tmp_path / ".env.dashboard")
+    try:
+        live_csv = tmp_path / "logs" / "live_orders.csv"
+        live_csv.parent.mkdir(parents=True, exist_ok=True)
+        live_csv.write_text(
+            "timestamp,mode,round_index,strategy,entry_timing,event_slug,start_time,end_time,side,price,"
+            "order_size,order_cost,expected_profit,result,trade_pnl,cash_pnl,recovery_loss,consecutive_losses,"
+            "stop_loss_triggered,skip_reason,signal_open_up_price,signal_current_up_price,signal_threshold,"
+            "signal_delta,signal_locked,signal_reason\n"
+            "2026-05-08T09:00:15+00:00,live,326,7,OPEN,btc-updown-5m-1778230800,"
+            "2026-05-08T09:00:00+00:00,2026-05-08T09:05:00+00:00,SKIP,,0,0,0,,0,5.7,0,1,"
+            "False,strategy7_ofi_too_weak,0.475,0.555,0.416,-0.3395,False,strategy7_ofi_too_weak\n"
+            "2026-05-08T09:05:02+00:00,live,325,7,OPEN,btc-updown-5m-1778230500,"
+            "2026-05-08T08:55:00+00:00,2026-05-08T09:00:00+00:00,SKIP,,0,0,0,,0,2.7,0,2,"
+            "False,strategy7_ofi_too_weak,0.425,0.475,0.416,0.05,False,strategy7_ofi_too_weak\n"
+            "2026-05-08T09:05:12+00:00,live,327,7,OPEN,btc-updown-5m-1778231100,"
+            "2026-05-08T09:05:00+00:00,2026-05-08T09:10:00+00:00,SKIP,,0,0,0,,0,2.7,0,2,"
+            "False,strategy7_ofi_too_weak,0.485,0.485,0.416,-0.2520,False,strategy7_ofi_too_weak\n",
+            encoding="utf-8",
+        )
+
+        payload = state.get_live_recent_orders_payload(limit=10, strategy=7)
+
+        assert [row["event_slug"] for row in payload["rows"]] == [
+            "btc-updown-5m-1778231100",
+            "btc-updown-5m-1778230800",
+            "btc-updown-5m-1778230500",
+        ]
+    finally:
+        state.close()
+        os.chdir(old_cwd)
+
+
+def test_live_recent_orders_limits_after_round_time_sort(tmp_path: Path):
+    old_cwd = Path.cwd()
+    os.chdir(tmp_path)
+    state = DashboardState(env_file=tmp_path / ".env.dashboard")
+    try:
+        live_csv = tmp_path / "logs" / "live_orders.csv"
+        live_csv.parent.mkdir(parents=True, exist_ok=True)
+        header = (
+            "timestamp,mode,round_index,strategy,entry_timing,event_slug,start_time,end_time,side,price,"
+            "order_size,order_cost,expected_profit,result,trade_pnl,cash_pnl,recovery_loss,consecutive_losses,"
+            "stop_loss_triggered,skip_reason,signal_open_up_price,signal_current_up_price,signal_threshold,"
+            "signal_delta,signal_locked,signal_reason\n"
+        )
+        rows = [
+            (
+                f"2026-05-08T09:{minute:02d}:00+00:00,live,{index},7,OPEN,btc-updown-5m-{1778230500 + index * 300},"
+                f"2026-05-08T09:{minute:02d}:00+00:00,2026-05-08T09:{minute + 5:02d}:00+00:00,SKIP,,"
+                "0,0,0,,0,0,0,0,False,strategy7_ofi_too_weak,,,,,False,strategy7_ofi_too_weak\n"
+            )
+            for index, minute in enumerate(range(0, 30, 5))
+        ]
+        rows.append(
+            "2026-05-08T09:59:00+00:00,live,99,7,OPEN,btc-updown-5m-1778230500,"
+            "2026-05-08T09:00:00+00:00,2026-05-08T09:05:00+00:00,SKIP,,0,0,0,,0,2.7,0,2,"
+            "False,strategy7_ofi_too_weak,0.425,0.475,0.416,0.05,False,strategy7_ofi_too_weak\n"
+        )
+        live_csv.write_text(header + "".join(rows), encoding="utf-8")
+
+        payload = state.get_live_recent_orders_payload(limit=3, strategy=7)
+
+        assert [row["event_slug"] for row in payload["rows"]] == [
+            "btc-updown-5m-1778232000",
+            "btc-updown-5m-1778231700",
+            "btc-updown-5m-1778231400",
+        ]
     finally:
         state.close()
         os.chdir(old_cwd)
@@ -2435,8 +2603,8 @@ def test_dashboard_assets_show_current_strategy_in_recent_panel_header():
     assert "const timeframe = effectivePaperTimeframeFilter();" in js
     assert "const strategy = effectivePaperRecentStrategyFilter();" in js
     assert "el('recentPanelDesc').textContent = recentStrategyHeaderText();" in js
-    assert "return '按时间倒序显示最近 80 条记录 · 当前频次：' + timeframe + ' · 当前策略：全部';" in js
-    assert "return '按时间倒序显示最近 80 条记录 · 当前频次：' + timeframe + ' · 当前策略：策略 ' + strategy;" in js
+    assert "return '按轮次倒序显示最近 80 条记录 · 当前频次：' + timeframe + ' · 当前策略：全部';" in js
+    assert "return '按轮次倒序显示最近 80 条记录 · 当前频次：' + timeframe + ' · 当前策略：策略 ' + strategy;" in js
 
 
 def test_dashboard_assets_refresh_all_loads_market_before_report_panels():
