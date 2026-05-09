@@ -16,6 +16,9 @@ class _StubHistoryClient(PolymarketClient):
     def list_series_events(self, **kwargs):  # type: ignore[override]
         return [self._event]
 
+    def list_series_events_page(self, **kwargs):  # type: ignore[override]
+        return [self._event], None
+
     def get_event_by_slug(self, slug: str):  # type: ignore[override]
         return self._event
 

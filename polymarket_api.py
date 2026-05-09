@@ -659,14 +659,39 @@ class PolymarketClient:
         *,
         limit: int = 200,
         offset: int | None = None,
+        after_cursor: str | None = None,
         active: bool | None = None,
         closed: bool | None = None,
         archived: bool | None = False,
         start_time_min: datetime | str | None = None,
     ) -> list[dict[str, Any]]:
-        params: dict[str, Any] = {"series_id": self.config.series_id, "limit": limit}
+        events, _next_cursor = self.list_series_events_page(
+            limit=limit,
+            offset=offset,
+            after_cursor=after_cursor,
+            active=active,
+            closed=closed,
+            archived=archived,
+            start_time_min=start_time_min,
+        )
+        return events
+
+    def list_series_events_page(
+        self,
+        *,
+        limit: int = 200,
+        offset: int | None = None,
+        after_cursor: str | None = None,
+        active: bool | None = None,
+        closed: bool | None = None,
+        archived: bool | None = False,
+        start_time_min: datetime | str | None = None,
+    ) -> tuple[list[dict[str, Any]], str | None]:
         if offset is not None:
-            params["offset"] = offset
+            raise ValueError("Gamma /events/keyset uses after_cursor pagination; offset is no longer supported.")
+        params: dict[str, Any] = {"series_id": self.config.series_id, "limit": limit}
+        if after_cursor:
+            params["after_cursor"] = after_cursor
         if active is not None:
             params["active"] = str(active).lower()
         if closed is not None:
@@ -681,9 +706,10 @@ class PolymarketClient:
             else:
                 params["start_time_min"] = start_time_min
 
-        payload = self._get_json("/events", base_url=self.config.gamma_api_base, params=params)
-        events = payload.get("value", payload) if isinstance(payload, dict) else payload
-        return [event for event in events or [] if self._matches_configured_series(event)]
+        payload = self._get_json("/events/keyset", base_url=self.config.gamma_api_base, params=params)
+        events = payload.get("events", payload.get("value", payload)) if isinstance(payload, dict) else payload
+        next_cursor = payload.get("next_cursor") if isinstance(payload, dict) else None
+        return [event for event in events or [] if self._matches_configured_series(event)], next_cursor
 
     def get_event_by_slug(self, slug: str) -> dict[str, Any]:
         return self._get_json(f"/events/slug/{slug}", base_url=self.config.gamma_api_base)
@@ -881,13 +907,14 @@ class PolymarketClient:
         recent_start = now_utc - timedelta(minutes=max(60, limit * 6))
         page_size = min(200, max(50, limit))
         paged_events: list[dict[str, Any]] = []
-        offset = 0
+        after_cursor: str | None = None
+        page_count = 0
 
         # Pull recent rounds first to avoid very old events that no longer have usable history snapshots.
         while True:
-            batch = self.list_series_events(
+            batch, next_cursor = self.list_series_events_page(
                 limit=page_size,
-                offset=offset,
+                after_cursor=after_cursor,
                 active=active,
                 closed=closed,
                 archived=False,
@@ -898,8 +925,11 @@ class PolymarketClient:
             paged_events.extend(batch)
             if len(batch) < page_size:
                 break
-            offset += page_size
-            if offset >= page_size * 20:
+            if not next_cursor or next_cursor == after_cursor:
+                break
+            after_cursor = next_cursor
+            page_count += 1
+            if page_count >= 20:
                 break
 
         events = paged_events or self.list_series_events(limit=limit, active=active, closed=closed, archived=False)

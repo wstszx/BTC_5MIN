@@ -51,6 +51,73 @@ def test_list_series_events_accepts_historical_btc_15m_fallback_slug(monkeypatch
     assert [row["slug"] for row in rows] == ["btc-updown-15m-1773368100"]
 
 
+def test_list_series_events_uses_keyset_endpoint_and_events_payload(monkeypatch):
+    client = PolymarketClient(AppConfig())
+    calls = []
+
+    def fake_get_json(path, *, base_url, params):
+        calls.append((path, base_url, params))
+        return {
+            "events": [
+                {
+                    "slug": "btc-updown-5m-1766038500",
+                    "seriesSlug": "btc-up-or-down-5m",
+                    "markets": [{}],
+                }
+            ],
+            "next_cursor": "cursor-2",
+        }
+
+    monkeypatch.setattr(client, "_get_json", fake_get_json)
+
+    rows = client.list_series_events(limit=10, after_cursor="cursor-1")
+
+    assert [row["slug"] for row in rows] == ["btc-updown-5m-1766038500"]
+    assert calls == [
+        (
+            "/events/keyset",
+            "https://gamma-api.polymarket.com",
+            {
+                "series_id": 10684,
+                "limit": 10,
+                "archived": "false",
+                "after_cursor": "cursor-1",
+            },
+        )
+    ]
+
+
+def test_list_series_events_rejects_offset_for_keyset_pagination():
+    client = PolymarketClient(AppConfig())
+
+    with pytest.raises(ValueError, match="after_cursor"):
+        client.list_series_events(limit=10, offset=10)
+
+
+def test_list_series_events_page_returns_next_cursor(monkeypatch):
+    client = PolymarketClient(AppConfig())
+
+    monkeypatch.setattr(
+        client,
+        "_get_json",
+        lambda *args, **kwargs: {
+            "events": [
+                {
+                    "slug": "btc-updown-5m-1766038500",
+                    "seriesSlug": "btc-up-or-down-5m",
+                    "markets": [{}],
+                }
+            ],
+            "next_cursor": "cursor-2",
+        },
+    )
+
+    events, next_cursor = client.list_series_events_page(limit=10, after_cursor="cursor-1")
+
+    assert [event["slug"] for event in events] == ["btc-updown-5m-1766038500"]
+    assert next_cursor == "cursor-2"
+
+
 def test_quote_from_market_uses_best_levels_and_midpoint_from_ws_book_snapshot(monkeypatch):
     client = PolymarketClient(AppConfig(ws_enabled=True))
     monkeypatch.setattr(client, "_ws_subscribe_assets", lambda asset_ids: None)
