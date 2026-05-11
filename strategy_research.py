@@ -3,15 +3,17 @@ from __future__ import annotations
 import csv
 import warnings
 from dataclasses import dataclass
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 from itertools import product
 from pathlib import Path
 from statistics import median
 from typing import Iterable
 
 from config import AppConfig
+from models import MarketQuote
 from polymarket_api import normalize_outcome_label, parse_iso_datetime
 from strategy import get_side_for_round, strategy7_strong_signal_allows_late_confirm
+from strategy_decision import evaluate_strategy7_consensus_signal
 
 
 @dataclass(slots=True)
@@ -199,35 +201,54 @@ def _simulate_segment(
         signal_open_up_price = _optional_float(row.get("entry_price_open_up"))
         signal_current_up_price = _select_signal_current_up_price(row, entry_timing)
         ofi_score = _select_ofi_score(row)
-        try:
-            side = get_side_for_round(
-                strategy_id,
-                round_index,
-                signal_open_up_price=signal_open_up_price,
-                signal_current_up_price=signal_current_up_price,
-                signal_threshold=cfg.strategy7_momentum_threshold if strategy_id in {7, 8} else cfg.signal_momentum_threshold,
-                signal_fallback_strategy_id=cfg.signal_fallback_strategy_id,
-                ofi_score=ofi_score,
-                ofi_threshold=cfg.strategy7_ofi_threshold if strategy_id in {7, 8} else cfg.ofi_threshold,
-                signal_min_gap=cfg.strategy7_min_signal_gap if strategy_id in {7, 8} else 0.0,
-            )
-        except ValueError:
-            if strategy_id not in {7, 8}:
-                raise
-            skipped += 1
-            round_index += 1
-            continue
         if strategy_id in {7, 8}:
             quote_fetched_at = _select_quote_fetched_at(row)
             strategy6_signal_at = _select_strategy6_signal_at(row)
-            if (
-                quote_fetched_at is not None
-                and strategy6_signal_at is not None
-                and (quote_fetched_at - strategy6_signal_at).total_seconds() > max(0.0, cfg.binance_signal_stale_seconds)
-            ):
-                skipped += 1
-                round_index += 1
-                continue
+            if strategy_id == 7:
+                signal_quote_time = quote_fetched_at or strategy6_signal_at or _historical_entry_time(row, cfg, entry_timing) or datetime.now(timezone.utc)
+                signal_quote = MarketQuote(
+                    slug=row.get("slug", ""),
+                    strategy6_ofi_score=ofi_score,
+                    strategy6_signal_at=strategy6_signal_at or signal_quote_time,
+                    fetched_at=quote_fetched_at or signal_quote_time,
+                )
+                signal_check = evaluate_strategy7_consensus_signal(
+                    cfg=cfg,
+                    quote=signal_quote,
+                    now=signal_quote_time,
+                    signal_open_up_price=signal_open_up_price,
+                    signal_current_up_price=signal_current_up_price,
+                )
+                if signal_check.decision.side is None:
+                    skipped += 1
+                    round_index += 1
+                    continue
+                side = signal_check.decision.side
+            else:
+                try:
+                    side = get_side_for_round(
+                        strategy_id,
+                        round_index,
+                        signal_open_up_price=signal_open_up_price,
+                        signal_current_up_price=signal_current_up_price,
+                        signal_threshold=cfg.strategy7_momentum_threshold,
+                        signal_fallback_strategy_id=cfg.signal_fallback_strategy_id,
+                        ofi_score=ofi_score,
+                        ofi_threshold=cfg.strategy7_ofi_threshold,
+                        signal_min_gap=cfg.strategy7_min_signal_gap,
+                    )
+                except ValueError:
+                    skipped += 1
+                    round_index += 1
+                    continue
+                if (
+                    quote_fetched_at is not None
+                    and strategy6_signal_at is not None
+                    and (quote_fetched_at - strategy6_signal_at).total_seconds() > max(0.0, cfg.binance_signal_stale_seconds)
+                ):
+                    skipped += 1
+                    round_index += 1
+                    continue
             entry_time = _historical_entry_time(row, cfg, entry_timing)
             effective_confirm_before_entry_seconds = max(0.0, float(cfg.strategy7_confirm_before_entry_seconds))
             if (
@@ -256,6 +277,17 @@ def _simulate_segment(
                 skipped += 1
                 round_index += 1
                 continue
+        else:
+            side = get_side_for_round(
+                strategy_id,
+                round_index,
+                signal_open_up_price=signal_open_up_price,
+                signal_current_up_price=signal_current_up_price,
+                signal_threshold=cfg.signal_momentum_threshold,
+                signal_fallback_strategy_id=cfg.signal_fallback_strategy_id,
+                ofi_score=ofi_score,
+                ofi_threshold=cfg.ofi_threshold,
+            )
         round_index += 1
 
         price = _select_entry_price(row, side, entry_timing)

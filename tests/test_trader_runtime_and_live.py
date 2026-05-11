@@ -4954,7 +4954,7 @@ def test_strategy7_uses_base_threshold_when_dynamic_history_lookup_fails():
     assert decision.signal_delta == pytest.approx(0.04)
 
 
-def test_strategy7_locks_confirmed_side_for_round():
+def test_strategy7_keeps_locked_side_when_revalidation_conflicts():
     now = datetime.now(timezone.utc)
     cfg = AppConfig(
         strategy_id=7,
@@ -5003,8 +5003,11 @@ def test_strategy7_locks_confirmed_side_for_round():
         entry_time=now + timedelta(seconds=10),
     )
 
-    assert second.side == "UP"
+    assert second.side is None
+    assert second.reason == "strategy7_signal_conflict"
+    assert second.signal_delta == pytest.approx(-0.05)
     assert second.signal_locked is True
+    assert state.signal_round_locked_side == "UP"
 
 
 def test_strategy7_rechecks_max_entry_price_after_lock():
@@ -5095,13 +5098,14 @@ def test_strategy7_skips_when_confirmation_is_too_late():
         strategy_id=7,
         strategy7_ofi_threshold=0.65,
         strategy7_momentum_threshold=0.02,
+        strategy7_min_signal_gap=0.01,
         strategy7_confirm_before_entry_seconds=15,
     )
     state = SessionState(round_index=0, signal_round_slug="s1", signal_round_open_up_price=0.50)
     quote = MarketQuote(
         slug="s1",
-        up_price=0.54,
-        up_best_ask=0.54,
+        up_price=0.56,
+        up_best_ask=0.56,
         strategy6_ofi_score=0.8,
         fetched_at=now,
         strategy6_signal_at=now,
@@ -5190,7 +5194,7 @@ def test_strategy7_strong_signal_still_skips_when_relaxation_is_zero():
     assert decision.reason == "strategy7_entry_too_late"
 
 
-def test_strategy7_late_confirm_relaxation_requires_final_quality_gate():
+def test_strategy7_late_confirm_relaxation_requires_current_signal_quality():
     now = datetime.now(timezone.utc)
     cfg = AppConfig(
         strategy_id=7,
@@ -5222,7 +5226,7 @@ def test_strategy7_late_confirm_relaxation_requires_final_quality_gate():
     )
 
     assert decision.side is None
-    assert decision.reason == "strategy7_entry_too_late"
+    assert decision.reason == "strategy7_confidence_too_low"
 
 
 def test_strategy7_clamps_confirmation_window_to_available_open_entry_window():

@@ -30,6 +30,13 @@ class SideDecision:
     signal_locked: bool = False
 
 
+@dataclass(slots=True)
+class Strategy7SignalCheck:
+    decision: SideDecision
+    ofi_score: float | None = None
+    momentum_delta: float | None = None
+
+
 def resolve_quote_price(side: str, quote: MarketQuote) -> float | None:
     if side == "UP":
         return quote.up_best_ask if quote.up_best_ask is not None else quote.up_price
@@ -223,6 +230,133 @@ def effective_strategy7_confirm_before_entry_seconds(
     return min(configured, available)
 
 
+def evaluate_strategy7_consensus_signal(
+    *,
+    cfg: AppConfig,
+    quote: MarketQuote,
+    now: datetime,
+    signal_open_up_price: float | None,
+    signal_current_up_price: float | None,
+) -> Strategy7SignalCheck:
+    ofi_score = resolve_strategy6_ofi_score(quote)
+    if ofi_score is None:
+        return Strategy7SignalCheck(
+            decision=SideDecision(
+                side=None,
+                reason="strategy7_ofi_unavailable",
+                signal_open_up_price=signal_open_up_price,
+                signal_current_up_price=signal_current_up_price,
+            )
+        )
+    if is_strategy6_signal_stale(quote=quote, now=now, stale_seconds=cfg.binance_signal_stale_seconds):
+        return Strategy7SignalCheck(
+            decision=SideDecision(
+                side=None,
+                reason="strategy7_ofi_stale",
+                signal_open_up_price=signal_open_up_price,
+                signal_current_up_price=signal_current_up_price,
+                signal_threshold=cfg.strategy7_ofi_threshold,
+                signal_delta=ofi_score,
+            ),
+            ofi_score=ofi_score,
+        )
+    if abs(ofi_score) < cfg.strategy7_ofi_threshold:
+        return Strategy7SignalCheck(
+            decision=SideDecision(
+                side=None,
+                reason="strategy7_ofi_too_weak",
+                signal_open_up_price=signal_open_up_price,
+                signal_current_up_price=signal_current_up_price,
+                signal_threshold=cfg.strategy7_ofi_threshold,
+                signal_delta=ofi_score,
+            ),
+            ofi_score=ofi_score,
+        )
+    if not (is_valid_signal_price(signal_open_up_price) and is_valid_signal_price(signal_current_up_price)):
+        return Strategy7SignalCheck(
+            decision=SideDecision(
+                side=None,
+                reason="strategy7_momentum_unavailable",
+                signal_open_up_price=signal_open_up_price,
+                signal_current_up_price=signal_current_up_price,
+                signal_threshold=cfg.strategy7_momentum_threshold,
+            ),
+            ofi_score=ofi_score,
+        )
+
+    momentum_delta = signal_current_up_price - signal_open_up_price
+    if abs(momentum_delta) < cfg.strategy7_momentum_threshold:
+        return Strategy7SignalCheck(
+            decision=SideDecision(
+                side=None,
+                reason="strategy7_momentum_too_weak",
+                signal_open_up_price=signal_open_up_price,
+                signal_current_up_price=signal_current_up_price,
+                signal_threshold=cfg.strategy7_momentum_threshold,
+                signal_delta=momentum_delta,
+            ),
+            ofi_score=ofi_score,
+            momentum_delta=momentum_delta,
+        )
+    max_momentum_delta = getattr(cfg, "strategy7_max_momentum_delta", None)
+    if max_momentum_delta is not None and max_momentum_delta > 0 and abs(momentum_delta) > max_momentum_delta:
+        return Strategy7SignalCheck(
+            decision=SideDecision(
+                side=None,
+                reason="strategy7_momentum_too_hot",
+                signal_open_up_price=signal_open_up_price,
+                signal_current_up_price=signal_current_up_price,
+                signal_threshold=max_momentum_delta,
+                signal_delta=momentum_delta,
+            ),
+            ofi_score=ofi_score,
+            momentum_delta=momentum_delta,
+        )
+    if not strategy7_signals_agree(ofi_score=ofi_score, momentum_delta=momentum_delta):
+        return Strategy7SignalCheck(
+            decision=SideDecision(
+                side=None,
+                reason="strategy7_signal_conflict",
+                signal_open_up_price=signal_open_up_price,
+                signal_current_up_price=signal_current_up_price,
+                signal_threshold=cfg.strategy7_momentum_threshold,
+                signal_delta=momentum_delta,
+            ),
+            ofi_score=ofi_score,
+            momentum_delta=momentum_delta,
+        )
+    if not strategy7_signal_gap_ok(
+        ofi_score=ofi_score,
+        momentum_delta=momentum_delta,
+        ofi_threshold=cfg.strategy7_ofi_threshold,
+        momentum_threshold=cfg.strategy7_momentum_threshold,
+        signal_min_gap=cfg.strategy7_min_signal_gap,
+    ):
+        return Strategy7SignalCheck(
+            decision=SideDecision(
+                side=None,
+                reason="strategy7_confidence_too_low",
+                signal_open_up_price=signal_open_up_price,
+                signal_current_up_price=signal_current_up_price,
+                signal_threshold=cfg.strategy7_momentum_threshold,
+                signal_delta=momentum_delta,
+            ),
+            ofi_score=ofi_score,
+            momentum_delta=momentum_delta,
+        )
+    return Strategy7SignalCheck(
+        decision=SideDecision(
+            side="UP" if momentum_delta > 0 else "DOWN",
+            signal_open_up_price=signal_open_up_price,
+            signal_current_up_price=signal_current_up_price,
+            signal_threshold=cfg.strategy7_momentum_threshold,
+            signal_delta=momentum_delta,
+        ),
+        ofi_score=ofi_score,
+        momentum_delta=momentum_delta,
+    )
+
+
 def resolve_side_from_strategy(
     *,
     cfg: AppConfig,
@@ -263,6 +397,29 @@ def resolve_side_from_strategy(
         signal_delta = None
         if is_valid_signal_price(state.signal_round_open_up_price) and is_valid_signal_price(signal_current_up_price):
             signal_delta = signal_current_up_price - state.signal_round_open_up_price
+        if cfg.strategy_id == 7:
+            now = now or datetime.now(timezone.utc)
+            signal_check = evaluate_strategy7_consensus_signal(
+                cfg=cfg,
+                quote=quote,
+                now=now,
+                signal_open_up_price=state.signal_round_open_up_price,
+                signal_current_up_price=signal_current_up_price,
+            )
+            state.strategy6_last_ofi_score = signal_check.ofi_score
+            if signal_check.decision.side is None:
+                signal_check.decision.signal_locked = True
+                return signal_check.decision
+            if signal_check.decision.side != state.signal_round_locked_side:
+                return SideDecision(
+                    side=None,
+                    reason="strategy7_signal_conflict",
+                    signal_open_up_price=state.signal_round_open_up_price,
+                    signal_current_up_price=signal_current_up_price,
+                    signal_threshold=cfg.strategy7_momentum_threshold,
+                    signal_delta=signal_check.momentum_delta,
+                    signal_locked=True,
+                )
         if cfg.strategy_id in {7, 8}:
             strategy_prefix = "strategy7" if cfg.strategy_id == 7 else "strategy8"
             candidate_price = resolve_quote_price(state.signal_round_locked_side, quote)
@@ -311,59 +468,74 @@ def resolve_side_from_strategy(
 
     if cfg.strategy_id in {7, 8}:
         strategy_prefix = "strategy7" if cfg.strategy_id == 7 else "strategy8"
-        ofi_score = resolve_strategy6_ofi_score(quote)
-        state.strategy6_last_ofi_score = ofi_score
-        if ofi_score is None:
-            return SideDecision(
-                side=None,
-                reason=f"{strategy_prefix}_ofi_unavailable",
+        if cfg.strategy_id == 7:
+            signal_check = evaluate_strategy7_consensus_signal(
+                cfg=cfg,
+                quote=quote,
+                now=now,
                 signal_open_up_price=signal_open_up_price,
                 signal_current_up_price=signal_current_up_price,
             )
-        if is_strategy6_signal_stale(quote=quote, now=now, stale_seconds=cfg.binance_signal_stale_seconds):
-            return SideDecision(
-                side=None,
-                reason=f"{strategy_prefix}_ofi_stale",
-                signal_open_up_price=signal_open_up_price,
-                signal_current_up_price=signal_current_up_price,
-                signal_threshold=cfg.strategy7_ofi_threshold,
-                signal_delta=ofi_score,
-            )
-        if abs(ofi_score) < cfg.strategy7_ofi_threshold:
-            return SideDecision(
-                side=None,
-                reason="strategy7_ofi_too_weak" if cfg.strategy_id == 7 else "strategy8_market_state_weak",
-                signal_open_up_price=signal_open_up_price,
-                signal_current_up_price=signal_current_up_price,
-                signal_threshold=cfg.strategy7_ofi_threshold,
-                signal_delta=ofi_score,
-            )
-        if not (is_valid_signal_price(signal_open_up_price) and is_valid_signal_price(signal_current_up_price)):
-            return SideDecision(
-                side=None,
-                reason=f"{strategy_prefix}_momentum_unavailable",
-                signal_open_up_price=signal_open_up_price,
-                signal_current_up_price=signal_current_up_price,
-                signal_threshold=cfg.strategy7_momentum_threshold,
-            )
+            state.strategy6_last_ofi_score = signal_check.ofi_score
+            if signal_check.decision.side is None:
+                return signal_check.decision
+            ofi_score = signal_check.ofi_score
+            momentum_delta = signal_check.momentum_delta
+            signal_gap_ok = True
+        else:
+            ofi_score = resolve_strategy6_ofi_score(quote)
+            state.strategy6_last_ofi_score = ofi_score
+            if ofi_score is None:
+                return SideDecision(
+                    side=None,
+                    reason=f"{strategy_prefix}_ofi_unavailable",
+                    signal_open_up_price=signal_open_up_price,
+                    signal_current_up_price=signal_current_up_price,
+                )
+            if is_strategy6_signal_stale(quote=quote, now=now, stale_seconds=cfg.binance_signal_stale_seconds):
+                return SideDecision(
+                    side=None,
+                    reason=f"{strategy_prefix}_ofi_stale",
+                    signal_open_up_price=signal_open_up_price,
+                    signal_current_up_price=signal_current_up_price,
+                    signal_threshold=cfg.strategy7_ofi_threshold,
+                    signal_delta=ofi_score,
+                )
+            if abs(ofi_score) < cfg.strategy7_ofi_threshold:
+                return SideDecision(
+                    side=None,
+                    reason="strategy8_market_state_weak",
+                    signal_open_up_price=signal_open_up_price,
+                    signal_current_up_price=signal_current_up_price,
+                    signal_threshold=cfg.strategy7_ofi_threshold,
+                    signal_delta=ofi_score,
+                )
+            if not (is_valid_signal_price(signal_open_up_price) and is_valid_signal_price(signal_current_up_price)):
+                return SideDecision(
+                    side=None,
+                    reason=f"{strategy_prefix}_momentum_unavailable",
+                    signal_open_up_price=signal_open_up_price,
+                    signal_current_up_price=signal_current_up_price,
+                    signal_threshold=cfg.strategy7_momentum_threshold,
+                )
 
-        momentum_delta = signal_current_up_price - signal_open_up_price
-        if abs(momentum_delta) < cfg.strategy7_momentum_threshold:
-            return SideDecision(
-                side=None,
-                reason="strategy7_momentum_too_weak" if cfg.strategy_id == 7 else "strategy8_market_state_weak",
-                signal_open_up_price=signal_open_up_price,
-                signal_current_up_price=signal_current_up_price,
-                signal_threshold=cfg.strategy7_momentum_threshold,
-                signal_delta=momentum_delta,
+            momentum_delta = signal_current_up_price - signal_open_up_price
+            if abs(momentum_delta) < cfg.strategy7_momentum_threshold:
+                return SideDecision(
+                    side=None,
+                    reason="strategy8_market_state_weak",
+                    signal_open_up_price=signal_open_up_price,
+                    signal_current_up_price=signal_current_up_price,
+                    signal_threshold=cfg.strategy7_momentum_threshold,
+                    signal_delta=momentum_delta,
+                )
+            signal_gap_ok = strategy7_signal_gap_ok(
+                ofi_score=ofi_score,
+                momentum_delta=momentum_delta,
+                ofi_threshold=cfg.strategy7_ofi_threshold,
+                momentum_threshold=cfg.strategy7_momentum_threshold,
+                signal_min_gap=cfg.strategy7_min_signal_gap,
             )
-        signal_gap_ok = strategy7_signal_gap_ok(
-            ofi_score=ofi_score,
-            momentum_delta=momentum_delta,
-            ofi_threshold=cfg.strategy7_ofi_threshold,
-            momentum_threshold=cfg.strategy7_momentum_threshold,
-            signal_min_gap=cfg.strategy7_min_signal_gap,
-        )
         if cfg.strategy_id == 8 and not signal_gap_ok:
             return SideDecision(
                 side=None,
@@ -449,7 +621,12 @@ def resolve_side_from_strategy(
                 signal_threshold=cfg.strategy7_momentum_threshold,
                 signal_delta=momentum_delta,
             )
-        state.signal_round_locked_side = resolved_side
+        if cfg.strategy_id == 8:
+            state.signal_round_locked_side = resolved_side
+        elif entry_time is not None:
+            lock_at = entry_time - timedelta(seconds=max(0, cfg.signal_lock_before_entry_seconds))
+            if now >= lock_at:
+                state.signal_round_locked_side = resolved_side
         return SideDecision(
             side=resolved_side,
             reason=decision_reason,

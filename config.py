@@ -57,6 +57,7 @@ _FLOAT_CONFIG_KEYS: frozenset[str] = frozenset(
         "MAX_ENTRY_PRICE",
         "STRATEGY7_OFI_THRESHOLD",
         "STRATEGY7_MOMENTUM_THRESHOLD",
+        "STRATEGY7_MAX_MOMENTUM_DELTA",
         "STRATEGY7_MAX_ENTRY_PRICE",
         "STRATEGY7_MIN_SIGNAL_GAP",
         "STRATEGY7_LATE_CONFIRM_STRONG_SIGNAL_GAP",
@@ -408,6 +409,11 @@ class PaperTimeframeProfile:
     binance_signal_stale_seconds: float
     strategy7_ofi_threshold: float
     strategy7_momentum_threshold: float
+    strategy7_max_momentum_delta: float | None
+    strategy7_min_signal_gap: float
+    strategy7_confirm_before_entry_seconds: int
+    strategy7_late_confirm_strong_signal_gap: float
+    strategy7_late_confirm_relax_seconds: float
     min_entry_price: float | None
     max_entry_price: float
     strategy7_max_entry_price: float
@@ -438,6 +444,7 @@ class LiveStrategyProfile:
     binance_signal_stale_seconds: float
     strategy7_ofi_threshold: float
     strategy7_momentum_threshold: float
+    strategy7_max_momentum_delta: float | None
     strategy7_max_entry_price: float
     strategy7_min_signal_gap: float
     strategy7_confirm_before_entry_seconds: int
@@ -470,6 +477,7 @@ def _base_live_profile_for_strategy(cfg: AppConfig, strategy_id: int) -> LiveStr
         binance_signal_stale_seconds=cfg.binance_signal_stale_seconds,
         strategy7_ofi_threshold=cfg.strategy7_ofi_threshold,
         strategy7_momentum_threshold=cfg.strategy7_momentum_threshold,
+        strategy7_max_momentum_delta=cfg.strategy7_max_momentum_delta,
         strategy7_max_entry_price=cfg.strategy7_max_entry_price,
         strategy7_min_signal_gap=cfg.strategy7_min_signal_gap,
         strategy7_confirm_before_entry_seconds=cfg.strategy7_confirm_before_entry_seconds,
@@ -551,6 +559,11 @@ def _profile_for_strategy_prefix(cfg: AppConfig, strategy_id: int, prefix: str) 
                 f"{prefix}_STRATEGY7_MOMENTUM_THRESHOLD",
                 cfg.strategy7_momentum_threshold,
             ),
+            strategy7_max_momentum_delta=(
+                _env_optional_float(f"{prefix}_STRATEGY7_MAX_MOMENTUM_DELTA")
+                if os.getenv(f"{prefix}_STRATEGY7_MAX_MOMENTUM_DELTA") is not None
+                else cfg.strategy7_max_momentum_delta
+            ),
             strategy7_max_entry_price=_env_float(
                 f"{prefix}_STRATEGY7_MAX_ENTRY_PRICE",
                 cfg.strategy7_max_entry_price,
@@ -624,6 +637,7 @@ class AppConfig:
     )
     strategy7_ofi_threshold: float = field(default_factory=lambda: _env_float("STRATEGY7_OFI_THRESHOLD", 0.7))
     strategy7_momentum_threshold: float = field(default_factory=lambda: _env_float("STRATEGY7_MOMENTUM_THRESHOLD", 0.025))
+    strategy7_max_momentum_delta: float | None = field(default_factory=lambda: _env_optional_float("STRATEGY7_MAX_MOMENTUM_DELTA"))
     strategy7_max_entry_price: float = field(default_factory=lambda: _env_float("STRATEGY7_MAX_ENTRY_PRICE", 0.54))
     strategy7_min_signal_gap: float = field(default_factory=lambda: _env_float("STRATEGY7_MIN_SIGNAL_GAP", 0.03))
     strategy7_confirm_before_entry_seconds: int = field(default_factory=lambda: _env_int("STRATEGY7_CONFIRM_BEFORE_ENTRY_SECONDS", 12))
@@ -739,6 +753,27 @@ class AppConfig:
                 strategy7_momentum_threshold=_env_float(
                     f"{prefix}_STRATEGY7_MOMENTUM_THRESHOLD",
                     self.strategy7_momentum_threshold,
+                ),
+                strategy7_max_momentum_delta=(
+                    _env_optional_float(f"{prefix}_STRATEGY7_MAX_MOMENTUM_DELTA")
+                    if os.getenv(f"{prefix}_STRATEGY7_MAX_MOMENTUM_DELTA") is not None
+                    else self.strategy7_max_momentum_delta
+                ),
+                strategy7_min_signal_gap=_env_float(
+                    f"{prefix}_STRATEGY7_MIN_SIGNAL_GAP",
+                    self.strategy7_min_signal_gap,
+                ),
+                strategy7_confirm_before_entry_seconds=_env_int(
+                    f"{prefix}_STRATEGY7_CONFIRM_BEFORE_ENTRY_SECONDS",
+                    self.strategy7_confirm_before_entry_seconds,
+                ),
+                strategy7_late_confirm_strong_signal_gap=_env_float(
+                    f"{prefix}_STRATEGY7_LATE_CONFIRM_STRONG_SIGNAL_GAP",
+                    self.strategy7_late_confirm_strong_signal_gap,
+                ),
+                strategy7_late_confirm_relax_seconds=_env_float(
+                    f"{prefix}_STRATEGY7_LATE_CONFIRM_RELAX_SECONDS",
+                    self.strategy7_late_confirm_relax_seconds,
                 ),
                 min_entry_price=(
                     _env_optional_float(f"{prefix}_MIN_ENTRY_PRICE")

@@ -187,10 +187,28 @@ def test_build_config_applies_strategy_overrides_with_split_strategy_ids_and_glo
     assert cfg.live_profiles[7].min_entry_price == 0.42
     assert cfg.live_profiles[7].max_entry_price == 0.55
     assert cfg.live_profiles[7].strategy7_ofi_threshold == 0.58
+    assert cfg.live_profiles[7].strategy7_max_momentum_delta is None
     assert cfg.paper_strategy_profiles[3].base_order_cost == 4.0
     assert cfg.paper_strategy_profiles[3].min_stake == 3.0
     assert cfg.paper_strategy_profiles[3].max_stake == 20.0
     assert cfg.paper_strategy_profiles[7].base_order_cost == 2.0
+
+
+def test_build_config_supports_strategy7_max_momentum_delta_overrides():
+    cfg = build_config_from_env_values(
+        {
+            "STRATEGY_ID": "7",
+            "PAPER_STRATEGY_IDS": "7",
+            "LIVE_STRATEGY_IDS": "7",
+            "STRATEGY7_MAX_MOMENTUM_DELTA": "0.015",
+            "PAPER_STRATEGY_7_STRATEGY7_MAX_MOMENTUM_DELTA": "0.012",
+            "LIVE_STRATEGY_7_STRATEGY7_MAX_MOMENTUM_DELTA": "0.018",
+        }
+    )
+
+    assert cfg.strategy7_max_momentum_delta == 0.015
+    assert cfg.paper_strategy_profiles[7].strategy7_max_momentum_delta == 0.012
+    assert cfg.live_profiles[7].strategy7_max_momentum_delta == 0.018
 
 
 def test_build_config_ignores_invalid_paper_strategy_entries():

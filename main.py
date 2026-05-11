@@ -8,7 +8,7 @@ import time
 from pathlib import Path
 from typing import Sequence
 
-from config import AppConfig, build_config_from_env_values, load_env_file_values
+from config import AppConfig, LiveStrategyProfile, build_config_from_env_values, load_env_file_values
 from dashboard import create_dashboard_runtime
 from runtime_control import RuntimeControl
 from trader import run_live_trading, run_paper_trading, validate_live_runtime_config
@@ -51,11 +51,66 @@ def _paper_runtime_paths(cfg: AppConfig, timeframe: str) -> tuple[Path, Path]:
     return base / 'session_state.json', base / 'paper_trades.csv'
 
 
+def _paper_strategy_profile_from_cfg(cfg: AppConfig, strategy_id: int) -> LiveStrategyProfile:
+    existing = getattr(cfg, 'paper_strategy_profiles', {}).get(strategy_id)
+    return LiveStrategyProfile(
+        strategy_id=strategy_id,
+        target_profit=getattr(existing, 'target_profit', cfg.target_profit),
+        bet_sizing_mode=getattr(existing, 'bet_sizing_mode', cfg.bet_sizing_mode),
+        base_order_cost=getattr(existing, 'base_order_cost', cfg.base_order_cost),
+        max_consecutive_losses=getattr(existing, 'max_consecutive_losses', cfg.max_consecutive_losses),
+        min_stake=getattr(existing, 'min_stake', cfg.min_stake),
+        max_stake=getattr(existing, 'max_stake', cfg.max_stake),
+        open_delay_seconds=getattr(existing, 'open_delay_seconds', cfg.open_delay_seconds),
+        signal_momentum_threshold=getattr(existing, 'signal_momentum_threshold', cfg.signal_momentum_threshold),
+        signal_fallback_strategy_id=getattr(existing, 'signal_fallback_strategy_id', cfg.signal_fallback_strategy_id),
+        signal_weak_signal_mode=getattr(existing, 'signal_weak_signal_mode', cfg.signal_weak_signal_mode),
+        signal_history_fidelity_seconds=getattr(
+            existing,
+            'signal_history_fidelity_seconds',
+            cfg.signal_history_fidelity_seconds,
+        ),
+        signal_anchor_max_offset_seconds=getattr(
+            existing,
+            'signal_anchor_max_offset_seconds',
+            cfg.signal_anchor_max_offset_seconds,
+        ),
+        signal_dynamic_threshold_k=getattr(existing, 'signal_dynamic_threshold_k', cfg.signal_dynamic_threshold_k),
+        signal_dynamic_threshold_min_points=getattr(
+            existing,
+            'signal_dynamic_threshold_min_points',
+            cfg.signal_dynamic_threshold_min_points,
+        ),
+        signal_lock_before_entry_seconds=getattr(
+            existing,
+            'signal_lock_before_entry_seconds',
+            cfg.signal_lock_before_entry_seconds,
+        ),
+        max_stake_skip_alert_threshold=getattr(
+            existing,
+            'max_stake_skip_alert_threshold',
+            cfg.max_stake_skip_alert_threshold,
+        ),
+        ofi_threshold=getattr(existing, 'ofi_threshold', cfg.ofi_threshold),
+        min_entry_price=cfg.min_entry_price,
+        max_entry_price=cfg.max_entry_price,
+        binance_signal_stale_seconds=cfg.binance_signal_stale_seconds,
+        strategy7_ofi_threshold=cfg.strategy7_ofi_threshold,
+        strategy7_momentum_threshold=cfg.strategy7_momentum_threshold,
+        strategy7_max_momentum_delta=cfg.strategy7_max_momentum_delta,
+        strategy7_max_entry_price=cfg.strategy7_max_entry_price,
+        strategy7_min_signal_gap=cfg.strategy7_min_signal_gap,
+        strategy7_confirm_before_entry_seconds=cfg.strategy7_confirm_before_entry_seconds,
+        strategy7_late_confirm_strong_signal_gap=cfg.strategy7_late_confirm_strong_signal_gap,
+        strategy7_late_confirm_relax_seconds=cfg.strategy7_late_confirm_relax_seconds,
+    )
+
+
 def _paper_cfg_for_timeframe(cfg: AppConfig, timeframe: str) -> AppConfig:
     if not hasattr(cfg, '__dataclass_fields__') or not hasattr(cfg, 'paper_profiles'):
         return cfg
     profile = cfg.paper_profiles[timeframe]
-    return replace(
+    timeframe_cfg = replace(
         cfg,
         market_timeframe=timeframe,
         strategy_id=profile.strategy_id,
@@ -74,8 +129,18 @@ def _paper_cfg_for_timeframe(cfg: AppConfig, timeframe: str) -> AppConfig:
         binance_signal_stale_seconds=profile.binance_signal_stale_seconds,
         strategy7_ofi_threshold=profile.strategy7_ofi_threshold,
         strategy7_momentum_threshold=profile.strategy7_momentum_threshold,
-        strategy7_max_entry_price=profile.strategy7_max_entry_price,
+        strategy7_max_momentum_delta=profile.strategy7_max_momentum_delta,
+        strategy7_max_entry_price=profile.max_entry_price,
+        strategy7_min_signal_gap=profile.strategy7_min_signal_gap,
+        strategy7_confirm_before_entry_seconds=profile.strategy7_confirm_before_entry_seconds,
+        strategy7_late_confirm_strong_signal_gap=profile.strategy7_late_confirm_strong_signal_gap,
+        strategy7_late_confirm_relax_seconds=profile.strategy7_late_confirm_relax_seconds,
     )
+    timeframe_cfg.paper_strategy_profiles = {
+        strategy_id: _paper_strategy_profile_from_cfg(timeframe_cfg, strategy_id)
+        for strategy_id in timeframe_cfg.paper_strategy_ids
+    }
+    return timeframe_cfg
 
 
 class _PaperRuntimeControlProxy:

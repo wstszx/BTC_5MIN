@@ -9,6 +9,7 @@ import pytest
 
 import main
 from config import AppConfig, build_config_from_env_values, load_env_file_values
+from runtime_config import cfg_for_paper_strategy
 
 
 def _path_tail(value: str | Path, count: int) -> tuple[str, ...]:
@@ -827,6 +828,37 @@ def test_run_single_command_runtime_starts_only_paper_when_trade_mode_is_paper_e
 
     assert exit_code == 0
     assert calls == [('paper', '5m', str(Path('logs') / 'paper' / '5m' / 'paper_trades.csv'))]
+
+
+def test_paper_timeframe_worker_config_preserves_strategy7_runtime_gates():
+    cfg = build_config_from_env_values(
+        {
+            'TRADE_MODE': 'paper',
+            'MAX_ENTRY_PRICE': '0.52',
+            'STRATEGY7_MAX_ENTRY_PRICE': '0.52',
+            'PAPER_TIMEFRAMES': '5m',
+            'PAPER_5M_STRATEGY_ID': '7',
+            'PAPER_5M_STRATEGY_IDS': '7',
+            'PAPER_5M_MIN_ENTRY_PRICE': '0.48',
+            'PAPER_5M_MAX_ENTRY_PRICE': '0.54',
+            'PAPER_5M_STRATEGY7_MAX_MOMENTUM_DELTA': '0.12',
+            'PAPER_5M_STRATEGY7_MIN_SIGNAL_GAP': '0.006',
+            'PAPER_5M_STRATEGY7_CONFIRM_BEFORE_ENTRY_SECONDS': '2',
+            'PAPER_5M_STRATEGY7_LATE_CONFIRM_STRONG_SIGNAL_GAP': '0.035',
+            'PAPER_5M_STRATEGY7_LATE_CONFIRM_RELAX_SECONDS': '0',
+        }
+    )
+
+    timeframe_cfg = main._paper_cfg_for_timeframe(cfg, '5m')
+    strategy_cfg = cfg_for_paper_strategy(timeframe_cfg, 7)
+
+    assert strategy_cfg.min_entry_price == pytest.approx(0.48)
+    assert strategy_cfg.max_entry_price == pytest.approx(0.54)
+    assert strategy_cfg.strategy7_max_momentum_delta == pytest.approx(0.12)
+    assert strategy_cfg.strategy7_min_signal_gap == pytest.approx(0.006)
+    assert strategy_cfg.strategy7_confirm_before_entry_seconds == 2
+    assert strategy_cfg.strategy7_late_confirm_strong_signal_gap == pytest.approx(0.035)
+    assert strategy_cfg.strategy7_late_confirm_relax_seconds == pytest.approx(0.0)
 
 
 def test_run_single_command_runtime_starts_only_live_when_trade_mode_is_live(monkeypatch):

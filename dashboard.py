@@ -304,6 +304,7 @@ PAPER_PROFILE_EDITABLE_FIELDS: tuple[str, ...] = (
     "BINANCE_SIGNAL_STALE_SECONDS",
     "STRATEGY7_OFI_THRESHOLD",
     "STRATEGY7_MOMENTUM_THRESHOLD",
+    "STRATEGY7_MAX_MOMENTUM_DELTA",
 )
 
 STRATEGY_PROFILE_EDITABLE_FIELDS: tuple[str, ...] = (
@@ -328,6 +329,7 @@ STRATEGY_PROFILE_EDITABLE_FIELDS: tuple[str, ...] = (
     "BINANCE_SIGNAL_STALE_SECONDS",
     "STRATEGY7_OFI_THRESHOLD",
     "STRATEGY7_MOMENTUM_THRESHOLD",
+    "STRATEGY7_MAX_MOMENTUM_DELTA",
     "STRATEGY7_MIN_SIGNAL_GAP",
     "STRATEGY7_CONFIRM_BEFORE_ENTRY_SECONDS",
     "STRATEGY7_LATE_CONFIRM_STRONG_SIGNAL_GAP",
@@ -409,6 +411,7 @@ def _strategy_profile_field_names(strategy_id: int | str) -> list[str]:
                 "BINANCE_SIGNAL_STALE_SECONDS",
                 "STRATEGY7_OFI_THRESHOLD",
                 "STRATEGY7_MOMENTUM_THRESHOLD",
+                "STRATEGY7_MAX_MOMENTUM_DELTA",
                 "STRATEGY7_MIN_SIGNAL_GAP",
                 "STRATEGY7_CONFIRM_BEFORE_ENTRY_SECONDS",
                 "STRATEGY7_LATE_CONFIRM_STRONG_SIGNAL_GAP",
@@ -453,7 +456,12 @@ def _cfg_for_paper_timeframe(cfg: AppConfig, timeframe: str) -> AppConfig:
         binance_signal_stale_seconds=profile.binance_signal_stale_seconds,
         strategy7_ofi_threshold=profile.strategy7_ofi_threshold,
         strategy7_momentum_threshold=profile.strategy7_momentum_threshold,
-        strategy7_max_entry_price=profile.strategy7_max_entry_price,
+        strategy7_max_momentum_delta=profile.strategy7_max_momentum_delta,
+        strategy7_min_signal_gap=profile.strategy7_min_signal_gap,
+        strategy7_confirm_before_entry_seconds=profile.strategy7_confirm_before_entry_seconds,
+        strategy7_late_confirm_strong_signal_gap=profile.strategy7_late_confirm_strong_signal_gap,
+        strategy7_late_confirm_relax_seconds=profile.strategy7_late_confirm_relax_seconds,
+        strategy7_max_entry_price=profile.max_entry_price,
     )
 
 
@@ -1395,6 +1403,7 @@ def _field_groups() -> list[dict[str, Any]]:
                 "BINANCE_SIGNAL_STALE_SECONDS",
                 "STRATEGY7_OFI_THRESHOLD",
                 "STRATEGY7_MOMENTUM_THRESHOLD",
+                "STRATEGY7_MAX_MOMENTUM_DELTA",
                 "STRATEGY7_MIN_SIGNAL_GAP",
                 "STRATEGY7_CONFIRM_BEFORE_ENTRY_SECONDS",
                 "STRATEGY7_LATE_CONFIRM_STRONG_SIGNAL_GAP",
@@ -1441,6 +1450,7 @@ TIMEFRAME_PRESETS: dict[str, dict[str, dict[str, str]]] = {
         "strategy7": {
             "STRATEGY7_OFI_THRESHOLD": "0.58",
             "STRATEGY7_MOMENTUM_THRESHOLD": "0.008",
+            "STRATEGY7_MAX_MOMENTUM_DELTA": "",
             "MAX_ENTRY_PRICE": "0.54",
             "STRATEGY7_MIN_SIGNAL_GAP": "0.015",
             "STRATEGY7_CONFIRM_BEFORE_ENTRY_SECONDS": "2",
@@ -1467,6 +1477,7 @@ TIMEFRAME_PRESETS: dict[str, dict[str, dict[str, str]]] = {
         "strategy7": {
             "STRATEGY7_OFI_THRESHOLD": "0.50",
             "STRATEGY7_MOMENTUM_THRESHOLD": "0.005",
+            "STRATEGY7_MAX_MOMENTUM_DELTA": "",
             "MAX_ENTRY_PRICE": "0.55",
             "STRATEGY7_MIN_SIGNAL_GAP": "0.01",
             "STRATEGY7_CONFIRM_BEFORE_ENTRY_SECONDS": "3",
@@ -1512,6 +1523,7 @@ class DashboardState:
         "OFI_THRESHOLD",
         "STRATEGY7_OFI_THRESHOLD",
         "STRATEGY7_MOMENTUM_THRESHOLD",
+        "STRATEGY7_MAX_MOMENTUM_DELTA",
         "STRATEGY7_MIN_SIGNAL_GAP",
         "STRATEGY7_CONFIRM_BEFORE_ENTRY_SECONDS",
         "STRATEGY7_LATE_CONFIRM_STRONG_SIGNAL_GAP",
@@ -1567,6 +1579,7 @@ class DashboardState:
         "OFI_THRESHOLD": "盘口失衡阈值",
         "STRATEGY7_OFI_THRESHOLD": "策略7 盘口失衡阈值",
         "STRATEGY7_MOMENTUM_THRESHOLD": "策略7 动量阈值",
+        "STRATEGY7_MAX_MOMENTUM_DELTA": "策略7 动量过热上限",
         "STRATEGY7_MIN_SIGNAL_GAP": "策略7 最小信号优势",
         "STRATEGY7_CONFIRM_BEFORE_ENTRY_SECONDS": "策略7 最晚确认秒数",
         "STRATEGY7_LATE_CONFIRM_STRONG_SIGNAL_GAP": "策略7 强信号额外优势",
@@ -1631,6 +1644,7 @@ class DashboardState:
         "OFI_THRESHOLD": "ofi_threshold",
         "STRATEGY7_OFI_THRESHOLD": "strategy7_ofi_threshold",
         "STRATEGY7_MOMENTUM_THRESHOLD": "strategy7_momentum_threshold",
+        "STRATEGY7_MAX_MOMENTUM_DELTA": "strategy7_max_momentum_delta",
         "STRATEGY7_MIN_SIGNAL_GAP": "strategy7_min_signal_gap",
         "STRATEGY7_CONFIRM_BEFORE_ENTRY_SECONDS": "strategy7_confirm_before_entry_seconds",
         "STRATEGY7_LATE_CONFIRM_STRONG_SIGNAL_GAP": "strategy7_late_confirm_strong_signal_gap",
@@ -1681,6 +1695,7 @@ class DashboardState:
         "OFI_THRESHOLD",
         "STRATEGY7_OFI_THRESHOLD",
         "STRATEGY7_MOMENTUM_THRESHOLD",
+        "STRATEGY7_MAX_MOMENTUM_DELTA",
         "STRATEGY7_MIN_SIGNAL_GAP",
         "STRATEGY7_LATE_CONFIRM_STRONG_SIGNAL_GAP",
         "STRATEGY7_LATE_CONFIRM_RELAX_SECONDS",
@@ -1721,6 +1736,7 @@ class DashboardState:
         "SIGNAL_LOCK_BEFORE_ENTRY_SECONDS": "strategy_5_only",
         "STRATEGY7_OFI_THRESHOLD": "strategy_7_only",
         "STRATEGY7_MOMENTUM_THRESHOLD": "strategy_7_only",
+        "STRATEGY7_MAX_MOMENTUM_DELTA": "strategy_7_only",
         "STRATEGY7_MIN_SIGNAL_GAP": "strategy_7_only",
         "STRATEGY7_CONFIRM_BEFORE_ENTRY_SECONDS": "strategy_7_only",
         "STRATEGY7_LATE_CONFIRM_STRONG_SIGNAL_GAP": "strategy_7_only",
@@ -1754,6 +1770,7 @@ class DashboardState:
         "OFI_THRESHOLD": "策略 6 的 Binance OFI 最小强度要求，低于该阈值直接跳过。",
         "STRATEGY7_OFI_THRESHOLD": "策略 7 对 Binance OFI 的最小强度要求，低于该阈值直接跳过。",
         "STRATEGY7_MOMENTUM_THRESHOLD": "策略 7 对 Polymarket 轮内动量确认的最小要求。",
+        "STRATEGY7_MAX_MOMENTUM_DELTA": "策略 7 对 Polymarket 轮内动量的过热上限，超过该值会跳过，留空则不启用。",
         "STRATEGY7_MIN_SIGNAL_GAP": "策略 7 要求 OFI 和动量超过阈值的最小额外优势，避免擦线交易。",
         "STRATEGY7_CONFIRM_BEFORE_ENTRY_SECONDS": "策略 7 需要在计划入场前至少提前这么多秒完成双信号确认。",
         "STRATEGY7_LATE_CONFIRM_STRONG_SIGNAL_GAP": "策略 7 只有在 OFI 和动量都额外强于阈值时，才允许走晚确认放宽通道。",
@@ -2164,6 +2181,11 @@ class DashboardState:
                     "binance_signal_stale_seconds": _fmt_env(profile.binance_signal_stale_seconds),
                     "strategy7_ofi_threshold": _fmt_env(profile.strategy7_ofi_threshold),
                     "strategy7_momentum_threshold": _fmt_env(profile.strategy7_momentum_threshold),
+                    "strategy7_max_momentum_delta": (
+                        _fmt_env(profile.strategy7_max_momentum_delta)
+                        if profile.strategy7_max_momentum_delta is not None
+                        else ""
+                    ),
                     "strategy7_max_entry_price": _fmt_env(profile.strategy7_max_entry_price),
                 }
                 for timeframe, profile in getattr(self._cfg, "paper_profiles", {}).items()
@@ -5028,6 +5050,7 @@ const OPTION_LABELS = {
 };
 
 const REASON_LABELS = {
+  strategy7_momentum_too_hot: '策略7 动量过热，跳过追单',
   observed_waiting_for_entry: '等待入场观察中',
   entry_window_missed: '已错过入场时间',
   ws_stale: '连接数据陈旧',
@@ -5083,6 +5106,7 @@ const REASON_LABELS = {
 };
 
 const CONFIG_KEY_NAMES = {
+  STRATEGY7_MAX_MOMENTUM_DELTA: '策略7 动量过热上限',
   ENABLE_LIVE_TRADING: '并行实盘',
   TRADE_MODE: '运行视角',
   LIVE_TRADING_ENABLED: '并行实盘开关',
@@ -6064,6 +6088,7 @@ function renderPaperProfiles(payload) {
     'BINANCE_SIGNAL_STALE_SECONDS',
     'STRATEGY7_OFI_THRESHOLD',
     'STRATEGY7_MOMENTUM_THRESHOLD',
+    'STRATEGY7_MAX_MOMENTUM_DELTA',
   ];
 
   node.innerHTML = ''
@@ -6098,6 +6123,7 @@ function renderPaperProfiles(payload) {
               : fieldName === 'OFI_THRESHOLD' ? 'ofi_threshold'
               : fieldName === 'BINANCE_SIGNAL_STALE_SECONDS' ? 'binance_signal_stale_seconds'
               : fieldName === 'STRATEGY7_OFI_THRESHOLD' ? 'strategy7_ofi_threshold'
+              : fieldName === 'STRATEGY7_MAX_MOMENTUM_DELTA' ? 'strategy7_max_momentum_delta'
               : 'strategy7_momentum_threshold'
             ] ?? '');
         const options = selectOptions[scopedKey] || selectOptions[fieldName] || null;

@@ -6,10 +6,11 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from config import AppConfig
-from models import BacktestResult, SessionState, TradeRecord
+from models import BacktestResult, MarketQuote, SessionState, TradeRecord
 from polymarket_api import normalize_outcome_label, parse_iso_datetime
 from risk_and_sizing import apply_round_outcome, build_trade_plan, reset_after_stop_loss
 from strategy import get_side_for_round, strategy7_strong_signal_allows_late_confirm
+from strategy_decision import evaluate_strategy7_consensus_signal
 
 
 def _optional_float(value: str | None) -> float | None:
@@ -159,45 +160,80 @@ def run_backtest(csv_path: Path, cfg: AppConfig | None = None) -> BacktestResult
         signal_open_up_price = _optional_float(row.get("entry_price_open_up"))
         signal_current_up_price = _select_signal_current_up_price(row, cfg.entry_timing)
         ofi_score = _select_ofi_score(row)
-        try:
-            side = get_side_for_round(
-                cfg.strategy_id,
-                state.round_index,
-                signal_open_up_price=signal_open_up_price,
-                signal_current_up_price=signal_current_up_price,
-                signal_threshold=cfg.strategy7_momentum_threshold if cfg.strategy_id in {7, 8} else cfg.signal_momentum_threshold,
-                signal_fallback_strategy_id=cfg.signal_fallback_strategy_id,
-                ofi_score=ofi_score,
-                ofi_threshold=cfg.strategy7_ofi_threshold if cfg.strategy_id in {7, 8} else cfg.ofi_threshold,
-                signal_min_gap=cfg.strategy7_min_signal_gap if cfg.strategy_id in {7, 8} else 0.0,
-            )
-        except ValueError:
-            if cfg.strategy_id not in {7, 8}:
-                raise
-            strategy_prefix = "strategy7" if cfg.strategy_id == 7 else "strategy8"
-            records.append(
-                _build_record(
-                    cfg=cfg,
-                    state=state,
-                    row=row,
-                    side="SKIP",
-                    price=None,
-                    order_size=0.0,
-                    order_cost=0.0,
-                    expected_profit=0.0,
-                    result=None,
-                    trade_pnl=0.0,
-                    skip_reason=f"{strategy_prefix}_signal_unavailable",
-                )
-            )
-            skipped_round_count += 1
-            state.round_index += 1
-            continue
         if cfg.strategy_id in {7, 8}:
             strategy_prefix = "strategy7" if cfg.strategy_id == 7 else "strategy8"
             quote_fetched_at = _select_quote_fetched_at(row)
             strategy6_signal_at = _select_strategy6_signal_at(row)
+            if cfg.strategy_id == 7:
+                signal_quote_time = quote_fetched_at or strategy6_signal_at or _historical_entry_time(row, cfg) or datetime.now(timezone.utc)
+                signal_quote = MarketQuote(
+                    slug=row.get("slug", ""),
+                    strategy6_ofi_score=ofi_score,
+                    strategy6_signal_at=strategy6_signal_at or signal_quote_time,
+                    fetched_at=quote_fetched_at or signal_quote_time,
+                )
+                signal_check = evaluate_strategy7_consensus_signal(
+                    cfg=cfg,
+                    quote=signal_quote,
+                    now=signal_quote_time,
+                    signal_open_up_price=signal_open_up_price,
+                    signal_current_up_price=signal_current_up_price,
+                )
+                if signal_check.decision.side is None:
+                    records.append(
+                        _build_record(
+                            cfg=cfg,
+                            state=state,
+                            row=row,
+                            side="SKIP",
+                            price=None,
+                            order_size=0.0,
+                            order_cost=0.0,
+                            expected_profit=0.0,
+                            result=None,
+                            trade_pnl=0.0,
+                            skip_reason=signal_check.decision.reason,
+                        )
+                    )
+                    skipped_round_count += 1
+                    state.round_index += 1
+                    continue
+                side = signal_check.decision.side
+            else:
+                try:
+                    side = get_side_for_round(
+                        cfg.strategy_id,
+                        state.round_index,
+                        signal_open_up_price=signal_open_up_price,
+                        signal_current_up_price=signal_current_up_price,
+                        signal_threshold=cfg.strategy7_momentum_threshold,
+                        signal_fallback_strategy_id=cfg.signal_fallback_strategy_id,
+                        ofi_score=ofi_score,
+                        ofi_threshold=cfg.strategy7_ofi_threshold,
+                        signal_min_gap=cfg.strategy7_min_signal_gap,
+                    )
+                except ValueError:
+                    records.append(
+                        _build_record(
+                            cfg=cfg,
+                            state=state,
+                            row=row,
+                            side="SKIP",
+                            price=None,
+                            order_size=0.0,
+                            order_cost=0.0,
+                            expected_profit=0.0,
+                            result=None,
+                            trade_pnl=0.0,
+                            skip_reason=f"{strategy_prefix}_signal_unavailable",
+                        )
+                    )
+                    skipped_round_count += 1
+                    state.round_index += 1
+                    continue
             if (
+                cfg.strategy_id == 8
+                and
                 quote_fetched_at is not None
                 and strategy6_signal_at is not None
                 and (quote_fetched_at - strategy6_signal_at).total_seconds() > max(0.0, cfg.binance_signal_stale_seconds)
@@ -263,6 +299,17 @@ def run_backtest(csv_path: Path, cfg: AppConfig | None = None) -> BacktestResult
                 skipped_round_count += 1
                 state.round_index += 1
                 continue
+        else:
+            side = get_side_for_round(
+                cfg.strategy_id,
+                state.round_index,
+                signal_open_up_price=signal_open_up_price,
+                signal_current_up_price=signal_current_up_price,
+                signal_threshold=cfg.signal_momentum_threshold,
+                signal_fallback_strategy_id=cfg.signal_fallback_strategy_id,
+                ofi_score=ofi_score,
+                ofi_threshold=cfg.ofi_threshold,
+            )
         price = _select_entry_price(row, side, cfg.entry_timing)
         if cfg.strategy_id in {7, 8} and price is not None and price > getattr(cfg, "max_entry_price", cfg.max_price_threshold):
             strategy_prefix = "strategy7" if cfg.strategy_id == 7 else "strategy8"
