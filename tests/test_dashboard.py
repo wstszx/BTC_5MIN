@@ -4272,10 +4272,15 @@ def test_dashboard_config_payload_includes_strategy9_fields(tmp_path: Path):
         assert payload['labels']['STRATEGY9_STABILITY_SAMPLE_COUNT'] == '策略9 稳定采样数'
         assert payload['labels']['STRATEGY9_BASE_MAX_ENTRY_PRICE'] == '策略9 普通价帽'
         assert payload['labels']['STRATEGY9_ULTRA_SIGNAL_GAP'] == '策略9 超强信号优势'
+        assert payload['labels']['STRATEGY9_DYNAMIC_SIZING_ENABLED'] == '策略9 动态下注'
         assert payload['field_scope']['STRATEGY9_STABILITY_SAMPLE_COUNT'] == 'strategy_9_only'
         assert payload['field_scope']['STRATEGY9_BASE_MAX_ENTRY_PRICE'] == 'strategy_9_only'
+        assert payload['field_scope']['STRATEGY9_DYNAMIC_SIZING_ENABLED'] == 'strategy_9_only'
+        assert payload['select_options']['STRATEGY9_DYNAMIC_SIZING_ENABLED'] == ['false', 'true']
         assert 'STRATEGY9_STABILITY_SAMPLE_COUNT' in payload['editable_keys']
         assert 'STRATEGY9_ULTRA_MAX_ENTRY_PRICE' in payload['editable_keys']
+        assert 'STRATEGY9_DYNAMIC_SIZING_ENABLED' in payload['editable_keys']
+        assert 'STRATEGY9_SIZING_MIN_MULTIPLIER' in payload['editable_keys']
     finally:
         state.close()
 

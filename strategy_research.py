@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 import warnings
 from dataclasses import dataclass
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from itertools import product
 from pathlib import Path
@@ -10,10 +11,10 @@ from statistics import median
 from typing import Iterable
 
 from config import AppConfig
-from models import MarketQuote
+from models import MarketQuote, SessionState
 from polymarket_api import normalize_outcome_label, parse_iso_datetime
 from strategy import get_side_for_round, strategy7_strong_signal_allows_late_confirm
-from strategy_decision import SideDecision, evaluate_strategy7_consensus_signal, resolve_side_from_strategy, strategy7_order_cost_multiplier
+from strategy_decision import SideDecision, effective_decision_order_cost_multiplier, evaluate_strategy7_consensus_signal, resolve_side_from_strategy
 
 
 @dataclass(slots=True)
@@ -205,17 +206,27 @@ def _simulate_segment(
             quote_fetched_at = _select_quote_fetched_at(row)
             strategy6_signal_at = _select_strategy6_signal_at(row)
             if strategy_id == 9:
+                historical_slug = row.get("slug", "")
+                strategy_state = SessionState(
+                    round_index=round_index,
+                    signal_round_slug=historical_slug,
+                    signal_round_open_up_price=signal_open_up_price,
+                )
                 signal_quote_time = quote_fetched_at or strategy6_signal_at or _historical_entry_time(row, cfg, entry_timing) or datetime.now(timezone.utc)
                 signal_quote = MarketQuote(
-                    slug=row.get("slug", ""),
+                    slug=historical_slug,
+                    up_price=signal_current_up_price,
+                    down_price=1 - signal_current_up_price if signal_current_up_price is not None else None,
+                    up_best_ask=signal_current_up_price,
+                    down_best_ask=1 - signal_current_up_price if signal_current_up_price is not None else None,
                     strategy6_ofi_score=ofi_score,
                     strategy6_signal_at=strategy6_signal_at or signal_quote_time,
                     fetched_at=quote_fetched_at or signal_quote_time,
                 )
                 side_decision = resolve_side_from_strategy(
                     cfg=cfg,
-                    state=SessionState(round_index=round_index),
-                    slug=row.get("slug", ""),
+                    state=strategy_state,
+                    slug=historical_slug,
                     quote=signal_quote,
                     now=signal_quote_time,
                     entry_time=_historical_entry_time(row, cfg, entry_timing),
@@ -322,18 +333,18 @@ def _simulate_segment(
             skipped += 1
             continue
         order_cost_multiplier = (
-            strategy7_order_cost_multiplier(
-                cfg=cfg,
+            effective_decision_order_cost_multiplier(
+                cfg=replace(cfg, strategy_id=strategy_id),
                 decision=SideDecision(
                     side=side,
                     signal_delta=signal_current_up_price - signal_open_up_price
                     if signal_current_up_price is not None and signal_open_up_price is not None
                     else None,
+                    ofi_score=ofi_score,
                 ),
                 price=price,
-                ofi_score=ofi_score,
             )
-            if strategy_id == 7
+            if strategy_id in {7, 9}
             else 1.0
         )
 

@@ -99,6 +99,46 @@ def test_backtest_strategy_7_dynamic_sizing_scales_high_price_trade(tmp_path):
     assert result.records[0].order_cost == pytest.approx(8.0)
 
 
+def test_backtest_strategy_9_dynamic_sizing_scales_high_price_trade(tmp_path):
+    csv_path = tmp_path / "strategy9_dynamic_sizing_history.csv"
+    csv_path.write_text(
+        "\n".join(
+            [
+                "event_id,market_id,slug,title,series_id,start_time,end_time,price_to_beat,final_price,result,up_token_id,down_token_id,entry_price_open_up,entry_price_open_down,entry_price_preclose_up,entry_price_preclose_down,strategy6_ofi_score",
+                "1,101,s9-sized,Round A,10684,2026-03-29T00:00:00Z,2026-03-29T00:05:00Z,100,101,UP,up-a,down-a,0.50,0.50,0.52,0.48,0.66",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    cfg = AppConfig(
+        strategy_id=9,
+        entry_timing="PRE_CLOSE",
+        bet_sizing_mode="FLAT_BASE_COST",
+        base_order_cost=10.0,
+        max_stake=25.0,
+        strategy7_ofi_threshold=0.65,
+        strategy7_momentum_threshold=0.02,
+        strategy7_min_signal_gap=0.0,
+        strategy7_confirm_before_entry_seconds=0,
+        strategy9_stability_sample_count=1,
+        strategy9_stability_required_count=1,
+        strategy9_dynamic_sizing_enabled=True,
+        strategy9_sizing_reference_price=0.50,
+        strategy9_sizing_price_step=0.01,
+        strategy9_sizing_price_step_reduction=0.10,
+        strategy9_sizing_min_multiplier=0.50,
+        strategy9_sizing_max_multiplier=1.0,
+        strategy9_sizing_strong_signal_gap=0.02,
+        strategy9_sizing_strong_signal_boost=0.20,
+    )
+
+    result = run_backtest(csv_path, cfg)
+
+    assert result.trade_count == 1
+    assert result.records[0].sizing_multiplier == pytest.approx(0.8)
+    assert result.records[0].order_cost == pytest.approx(8.0)
+
+
 def test_backtest_supports_strategy_8_trend_and_reversal_states(tmp_path):
     csv_path = tmp_path / "strategy8_history.csv"
     csv_path.write_text(

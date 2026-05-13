@@ -71,6 +71,13 @@ _FLOAT_CONFIG_KEYS: frozenset[str] = frozenset(
         "STRATEGY7_SIZING_MAX_MULTIPLIER",
         "STRATEGY7_SIZING_STRONG_SIGNAL_GAP",
         "STRATEGY7_SIZING_STRONG_SIGNAL_BOOST",
+        "STRATEGY9_SIZING_REFERENCE_PRICE",
+        "STRATEGY9_SIZING_PRICE_STEP",
+        "STRATEGY9_SIZING_PRICE_STEP_REDUCTION",
+        "STRATEGY9_SIZING_MIN_MULTIPLIER",
+        "STRATEGY9_SIZING_MAX_MULTIPLIER",
+        "STRATEGY9_SIZING_STRONG_SIGNAL_GAP",
+        "STRATEGY9_SIZING_STRONG_SIGNAL_BOOST",
         "STRATEGY9_STABILITY_WINDOW_SECONDS",
         "STRATEGY9_REVERSAL_LOOKBACK_SECONDS",
         "STRATEGY9_MAX_SIGNAL_DECAY",
@@ -94,6 +101,7 @@ _BOOL_CONFIG_KEYS: frozenset[str] = frozenset(
         "LIVE_TRADING_ENABLED",
         "WS_ENABLED",
         "STRATEGY7_DYNAMIC_SIZING_ENABLED",
+        "STRATEGY9_DYNAMIC_SIZING_ENABLED",
     }
 )
 _SELECT_CONFIG_OPTIONS: dict[str, tuple[str, ...]] = {
@@ -440,6 +448,14 @@ class PaperTimeframeProfile:
     strategy7_sizing_max_multiplier: float
     strategy7_sizing_strong_signal_gap: float
     strategy7_sizing_strong_signal_boost: float
+    strategy9_dynamic_sizing_enabled: bool
+    strategy9_sizing_reference_price: float
+    strategy9_sizing_price_step: float
+    strategy9_sizing_price_step_reduction: float
+    strategy9_sizing_min_multiplier: float
+    strategy9_sizing_max_multiplier: float
+    strategy9_sizing_strong_signal_gap: float
+    strategy9_sizing_strong_signal_boost: float
     strategy9_stability_sample_count: int
     strategy9_stability_required_count: int
     strategy9_stability_window_seconds: float
@@ -494,6 +510,14 @@ class LiveStrategyProfile:
     strategy7_sizing_max_multiplier: float
     strategy7_sizing_strong_signal_gap: float
     strategy7_sizing_strong_signal_boost: float
+    strategy9_dynamic_sizing_enabled: bool
+    strategy9_sizing_reference_price: float
+    strategy9_sizing_price_step: float
+    strategy9_sizing_price_step_reduction: float
+    strategy9_sizing_min_multiplier: float
+    strategy9_sizing_max_multiplier: float
+    strategy9_sizing_strong_signal_gap: float
+    strategy9_sizing_strong_signal_boost: float
     strategy9_stability_sample_count: int
     strategy9_stability_required_count: int
     strategy9_stability_window_seconds: float
@@ -545,6 +569,14 @@ def _base_live_profile_for_strategy(cfg: AppConfig, strategy_id: int) -> LiveStr
         strategy7_sizing_max_multiplier=cfg.strategy7_sizing_max_multiplier,
         strategy7_sizing_strong_signal_gap=cfg.strategy7_sizing_strong_signal_gap,
         strategy7_sizing_strong_signal_boost=cfg.strategy7_sizing_strong_signal_boost,
+        strategy9_dynamic_sizing_enabled=cfg.strategy9_dynamic_sizing_enabled,
+        strategy9_sizing_reference_price=cfg.strategy9_sizing_reference_price,
+        strategy9_sizing_price_step=cfg.strategy9_sizing_price_step,
+        strategy9_sizing_price_step_reduction=cfg.strategy9_sizing_price_step_reduction,
+        strategy9_sizing_min_multiplier=cfg.strategy9_sizing_min_multiplier,
+        strategy9_sizing_max_multiplier=cfg.strategy9_sizing_max_multiplier,
+        strategy9_sizing_strong_signal_gap=cfg.strategy9_sizing_strong_signal_gap,
+        strategy9_sizing_strong_signal_boost=cfg.strategy9_sizing_strong_signal_boost,
         strategy9_stability_sample_count=cfg.strategy9_stability_sample_count,
         strategy9_stability_required_count=cfg.strategy9_stability_required_count,
         strategy9_stability_window_seconds=cfg.strategy9_stability_window_seconds,
@@ -688,6 +720,38 @@ def _profile_for_strategy_prefix(cfg: AppConfig, strategy_id: int, prefix: str) 
                 f"{prefix}_STRATEGY7_SIZING_STRONG_SIGNAL_BOOST",
                 cfg.strategy7_sizing_strong_signal_boost,
             ),
+            strategy9_dynamic_sizing_enabled=_env_bool(
+                f"{prefix}_STRATEGY9_DYNAMIC_SIZING_ENABLED",
+                cfg.strategy9_dynamic_sizing_enabled,
+            ),
+            strategy9_sizing_reference_price=_env_float(
+                f"{prefix}_STRATEGY9_SIZING_REFERENCE_PRICE",
+                cfg.strategy9_sizing_reference_price,
+            ),
+            strategy9_sizing_price_step=_env_float(
+                f"{prefix}_STRATEGY9_SIZING_PRICE_STEP",
+                cfg.strategy9_sizing_price_step,
+            ),
+            strategy9_sizing_price_step_reduction=_env_float(
+                f"{prefix}_STRATEGY9_SIZING_PRICE_STEP_REDUCTION",
+                cfg.strategy9_sizing_price_step_reduction,
+            ),
+            strategy9_sizing_min_multiplier=_env_float(
+                f"{prefix}_STRATEGY9_SIZING_MIN_MULTIPLIER",
+                cfg.strategy9_sizing_min_multiplier,
+            ),
+            strategy9_sizing_max_multiplier=_env_float(
+                f"{prefix}_STRATEGY9_SIZING_MAX_MULTIPLIER",
+                cfg.strategy9_sizing_max_multiplier,
+            ),
+            strategy9_sizing_strong_signal_gap=_env_float(
+                f"{prefix}_STRATEGY9_SIZING_STRONG_SIGNAL_GAP",
+                cfg.strategy9_sizing_strong_signal_gap,
+            ),
+            strategy9_sizing_strong_signal_boost=_env_float(
+                f"{prefix}_STRATEGY9_SIZING_STRONG_SIGNAL_BOOST",
+                cfg.strategy9_sizing_strong_signal_boost,
+            ),
             strategy9_stability_sample_count=_env_int(
                 f"{prefix}_STRATEGY9_STABILITY_SAMPLE_COUNT",
                 cfg.strategy9_stability_sample_count,
@@ -799,6 +863,14 @@ class AppConfig:
     strategy7_sizing_max_multiplier: float = field(default_factory=lambda: _env_float("STRATEGY7_SIZING_MAX_MULTIPLIER", 1.00))
     strategy7_sizing_strong_signal_gap: float = field(default_factory=lambda: _env_float("STRATEGY7_SIZING_STRONG_SIGNAL_GAP", 0.02))
     strategy7_sizing_strong_signal_boost: float = field(default_factory=lambda: _env_float("STRATEGY7_SIZING_STRONG_SIGNAL_BOOST", 0.20))
+    strategy9_dynamic_sizing_enabled: bool = field(default_factory=lambda: _env_bool("STRATEGY9_DYNAMIC_SIZING_ENABLED", False))
+    strategy9_sizing_reference_price: float = field(default_factory=lambda: _env_float("STRATEGY9_SIZING_REFERENCE_PRICE", _env_float("STRATEGY7_SIZING_REFERENCE_PRICE", 0.50)))
+    strategy9_sizing_price_step: float = field(default_factory=lambda: _env_float("STRATEGY9_SIZING_PRICE_STEP", _env_float("STRATEGY7_SIZING_PRICE_STEP", 0.01)))
+    strategy9_sizing_price_step_reduction: float = field(default_factory=lambda: _env_float("STRATEGY9_SIZING_PRICE_STEP_REDUCTION", _env_float("STRATEGY7_SIZING_PRICE_STEP_REDUCTION", 0.10)))
+    strategy9_sizing_min_multiplier: float = field(default_factory=lambda: _env_float("STRATEGY9_SIZING_MIN_MULTIPLIER", _env_float("STRATEGY7_SIZING_MIN_MULTIPLIER", 0.50)))
+    strategy9_sizing_max_multiplier: float = field(default_factory=lambda: _env_float("STRATEGY9_SIZING_MAX_MULTIPLIER", _env_float("STRATEGY7_SIZING_MAX_MULTIPLIER", 1.00)))
+    strategy9_sizing_strong_signal_gap: float = field(default_factory=lambda: _env_float("STRATEGY9_SIZING_STRONG_SIGNAL_GAP", _env_float("STRATEGY7_SIZING_STRONG_SIGNAL_GAP", 0.02)))
+    strategy9_sizing_strong_signal_boost: float = field(default_factory=lambda: _env_float("STRATEGY9_SIZING_STRONG_SIGNAL_BOOST", _env_float("STRATEGY7_SIZING_STRONG_SIGNAL_BOOST", 0.20)))
     strategy9_stability_sample_count: int = field(default_factory=lambda: _env_int("STRATEGY9_STABILITY_SAMPLE_COUNT", 3))
     strategy9_stability_required_count: int = field(default_factory=lambda: _env_int("STRATEGY9_STABILITY_REQUIRED_COUNT", 2))
     strategy9_stability_window_seconds: float = field(default_factory=lambda: _env_float("STRATEGY9_STABILITY_WINDOW_SECONDS", 6.0))
@@ -968,6 +1040,38 @@ class AppConfig:
                 strategy7_sizing_strong_signal_boost=_env_float(
                     f"{prefix}_STRATEGY7_SIZING_STRONG_SIGNAL_BOOST",
                     self.strategy7_sizing_strong_signal_boost,
+                ),
+                strategy9_dynamic_sizing_enabled=_env_bool(
+                    f"{prefix}_STRATEGY9_DYNAMIC_SIZING_ENABLED",
+                    self.strategy9_dynamic_sizing_enabled,
+                ),
+                strategy9_sizing_reference_price=_env_float(
+                    f"{prefix}_STRATEGY9_SIZING_REFERENCE_PRICE",
+                    self.strategy9_sizing_reference_price,
+                ),
+                strategy9_sizing_price_step=_env_float(
+                    f"{prefix}_STRATEGY9_SIZING_PRICE_STEP",
+                    self.strategy9_sizing_price_step,
+                ),
+                strategy9_sizing_price_step_reduction=_env_float(
+                    f"{prefix}_STRATEGY9_SIZING_PRICE_STEP_REDUCTION",
+                    self.strategy9_sizing_price_step_reduction,
+                ),
+                strategy9_sizing_min_multiplier=_env_float(
+                    f"{prefix}_STRATEGY9_SIZING_MIN_MULTIPLIER",
+                    self.strategy9_sizing_min_multiplier,
+                ),
+                strategy9_sizing_max_multiplier=_env_float(
+                    f"{prefix}_STRATEGY9_SIZING_MAX_MULTIPLIER",
+                    self.strategy9_sizing_max_multiplier,
+                ),
+                strategy9_sizing_strong_signal_gap=_env_float(
+                    f"{prefix}_STRATEGY9_SIZING_STRONG_SIGNAL_GAP",
+                    self.strategy9_sizing_strong_signal_gap,
+                ),
+                strategy9_sizing_strong_signal_boost=_env_float(
+                    f"{prefix}_STRATEGY9_SIZING_STRONG_SIGNAL_BOOST",
+                    self.strategy9_sizing_strong_signal_boost,
                 ),
                 strategy9_stability_sample_count=_env_int(
                     f"{prefix}_STRATEGY9_STABILITY_SAMPLE_COUNT",

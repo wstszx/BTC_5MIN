@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import pytest
+
 from config import AppConfig
 from strategy_research import run_strategy_research
 
@@ -344,3 +346,49 @@ def test_strategy_research_strategy_7_applies_momentum_overheat_gate(tmp_path):
 
     assert report.top_candidates[0].trades == 0
     assert report.top_candidates[0].skipped == 1
+
+
+def test_strategy_research_strategy_9_dynamic_sizing_scales_order_cost(tmp_path):
+    csv_path = tmp_path / "strategy9_dynamic_sizing_history.csv"
+    csv_path.write_text(
+        "\n".join(
+            [
+                "event_id,market_id,slug,title,series_id,start_time,end_time,price_to_beat,final_price,result,up_token_id,down_token_id,entry_price_open_up,entry_price_open_down,entry_price_preclose_up,entry_price_preclose_down,strategy6_ofi_score",
+                "1,101,s9-sized,Round A,10684,2026-03-29T00:00:00Z,2026-03-29T00:05:00Z,100,101,UP,up-a,down-a,0.50,0.50,0.52,0.48,0.66",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    cfg = AppConfig(
+        max_stake=25.0,
+        bet_sizing_mode="FLAT_BASE_COST",
+        base_order_cost=10.0,
+        strategy7_ofi_threshold=0.65,
+        strategy7_momentum_threshold=0.02,
+        strategy7_min_signal_gap=0.0,
+        strategy7_confirm_before_entry_seconds=0,
+        strategy9_stability_sample_count=1,
+        strategy9_stability_required_count=1,
+        strategy9_dynamic_sizing_enabled=True,
+        strategy9_sizing_reference_price=0.50,
+        strategy9_sizing_price_step=0.01,
+        strategy9_sizing_price_step_reduction=0.10,
+        strategy9_sizing_min_multiplier=0.50,
+        strategy9_sizing_max_multiplier=1.0,
+        strategy9_sizing_strong_signal_gap=0.02,
+        strategy9_sizing_strong_signal_boost=0.20,
+    )
+
+    report = run_strategy_research(
+        csv_path,
+        cfg,
+        strategy_ids=[9],
+        reset_rounds=[2],
+        target_profits=[0.5],
+        entry_timing="PRE_CLOSE",
+        segments=1,
+        top_n=1,
+    )
+
+    assert report.top_candidates[0].trades == 1
+    assert report.top_candidates[0].max_single_order_cost == pytest.approx(8.0)

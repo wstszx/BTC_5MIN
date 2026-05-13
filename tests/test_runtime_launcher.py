@@ -861,6 +861,37 @@ def test_paper_timeframe_worker_config_preserves_strategy7_runtime_gates():
     assert strategy_cfg.strategy7_late_confirm_relax_seconds == pytest.approx(0.0)
 
 
+def test_paper_timeframe_worker_config_preserves_strategy9_dynamic_sizing():
+    cfg = build_config_from_env_values(
+        {
+            'TRADE_MODE': 'paper',
+            'PAPER_TIMEFRAMES': '5m',
+            'PAPER_5M_STRATEGY_ID': '9',
+            'PAPER_5M_STRATEGY_IDS': '9',
+            'PAPER_5M_STRATEGY9_DYNAMIC_SIZING_ENABLED': 'true',
+            'PAPER_5M_STRATEGY9_SIZING_REFERENCE_PRICE': '0.51',
+            'PAPER_5M_STRATEGY9_SIZING_PRICE_STEP': '0.02',
+            'PAPER_5M_STRATEGY9_SIZING_PRICE_STEP_REDUCTION': '0.15',
+            'PAPER_5M_STRATEGY9_SIZING_MIN_MULTIPLIER': '0.45',
+            'PAPER_5M_STRATEGY9_SIZING_MAX_MULTIPLIER': '1.10',
+            'PAPER_5M_STRATEGY9_SIZING_STRONG_SIGNAL_GAP': '0.03',
+            'PAPER_5M_STRATEGY9_SIZING_STRONG_SIGNAL_BOOST': '0.25',
+        }
+    )
+
+    timeframe_cfg = main._paper_cfg_for_timeframe(cfg, '5m')
+    strategy_cfg = cfg_for_paper_strategy(timeframe_cfg, 9)
+
+    assert strategy_cfg.strategy9_dynamic_sizing_enabled is True
+    assert strategy_cfg.strategy9_sizing_reference_price == pytest.approx(0.51)
+    assert strategy_cfg.strategy9_sizing_price_step == pytest.approx(0.02)
+    assert strategy_cfg.strategy9_sizing_price_step_reduction == pytest.approx(0.15)
+    assert strategy_cfg.strategy9_sizing_min_multiplier == pytest.approx(0.45)
+    assert strategy_cfg.strategy9_sizing_max_multiplier == pytest.approx(1.10)
+    assert strategy_cfg.strategy9_sizing_strong_signal_gap == pytest.approx(0.03)
+    assert strategy_cfg.strategy9_sizing_strong_signal_boost == pytest.approx(0.25)
+
+
 def test_run_single_command_runtime_starts_only_live_when_trade_mode_is_live(monkeypatch):
     cfg = build_config_from_env_values(
         {

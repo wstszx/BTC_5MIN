@@ -83,16 +83,33 @@ def strategy7_order_cost_multiplier(
 ) -> float:
     if getattr(cfg, "strategy_id", None) != 7 or not getattr(cfg, "strategy7_dynamic_sizing_enabled", False):
         return 1.0
+    return _dynamic_order_cost_multiplier(
+        cfg=cfg,
+        decision=decision,
+        price=price,
+        ofi_score=ofi_score,
+        prefix="strategy7",
+    )
+
+
+def _dynamic_order_cost_multiplier(
+    *,
+    cfg: AppConfig,
+    decision: SideDecision,
+    price: float | None,
+    ofi_score: float | None,
+    prefix: str,
+) -> float:
     if price is None or price <= 0:
         return 1.0
 
-    reference_price = float(getattr(cfg, "strategy7_sizing_reference_price", 0.50))
-    price_step = float(getattr(cfg, "strategy7_sizing_price_step", 0.01))
-    step_reduction = max(0.0, float(getattr(cfg, "strategy7_sizing_price_step_reduction", 0.0)))
-    min_multiplier = max(0.0, float(getattr(cfg, "strategy7_sizing_min_multiplier", 1.0)))
-    max_multiplier = max(min_multiplier, float(getattr(cfg, "strategy7_sizing_max_multiplier", 1.0)))
-    strong_gap = max(0.0, float(getattr(cfg, "strategy7_sizing_strong_signal_gap", 0.0)))
-    strong_boost = max(0.0, float(getattr(cfg, "strategy7_sizing_strong_signal_boost", 0.0)))
+    reference_price = float(getattr(cfg, f"{prefix}_sizing_reference_price", 0.50))
+    price_step = float(getattr(cfg, f"{prefix}_sizing_price_step", 0.01))
+    step_reduction = max(0.0, float(getattr(cfg, f"{prefix}_sizing_price_step_reduction", 0.0)))
+    min_multiplier = max(0.0, float(getattr(cfg, f"{prefix}_sizing_min_multiplier", 1.0)))
+    max_multiplier = max(min_multiplier, float(getattr(cfg, f"{prefix}_sizing_max_multiplier", 1.0)))
+    strong_gap = max(0.0, float(getattr(cfg, f"{prefix}_sizing_strong_signal_gap", 0.0)))
+    strong_boost = max(0.0, float(getattr(cfg, f"{prefix}_sizing_strong_signal_boost", 0.0)))
 
     multiplier = 1.0
     if price_step > 0 and price > reference_price:
@@ -116,6 +133,14 @@ def effective_decision_order_cost_multiplier(
     decision: SideDecision,
     price: float | None,
 ) -> float:
+    if getattr(cfg, "strategy_id", None) == 9 and getattr(cfg, "strategy9_dynamic_sizing_enabled", False):
+        return _dynamic_order_cost_multiplier(
+            cfg=cfg,
+            decision=decision,
+            price=price,
+            ofi_score=decision.ofi_score,
+            prefix="strategy9",
+        )
     return strategy7_order_cost_multiplier(
         cfg=cfg,
         decision=decision,

@@ -10,7 +10,7 @@ from models import BacktestResult, MarketQuote, SessionState, TradeRecord
 from polymarket_api import normalize_outcome_label, parse_iso_datetime
 from risk_and_sizing import apply_round_outcome, build_trade_plan, reset_after_stop_loss
 from strategy import get_side_for_round, strategy7_strong_signal_allows_late_confirm
-from strategy_decision import SideDecision, evaluate_strategy7_consensus_signal, resolve_side_from_strategy, strategy7_order_cost_multiplier
+from strategy_decision import SideDecision, effective_decision_order_cost_multiplier, evaluate_strategy7_consensus_signal, resolve_side_from_strategy
 
 
 def _optional_float(value: str | None) -> float | None:
@@ -167,9 +167,19 @@ def run_backtest(csv_path: Path, cfg: AppConfig | None = None) -> BacktestResult
             quote_fetched_at = _select_quote_fetched_at(row)
             strategy6_signal_at = _select_strategy6_signal_at(row)
             if cfg.strategy_id == 9:
+                historical_slug = row.get("slug", "")
+                if state.signal_round_slug != historical_slug:
+                    state.signal_round_slug = historical_slug
+                    state.signal_round_open_up_price = signal_open_up_price
+                    state.signal_round_locked_side = None
+                    state.strategy9_signal_samples = []
                 signal_quote_time = quote_fetched_at or strategy6_signal_at or _historical_entry_time(row, cfg) or datetime.now(timezone.utc)
                 signal_quote = MarketQuote(
-                    slug=row.get("slug", ""),
+                    slug=historical_slug,
+                    up_price=signal_current_up_price,
+                    down_price=1 - signal_current_up_price if signal_current_up_price is not None else None,
+                    up_best_ask=signal_current_up_price,
+                    down_best_ask=1 - signal_current_up_price if signal_current_up_price is not None else None,
                     strategy6_ofi_score=ofi_score,
                     strategy6_signal_at=strategy6_signal_at or signal_quote_time,
                     fetched_at=quote_fetched_at or signal_quote_time,
@@ -177,7 +187,7 @@ def run_backtest(csv_path: Path, cfg: AppConfig | None = None) -> BacktestResult
                 side_decision = resolve_side_from_strategy(
                     cfg=cfg,
                     state=state,
-                    slug=row.get("slug", ""),
+                    slug=historical_slug,
                     quote=signal_quote,
                     now=signal_quote_time,
                     entry_time=_historical_entry_time(row, cfg),
@@ -384,18 +394,18 @@ def run_backtest(csv_path: Path, cfg: AppConfig | None = None) -> BacktestResult
             max_consecutive_losses=cfg.max_consecutive_losses,
             bet_sizing_mode=cfg.bet_sizing_mode,
             base_order_cost=cfg.base_order_cost,
-            order_cost_multiplier=strategy7_order_cost_multiplier(
+            order_cost_multiplier=effective_decision_order_cost_multiplier(
                 cfg=cfg,
                 decision=SideDecision(
                     side=side,
                     signal_delta=signal_current_up_price - signal_open_up_price
                     if signal_current_up_price is not None and signal_open_up_price is not None
-                    else None
+                    else None,
+                    ofi_score=ofi_score,
                 ),
                 price=price,
-                ofi_score=ofi_score,
             )
-            if cfg.strategy_id == 7
+            if cfg.strategy_id in {7, 9}
             else 1.0,
         )
 

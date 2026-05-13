@@ -253,6 +253,35 @@ def test_build_config_reads_strategy7_dynamic_sizing_values():
     assert cfg.paper_strategy_profiles[7].strategy7_sizing_min_multiplier == 0.60
 
 
+def test_build_config_reads_strategy9_dynamic_sizing_values():
+    cfg = build_config_from_env_values(
+        {
+            "STRATEGY9_DYNAMIC_SIZING_ENABLED": "true",
+            "STRATEGY9_SIZING_REFERENCE_PRICE": "0.51",
+            "STRATEGY9_SIZING_PRICE_STEP": "0.02",
+            "STRATEGY9_SIZING_PRICE_STEP_REDUCTION": "0.15",
+            "STRATEGY9_SIZING_MIN_MULTIPLIER": "0.45",
+            "STRATEGY9_SIZING_MAX_MULTIPLIER": "1.10",
+            "STRATEGY9_SIZING_STRONG_SIGNAL_GAP": "0.03",
+            "STRATEGY9_SIZING_STRONG_SIGNAL_BOOST": "0.25",
+            "PAPER_STRATEGY_IDS": "9",
+            "PAPER_STRATEGY_9_STRATEGY9_DYNAMIC_SIZING_ENABLED": "false",
+            "PAPER_STRATEGY_9_STRATEGY9_SIZING_MIN_MULTIPLIER": "0.60",
+        }
+    )
+
+    assert cfg.strategy9_dynamic_sizing_enabled is True
+    assert cfg.strategy9_sizing_reference_price == 0.51
+    assert cfg.strategy9_sizing_price_step == 0.02
+    assert cfg.strategy9_sizing_price_step_reduction == 0.15
+    assert cfg.strategy9_sizing_min_multiplier == 0.45
+    assert cfg.strategy9_sizing_max_multiplier == 1.10
+    assert cfg.strategy9_sizing_strong_signal_gap == 0.03
+    assert cfg.strategy9_sizing_strong_signal_boost == 0.25
+    assert cfg.paper_strategy_profiles[9].strategy9_dynamic_sizing_enabled is False
+    assert cfg.paper_strategy_profiles[9].strategy9_sizing_min_multiplier == 0.60
+
+
 def test_build_config_supports_btc_15m_market_timeframe():
     cfg = build_config_from_env_values({'MARKET_TIMEFRAME': '15m'})
 

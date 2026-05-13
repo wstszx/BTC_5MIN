@@ -6,7 +6,7 @@ import pytest
 
 from config import AppConfig, build_config_from_env_values
 from models import MarketQuote, MarketWindow, SessionState
-from strategy_decision import SideDecision, resolve_side_from_strategy, strategy7_order_cost_multiplier
+from strategy_decision import SideDecision, effective_decision_order_cost_multiplier, resolve_side_from_strategy, strategy7_order_cost_multiplier
 from trader import SideDecision as TraderSideDecision
 from trader import _resolve_side_from_strategy
 
@@ -124,6 +124,34 @@ def test_strategy7_order_cost_multiplier_preserves_full_size_for_strong_signal_n
     )
 
     assert multiplier == pytest.approx(1.00)
+
+
+def test_strategy9_order_cost_multiplier_reuses_dynamic_sizing_when_enabled():
+    cfg = AppConfig(
+        strategy_id=9,
+        strategy9_dynamic_sizing_enabled=True,
+        strategy9_sizing_reference_price=0.50,
+        strategy9_sizing_price_step=0.01,
+        strategy9_sizing_price_step_reduction=0.10,
+        strategy9_sizing_min_multiplier=0.50,
+        strategy9_sizing_max_multiplier=1.00,
+        strategy9_sizing_strong_signal_gap=0.02,
+        strategy9_sizing_strong_signal_boost=0.20,
+    )
+    decision = SideDecision(
+        side="UP",
+        candidate_price=0.54,
+        signal_delta=0.03,
+        ofi_score=0.72,
+    )
+
+    multiplier = effective_decision_order_cost_multiplier(
+        cfg=cfg,
+        decision=decision,
+        price=0.54,
+    )
+
+    assert multiplier == pytest.approx(0.60)
 
 
 def test_strategy7_zero_confirm_window_allows_entry_inside_grace_window():
