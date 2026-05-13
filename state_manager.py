@@ -7,7 +7,7 @@ from typing import Any
 
 from atomic_io import atomic_write_text
 from live_pending import normalize_pending_live_trades
-from models import LiveStrategyState, PaperStrategyState, PendingLiveTrade, PendingPaperTrade, SessionState
+from models import LiveStrategyState, PaperStrategyState, PendingLiveTrade, PendingPaperTrade, SessionState, Strategy9SignalSample
 
 
 _LIVE_STRATEGY_FIELD_NAMES = (
@@ -20,6 +20,7 @@ _LIVE_STRATEGY_FIELD_NAMES = (
     "signal_round_open_up_price",
     "signal_round_locked_side",
     "strategy6_last_ofi_score",
+    "strategy9_signal_samples",
     "stop_loss_count",
     "daily_realized_pnl",
     "current_day",
@@ -51,10 +52,20 @@ def hydrate_pending_live_trades(items: list[dict[str, Any]] | list[PendingLiveTr
     ]
 
 
+def hydrate_strategy9_signal_samples(items: list[dict[str, Any]] | list[Strategy9SignalSample] | None) -> list[Strategy9SignalSample]:
+    return [
+        item if isinstance(item, Strategy9SignalSample) else Strategy9SignalSample(**item)
+        for item in (items or [])
+    ]
+
+
 def hydrate_paper_strategy_state(payload: dict[str, Any]) -> PaperStrategyState:
     strategy_payload = dict(payload)
     pending_key = "pending_paper_trades"
     strategy_payload[pending_key] = hydrate_pending_paper_trades(strategy_payload.get(pending_key))
+    strategy_payload["strategy9_signal_samples"] = hydrate_strategy9_signal_samples(
+        strategy_payload.get("strategy9_signal_samples")
+    )
     return PaperStrategyState(**strategy_payload)
 
 
@@ -62,6 +73,9 @@ def hydrate_live_strategy_state(payload: dict[str, Any], *, strategy_id: int = 0
     strategy_payload = dict(payload)
     strategy_payload["pending_live_trades"] = hydrate_pending_live_trades(
         strategy_payload.get("pending_live_trades")
+    )
+    strategy_payload["strategy9_signal_samples"] = hydrate_strategy9_signal_samples(
+        strategy_payload.get("strategy9_signal_samples")
     )
     state = LiveStrategyState(**strategy_payload)
     normalize_pending_live_trades(state, strategy_id=strategy_id)
@@ -84,6 +98,7 @@ def live_strategy_state_from_payload(payload: dict[str, Any]) -> LiveStrategySta
         signal_round_open_up_price=payload.get("signal_round_open_up_price"),
         signal_round_locked_side=payload.get("signal_round_locked_side"),
         strategy6_last_ofi_score=payload.get("strategy6_last_ofi_score"),
+        strategy9_signal_samples=hydrate_strategy9_signal_samples(payload.get("strategy9_signal_samples")),
         stop_loss_count=payload.get("stop_loss_count", 0),
         daily_realized_pnl=payload.get("daily_realized_pnl", 0.0),
         current_day=payload.get("current_day"),
@@ -158,6 +173,7 @@ def _load_session_state_legacy(path: Path) -> SessionState:
         for item in payload.pop("pending_paper_trades", [])
     ]
     pending_live_trades = hydrate_pending_live_trades(payload.pop("pending_live_trades", []))
+    strategy9_signal_samples = hydrate_strategy9_signal_samples(payload.pop("strategy9_signal_samples", []))
     raw_live_strategy_map = payload.pop("live_strategies", {})
     live_strategies = {}
     if isinstance(raw_live_strategy_map, dict):
@@ -170,6 +186,7 @@ def _load_session_state_legacy(path: Path) -> SessionState:
     return SessionState(
         pending_paper_trades=pending_paper_trades,
         pending_live_trades=pending_live_trades,
+        strategy9_signal_samples=strategy9_signal_samples,
         live_strategies=live_strategies,
         **payload,
     )
@@ -202,6 +219,7 @@ def load_session_state(
                     signal_round_open_up_price=state.signal_round_open_up_price,
                     signal_round_locked_side=state.signal_round_locked_side,
                     strategy6_last_ofi_score=state.strategy6_last_ofi_score,
+                    strategy9_signal_samples=list(state.strategy9_signal_samples),
                     stop_loss_count=state.stop_loss_count,
                     daily_realized_pnl=state.daily_realized_pnl,
                     current_day=state.current_day,
@@ -235,6 +253,7 @@ def clone_session_state(state: SessionState) -> SessionState:
     payload = asdict(state)
     payload["pending_paper_trades"] = hydrate_pending_paper_trades(payload.get("pending_paper_trades"))
     payload["pending_live_trades"] = hydrate_pending_live_trades(payload.get("pending_live_trades"))
+    payload["strategy9_signal_samples"] = hydrate_strategy9_signal_samples(payload.get("strategy9_signal_samples"))
     raw_strategy_map = payload.get("paper_strategies") or {}
     payload["paper_strategies"] = {
         int(raw_key): hydrate_paper_strategy_state(raw_value)
@@ -252,6 +271,7 @@ def copy_session_state_into(target: SessionState, source: SessionState) -> None:
     payload = asdict(source)
     payload["pending_paper_trades"] = hydrate_pending_paper_trades(payload.get("pending_paper_trades"))
     payload["pending_live_trades"] = hydrate_pending_live_trades(payload.get("pending_live_trades"))
+    payload["strategy9_signal_samples"] = hydrate_strategy9_signal_samples(payload.get("strategy9_signal_samples"))
     raw_strategy_map = payload.get("paper_strategies") or {}
     payload["paper_strategies"] = {
         int(raw_key): hydrate_paper_strategy_state(raw_value)

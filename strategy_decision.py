@@ -8,7 +8,7 @@ from typing import Any
 
 from binance_signal import BinanceDepth5SignalService
 from config import AppConfig
-from models import MarketQuote, MarketWindow, SessionState
+from models import MarketQuote, MarketWindow, SessionState, Strategy9SignalSample
 from strategy import (
     get_side_for_round,
     strategy7_signal_gap_ok,
@@ -28,6 +28,7 @@ class SideDecision:
     signal_threshold: float | None = None
     signal_delta: float | None = None
     signal_locked: bool = False
+    max_entry_price: float | None = None
 
 
 @dataclass(slots=True)
@@ -35,6 +36,12 @@ class Strategy7SignalCheck:
     decision: SideDecision
     ofi_score: float | None = None
     momentum_delta: float | None = None
+
+
+@dataclass(slots=True)
+class Strategy9QualityCheck:
+    reason: str | None
+    max_entry_price: float | None
 
 
 def resolve_quote_price(side: str, quote: MarketQuote) -> float | None:
@@ -59,6 +66,10 @@ def entry_price_skip_reason(
     if max_entry_price is not None and price > max_entry_price:
         return f"{strategy_prefix}_price_too_high"
     return None
+
+
+def effective_decision_max_entry_price(cfg: AppConfig, decision: SideDecision) -> float | None:
+    return decision.max_entry_price if decision.max_entry_price is not None else getattr(cfg, "max_entry_price", None)
 
 
 def resolve_signal_up_price(quote: MarketQuote) -> float | None:
@@ -198,7 +209,7 @@ def apply_strategy6_signal_to_quote(
     now: datetime | None = None,
     diagnostic_log: Callable[[str], None] | None = None,
 ) -> None:
-    if cfg.strategy_id not in {6, 7} or binance_signal_service is None:
+    if cfg.strategy_id not in {6, 7, 8, 9} or binance_signal_service is None:
         return
     now = now or datetime.now(timezone.utc)
     latest = binance_signal_service.latest()
@@ -357,6 +368,133 @@ def evaluate_strategy7_consensus_signal(
     )
 
 
+def _strategy9_sample_observed_at(sample: Strategy9SignalSample) -> datetime | None:
+    try:
+        return datetime.fromisoformat(sample.observed_at)
+    except (TypeError, ValueError):
+        return None
+
+
+def _strategy9_sample_side(sample: Strategy9SignalSample) -> str | None:
+    if sample.ofi_score * sample.momentum_delta <= 0:
+        return None
+    return "UP" if sample.momentum_delta > 0 else "DOWN"
+
+
+def append_strategy9_signal_sample(
+    *,
+    cfg: AppConfig,
+    state: SessionState,
+    now: datetime,
+    ofi_score: float,
+    momentum_delta: float,
+    signal_current_up_price: float,
+) -> list[Strategy9SignalSample]:
+    cutoff = now - timedelta(
+        seconds=max(
+            float(getattr(cfg, "strategy9_stability_window_seconds", 0.0)),
+            float(getattr(cfg, "strategy9_reversal_lookback_seconds", 0.0)),
+        )
+    )
+    samples: list[Strategy9SignalSample] = []
+    for sample in state.strategy9_signal_samples:
+        observed_at = _strategy9_sample_observed_at(sample)
+        if observed_at is not None and observed_at >= cutoff:
+            samples.append(sample)
+    samples.append(
+        Strategy9SignalSample(
+            observed_at=now.isoformat(),
+            ofi_score=ofi_score,
+            momentum_delta=momentum_delta,
+            current_up_price=signal_current_up_price,
+        )
+    )
+    state.strategy9_signal_samples = samples
+    return samples
+
+
+def strategy9_dynamic_max_entry_price(
+    *,
+    cfg: AppConfig,
+    ofi_score: float,
+    momentum_delta: float,
+) -> float:
+    ofi_strength = abs(ofi_score)
+    momentum_strength = abs(momentum_delta)
+    ultra_gap = max(0.0, float(getattr(cfg, "strategy9_ultra_signal_gap", 0.0)))
+    strong_gap = max(0.0, float(getattr(cfg, "strategy9_strong_signal_gap", 0.0)))
+    if (
+        ofi_strength >= cfg.strategy7_ofi_threshold + ultra_gap
+        and momentum_strength >= cfg.strategy7_momentum_threshold + ultra_gap
+    ):
+        return float(getattr(cfg, "strategy9_ultra_max_entry_price", getattr(cfg, "max_entry_price", 0.54)))
+    if (
+        ofi_strength >= cfg.strategy7_ofi_threshold + strong_gap
+        and momentum_strength >= cfg.strategy7_momentum_threshold + strong_gap
+    ):
+        return float(getattr(cfg, "strategy9_strong_max_entry_price", getattr(cfg, "max_entry_price", 0.53)))
+    return float(getattr(cfg, "strategy9_base_max_entry_price", getattr(cfg, "max_entry_price", 0.52)))
+
+
+def evaluate_strategy9_quality(
+    *,
+    cfg: AppConfig,
+    state: SessionState,
+    now: datetime,
+    side: str,
+    ofi_score: float,
+    momentum_delta: float,
+    signal_current_up_price: float,
+) -> Strategy9QualityCheck:
+    samples = append_strategy9_signal_sample(
+        cfg=cfg,
+        state=state,
+        now=now,
+        ofi_score=ofi_score,
+        momentum_delta=momentum_delta,
+        signal_current_up_price=signal_current_up_price,
+    )
+    stability_cutoff = now - timedelta(seconds=max(0.0, float(getattr(cfg, "strategy9_stability_window_seconds", 0.0))))
+    stability_samples = [
+        sample
+        for sample in samples
+        if (_strategy9_sample_observed_at(sample) or datetime.min.replace(tzinfo=timezone.utc)) >= stability_cutoff
+    ]
+    required_sample_count = max(1, int(getattr(cfg, "strategy9_stability_sample_count", 1)))
+    required_agree_count = max(1, int(getattr(cfg, "strategy9_stability_required_count", 1)))
+    agreeing_samples = [
+        sample
+        for sample in stability_samples
+        if _strategy9_sample_side(sample) == side
+        and abs(sample.ofi_score) >= cfg.strategy7_ofi_threshold
+        and abs(sample.momentum_delta) >= cfg.strategy7_momentum_threshold
+    ]
+    if len(stability_samples) < required_sample_count or len(agreeing_samples) < required_agree_count:
+        return Strategy9QualityCheck(reason="strategy9_signal_unstable", max_entry_price=None)
+
+    lookback_cutoff = now - timedelta(seconds=max(0.0, float(getattr(cfg, "strategy9_reversal_lookback_seconds", 0.0))))
+    lookback_samples = [
+        sample
+        for sample in samples
+        if (_strategy9_sample_observed_at(sample) or datetime.min.replace(tzinfo=timezone.utc)) >= lookback_cutoff
+        and _strategy9_sample_side(sample) == side
+    ]
+    current_strength = min(abs(ofi_score), abs(momentum_delta))
+    peak_strength = max((min(abs(sample.ofi_score), abs(sample.momentum_delta)) for sample in lookback_samples), default=current_strength)
+    max_decay = max(0.0, float(getattr(cfg, "strategy9_max_signal_decay", 0.0)))
+    if peak_strength > 0 and current_strength < peak_strength * (1.0 - max_decay):
+        return Strategy9QualityCheck(reason="strategy9_signal_decaying", max_entry_price=None)
+
+    return Strategy9QualityCheck(
+        reason=None,
+        max_entry_price=strategy9_dynamic_max_entry_price(
+            cfg=cfg,
+            ofi_score=ofi_score,
+            momentum_delta=momentum_delta,
+        ),
+    )
+
+
 def resolve_side_from_strategy(
     *,
     cfg: AppConfig,
@@ -383,7 +521,7 @@ def resolve_side_from_strategy(
             return SideDecision(side="DOWN", signal_threshold=cfg.ofi_threshold, signal_delta=ofi_score)
         return SideDecision(side=None, reason="ofi_too_weak", signal_threshold=cfg.ofi_threshold, signal_delta=ofi_score)
 
-    if cfg.strategy_id not in {5, 7, 8}:
+    if cfg.strategy_id not in {5, 7, 8, 9}:
         return SideDecision(side=fallback_side_resolver(cfg.strategy_id, state.round_index))
 
     fallback_strategy = cfg.signal_fallback_strategy_id
@@ -391,13 +529,15 @@ def resolve_side_from_strategy(
         state.signal_round_slug = slug
         state.signal_round_open_up_price = None
         state.signal_round_locked_side = None
+        state.strategy9_signal_samples = []
 
     signal_current_up_price = resolve_signal_up_price(quote)
     if state.signal_round_locked_side in {"UP", "DOWN"}:
         signal_delta = None
+        locked_max_entry_price: float | None = None
         if is_valid_signal_price(state.signal_round_open_up_price) and is_valid_signal_price(signal_current_up_price):
             signal_delta = signal_current_up_price - state.signal_round_open_up_price
-        if cfg.strategy_id == 7:
+        if cfg.strategy_id in {7, 9}:
             now = now or datetime.now(timezone.utc)
             signal_check = evaluate_strategy7_consensus_signal(
                 cfg=cfg,
@@ -408,26 +548,78 @@ def resolve_side_from_strategy(
             )
             state.strategy6_last_ofi_score = signal_check.ofi_score
             if signal_check.decision.side is None:
+                if cfg.strategy_id == 9 and signal_check.decision.reason:
+                    signal_check.decision.reason = signal_check.decision.reason.replace("strategy7_", "strategy9_", 1)
                 signal_check.decision.signal_locked = True
                 return signal_check.decision
             if signal_check.decision.side != state.signal_round_locked_side:
                 return SideDecision(
                     side=None,
-                    reason="strategy7_signal_conflict",
+                    reason="strategy9_signal_conflict" if cfg.strategy_id == 9 else "strategy7_signal_conflict",
                     signal_open_up_price=state.signal_round_open_up_price,
                     signal_current_up_price=signal_current_up_price,
                     signal_threshold=cfg.strategy7_momentum_threshold,
                     signal_delta=signal_check.momentum_delta,
                     signal_locked=True,
                 )
-        if cfg.strategy_id in {7, 8}:
-            strategy_prefix = "strategy7" if cfg.strategy_id == 7 else "strategy8"
+            if cfg.strategy_id == 9:
+                signal_current_for_quality = signal_current_up_price
+                if (
+                    signal_check.ofi_score is None
+                    or signal_check.momentum_delta is None
+                    or not is_valid_signal_price(signal_current_for_quality)
+                ):
+                    return SideDecision(
+                        side=None,
+                        reason="strategy9_signal_unstable",
+                        signal_open_up_price=state.signal_round_open_up_price,
+                        signal_current_up_price=signal_current_up_price,
+                        signal_threshold=cfg.strategy7_momentum_threshold,
+                        signal_delta=signal_check.momentum_delta,
+                        signal_locked=True,
+                    )
+                quality_check = evaluate_strategy9_quality(
+                    cfg=cfg,
+                    state=state,
+                    now=now,
+                    side=state.signal_round_locked_side,
+                    ofi_score=signal_check.ofi_score,
+                    momentum_delta=signal_check.momentum_delta,
+                    signal_current_up_price=signal_current_for_quality,
+                )
+                locked_max_entry_price = quality_check.max_entry_price
+                if quality_check.reason is not None:
+                    return SideDecision(
+                        side=None,
+                        reason=quality_check.reason,
+                        signal_open_up_price=state.signal_round_open_up_price,
+                        signal_current_up_price=signal_current_up_price,
+                        signal_threshold=cfg.strategy7_momentum_threshold,
+                        signal_delta=signal_check.momentum_delta,
+                        signal_locked=True,
+                    )
+                dynamic_price = resolve_quote_price(state.signal_round_locked_side, quote)
+                if quality_check.max_entry_price is not None and dynamic_price is not None and dynamic_price > quality_check.max_entry_price:
+                    return SideDecision(
+                        side=None,
+                        reason="strategy9_dynamic_price_too_high",
+                        candidate_side=state.signal_round_locked_side,
+                        candidate_price=dynamic_price,
+                        signal_open_up_price=state.signal_round_open_up_price,
+                        signal_current_up_price=signal_current_up_price,
+                        signal_threshold=cfg.strategy7_momentum_threshold,
+                        signal_delta=signal_check.momentum_delta,
+                        signal_locked=True,
+                        max_entry_price=quality_check.max_entry_price,
+                    )
+        if cfg.strategy_id in {7, 8, 9}:
+            strategy_prefix = "strategy7" if cfg.strategy_id == 7 else ("strategy8" if cfg.strategy_id == 8 else "strategy9")
             candidate_price = resolve_quote_price(state.signal_round_locked_side, quote)
             price_skip_reason = entry_price_skip_reason(
                 strategy_prefix=strategy_prefix,
                 price=candidate_price,
                 min_entry_price=getattr(cfg, "min_entry_price", None),
-                max_entry_price=getattr(cfg, "max_entry_price", None),
+                max_entry_price=locked_max_entry_price if locked_max_entry_price is not None else getattr(cfg, "max_entry_price", None),
             )
             if price_skip_reason is not None:
                 return SideDecision(
@@ -440,6 +632,7 @@ def resolve_side_from_strategy(
                     signal_threshold=cfg.strategy7_momentum_threshold,
                     signal_delta=signal_delta,
                     signal_locked=True,
+                    max_entry_price=locked_max_entry_price,
                 )
         return SideDecision(
             side=state.signal_round_locked_side,
@@ -447,6 +640,7 @@ def resolve_side_from_strategy(
             signal_current_up_price=signal_current_up_price,
             signal_delta=signal_delta,
             signal_locked=True,
+            max_entry_price=locked_max_entry_price,
         )
 
     now = now or datetime.now(timezone.utc)
@@ -466,9 +660,10 @@ def resolve_side_from_strategy(
         now=now,
     )
 
-    if cfg.strategy_id in {7, 8}:
-        strategy_prefix = "strategy7" if cfg.strategy_id == 7 else "strategy8"
-        if cfg.strategy_id == 7:
+    if cfg.strategy_id in {7, 8, 9}:
+        strategy_prefix = "strategy7" if cfg.strategy_id == 7 else ("strategy8" if cfg.strategy_id == 8 else "strategy9")
+        dynamic_max_entry_price: float | None = None
+        if cfg.strategy_id in {7, 9}:
             signal_check = evaluate_strategy7_consensus_signal(
                 cfg=cfg,
                 quote=quote,
@@ -478,6 +673,8 @@ def resolve_side_from_strategy(
             )
             state.strategy6_last_ofi_score = signal_check.ofi_score
             if signal_check.decision.side is None:
+                if cfg.strategy_id == 9 and signal_check.decision.reason:
+                    signal_check.decision.reason = signal_check.decision.reason.replace("strategy7_", "strategy9_", 1)
                 return signal_check.decision
             ofi_score = signal_check.ofi_score
             momentum_delta = signal_check.momentum_delta
@@ -576,11 +773,11 @@ def resolve_side_from_strategy(
                 signal_delta=momentum_delta,
             )
 
-        if cfg.strategy_id == 7:
+        if cfg.strategy_id in {7, 9}:
             if not strategy7_signals_agree(ofi_score=ofi_score, momentum_delta=momentum_delta):
                 return SideDecision(
                     side=None,
-                    reason="strategy7_signal_conflict",
+                    reason=f"{strategy_prefix}_signal_conflict",
                     signal_open_up_price=signal_open_up_price,
                     signal_current_up_price=signal_current_up_price,
                     signal_threshold=cfg.strategy7_momentum_threshold,
@@ -588,6 +785,35 @@ def resolve_side_from_strategy(
                 )
             resolved_side = "UP" if momentum_delta > 0 else "DOWN"
             decision_reason = None
+            if cfg.strategy_id == 9:
+                if not is_valid_signal_price(signal_current_up_price):
+                    return SideDecision(
+                        side=None,
+                        reason="strategy9_signal_unstable",
+                        signal_open_up_price=signal_open_up_price,
+                        signal_current_up_price=signal_current_up_price,
+                        signal_threshold=cfg.strategy7_momentum_threshold,
+                        signal_delta=momentum_delta,
+                    )
+                quality_check = evaluate_strategy9_quality(
+                    cfg=cfg,
+                    state=state,
+                    now=now,
+                    side=resolved_side,
+                    ofi_score=ofi_score,
+                    momentum_delta=momentum_delta,
+                    signal_current_up_price=signal_current_up_price,
+                )
+                if quality_check.reason is not None:
+                    return SideDecision(
+                        side=None,
+                        reason=quality_check.reason,
+                        signal_open_up_price=signal_open_up_price,
+                        signal_current_up_price=signal_current_up_price,
+                        signal_threshold=cfg.strategy7_momentum_threshold,
+                        signal_delta=momentum_delta,
+                    )
+                dynamic_max_entry_price = quality_check.max_entry_price
         elif cfg.strategy_id == 8 and ofi_score * momentum_delta <= 0:
             resolved_side = "UP" if ofi_score > 0 else "DOWN"
             decision_reason = "strategy8_conflict_reversal"
@@ -599,9 +825,11 @@ def resolve_side_from_strategy(
             strategy_prefix=strategy_prefix,
             price=candidate_price,
             min_entry_price=getattr(cfg, "min_entry_price", None),
-            max_entry_price=getattr(cfg, "max_entry_price", None),
+            max_entry_price=dynamic_max_entry_price if dynamic_max_entry_price is not None else getattr(cfg, "max_entry_price", None),
         )
         if price_skip_reason is not None:
+            if cfg.strategy_id == 9 and price_skip_reason == "strategy9_price_too_high":
+                price_skip_reason = "strategy9_dynamic_price_too_high"
             return SideDecision(
                 side=None,
                 reason=price_skip_reason,
@@ -611,11 +839,12 @@ def resolve_side_from_strategy(
                 signal_current_up_price=signal_current_up_price,
                 signal_threshold=cfg.strategy7_momentum_threshold,
                 signal_delta=momentum_delta,
+                max_entry_price=dynamic_max_entry_price,
             )
-        if cfg.strategy_id == 7 and not signal_gap_ok:
+        if cfg.strategy_id in {7, 9} and not signal_gap_ok:
             return SideDecision(
                 side=None,
-                reason="strategy7_confidence_too_low",
+                reason=f"{strategy_prefix}_confidence_too_low",
                 signal_open_up_price=signal_open_up_price,
                 signal_current_up_price=signal_current_up_price,
                 signal_threshold=cfg.strategy7_momentum_threshold,
@@ -635,6 +864,7 @@ def resolve_side_from_strategy(
             signal_threshold=cfg.strategy7_momentum_threshold,
             signal_delta=momentum_delta,
             signal_locked=state.signal_round_locked_side in {"UP", "DOWN"},
+            max_entry_price=dynamic_max_entry_price,
         )
 
     weak_mode = cfg.signal_weak_signal_mode.upper()

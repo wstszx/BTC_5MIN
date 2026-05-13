@@ -103,6 +103,16 @@ def _paper_strategy_profile_from_cfg(cfg: AppConfig, strategy_id: int) -> LiveSt
         strategy7_confirm_before_entry_seconds=cfg.strategy7_confirm_before_entry_seconds,
         strategy7_late_confirm_strong_signal_gap=cfg.strategy7_late_confirm_strong_signal_gap,
         strategy7_late_confirm_relax_seconds=cfg.strategy7_late_confirm_relax_seconds,
+        strategy9_stability_sample_count=cfg.strategy9_stability_sample_count,
+        strategy9_stability_required_count=cfg.strategy9_stability_required_count,
+        strategy9_stability_window_seconds=cfg.strategy9_stability_window_seconds,
+        strategy9_reversal_lookback_seconds=cfg.strategy9_reversal_lookback_seconds,
+        strategy9_max_signal_decay=cfg.strategy9_max_signal_decay,
+        strategy9_base_max_entry_price=cfg.strategy9_base_max_entry_price,
+        strategy9_strong_max_entry_price=cfg.strategy9_strong_max_entry_price,
+        strategy9_ultra_max_entry_price=cfg.strategy9_ultra_max_entry_price,
+        strategy9_strong_signal_gap=cfg.strategy9_strong_signal_gap,
+        strategy9_ultra_signal_gap=cfg.strategy9_ultra_signal_gap,
     )
 
 
@@ -135,6 +145,16 @@ def _paper_cfg_for_timeframe(cfg: AppConfig, timeframe: str) -> AppConfig:
         strategy7_confirm_before_entry_seconds=profile.strategy7_confirm_before_entry_seconds,
         strategy7_late_confirm_strong_signal_gap=profile.strategy7_late_confirm_strong_signal_gap,
         strategy7_late_confirm_relax_seconds=profile.strategy7_late_confirm_relax_seconds,
+        strategy9_stability_sample_count=profile.strategy9_stability_sample_count,
+        strategy9_stability_required_count=profile.strategy9_stability_required_count,
+        strategy9_stability_window_seconds=profile.strategy9_stability_window_seconds,
+        strategy9_reversal_lookback_seconds=profile.strategy9_reversal_lookback_seconds,
+        strategy9_max_signal_decay=profile.strategy9_max_signal_decay,
+        strategy9_base_max_entry_price=profile.strategy9_base_max_entry_price,
+        strategy9_strong_max_entry_price=profile.strategy9_strong_max_entry_price,
+        strategy9_ultra_max_entry_price=profile.strategy9_ultra_max_entry_price,
+        strategy9_strong_signal_gap=profile.strategy9_strong_signal_gap,
+        strategy9_ultra_signal_gap=profile.strategy9_ultra_signal_gap,
     )
     timeframe_cfg.paper_strategy_profiles = {
         strategy_id: _paper_strategy_profile_from_cfg(timeframe_cfg, strategy_id)

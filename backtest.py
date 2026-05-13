@@ -10,7 +10,7 @@ from models import BacktestResult, MarketQuote, SessionState, TradeRecord
 from polymarket_api import normalize_outcome_label, parse_iso_datetime
 from risk_and_sizing import apply_round_outcome, build_trade_plan, reset_after_stop_loss
 from strategy import get_side_for_round, strategy7_strong_signal_allows_late_confirm
-from strategy_decision import evaluate_strategy7_consensus_signal
+from strategy_decision import evaluate_strategy7_consensus_signal, resolve_side_from_strategy
 
 
 def _optional_float(value: str | None) -> float | None:
@@ -160,11 +160,47 @@ def run_backtest(csv_path: Path, cfg: AppConfig | None = None) -> BacktestResult
         signal_open_up_price = _optional_float(row.get("entry_price_open_up"))
         signal_current_up_price = _select_signal_current_up_price(row, cfg.entry_timing)
         ofi_score = _select_ofi_score(row)
-        if cfg.strategy_id in {7, 8}:
-            strategy_prefix = "strategy7" if cfg.strategy_id == 7 else "strategy8"
+        if cfg.strategy_id in {7, 8, 9}:
+            strategy_prefix = "strategy7" if cfg.strategy_id == 7 else ("strategy8" if cfg.strategy_id == 8 else "strategy9")
             quote_fetched_at = _select_quote_fetched_at(row)
             strategy6_signal_at = _select_strategy6_signal_at(row)
-            if cfg.strategy_id == 7:
+            if cfg.strategy_id == 9:
+                signal_quote_time = quote_fetched_at or strategy6_signal_at or _historical_entry_time(row, cfg) or datetime.now(timezone.utc)
+                signal_quote = MarketQuote(
+                    slug=row.get("slug", ""),
+                    strategy6_ofi_score=ofi_score,
+                    strategy6_signal_at=strategy6_signal_at or signal_quote_time,
+                    fetched_at=quote_fetched_at or signal_quote_time,
+                )
+                side_decision = resolve_side_from_strategy(
+                    cfg=cfg,
+                    state=state,
+                    slug=row.get("slug", ""),
+                    quote=signal_quote,
+                    now=signal_quote_time,
+                    entry_time=_historical_entry_time(row, cfg),
+                )
+                if side_decision.side is None:
+                    records.append(
+                        _build_record(
+                            cfg=cfg,
+                            state=state,
+                            row=row,
+                            side="SKIP",
+                            price=side_decision.candidate_price,
+                            order_size=0.0,
+                            order_cost=0.0,
+                            expected_profit=0.0,
+                            result=None,
+                            trade_pnl=0.0,
+                            skip_reason=side_decision.reason,
+                        )
+                    )
+                    skipped_round_count += 1
+                    state.round_index += 1
+                    continue
+                side = side_decision.side
+            elif cfg.strategy_id == 7:
                 signal_quote_time = quote_fetched_at or strategy6_signal_at or _historical_entry_time(row, cfg) or datetime.now(timezone.utc)
                 signal_quote = MarketQuote(
                     slug=row.get("slug", ""),
@@ -311,8 +347,8 @@ def run_backtest(csv_path: Path, cfg: AppConfig | None = None) -> BacktestResult
                 ofi_threshold=cfg.ofi_threshold,
             )
         price = _select_entry_price(row, side, cfg.entry_timing)
-        if cfg.strategy_id in {7, 8} and price is not None and price > getattr(cfg, "max_entry_price", cfg.max_price_threshold):
-            strategy_prefix = "strategy7" if cfg.strategy_id == 7 else "strategy8"
+        if cfg.strategy_id in {7, 8, 9} and price is not None and price > getattr(cfg, "max_entry_price", cfg.max_price_threshold):
+            strategy_prefix = "strategy7" if cfg.strategy_id == 7 else ("strategy8" if cfg.strategy_id == 8 else "strategy9")
             records.append(
                 _build_record(
                     cfg=cfg,

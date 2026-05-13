@@ -59,6 +59,7 @@ class TradePlan:
     order_size: float = 0.0
     order_cost: float = 0.0
     expected_profit: float = 0.0
+    max_entry_price: float | None = None
     skip_reason: str | None = None
     stop_loss_triggered: bool = False
     tracks_recovery_loss: bool = True
@@ -92,6 +93,7 @@ class TradeRecord:
     signal_delta: float | None = None
     signal_locked: bool = False
     signal_reason: str | None = None
+    signal_max_entry_price: float | None = None
     experiment_id: str | None = None
     balance_error: str | None = None
     tracks_recovery_loss: bool = True
@@ -116,6 +118,7 @@ class PendingPaperTrade:
     signal_delta: float | None = None
     signal_locked: bool = False
     signal_reason: str | None = None
+    signal_max_entry_price: float | None = None
     queued_at: str | None = None
     experiment_id: str | None = None
     tracks_recovery_loss: bool = True
@@ -140,6 +143,14 @@ class PendingLiveTrade:
 
 
 @dataclass(slots=True)
+class Strategy9SignalSample:
+    observed_at: str
+    ofi_score: float
+    momentum_delta: float
+    current_up_price: float
+
+
+@dataclass(slots=True)
 class PaperStrategyState:
     round_index: int = 0
     cash_pnl: float = 0.0
@@ -150,6 +161,7 @@ class PaperStrategyState:
     signal_round_open_up_price: float | None = None
     signal_round_locked_side: str | None = None
     strategy6_last_ofi_score: float | None = None
+    strategy9_signal_samples: list[Strategy9SignalSample] = field(default_factory=list)
     stop_loss_count: int = 0
     daily_realized_pnl: float = 0.0
     current_day: str | None = None
@@ -169,6 +181,7 @@ class LiveStrategyState:
     signal_round_open_up_price: float | None = None
     signal_round_locked_side: str | None = None
     strategy6_last_ofi_score: float | None = None
+    strategy9_signal_samples: list[Strategy9SignalSample] = field(default_factory=list)
     stop_loss_count: int = 0
     daily_realized_pnl: float = 0.0
     current_day: str | None = None
@@ -196,6 +209,7 @@ class SessionState:
     signal_round_open_up_price: float | None = None
     signal_round_locked_side: str | None = None
     strategy6_last_ofi_score: float | None = None
+    strategy9_signal_samples: list[Strategy9SignalSample] = field(default_factory=list)
     stop_loss_count: int = 0
     daily_realized_pnl: float = 0.0
     current_day: str | None = None

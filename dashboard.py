@@ -87,8 +87,8 @@ def _write_env_file(path: Path, values: dict[str, str]) -> None:
     atomic_write_text(path, text, encoding="utf-8")
 
 
-SUPPORTED_STRATEGY_ID_TEXTS: set[str] = {"1", "2", "3", "4", "5", "6", "7", "8"}
-SUPPORTED_STRATEGY_SELECT_OPTIONS: list[str] = ["1", "2", "3", "4", "5", "6", "7", "8"]
+SUPPORTED_STRATEGY_ID_TEXTS: set[str] = {"1", "2", "3", "4", "5", "6", "7", "8", "9"}
+SUPPORTED_STRATEGY_SELECT_OPTIONS: list[str] = ["1", "2", "3", "4", "5", "6", "7", "8", "9"]
 
 
 def _normalize_strategy_id_list_for_key(value: str, key: str, attr_name: str) -> str:
@@ -98,10 +98,10 @@ def _normalize_strategy_id_list_for_key(value: str, key: str, attr_name: str) ->
     if raw and len(normalized_ids) == 1 and normalized_ids[0] == cfg.strategy_id:
         has_valid = any(item in SUPPORTED_STRATEGY_ID_TEXTS for item in raw)
         if not has_valid:
-            raise ValueError(f"Invalid value for {key}: expected comma-separated strategy ids 1-8, got {value!r}")
+            raise ValueError(f"Invalid value for {key}: expected comma-separated strategy ids 1-9, got {value!r}")
     normalized = [str(item) for item in normalized_ids]
     if not normalized:
-        raise ValueError(f"Invalid value for {key}: expected comma-separated strategy ids 1-8, got {value!r}")
+        raise ValueError(f"Invalid value for {key}: expected comma-separated strategy ids 1-9, got {value!r}")
     return ",".join(normalized)
 
 
@@ -334,6 +334,16 @@ STRATEGY_PROFILE_EDITABLE_FIELDS: tuple[str, ...] = (
     "STRATEGY7_CONFIRM_BEFORE_ENTRY_SECONDS",
     "STRATEGY7_LATE_CONFIRM_STRONG_SIGNAL_GAP",
     "STRATEGY7_LATE_CONFIRM_RELAX_SECONDS",
+    "STRATEGY9_STABILITY_SAMPLE_COUNT",
+    "STRATEGY9_STABILITY_REQUIRED_COUNT",
+    "STRATEGY9_STABILITY_WINDOW_SECONDS",
+    "STRATEGY9_REVERSAL_LOOKBACK_SECONDS",
+    "STRATEGY9_MAX_SIGNAL_DECAY",
+    "STRATEGY9_BASE_MAX_ENTRY_PRICE",
+    "STRATEGY9_STRONG_MAX_ENTRY_PRICE",
+    "STRATEGY9_ULTRA_MAX_ENTRY_PRICE",
+    "STRATEGY9_STRONG_SIGNAL_GAP",
+    "STRATEGY9_ULTRA_SIGNAL_GAP",
 )
 
 STRATEGY_PROFILE_COMMON_FIELDS: tuple[str, ...] = (
@@ -375,7 +385,7 @@ def _strategy_profile_prefix(mode: str, strategy_id: int | str) -> str:
 
 
 def _split_strategy_profile_key(key: str) -> tuple[str, str, str] | None:
-    match = re.match(r"^(LIVE|PAPER)_STRATEGY_([1-8])_(.+)$", str(key or ""))
+    match = re.match(r"^(LIVE|PAPER)_STRATEGY_([1-9])_(.+)$", str(key or ""))
     if not match:
         return None
     mode = match.group(1).lower()
@@ -404,7 +414,7 @@ def _strategy_profile_field_names(strategy_id: int | str) -> list[str]:
         )
     if strategy_text == "6":
         fields.extend(["OFI_THRESHOLD", "BINANCE_SIGNAL_STALE_SECONDS"])
-    if strategy_text in {"7", "8"}:
+    if strategy_text in {"7", "8", "9"}:
         fields.extend(
             [
                 "OFI_THRESHOLD",
@@ -416,6 +426,21 @@ def _strategy_profile_field_names(strategy_id: int | str) -> list[str]:
                 "STRATEGY7_CONFIRM_BEFORE_ENTRY_SECONDS",
                 "STRATEGY7_LATE_CONFIRM_STRONG_SIGNAL_GAP",
                 "STRATEGY7_LATE_CONFIRM_RELAX_SECONDS",
+            ]
+        )
+    if strategy_text == "9":
+        fields.extend(
+            [
+                "STRATEGY9_STABILITY_SAMPLE_COUNT",
+                "STRATEGY9_STABILITY_REQUIRED_COUNT",
+                "STRATEGY9_STABILITY_WINDOW_SECONDS",
+                "STRATEGY9_REVERSAL_LOOKBACK_SECONDS",
+                "STRATEGY9_MAX_SIGNAL_DECAY",
+                "STRATEGY9_BASE_MAX_ENTRY_PRICE",
+                "STRATEGY9_STRONG_MAX_ENTRY_PRICE",
+                "STRATEGY9_ULTRA_MAX_ENTRY_PRICE",
+                "STRATEGY9_STRONG_SIGNAL_GAP",
+                "STRATEGY9_ULTRA_SIGNAL_GAP",
             ]
         )
     return fields
@@ -462,6 +487,16 @@ def _cfg_for_paper_timeframe(cfg: AppConfig, timeframe: str) -> AppConfig:
         strategy7_late_confirm_strong_signal_gap=profile.strategy7_late_confirm_strong_signal_gap,
         strategy7_late_confirm_relax_seconds=profile.strategy7_late_confirm_relax_seconds,
         strategy7_max_entry_price=profile.max_entry_price,
+        strategy9_stability_sample_count=profile.strategy9_stability_sample_count,
+        strategy9_stability_required_count=profile.strategy9_stability_required_count,
+        strategy9_stability_window_seconds=profile.strategy9_stability_window_seconds,
+        strategy9_reversal_lookback_seconds=profile.strategy9_reversal_lookback_seconds,
+        strategy9_max_signal_decay=profile.strategy9_max_signal_decay,
+        strategy9_base_max_entry_price=profile.strategy9_base_max_entry_price,
+        strategy9_strong_max_entry_price=profile.strategy9_strong_max_entry_price,
+        strategy9_ultra_max_entry_price=profile.strategy9_ultra_max_entry_price,
+        strategy9_strong_signal_gap=profile.strategy9_strong_signal_gap,
+        strategy9_ultra_signal_gap=profile.strategy9_ultra_signal_gap,
     )
 
 
@@ -1349,6 +1384,12 @@ def _strategy_catalog() -> dict[str, dict[str, Any]]:
             "preview": ["REGIME", "OFI", "MOMENTUM", "REVERSAL"],
             "detail": "用同一套信号在趋势和过热冲突之间切换，纸面和实盘行为保持一致。",
         },
+        "9": {
+            "label": "稳定共振",
+            "summary": "在策略7共识基础上加入连续稳定、衰减风险与动态价帽过滤。",
+            "preview": ["OFI", "MOMENTUM", "STABILITY", "PRICE CAP"],
+            "detail": "只在信号持续同向、没有明显衰减且价格低于动态上限时给出方向。",
+        },
     }
 
 
@@ -1408,6 +1449,16 @@ def _field_groups() -> list[dict[str, Any]]:
                 "STRATEGY7_CONFIRM_BEFORE_ENTRY_SECONDS",
                 "STRATEGY7_LATE_CONFIRM_STRONG_SIGNAL_GAP",
                 "STRATEGY7_LATE_CONFIRM_RELAX_SECONDS",
+                "STRATEGY9_STABILITY_SAMPLE_COUNT",
+                "STRATEGY9_STABILITY_REQUIRED_COUNT",
+                "STRATEGY9_STABILITY_WINDOW_SECONDS",
+                "STRATEGY9_REVERSAL_LOOKBACK_SECONDS",
+                "STRATEGY9_MAX_SIGNAL_DECAY",
+                "STRATEGY9_BASE_MAX_ENTRY_PRICE",
+                "STRATEGY9_STRONG_MAX_ENTRY_PRICE",
+                "STRATEGY9_ULTRA_MAX_ENTRY_PRICE",
+                "STRATEGY9_STRONG_SIGNAL_GAP",
+                "STRATEGY9_ULTRA_SIGNAL_GAP",
             ],
         },
         {
@@ -1456,6 +1507,16 @@ TIMEFRAME_PRESETS: dict[str, dict[str, dict[str, str]]] = {
             "STRATEGY7_CONFIRM_BEFORE_ENTRY_SECONDS": "2",
             "STRATEGY7_LATE_CONFIRM_STRONG_SIGNAL_GAP": "0.035",
             "STRATEGY7_LATE_CONFIRM_RELAX_SECONDS": "2",
+            "STRATEGY9_STABILITY_SAMPLE_COUNT": "3",
+            "STRATEGY9_STABILITY_REQUIRED_COUNT": "2",
+            "STRATEGY9_STABILITY_WINDOW_SECONDS": "6",
+            "STRATEGY9_REVERSAL_LOOKBACK_SECONDS": "6",
+            "STRATEGY9_MAX_SIGNAL_DECAY": "0.35",
+            "STRATEGY9_BASE_MAX_ENTRY_PRICE": "0.52",
+            "STRATEGY9_STRONG_MAX_ENTRY_PRICE": "0.53",
+            "STRATEGY9_ULTRA_MAX_ENTRY_PRICE": "0.54",
+            "STRATEGY9_STRONG_SIGNAL_GAP": "0.02",
+            "STRATEGY9_ULTRA_SIGNAL_GAP": "0.04",
         },
     },
     "15m": {
@@ -1483,6 +1544,16 @@ TIMEFRAME_PRESETS: dict[str, dict[str, dict[str, str]]] = {
             "STRATEGY7_CONFIRM_BEFORE_ENTRY_SECONDS": "3",
             "STRATEGY7_LATE_CONFIRM_STRONG_SIGNAL_GAP": "0.03",
             "STRATEGY7_LATE_CONFIRM_RELAX_SECONDS": "3",
+            "STRATEGY9_STABILITY_SAMPLE_COUNT": "3",
+            "STRATEGY9_STABILITY_REQUIRED_COUNT": "2",
+            "STRATEGY9_STABILITY_WINDOW_SECONDS": "8",
+            "STRATEGY9_REVERSAL_LOOKBACK_SECONDS": "8",
+            "STRATEGY9_MAX_SIGNAL_DECAY": "0.35",
+            "STRATEGY9_BASE_MAX_ENTRY_PRICE": "0.52",
+            "STRATEGY9_STRONG_MAX_ENTRY_PRICE": "0.53",
+            "STRATEGY9_ULTRA_MAX_ENTRY_PRICE": "0.54",
+            "STRATEGY9_STRONG_SIGNAL_GAP": "0.02",
+            "STRATEGY9_ULTRA_SIGNAL_GAP": "0.04",
         },
     },
 }
@@ -1528,6 +1599,16 @@ class DashboardState:
         "STRATEGY7_CONFIRM_BEFORE_ENTRY_SECONDS",
         "STRATEGY7_LATE_CONFIRM_STRONG_SIGNAL_GAP",
         "STRATEGY7_LATE_CONFIRM_RELAX_SECONDS",
+        "STRATEGY9_STABILITY_SAMPLE_COUNT",
+        "STRATEGY9_STABILITY_REQUIRED_COUNT",
+        "STRATEGY9_STABILITY_WINDOW_SECONDS",
+        "STRATEGY9_REVERSAL_LOOKBACK_SECONDS",
+        "STRATEGY9_MAX_SIGNAL_DECAY",
+        "STRATEGY9_BASE_MAX_ENTRY_PRICE",
+        "STRATEGY9_STRONG_MAX_ENTRY_PRICE",
+        "STRATEGY9_ULTRA_MAX_ENTRY_PRICE",
+        "STRATEGY9_STRONG_SIGNAL_GAP",
+        "STRATEGY9_ULTRA_SIGNAL_GAP",
         "SIGNAL_MOMENTUM_THRESHOLD",
         "SIGNAL_WEAK_SIGNAL_MODE",
         "SIGNAL_FALLBACK_STRATEGY_ID",
@@ -1584,6 +1665,16 @@ class DashboardState:
         "STRATEGY7_CONFIRM_BEFORE_ENTRY_SECONDS": "策略7 最晚确认秒数",
         "STRATEGY7_LATE_CONFIRM_STRONG_SIGNAL_GAP": "策略7 强信号额外优势",
         "STRATEGY7_LATE_CONFIRM_RELAX_SECONDS": "策略7 强信号放宽秒数",
+        "STRATEGY9_STABILITY_SAMPLE_COUNT": "策略9 稳定采样数",
+        "STRATEGY9_STABILITY_REQUIRED_COUNT": "策略9 同向采样数",
+        "STRATEGY9_STABILITY_WINDOW_SECONDS": "策略9 稳定窗口秒",
+        "STRATEGY9_REVERSAL_LOOKBACK_SECONDS": "策略9 衰减回看秒",
+        "STRATEGY9_MAX_SIGNAL_DECAY": "策略9 最大信号衰减",
+        "STRATEGY9_BASE_MAX_ENTRY_PRICE": "策略9 普通价帽",
+        "STRATEGY9_STRONG_MAX_ENTRY_PRICE": "策略9 强信号价帽",
+        "STRATEGY9_ULTRA_MAX_ENTRY_PRICE": "策略9 超强信号价帽",
+        "STRATEGY9_STRONG_SIGNAL_GAP": "策略9 强信号优势",
+        "STRATEGY9_ULTRA_SIGNAL_GAP": "策略9 超强信号优势",
         "SIGNAL_MOMENTUM_THRESHOLD": "动量阈值",
         "SIGNAL_WEAK_SIGNAL_MODE": "弱信号处理",
         "SIGNAL_FALLBACK_STRATEGY_ID": "弱信号回退基础策略",
@@ -1649,6 +1740,16 @@ class DashboardState:
         "STRATEGY7_CONFIRM_BEFORE_ENTRY_SECONDS": "strategy7_confirm_before_entry_seconds",
         "STRATEGY7_LATE_CONFIRM_STRONG_SIGNAL_GAP": "strategy7_late_confirm_strong_signal_gap",
         "STRATEGY7_LATE_CONFIRM_RELAX_SECONDS": "strategy7_late_confirm_relax_seconds",
+        "STRATEGY9_STABILITY_SAMPLE_COUNT": "strategy9_stability_sample_count",
+        "STRATEGY9_STABILITY_REQUIRED_COUNT": "strategy9_stability_required_count",
+        "STRATEGY9_STABILITY_WINDOW_SECONDS": "strategy9_stability_window_seconds",
+        "STRATEGY9_REVERSAL_LOOKBACK_SECONDS": "strategy9_reversal_lookback_seconds",
+        "STRATEGY9_MAX_SIGNAL_DECAY": "strategy9_max_signal_decay",
+        "STRATEGY9_BASE_MAX_ENTRY_PRICE": "strategy9_base_max_entry_price",
+        "STRATEGY9_STRONG_MAX_ENTRY_PRICE": "strategy9_strong_max_entry_price",
+        "STRATEGY9_ULTRA_MAX_ENTRY_PRICE": "strategy9_ultra_max_entry_price",
+        "STRATEGY9_STRONG_SIGNAL_GAP": "strategy9_strong_signal_gap",
+        "STRATEGY9_ULTRA_SIGNAL_GAP": "strategy9_ultra_signal_gap",
         "SIGNAL_MOMENTUM_THRESHOLD": "signal_momentum_threshold",
         "SIGNAL_WEAK_SIGNAL_MODE": "signal_weak_signal_mode",
         "SIGNAL_FALLBACK_STRATEGY_ID": "signal_fallback_strategy_id",
@@ -1678,6 +1779,8 @@ class DashboardState:
         "SIGNAL_DYNAMIC_THRESHOLD_MIN_POINTS",
         "SIGNAL_LOCK_BEFORE_ENTRY_SECONDS",
         "MAX_STAKE_SKIP_ALERT_THRESHOLD",
+        "STRATEGY9_STABILITY_SAMPLE_COUNT",
+        "STRATEGY9_STABILITY_REQUIRED_COUNT",
         "WS_QUOTE_STALE_SECONDS",
         "WS_CONNECT_TIMEOUT_SECONDS",
     )
@@ -1699,6 +1802,14 @@ class DashboardState:
         "STRATEGY7_MIN_SIGNAL_GAP",
         "STRATEGY7_LATE_CONFIRM_STRONG_SIGNAL_GAP",
         "STRATEGY7_LATE_CONFIRM_RELAX_SECONDS",
+        "STRATEGY9_STABILITY_WINDOW_SECONDS",
+        "STRATEGY9_REVERSAL_LOOKBACK_SECONDS",
+        "STRATEGY9_MAX_SIGNAL_DECAY",
+        "STRATEGY9_BASE_MAX_ENTRY_PRICE",
+        "STRATEGY9_STRONG_MAX_ENTRY_PRICE",
+        "STRATEGY9_ULTRA_MAX_ENTRY_PRICE",
+        "STRATEGY9_STRONG_SIGNAL_GAP",
+        "STRATEGY9_ULTRA_SIGNAL_GAP",
         "SIGNAL_MOMENTUM_THRESHOLD",
         "SIGNAL_DYNAMIC_THRESHOLD_K",
         "WS_TRADE_GUARD_STALE_SECONDS",
@@ -1741,9 +1852,19 @@ class DashboardState:
         "STRATEGY7_CONFIRM_BEFORE_ENTRY_SECONDS": "strategy_7_only",
         "STRATEGY7_LATE_CONFIRM_STRONG_SIGNAL_GAP": "strategy_7_only",
         "STRATEGY7_LATE_CONFIRM_RELAX_SECONDS": "strategy_7_only",
+        "STRATEGY9_STABILITY_SAMPLE_COUNT": "strategy_9_only",
+        "STRATEGY9_STABILITY_REQUIRED_COUNT": "strategy_9_only",
+        "STRATEGY9_STABILITY_WINDOW_SECONDS": "strategy_9_only",
+        "STRATEGY9_REVERSAL_LOOKBACK_SECONDS": "strategy_9_only",
+        "STRATEGY9_MAX_SIGNAL_DECAY": "strategy_9_only",
+        "STRATEGY9_BASE_MAX_ENTRY_PRICE": "strategy_9_only",
+        "STRATEGY9_STRONG_MAX_ENTRY_PRICE": "strategy_9_only",
+        "STRATEGY9_ULTRA_MAX_ENTRY_PRICE": "strategy_9_only",
+        "STRATEGY9_STRONG_SIGNAL_GAP": "strategy_9_only",
+        "STRATEGY9_ULTRA_SIGNAL_GAP": "strategy_9_only",
     }
     FIELD_HELP: dict[str, str] = {
-        "STRATEGY_ID": "策略 1-4 是固定节奏策略，策略 5 是动量策略，策略 6 是 Binance OFI，策略 7/8 是组合信号策略。",
+        "STRATEGY_ID": "策略 1-4 是固定节奏策略，策略 5 是动量策略，策略 6 是 Binance OFI，策略 7/8/9 是组合信号策略，其中策略 9 是稳定共振策略。",
         "STRATEGY_IDS": "统一策略组合。设置后纸面和实盘都使用同一组策略和同一套参数，切换模式只改变执行环境。",
         "LIVE_STRATEGY_IDS": "实盘运行时可轮询的策略列表，按输入顺序去重，例如 2,6。未填写时会回退到 STRATEGY_ID。",
         "PAPER_STRATEGY_IDS": "纸面测试可同时运行多个策略，按输入顺序去重，例如 1,2,6。",
@@ -1775,6 +1896,16 @@ class DashboardState:
         "STRATEGY7_CONFIRM_BEFORE_ENTRY_SECONDS": "策略 7 需要在计划入场前至少提前这么多秒完成双信号确认。",
         "STRATEGY7_LATE_CONFIRM_STRONG_SIGNAL_GAP": "策略 7 只有在 OFI 和动量都额外强于阈值时，才允许走晚确认放宽通道。",
         "STRATEGY7_LATE_CONFIRM_RELAX_SECONDS": "满足强信号条件后，可从策略 7 的最晚确认要求里减去的秒数。",
+        "STRATEGY9_STABILITY_SAMPLE_COUNT": "策略 9 在稳定窗口内要求的有效采样数量。",
+        "STRATEGY9_STABILITY_REQUIRED_COUNT": "策略 9 在稳定窗口内要求同向共振的最少采样数量。",
+        "STRATEGY9_STABILITY_WINDOW_SECONDS": "策略 9 判断稳定共振的回看秒数。",
+        "STRATEGY9_REVERSAL_LOOKBACK_SECONDS": "策略 9 判断信号衰减风险的回看秒数。",
+        "STRATEGY9_MAX_SIGNAL_DECAY": "策略 9 当前信号相对近期峰值允许衰减的最大比例。",
+        "STRATEGY9_BASE_MAX_ENTRY_PRICE": "策略 9 普通信号允许的最高买入价。",
+        "STRATEGY9_STRONG_MAX_ENTRY_PRICE": "策略 9 强信号允许的最高买入价。",
+        "STRATEGY9_ULTRA_MAX_ENTRY_PRICE": "策略 9 超强信号允许的最高买入价。",
+        "STRATEGY9_STRONG_SIGNAL_GAP": "策略 9 判断强信号时，OFI 和动量需要额外超过阈值的幅度。",
+        "STRATEGY9_ULTRA_SIGNAL_GAP": "策略 9 判断超强信号时，OFI 和动量需要额外超过阈值的幅度。",
         "SIGNAL_MOMENTUM_THRESHOLD": "策略 5 的基础动量阈值，比较 abs(current_up - open_up)。",
         "SIGNAL_WEAK_SIGNAL_MODE": "弱动量信号的处理方式：直接跳过，或回退到固定节奏策略。",
         "SIGNAL_FALLBACK_STRATEGY_ID": "仅当策略 5 在弱信号下回退时使用。",
@@ -1948,7 +2079,7 @@ class DashboardState:
             strategy_ids = []
             strategy_ids.extend(getattr(cfg, "paper_strategy_ids", []) or [])
             strategy_ids.extend(getattr(cfg, "live_strategy_ids", []) or [])
-        if cfg.strategy_id not in {6, 7, 8} and not any(strategy_id in {6, 7, 8} for strategy_id in strategy_ids):
+        if cfg.strategy_id not in {6, 7, 8, 9} and not any(strategy_id in {6, 7, 8, 9} for strategy_id in strategy_ids):
             return None
         service = BinanceDepth5SignalService(ws_url=cfg.binance_ws_url, stream=cfg.binance_depth_stream)
         service.start()
@@ -2187,6 +2318,16 @@ class DashboardState:
                         else ""
                     ),
                     "strategy7_max_entry_price": _fmt_env(profile.strategy7_max_entry_price),
+                    "strategy9_stability_sample_count": _fmt_env(profile.strategy9_stability_sample_count),
+                    "strategy9_stability_required_count": _fmt_env(profile.strategy9_stability_required_count),
+                    "strategy9_stability_window_seconds": _fmt_env(profile.strategy9_stability_window_seconds),
+                    "strategy9_reversal_lookback_seconds": _fmt_env(profile.strategy9_reversal_lookback_seconds),
+                    "strategy9_max_signal_decay": _fmt_env(profile.strategy9_max_signal_decay),
+                    "strategy9_base_max_entry_price": _fmt_env(profile.strategy9_base_max_entry_price),
+                    "strategy9_strong_max_entry_price": _fmt_env(profile.strategy9_strong_max_entry_price),
+                    "strategy9_ultra_max_entry_price": _fmt_env(profile.strategy9_ultra_max_entry_price),
+                    "strategy9_strong_signal_gap": _fmt_env(profile.strategy9_strong_signal_gap),
+                    "strategy9_ultra_signal_gap": _fmt_env(profile.strategy9_ultra_signal_gap),
                 }
                 for timeframe, profile in getattr(self._cfg, "paper_profiles", {}).items()
             }
@@ -2509,20 +2650,21 @@ class DashboardState:
                 }
 
             strategy7_payload = {
-                "enabled": selected_strategy in {7, 8},
+                "enabled": selected_strategy in {7, 8, 9},
                 "ofi_score": quote.strategy6_ofi_score,
                 "momentum_delta": side_decision.signal_delta,
                 "agreement": (
                     "agree"
-                    if selected_strategy in {7, 8} and side_decision.side in {"UP", "DOWN"} and side_decision.reason != "strategy8_conflict_reversal"
-                    else ("conflict" if side_decision.reason in {"strategy7_signal_conflict", "strategy8_conflict_reversal"} else None)
+                    if selected_strategy in {7, 8, 9} and side_decision.side in {"UP", "DOWN"} and side_decision.reason != "strategy8_conflict_reversal"
+                    else ("conflict" if side_decision.reason in {"strategy7_signal_conflict", "strategy8_conflict_reversal", "strategy9_signal_conflict"} else None)
                 ),
                 "quality_gate": (
                     "passed"
-                    if selected_strategy in {7, 8} and side_decision.side in {"UP", "DOWN"}
-                    else (side_decision.reason if selected_strategy in {7, 8} else None)
+                    if selected_strategy in {7, 8, 9} and side_decision.side in {"UP", "DOWN"}
+                    else (side_decision.reason if selected_strategy in {7, 8, 9} else None)
                 ),
                 "final_reason": side_decision.reason,
+                "dynamic_max_entry_price": side_decision.max_entry_price,
             }
 
             return {
@@ -5093,6 +5235,20 @@ const REASON_LABELS = {
   strategy8_entry_too_late: '策略8 确认出现过晚',
   strategy8_price_too_low: '策略8 入场价格过低',
   strategy8_price_too_high: '策略8 入场价格过高',
+  strategy9_ofi_unavailable: '策略9 盘口失衡信号不可用',
+  strategy9_ofi_stale: '策略9 盘口失衡信号已过期',
+  strategy9_ofi_too_weak: '策略9 盘口失衡信号过弱',
+  strategy9_momentum_unavailable: '策略9 动量信号不可用',
+  strategy9_momentum_too_weak: '策略9 动量信号过弱',
+  strategy9_momentum_too_hot: '策略9 动量过热，跳过追单',
+  strategy9_signal_conflict: '策略9 盘口失衡与动量需同向确认',
+  strategy9_confidence_too_low: '策略9 信号优势不足',
+  strategy9_entry_too_late: '策略9 确认出现过晚',
+  strategy9_signal_unstable: '策略9 信号稳定性不足',
+  strategy9_signal_decaying: '策略9 信号明显衰减',
+  strategy9_dynamic_price_too_high: '策略9 动态价帽过高',
+  strategy9_price_too_low: '策略9 入场价格过低',
+  strategy9_price_too_high: '策略9 入场价格过高',
   live_fok_not_filled: '策略7 实时 FOK 订单未成交',
   awaiting_fill_confirmation: '等待成交确认',
   round_in_progress: '轮次仍在进行中',
@@ -5128,6 +5284,16 @@ const CONFIG_KEY_NAMES = {
   STRATEGY7_MOMENTUM_THRESHOLD: '策略7 动量阈值',
   STRATEGY7_MIN_SIGNAL_GAP: '策略7 最小信号优势',
   STRATEGY7_CONFIRM_BEFORE_ENTRY_SECONDS: '策略7 最晚确认秒数',
+  STRATEGY9_STABILITY_SAMPLE_COUNT: '策略9 稳定采样数',
+  STRATEGY9_STABILITY_REQUIRED_COUNT: '策略9 同向采样数',
+  STRATEGY9_STABILITY_WINDOW_SECONDS: '策略9 稳定窗口秒',
+  STRATEGY9_REVERSAL_LOOKBACK_SECONDS: '策略9 衰减回看秒',
+  STRATEGY9_MAX_SIGNAL_DECAY: '策略9 最大信号衰减',
+  STRATEGY9_BASE_MAX_ENTRY_PRICE: '策略9 普通价帽',
+  STRATEGY9_STRONG_MAX_ENTRY_PRICE: '策略9 强信号价帽',
+  STRATEGY9_ULTRA_MAX_ENTRY_PRICE: '策略9 超强信号价帽',
+  STRATEGY9_STRONG_SIGNAL_GAP: '策略9 强信号优势',
+  STRATEGY9_ULTRA_SIGNAL_GAP: '策略9 超强信号优势',
   SIGNAL_MOMENTUM_THRESHOLD: '动量阈值',
   SIGNAL_WEAK_SIGNAL_MODE: '弱信号处理',
   SIGNAL_FALLBACK_STRATEGY_ID: '弱信号回退基础策略',
@@ -6124,6 +6290,7 @@ function renderPaperProfiles(payload) {
               : fieldName === 'BINANCE_SIGNAL_STALE_SECONDS' ? 'binance_signal_stale_seconds'
               : fieldName === 'STRATEGY7_OFI_THRESHOLD' ? 'strategy7_ofi_threshold'
               : fieldName === 'STRATEGY7_MAX_MOMENTUM_DELTA' ? 'strategy7_max_momentum_delta'
+              : fieldName.startsWith('STRATEGY9_') ? fieldName.toLowerCase()
               : 'strategy7_momentum_threshold'
             ] ?? '');
         const options = selectOptions[scopedKey] || selectOptions[fieldName] || null;
@@ -6270,7 +6437,7 @@ function isAdvancedConfigGroup(group) {
 
 function isAdvancedConfigKey(key) {
   const normalized = String(key || '');
-  return normalized.startsWith('STRATEGY7_');
+  return normalized.startsWith('STRATEGY7_') || normalized.startsWith('STRATEGY9_');
 }
 
 function applyAdvancedConfigVisibility(values) {
@@ -6280,7 +6447,8 @@ function applyAdvancedConfigVisibility(values) {
   }
   const strategyId = String(resolveUnifiedStrategySelection(state.config || {}, values || {}).focus || '');
   const isStrategyFive = strategyId === '5';
-  const isStrategySeven = strategyId === '7';
+  const isStrategySeven = strategyId === '7' || strategyId === '8' || strategyId === '9';
+  const isStrategyNine = strategyId === '9';
 
   panel.querySelectorAll('.config-group').forEach((section) => {
     const advancedGroup = section.dataset.advancedGroup === 'true';
@@ -6292,6 +6460,7 @@ function applyAdvancedConfigVisibility(values) {
     const shouldShow =
       scope === 'strategy_5_only' ? isStrategyFive
       : scope === 'strategy_7_only' ? isStrategySeven
+      : scope === 'strategy_9_only' ? isStrategyNine
       : true;
     field.style.display = panel.hidden ? 'none' : (shouldShow ? '' : 'none');
   });

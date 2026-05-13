@@ -3870,9 +3870,9 @@ def test_dashboard_config_payload_includes_paper_strategy_ids(tmp_path: Path):
         payload = state.get_config_payload()
         assert 'PAPER_STRATEGY_IDS' in payload['editable_keys']
         assert 'STRATEGY_IDS' in payload['editable_keys']
-        assert payload['select_options']['STRATEGY_ID'] == ['1', '2', '3', '4', '5', '6', '7', '8']
-        assert payload['select_options']['STRATEGY_IDS'] == ['1', '2', '3', '4', '5', '6', '7', '8']
-        assert payload['select_options']['PAPER_STRATEGY_IDS'] == ['1', '2', '3', '4', '5', '6', '7', '8']
+        assert payload['select_options']['STRATEGY_ID'] == ['1', '2', '3', '4', '5', '6', '7', '8', '9']
+        assert payload['select_options']['STRATEGY_IDS'] == ['1', '2', '3', '4', '5', '6', '7', '8', '9']
+        assert payload['select_options']['PAPER_STRATEGY_IDS'] == ['1', '2', '3', '4', '5', '6', '7', '8', '9']
     finally:
         state.close()
 
@@ -4247,7 +4247,7 @@ def test_dashboard_config_payload_includes_strategy7_fields(tmp_path: Path):
     state = DashboardState(env_file=tmp_path / '.env.dashboard')
     try:
         payload = state.get_config_payload()
-        assert payload['select_options']['STRATEGY_ID'] == ['1', '2', '3', '4', '5', '6', '7', '8']
+        assert payload['select_options']['STRATEGY_ID'] == ['1', '2', '3', '4', '5', '6', '7', '8', '9']
         assert payload['labels']['STRATEGY7_OFI_THRESHOLD'] == '策略7 盘口失衡阈值'
         assert payload['labels']['STRATEGY7_MOMENTUM_THRESHOLD'] == '策略7 动量阈值'
         assert payload['labels']['STRATEGY7_LATE_CONFIRM_STRONG_SIGNAL_GAP'] == '策略7 强信号额外优势'
@@ -4256,6 +4256,21 @@ def test_dashboard_config_payload_includes_strategy7_fields(tmp_path: Path):
         assert payload['field_scope']['STRATEGY7_LATE_CONFIRM_STRONG_SIGNAL_GAP'] == 'strategy_7_only'
         assert 'MAX_ENTRY_PRICE' in payload['editable_keys']
         assert 'STRATEGY7_LATE_CONFIRM_RELAX_SECONDS' in payload['editable_keys']
+    finally:
+        state.close()
+
+
+def test_dashboard_config_payload_includes_strategy9_fields(tmp_path: Path):
+    state = DashboardState(env_file=tmp_path / '.env.dashboard')
+    try:
+        payload = state.get_config_payload()
+        assert payload['labels']['STRATEGY9_STABILITY_SAMPLE_COUNT'] == '策略9 稳定采样数'
+        assert payload['labels']['STRATEGY9_BASE_MAX_ENTRY_PRICE'] == '策略9 普通价帽'
+        assert payload['labels']['STRATEGY9_ULTRA_SIGNAL_GAP'] == '策略9 超强信号优势'
+        assert payload['field_scope']['STRATEGY9_STABILITY_SAMPLE_COUNT'] == 'strategy_9_only'
+        assert payload['field_scope']['STRATEGY9_BASE_MAX_ENTRY_PRICE'] == 'strategy_9_only'
+        assert 'STRATEGY9_STABILITY_SAMPLE_COUNT' in payload['editable_keys']
+        assert 'STRATEGY9_ULTRA_MAX_ENTRY_PRICE' in payload['editable_keys']
     finally:
         state.close()
 
@@ -4289,7 +4304,7 @@ def test_dashboard_rejects_invalid_paper_strategy_ids(tmp_path: Path):
     state = DashboardState(env_file=tmp_path / '.env.dashboard')
     try:
         with pytest.raises(ConfigValidationError) as excinfo:
-            state.update_config({'PAPER_STRATEGY_IDS': '9,x'})
+            state.update_config({'PAPER_STRATEGY_IDS': '10,x'})
         assert 'PAPER_STRATEGY_IDS' in excinfo.value.field_errors
     finally:
         state.close()
@@ -4436,6 +4451,10 @@ def test_dashboard_assets_include_strategy7_copy_and_reasons(tmp_path: Path):
     assert payload['strategy_catalog']['7']['summary'] == '币安盘口失衡与预测市场动量必须同向确认，冲突时跳过。'
     assert 'strategy7_signal_conflict' in js
     assert 'strategy7_confidence_too_low' in js
+    assert payload['strategy_catalog']['9']['label'] == '稳定共振'
+    assert payload['strategy_catalog']['9']['summary'] == '在策略7共识基础上加入连续稳定、衰减风险与动态价帽过滤。'
+    assert 'strategy9_signal_unstable' in js
+    assert 'strategy9_dynamic_price_too_high' in js
     assert '盘口失衡与动量需同向确认' in js
     assert '策略7 盘口失衡阈值' in js
     assert 'id=strategy7Panel' in html

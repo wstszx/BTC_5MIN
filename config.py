@@ -17,7 +17,7 @@ _ENV_FILE_ENCODINGS: tuple[str, ...] = ("utf-8", "utf-8-sig", "gbk")
 _BOOL_TRUE_VALUES = {"1", "true", "yes", "on"}
 _BOOL_FALSE_VALUES = {"0", "false", "no", "off"}
 _STRATEGY_ID_MIN = 1
-_STRATEGY_ID_MAX = 8
+_STRATEGY_ID_MAX = 9
 
 _INT_CONFIG_KEYS: frozenset[str] = frozenset(
     {
@@ -30,6 +30,8 @@ _INT_CONFIG_KEYS: frozenset[str] = frozenset(
         "SIGNAL_LOCK_BEFORE_ENTRY_SECONDS",
         "MAX_STAKE_SKIP_ALERT_THRESHOLD",
         "STRATEGY7_CONFIRM_BEFORE_ENTRY_SECONDS",
+        "STRATEGY9_STABILITY_SAMPLE_COUNT",
+        "STRATEGY9_STABILITY_REQUIRED_COUNT",
         "WS_QUOTE_STALE_SECONDS",
         "WS_CONNECT_TIMEOUT_SECONDS",
         "WS_LOG_EVERY_UPDATES",
@@ -62,6 +64,14 @@ _FLOAT_CONFIG_KEYS: frozenset[str] = frozenset(
         "STRATEGY7_MIN_SIGNAL_GAP",
         "STRATEGY7_LATE_CONFIRM_STRONG_SIGNAL_GAP",
         "STRATEGY7_LATE_CONFIRM_RELAX_SECONDS",
+        "STRATEGY9_STABILITY_WINDOW_SECONDS",
+        "STRATEGY9_REVERSAL_LOOKBACK_SECONDS",
+        "STRATEGY9_MAX_SIGNAL_DECAY",
+        "STRATEGY9_BASE_MAX_ENTRY_PRICE",
+        "STRATEGY9_STRONG_MAX_ENTRY_PRICE",
+        "STRATEGY9_ULTRA_MAX_ENTRY_PRICE",
+        "STRATEGY9_STRONG_SIGNAL_GAP",
+        "STRATEGY9_ULTRA_SIGNAL_GAP",
         "BINANCE_SIGNAL_STALE_SECONDS",
         "NEAR_ENTRY_POLL_WINDOW_SECONDS",
         "POLL_INTERVAL_SECONDS",
@@ -188,7 +198,7 @@ def _collect_strategy_list_warning(name: str, raw: str) -> str | None:
     if invalid:
         return f"Invalid entries for {name} ignored: {', '.join(invalid)}"
     if not _parse_strategy_id_list(raw, fallback=2):
-        return _invalid_value_warning(name, "comma-separated strategy ids 1-8", raw)
+        return _invalid_value_warning(name, f"comma-separated strategy ids 1-{_STRATEGY_ID_MAX}", raw)
     return None
 
 
@@ -205,10 +215,10 @@ def collect_config_warnings(values: dict[str, str]) -> dict[str, str]:
             try:
                 strategy_id = int(raw)
             except ValueError:
-                warnings[key] = _invalid_value_warning(key, "strategy id 1-8", raw)
+                warnings[key] = _invalid_value_warning(key, f"strategy id 1-{_STRATEGY_ID_MAX}", raw)
                 continue
             if strategy_id < _STRATEGY_ID_MIN or strategy_id > _STRATEGY_ID_MAX:
-                warnings[key] = _invalid_value_warning(key, "strategy id 1-8", raw)
+                warnings[key] = _invalid_value_warning(key, f"strategy id 1-{_STRATEGY_ID_MAX}", raw)
             continue
 
         if base_key in {STRATEGY_IDS, PAPER_STRATEGY_IDS, LIVE_STRATEGY_IDS} or (
@@ -325,7 +335,7 @@ def _parse_strategy_id_list(raw: str | None, *, fallback: int) -> list[int]:
             strategy_id = int(candidate)
         except ValueError:
             continue
-        if strategy_id < 1 or strategy_id > 8 or strategy_id in seen:
+        if strategy_id < _STRATEGY_ID_MIN or strategy_id > _STRATEGY_ID_MAX or strategy_id in seen:
             continue
         seen.add(strategy_id)
         strategy_ids.append(strategy_id)
@@ -414,6 +424,16 @@ class PaperTimeframeProfile:
     strategy7_confirm_before_entry_seconds: int
     strategy7_late_confirm_strong_signal_gap: float
     strategy7_late_confirm_relax_seconds: float
+    strategy9_stability_sample_count: int
+    strategy9_stability_required_count: int
+    strategy9_stability_window_seconds: float
+    strategy9_reversal_lookback_seconds: float
+    strategy9_max_signal_decay: float
+    strategy9_base_max_entry_price: float
+    strategy9_strong_max_entry_price: float
+    strategy9_ultra_max_entry_price: float
+    strategy9_strong_signal_gap: float
+    strategy9_ultra_signal_gap: float
     min_entry_price: float | None
     max_entry_price: float
     strategy7_max_entry_price: float
@@ -450,6 +470,16 @@ class LiveStrategyProfile:
     strategy7_confirm_before_entry_seconds: int
     strategy7_late_confirm_strong_signal_gap: float
     strategy7_late_confirm_relax_seconds: float
+    strategy9_stability_sample_count: int
+    strategy9_stability_required_count: int
+    strategy9_stability_window_seconds: float
+    strategy9_reversal_lookback_seconds: float
+    strategy9_max_signal_decay: float
+    strategy9_base_max_entry_price: float
+    strategy9_strong_max_entry_price: float
+    strategy9_ultra_max_entry_price: float
+    strategy9_strong_signal_gap: float
+    strategy9_ultra_signal_gap: float
 
 
 def _base_live_profile_for_strategy(cfg: AppConfig, strategy_id: int) -> LiveStrategyProfile:
@@ -483,6 +513,16 @@ def _base_live_profile_for_strategy(cfg: AppConfig, strategy_id: int) -> LiveStr
         strategy7_confirm_before_entry_seconds=cfg.strategy7_confirm_before_entry_seconds,
         strategy7_late_confirm_strong_signal_gap=cfg.strategy7_late_confirm_strong_signal_gap,
         strategy7_late_confirm_relax_seconds=cfg.strategy7_late_confirm_relax_seconds,
+        strategy9_stability_sample_count=cfg.strategy9_stability_sample_count,
+        strategy9_stability_required_count=cfg.strategy9_stability_required_count,
+        strategy9_stability_window_seconds=cfg.strategy9_stability_window_seconds,
+        strategy9_reversal_lookback_seconds=cfg.strategy9_reversal_lookback_seconds,
+        strategy9_max_signal_decay=cfg.strategy9_max_signal_decay,
+        strategy9_base_max_entry_price=cfg.strategy9_base_max_entry_price,
+        strategy9_strong_max_entry_price=cfg.strategy9_strong_max_entry_price,
+        strategy9_ultra_max_entry_price=cfg.strategy9_ultra_max_entry_price,
+        strategy9_strong_signal_gap=cfg.strategy9_strong_signal_gap,
+        strategy9_ultra_signal_gap=cfg.strategy9_ultra_signal_gap,
     )
 
 
@@ -547,7 +587,7 @@ def _profile_for_strategy_prefix(cfg: AppConfig, strategy_id: int, prefix: str) 
             max_entry_price=_env_float(
                 f"{prefix}_MAX_ENTRY_PRICE",
                 _env_float(legacy_strategy7_max_entry_key, cfg.max_entry_price)
-                if strategy_id in {7, 8} and os.getenv(legacy_strategy7_max_entry_key) is not None
+                if strategy_id in {7, 8, 9} and os.getenv(legacy_strategy7_max_entry_key) is not None
                 else cfg.max_entry_price,
             ),
             binance_signal_stale_seconds=_env_float(
@@ -583,6 +623,46 @@ def _profile_for_strategy_prefix(cfg: AppConfig, strategy_id: int, prefix: str) 
             strategy7_late_confirm_relax_seconds=_env_float(
                 f"{prefix}_STRATEGY7_LATE_CONFIRM_RELAX_SECONDS",
                 cfg.strategy7_late_confirm_relax_seconds,
+            ),
+            strategy9_stability_sample_count=_env_int(
+                f"{prefix}_STRATEGY9_STABILITY_SAMPLE_COUNT",
+                cfg.strategy9_stability_sample_count,
+            ),
+            strategy9_stability_required_count=_env_int(
+                f"{prefix}_STRATEGY9_STABILITY_REQUIRED_COUNT",
+                cfg.strategy9_stability_required_count,
+            ),
+            strategy9_stability_window_seconds=_env_float(
+                f"{prefix}_STRATEGY9_STABILITY_WINDOW_SECONDS",
+                cfg.strategy9_stability_window_seconds,
+            ),
+            strategy9_reversal_lookback_seconds=_env_float(
+                f"{prefix}_STRATEGY9_REVERSAL_LOOKBACK_SECONDS",
+                cfg.strategy9_reversal_lookback_seconds,
+            ),
+            strategy9_max_signal_decay=_env_float(
+                f"{prefix}_STRATEGY9_MAX_SIGNAL_DECAY",
+                cfg.strategy9_max_signal_decay,
+            ),
+            strategy9_base_max_entry_price=_env_float(
+                f"{prefix}_STRATEGY9_BASE_MAX_ENTRY_PRICE",
+                cfg.strategy9_base_max_entry_price,
+            ),
+            strategy9_strong_max_entry_price=_env_float(
+                f"{prefix}_STRATEGY9_STRONG_MAX_ENTRY_PRICE",
+                cfg.strategy9_strong_max_entry_price,
+            ),
+            strategy9_ultra_max_entry_price=_env_float(
+                f"{prefix}_STRATEGY9_ULTRA_MAX_ENTRY_PRICE",
+                cfg.strategy9_ultra_max_entry_price,
+            ),
+            strategy9_strong_signal_gap=_env_float(
+                f"{prefix}_STRATEGY9_STRONG_SIGNAL_GAP",
+                cfg.strategy9_strong_signal_gap,
+            ),
+            strategy9_ultra_signal_gap=_env_float(
+                f"{prefix}_STRATEGY9_ULTRA_SIGNAL_GAP",
+                cfg.strategy9_ultra_signal_gap,
             ),
         ),
     )
@@ -647,6 +727,16 @@ class AppConfig:
     strategy7_late_confirm_relax_seconds: float = field(
         default_factory=lambda: _env_float("STRATEGY7_LATE_CONFIRM_RELAX_SECONDS", 0.0)
     )
+    strategy9_stability_sample_count: int = field(default_factory=lambda: _env_int("STRATEGY9_STABILITY_SAMPLE_COUNT", 3))
+    strategy9_stability_required_count: int = field(default_factory=lambda: _env_int("STRATEGY9_STABILITY_REQUIRED_COUNT", 2))
+    strategy9_stability_window_seconds: float = field(default_factory=lambda: _env_float("STRATEGY9_STABILITY_WINDOW_SECONDS", 6.0))
+    strategy9_reversal_lookback_seconds: float = field(default_factory=lambda: _env_float("STRATEGY9_REVERSAL_LOOKBACK_SECONDS", 6.0))
+    strategy9_max_signal_decay: float = field(default_factory=lambda: _env_float("STRATEGY9_MAX_SIGNAL_DECAY", 0.35))
+    strategy9_base_max_entry_price: float = field(default_factory=lambda: _env_float("STRATEGY9_BASE_MAX_ENTRY_PRICE", 0.52))
+    strategy9_strong_max_entry_price: float = field(default_factory=lambda: _env_float("STRATEGY9_STRONG_MAX_ENTRY_PRICE", 0.53))
+    strategy9_ultra_max_entry_price: float = field(default_factory=lambda: _env_float("STRATEGY9_ULTRA_MAX_ENTRY_PRICE", 0.54))
+    strategy9_strong_signal_gap: float = field(default_factory=lambda: _env_float("STRATEGY9_STRONG_SIGNAL_GAP", 0.02))
+    strategy9_ultra_signal_gap: float = field(default_factory=lambda: _env_float("STRATEGY9_ULTRA_SIGNAL_GAP", 0.04))
     binance_ws_url: str = field(default_factory=lambda: os.getenv('BINANCE_WS_URL') or 'wss://stream.binance.com:9443/ws')
     binance_depth_stream: str = field(default_factory=lambda: os.getenv('BINANCE_DEPTH_STREAM') or 'btcusdt@depth5')
     binance_signal_stale_seconds: float = field(default_factory=lambda: _env_float('BINANCE_SIGNAL_STALE_SECONDS', 2.0))
@@ -774,6 +864,46 @@ class AppConfig:
                 strategy7_late_confirm_relax_seconds=_env_float(
                     f"{prefix}_STRATEGY7_LATE_CONFIRM_RELAX_SECONDS",
                     self.strategy7_late_confirm_relax_seconds,
+                ),
+                strategy9_stability_sample_count=_env_int(
+                    f"{prefix}_STRATEGY9_STABILITY_SAMPLE_COUNT",
+                    self.strategy9_stability_sample_count,
+                ),
+                strategy9_stability_required_count=_env_int(
+                    f"{prefix}_STRATEGY9_STABILITY_REQUIRED_COUNT",
+                    self.strategy9_stability_required_count,
+                ),
+                strategy9_stability_window_seconds=_env_float(
+                    f"{prefix}_STRATEGY9_STABILITY_WINDOW_SECONDS",
+                    self.strategy9_stability_window_seconds,
+                ),
+                strategy9_reversal_lookback_seconds=_env_float(
+                    f"{prefix}_STRATEGY9_REVERSAL_LOOKBACK_SECONDS",
+                    self.strategy9_reversal_lookback_seconds,
+                ),
+                strategy9_max_signal_decay=_env_float(
+                    f"{prefix}_STRATEGY9_MAX_SIGNAL_DECAY",
+                    self.strategy9_max_signal_decay,
+                ),
+                strategy9_base_max_entry_price=_env_float(
+                    f"{prefix}_STRATEGY9_BASE_MAX_ENTRY_PRICE",
+                    self.strategy9_base_max_entry_price,
+                ),
+                strategy9_strong_max_entry_price=_env_float(
+                    f"{prefix}_STRATEGY9_STRONG_MAX_ENTRY_PRICE",
+                    self.strategy9_strong_max_entry_price,
+                ),
+                strategy9_ultra_max_entry_price=_env_float(
+                    f"{prefix}_STRATEGY9_ULTRA_MAX_ENTRY_PRICE",
+                    self.strategy9_ultra_max_entry_price,
+                ),
+                strategy9_strong_signal_gap=_env_float(
+                    f"{prefix}_STRATEGY9_STRONG_SIGNAL_GAP",
+                    self.strategy9_strong_signal_gap,
+                ),
+                strategy9_ultra_signal_gap=_env_float(
+                    f"{prefix}_STRATEGY9_ULTRA_SIGNAL_GAP",
+                    self.strategy9_ultra_signal_gap,
                 ),
                 min_entry_price=(
                     _env_optional_float(f"{prefix}_MIN_ENTRY_PRICE")

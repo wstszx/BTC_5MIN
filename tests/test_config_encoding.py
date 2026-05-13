@@ -31,7 +31,7 @@ def test_collect_config_warnings_reports_invalid_scalar_values():
         {
             'MAX_STAKE': 'abc',
             'WS_ENABLED': 'maybe',
-            'STRATEGY_ID': '9',
+            'STRATEGY_ID': '10',
             'MARKET_TIMEFRAME': '7m',
             'TARGET_PROFIT': '1.2',
         }
@@ -39,7 +39,7 @@ def test_collect_config_warnings_reports_invalid_scalar_values():
 
     assert warnings['MAX_STAKE'] == "Invalid value for MAX_STAKE: expected number, got 'abc'"
     assert warnings['WS_ENABLED'] == "Invalid value for WS_ENABLED: expected true/false, got 'maybe'"
-    assert warnings['STRATEGY_ID'] == "Invalid value for STRATEGY_ID: expected strategy id 1-8, got '9'"
+    assert warnings['STRATEGY_ID'] == "Invalid value for STRATEGY_ID: expected strategy id 1-9, got '10'"
     assert warnings['MARKET_TIMEFRAME'] == "Invalid value for MARKET_TIMEFRAME: expected one of 5m, 15m, got '7m'"
     assert 'TARGET_PROFIT' not in warnings
 
@@ -53,7 +53,7 @@ def test_collect_config_warnings_reports_profile_and_strategy_list_values():
         }
     )
 
-    assert warnings['STRATEGY_IDS'] == "Invalid entries for STRATEGY_IDS ignored: x, 9"
+    assert warnings['STRATEGY_IDS'] == "Invalid entries for STRATEGY_IDS ignored: x"
     assert warnings['PAPER_15M_TARGET_PROFIT'] == "Invalid value for PAPER_15M_TARGET_PROFIT: expected number, got 'oops'"
     assert warnings['LIVE_STRATEGY_7_BASE_ORDER_COST'] == "Invalid value for LIVE_STRATEGY_7_BASE_ORDER_COST: expected number, got 'bad'"
 
@@ -214,14 +214,14 @@ def test_build_config_supports_strategy7_max_momentum_delta_overrides():
 def test_build_config_ignores_invalid_paper_strategy_entries():
     cfg = build_config_from_env_values({'STRATEGY_ID': '3', 'PAPER_STRATEGY_IDS': '6,x,9,2,6'})
 
-    assert cfg.paper_strategy_ids == [6, 2]
+    assert cfg.paper_strategy_ids == [6, 9, 2]
 
 
-def test_build_config_accepts_strategy_8_in_legacy_strategy_lists():
-    cfg = build_config_from_env_values({'STRATEGY_ID': '3', 'PAPER_STRATEGY_IDS': '8,6', 'LIVE_STRATEGY_IDS': '8'})
+def test_build_config_accepts_strategy_9_in_strategy_lists():
+    cfg = build_config_from_env_values({'STRATEGY_ID': '3', 'PAPER_STRATEGY_IDS': '9,8,6', 'LIVE_STRATEGY_IDS': '9'})
 
-    assert cfg.paper_strategy_ids == [8, 6]
-    assert cfg.live_strategy_ids == [8]
+    assert cfg.paper_strategy_ids == [9, 8, 6]
+    assert cfg.live_strategy_ids == [9]
 
 
 def test_build_config_supports_btc_15m_market_timeframe():

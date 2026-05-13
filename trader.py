@@ -57,6 +57,7 @@ from strategy_decision import (
     apply_strategy6_signal_to_quote as _apply_strategy6_signal_to_quote,
     compute_signal_threshold as _compute_signal_threshold,
     effective_strategy7_confirm_before_entry_seconds as _effective_strategy7_confirm_before_entry_seconds,
+    effective_decision_max_entry_price as _effective_decision_max_entry_price,
     is_strategy6_signal_stale as _is_strategy6_signal_stale,
     is_valid_signal_price as _is_valid_signal_price,
     resolve_quote_price,
@@ -141,7 +142,7 @@ def _sync_paper_binance_signal_service(
     strategy_ids: list[int],
     service: BinanceDepth5SignalService | None,
 ) -> BinanceDepth5SignalService | None:
-    needs_service = any(strategy_id in {6, 7, 8} for strategy_id in strategy_ids)
+    needs_service = any(strategy_id in {6, 7, 8, 9} for strategy_id in strategy_ids)
     expected_url = _binance_signal_service_url(cfg)
 
     if not needs_service:
@@ -320,6 +321,10 @@ def _sync_live_state_ledger_from_trade_log(
 
 def _side_decision_log_price(side_decision: SideDecision) -> float | None:
     return side_decision.candidate_price
+
+
+def _max_entry_price_for_decision(cfg: AppConfig, side_decision: SideDecision) -> float | None:
+    return _effective_decision_max_entry_price(cfg, side_decision)
 
 
 def _runtime_backoff_seconds(cfg: AppConfig, consecutive_errors: int) -> int:
@@ -756,7 +761,7 @@ def place_live_order(
         price=price,
         target_profit=cfg.target_profit,
         min_entry_price=getattr(cfg, "min_entry_price", getattr(cfg, "min_price_threshold", None)),
-        max_entry_price=getattr(cfg, "max_entry_price", cfg.max_price_threshold),
+        max_entry_price=_max_entry_price_for_decision(cfg, side_decision),
         min_price_threshold=getattr(cfg, 'min_price_threshold', None),
         max_price_threshold=cfg.max_price_threshold,
         min_stake=getattr(cfg, "min_stake", None),
@@ -969,7 +974,7 @@ def place_live_order(
         side=side,
         order_id=order_id,
         clob_client=live_client,
-        max_entry_price=getattr(cfg, "max_entry_price", None),
+        max_entry_price=plan.max_entry_price if plan.max_entry_price is not None else getattr(cfg, "max_entry_price", None),
         strategy_id=cfg.strategy_id,
         slug=target_round.slug,
     )
@@ -1594,7 +1599,7 @@ def run_live_trading(
                             price=price,
                             target_profit=strategy_cfg.target_profit,
                             min_entry_price=getattr(strategy_cfg, "min_entry_price", getattr(strategy_cfg, "min_price_threshold", None)),
-                            max_entry_price=getattr(strategy_cfg, "max_entry_price", strategy_cfg.max_price_threshold),
+                            max_entry_price=_max_entry_price_for_decision(strategy_cfg, side_decision),
                             min_price_threshold=getattr(strategy_cfg, "min_price_threshold", None),
                             max_price_threshold=strategy_cfg.max_price_threshold,
                             min_stake=getattr(strategy_cfg, "min_stake", None),
@@ -1774,7 +1779,7 @@ def run_live_trading(
                             side=side,
                             order_id=execution.order_id,
                             clob_client=live_client,
-                            max_entry_price=getattr(strategy_cfg, "max_entry_price", None),
+                            max_entry_price=plan.max_entry_price if plan.max_entry_price is not None else getattr(strategy_cfg, "max_entry_price", None),
                             strategy_id=strategy_id,
                             slug=target_round.slug,
                         )
@@ -2313,7 +2318,7 @@ def run_paper_trading(
                     price=price,
                     target_profit=strategy_cfg.target_profit,
                     min_entry_price=getattr(strategy_cfg, "min_entry_price", getattr(strategy_cfg, "min_price_threshold", None)),
-                    max_entry_price=getattr(strategy_cfg, "max_entry_price", strategy_cfg.max_price_threshold),
+                    max_entry_price=_max_entry_price_for_decision(strategy_cfg, side_decision),
                     min_price_threshold=getattr(strategy_cfg, 'min_price_threshold', None),
                     max_price_threshold=strategy_cfg.max_price_threshold,
                     min_stake=getattr(strategy_cfg, "min_stake", None),
@@ -2530,7 +2535,7 @@ def run_paper_trading(
                     price=price,
                     target_profit=strategy_cfg.target_profit,
                     min_entry_price=getattr(strategy_cfg, "min_entry_price", getattr(strategy_cfg, "min_price_threshold", None)),
-                    max_entry_price=getattr(strategy_cfg, "max_entry_price", strategy_cfg.max_price_threshold),
+                    max_entry_price=_max_entry_price_for_decision(strategy_cfg, side_decision),
                     min_price_threshold=getattr(strategy_cfg, 'min_price_threshold', None),
                     max_price_threshold=strategy_cfg.max_price_threshold,
                     min_stake=getattr(strategy_cfg, "min_stake", None),

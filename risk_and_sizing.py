@@ -54,33 +54,34 @@ def build_trade_plan(
             False,
             side=side,
             price=price,
+            max_entry_price=max_entry_price,
             skip_reason="max_consecutive_losses_reached",
             stop_loss_triggered=True,
         )
 
     if not validate_price(price):
-        return TradePlan(False, side=side, price=price, skip_reason="invalid_price")
+        return TradePlan(False, side=side, price=price, max_entry_price=max_entry_price, skip_reason="invalid_price")
 
     effective_min_entry_price = min_entry_price if min_entry_price is not None else min_price_threshold
     effective_max_entry_price = max_entry_price if max_entry_price is not None else max_price_threshold
 
     if effective_min_entry_price is not None and price < effective_min_entry_price:
-        return TradePlan(False, side=side, price=price, skip_reason='price_below_threshold')
+        return TradePlan(False, side=side, price=price, max_entry_price=effective_max_entry_price, skip_reason='price_below_threshold')
 
     if effective_max_entry_price is not None and price > effective_max_entry_price:
-        return TradePlan(False, side=side, price=price, skip_reason="price_above_threshold")
+        return TradePlan(False, side=side, price=price, max_entry_price=effective_max_entry_price, skip_reason="price_above_threshold")
     mode = bet_sizing_mode.upper()
     tracks_recovery_loss = True
     if mode == "FLAT_BASE_COST":
         if base_order_cost <= 0:
-            return TradePlan(False, side=side, price=price, skip_reason="invalid_base_order_cost")
+            return TradePlan(False, side=side, price=price, max_entry_price=effective_max_entry_price, skip_reason="invalid_base_order_cost")
         order_cost = base_order_cost
         order_size = order_cost / price
         expected_profit = order_size * (1 - price)
         tracks_recovery_loss = False
     elif mode == "FIXED_BASE_COST":
         if base_order_cost <= 0:
-            return TradePlan(False, side=side, price=price, skip_reason="invalid_base_order_cost")
+            return TradePlan(False, side=side, price=price, max_entry_price=effective_max_entry_price, skip_reason="invalid_base_order_cost")
         if state.recovery_loss <= 0:
             order_cost = base_order_cost
             order_size = order_cost / price
@@ -94,18 +95,19 @@ def build_trade_plan(
         order_cost = compute_order_cost(order_size, price)
         expected_profit = order_size * (1 - price)
     else:
-        return TradePlan(False, side=side, price=price, skip_reason="invalid_bet_sizing_mode")
+        return TradePlan(False, side=side, price=price, max_entry_price=effective_max_entry_price, skip_reason="invalid_bet_sizing_mode")
 
     if min_stake is not None and order_cost < min_stake:
-        return TradePlan(False, side=side, price=price, skip_reason="order_cost_below_min_stake")
+        return TradePlan(False, side=side, price=price, max_entry_price=effective_max_entry_price, skip_reason="order_cost_below_min_stake")
 
     if max_stake is not None and order_cost > max_stake:
-        return TradePlan(False, side=side, price=price, skip_reason="order_cost_above_max_stake")
+        return TradePlan(False, side=side, price=price, max_entry_price=effective_max_entry_price, skip_reason="order_cost_above_max_stake")
 
     return TradePlan(
         True,
         side=side,
         price=price,
+        max_entry_price=effective_max_entry_price,
         order_size=order_size,
         order_cost=order_cost,
         expected_profit=expected_profit,

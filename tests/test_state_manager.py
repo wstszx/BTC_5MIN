@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from models import PendingPaperTrade, SessionState
+from models import PendingPaperTrade, SessionState, Strategy9SignalSample
 from state_manager import load_session_state, save_session_state
 from trader import load_session_state as trader_load_session_state
 from trader import save_session_state as trader_save_session_state
@@ -81,6 +81,22 @@ def test_trader_reexports_session_state_persistence_helpers():
 def test_state_manager_save_session_state_roundtrips(tmp_path: Path):
     state_path = tmp_path / "session_state.json"
 
-    save_session_state(state_path, SessionState(cash_pnl=1.25))
+    save_session_state(
+        state_path,
+        SessionState(
+            cash_pnl=1.25,
+            strategy9_signal_samples=[
+                Strategy9SignalSample(
+                    observed_at="2026-04-30T01:00:00+00:00",
+                    ofi_score=0.7,
+                    momentum_delta=0.03,
+                    current_up_price=0.53,
+                )
+            ],
+        ),
+    )
 
-    assert load_session_state(state_path).cash_pnl == 1.25
+    loaded = load_session_state(state_path)
+
+    assert loaded.cash_pnl == 1.25
+    assert loaded.strategy9_signal_samples[0].ofi_score == 0.7

@@ -41,6 +41,7 @@ def paper_strategy_state_to_session_state(state: PaperStrategyState, base_state:
         signal_round_open_up_price=state.signal_round_open_up_price,
         signal_round_locked_side=state.signal_round_locked_side,
         strategy6_last_ofi_score=state.strategy6_last_ofi_score,
+        strategy9_signal_samples=list(state.strategy9_signal_samples),
         stop_loss_count=state.stop_loss_count,
         daily_realized_pnl=state.daily_realized_pnl,
         current_day=state.current_day,
@@ -72,6 +73,7 @@ def session_state_to_paper_strategy_state(state: SessionState) -> PaperStrategyS
         signal_round_open_up_price=state.signal_round_open_up_price,
         signal_round_locked_side=state.signal_round_locked_side,
         strategy6_last_ofi_score=state.strategy6_last_ofi_score,
+        strategy9_signal_samples=list(state.strategy9_signal_samples),
         stop_loss_count=state.stop_loss_count,
         daily_realized_pnl=state.daily_realized_pnl,
         current_day=state.current_day,
@@ -97,6 +99,7 @@ def ensure_paper_strategy_state_map(state: SessionState, strategy_ids: list[int]
             signal_round_open_up_price=state.signal_round_open_up_price,
             signal_round_locked_side=state.signal_round_locked_side,
             strategy6_last_ofi_score=state.strategy6_last_ofi_score,
+            strategy9_signal_samples=list(state.strategy9_signal_samples),
             stop_loss_count=state.stop_loss_count,
             daily_realized_pnl=state.daily_realized_pnl,
             current_day=state.current_day,
@@ -145,6 +148,7 @@ def sync_legacy_paper_state_fields(state: SessionState, strategy_ids: list[int])
     state.signal_round_open_up_price = strategy_state.signal_round_open_up_price
     state.signal_round_locked_side = strategy_state.signal_round_locked_side
     state.strategy6_last_ofi_score = strategy_state.strategy6_last_ofi_score
+    state.strategy9_signal_samples = list(strategy_state.strategy9_signal_samples)
     state.stop_loss_count = strategy_state.stop_loss_count
     state.daily_realized_pnl = strategy_state.daily_realized_pnl
     state.current_day = strategy_state.current_day

@@ -13,7 +13,7 @@ from config import AppConfig
 from models import MarketQuote
 from polymarket_api import normalize_outcome_label, parse_iso_datetime
 from strategy import get_side_for_round, strategy7_strong_signal_allows_late_confirm
-from strategy_decision import evaluate_strategy7_consensus_signal
+from strategy_decision import evaluate_strategy7_consensus_signal, resolve_side_from_strategy
 
 
 @dataclass(slots=True)
@@ -201,10 +201,31 @@ def _simulate_segment(
         signal_open_up_price = _optional_float(row.get("entry_price_open_up"))
         signal_current_up_price = _select_signal_current_up_price(row, entry_timing)
         ofi_score = _select_ofi_score(row)
-        if strategy_id in {7, 8}:
+        if strategy_id in {7, 8, 9}:
             quote_fetched_at = _select_quote_fetched_at(row)
             strategy6_signal_at = _select_strategy6_signal_at(row)
-            if strategy_id == 7:
+            if strategy_id == 9:
+                signal_quote_time = quote_fetched_at or strategy6_signal_at or _historical_entry_time(row, cfg, entry_timing) or datetime.now(timezone.utc)
+                signal_quote = MarketQuote(
+                    slug=row.get("slug", ""),
+                    strategy6_ofi_score=ofi_score,
+                    strategy6_signal_at=strategy6_signal_at or signal_quote_time,
+                    fetched_at=quote_fetched_at or signal_quote_time,
+                )
+                side_decision = resolve_side_from_strategy(
+                    cfg=cfg,
+                    state=SessionState(round_index=round_index),
+                    slug=row.get("slug", ""),
+                    quote=signal_quote,
+                    now=signal_quote_time,
+                    entry_time=_historical_entry_time(row, cfg, entry_timing),
+                )
+                if side_decision.side is None:
+                    skipped += 1
+                    round_index += 1
+                    continue
+                side = side_decision.side
+            elif strategy_id == 7:
                 signal_quote_time = quote_fetched_at or strategy6_signal_at or _historical_entry_time(row, cfg, entry_timing) or datetime.now(timezone.utc)
                 signal_quote = MarketQuote(
                     slug=row.get("slug", ""),
@@ -294,7 +315,7 @@ def _simulate_segment(
         if price is None or price <= 0 or price >= 1:
             skipped += 1
             continue
-        if strategy_id in {7, 8} and price > getattr(cfg, "max_entry_price", cfg.max_price_threshold):
+        if strategy_id in {7, 8, 9} and price > getattr(cfg, "max_entry_price", cfg.max_price_threshold):
             skipped += 1
             continue
         if price > cfg.max_price_threshold:

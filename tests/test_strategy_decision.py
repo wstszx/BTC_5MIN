@@ -371,3 +371,176 @@ def test_strategy8_ignores_strategy7_momentum_overheat_gate():
     assert decision.side == "UP"
     assert decision.reason is None
     assert decision.signal_delta == pytest.approx(0.05)
+
+
+def test_strategy9_requires_stable_consensus_samples_before_entry():
+    now = datetime(2026, 4, 30, 1, 0, tzinfo=timezone.utc)
+    cfg = AppConfig(
+        strategy_id=9,
+        strategy7_ofi_threshold=0.5,
+        strategy7_momentum_threshold=0.01,
+        strategy7_min_signal_gap=0.0,
+        strategy7_confirm_before_entry_seconds=0,
+        strategy9_stability_sample_count=3,
+        strategy9_stability_required_count=2,
+        strategy9_stability_window_seconds=6,
+        binance_signal_stale_seconds=10.0,
+    )
+    state = SessionState(signal_round_slug="s1", signal_round_open_up_price=0.50)
+
+    first = resolve_side_from_strategy(
+        cfg=cfg,
+        state=state,
+        slug="s1",
+        quote=MarketQuote(
+            slug="s1",
+            up_price=0.53,
+            up_best_ask=0.53,
+            strategy6_ofi_score=0.7,
+            strategy6_signal_at=now,
+        ),
+        now=now,
+    )
+    second = resolve_side_from_strategy(
+        cfg=cfg,
+        state=state,
+        slug="s1",
+        quote=MarketQuote(
+            slug="s1",
+            up_price=0.535,
+            up_best_ask=0.535,
+            strategy6_ofi_score=0.72,
+            strategy6_signal_at=now + timedelta(seconds=2),
+        ),
+        now=now + timedelta(seconds=2),
+    )
+    third = resolve_side_from_strategy(
+        cfg=cfg,
+        state=state,
+        slug="s1",
+        quote=MarketQuote(
+            slug="s1",
+            up_price=0.53,
+            up_best_ask=0.53,
+            strategy6_ofi_score=0.74,
+            strategy6_signal_at=now + timedelta(seconds=4),
+        ),
+        now=now + timedelta(seconds=4),
+    )
+
+    assert first.side is None
+    assert first.reason == "strategy9_signal_unstable"
+    assert second.side is None
+    assert second.reason == "strategy9_signal_unstable"
+    assert third.side == "UP"
+    assert third.reason is None
+    assert len(state.strategy9_signal_samples) == 3
+
+
+def test_strategy9_skips_when_recent_signal_is_decaying():
+    now = datetime(2026, 4, 30, 1, 0, tzinfo=timezone.utc)
+    cfg = AppConfig(
+        strategy_id=9,
+        strategy7_ofi_threshold=0.5,
+        strategy7_momentum_threshold=0.01,
+        strategy7_min_signal_gap=0.0,
+        strategy7_confirm_before_entry_seconds=0,
+        strategy9_stability_sample_count=3,
+        strategy9_stability_required_count=2,
+        strategy9_stability_window_seconds=6,
+        strategy9_max_signal_decay=0.35,
+        binance_signal_stale_seconds=10.0,
+    )
+    state = SessionState(signal_round_slug="s1", signal_round_open_up_price=0.50)
+
+    for offset, up_price in ((0, 0.56), (2, 0.55), (4, 0.53)):
+        decision = resolve_side_from_strategy(
+            cfg=cfg,
+            state=state,
+            slug="s1",
+            quote=MarketQuote(
+                slug="s1",
+                up_price=up_price,
+                up_best_ask=up_price,
+                strategy6_ofi_score=0.75,
+                strategy6_signal_at=now + timedelta(seconds=offset),
+            ),
+            now=now + timedelta(seconds=offset),
+        )
+
+    assert decision.side is None
+    assert decision.reason == "strategy9_signal_decaying"
+    assert decision.signal_delta == pytest.approx(0.03)
+
+
+def test_strategy9_uses_dynamic_price_cap_by_signal_strength():
+    now = datetime(2026, 4, 30, 1, 0, tzinfo=timezone.utc)
+    cfg = AppConfig(
+        strategy_id=9,
+        strategy7_ofi_threshold=0.5,
+        strategy7_momentum_threshold=0.01,
+        strategy7_min_signal_gap=0.0,
+        strategy7_confirm_before_entry_seconds=0,
+        strategy9_stability_sample_count=3,
+        strategy9_stability_required_count=2,
+        strategy9_stability_window_seconds=6,
+        strategy9_base_max_entry_price=0.52,
+        strategy9_strong_max_entry_price=0.53,
+        strategy9_ultra_max_entry_price=0.54,
+        strategy9_strong_signal_gap=0.015,
+        strategy9_ultra_signal_gap=0.04,
+        binance_signal_stale_seconds=10.0,
+    )
+    state = SessionState(signal_round_slug="s1", signal_round_open_up_price=0.50)
+
+    for offset in (0, 2):
+        decision = resolve_side_from_strategy(
+            cfg=cfg,
+            state=state,
+            slug="s1",
+            quote=MarketQuote(
+                slug="s1",
+                up_price=0.525,
+                up_best_ask=0.525,
+                strategy6_ofi_score=0.51,
+                strategy6_signal_at=now + timedelta(seconds=offset),
+            ),
+            now=now + timedelta(seconds=offset),
+        )
+    weak_third = resolve_side_from_strategy(
+        cfg=cfg,
+        state=state,
+        slug="s1",
+        quote=MarketQuote(
+            slug="s1",
+            up_price=0.525,
+            up_best_ask=0.525,
+            strategy6_ofi_score=0.51,
+            strategy6_signal_at=now + timedelta(seconds=4),
+        ),
+        now=now + timedelta(seconds=4),
+    )
+
+    assert weak_third.side is None
+    assert weak_third.reason == "strategy9_dynamic_price_too_high"
+    assert weak_third.candidate_price == pytest.approx(0.525)
+    assert weak_third.max_entry_price == pytest.approx(0.52)
+
+    strong_state = SessionState(signal_round_slug="s2", signal_round_open_up_price=0.50)
+    for offset in (0, 2, 4):
+        strong_third = resolve_side_from_strategy(
+            cfg=cfg,
+            state=strong_state,
+            slug="s2",
+            quote=MarketQuote(
+                slug="s2",
+                up_price=0.525,
+                up_best_ask=0.525,
+                strategy6_ofi_score=0.56,
+                strategy6_signal_at=now + timedelta(seconds=offset),
+            ),
+            now=now + timedelta(seconds=offset),
+        )
+
+    assert strong_third.side == "UP"
+    assert strong_third.max_entry_price == pytest.approx(0.53)

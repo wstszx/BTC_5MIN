@@ -271,6 +271,30 @@ def test_clob_adapter_submits_injected_market_order_with_strategy_price_cap():
     assert client.posted_orders[0][1] == "FOK"
 
 
+def test_clob_adapter_prefers_plan_dynamic_price_cap():
+    client = _InjectedOrderClient()
+    plan = TradePlan(
+        True,
+        side="UP",
+        price=0.525,
+        max_entry_price=0.53,
+        order_size=2.0,
+        order_cost=1.05,
+        expected_profit=0.95,
+    )
+
+    order_id, response = submit_live_strategy_order(
+        cfg=AppConfig(strategy_id=9, max_entry_price=0.56),
+        clob_client=client,
+        token_id="up-token",
+        plan=plan,
+    )
+
+    assert order_id == "oid-adapter"
+    assert response["success"] is True
+    assert client.created_orders[0].price == pytest.approx(0.53)
+
+
 def test_clob_adapter_applies_price_cap_to_strategy4_live_market_order():
     client = _InjectedOrderClient()
     plan = TradePlan(True, side="DOWN", price=0.55, order_size=4.4, order_cost=2.44, expected_profit=1.96)
