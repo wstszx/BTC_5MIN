@@ -10,7 +10,7 @@ from models import BacktestResult, MarketQuote, SessionState, TradeRecord
 from polymarket_api import normalize_outcome_label, parse_iso_datetime
 from risk_and_sizing import apply_round_outcome, build_trade_plan, reset_after_stop_loss
 from strategy import get_side_for_round, strategy7_strong_signal_allows_late_confirm
-from strategy_decision import evaluate_strategy7_consensus_signal, resolve_side_from_strategy
+from strategy_decision import SideDecision, evaluate_strategy7_consensus_signal, resolve_side_from_strategy, strategy7_order_cost_multiplier
 
 
 def _optional_float(value: str | None) -> float | None:
@@ -106,6 +106,7 @@ def _build_record(
     trade_pnl: float,
     skip_reason: str | None = None,
     stop_loss_triggered: bool = False,
+    sizing_multiplier: float = 1.0,
 ) -> TradeRecord:
     return TradeRecord(
         timestamp=datetime.now(timezone.utc),
@@ -128,6 +129,7 @@ def _build_record(
         consecutive_losses=state.consecutive_losses,
         stop_loss_triggered=stop_loss_triggered,
         skip_reason=skip_reason,
+        sizing_multiplier=sizing_multiplier,
     )
 
 
@@ -382,6 +384,19 @@ def run_backtest(csv_path: Path, cfg: AppConfig | None = None) -> BacktestResult
             max_consecutive_losses=cfg.max_consecutive_losses,
             bet_sizing_mode=cfg.bet_sizing_mode,
             base_order_cost=cfg.base_order_cost,
+            order_cost_multiplier=strategy7_order_cost_multiplier(
+                cfg=cfg,
+                decision=SideDecision(
+                    side=side,
+                    signal_delta=signal_current_up_price - signal_open_up_price
+                    if signal_current_up_price is not None and signal_open_up_price is not None
+                    else None
+                ),
+                price=price,
+                ofi_score=ofi_score,
+            )
+            if cfg.strategy_id == 7
+            else 1.0,
         )
 
         if not plan.should_trade:
@@ -431,6 +446,7 @@ def run_backtest(csv_path: Path, cfg: AppConfig | None = None) -> BacktestResult
                 expected_profit=plan.expected_profit,
                 result=resolved_result,
                 trade_pnl=trade_pnl,
+                sizing_multiplier=plan.order_cost_multiplier,
             )
         )
 

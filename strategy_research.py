@@ -13,7 +13,7 @@ from config import AppConfig
 from models import MarketQuote
 from polymarket_api import normalize_outcome_label, parse_iso_datetime
 from strategy import get_side_for_round, strategy7_strong_signal_allows_late_confirm
-from strategy_decision import evaluate_strategy7_consensus_signal, resolve_side_from_strategy
+from strategy_decision import SideDecision, evaluate_strategy7_consensus_signal, resolve_side_from_strategy, strategy7_order_cost_multiplier
 
 
 @dataclass(slots=True)
@@ -321,6 +321,21 @@ def _simulate_segment(
         if price > cfg.max_price_threshold:
             skipped += 1
             continue
+        order_cost_multiplier = (
+            strategy7_order_cost_multiplier(
+                cfg=cfg,
+                decision=SideDecision(
+                    side=side,
+                    signal_delta=signal_current_up_price - signal_open_up_price
+                    if signal_current_up_price is not None and signal_open_up_price is not None
+                    else None,
+                ),
+                price=price,
+                ofi_score=ofi_score,
+            )
+            if strategy_id == 7
+            else 1.0
+        )
 
         tracks_recovery_loss = True
         if sizing_mode == "FLAT_BASE_COST":
@@ -346,6 +361,9 @@ def _simulate_segment(
         else:
             order_size = (recovery_loss + target_profit) / (1 - price)
             order_cost = order_size * price
+        if order_cost_multiplier != 1.0:
+            order_cost *= order_cost_multiplier
+            order_size *= order_cost_multiplier
         if order_cost > cfg.max_stake:
             skipped += 1
             continue
@@ -363,7 +381,7 @@ def _simulate_segment(
             profit = order_size * (1 - price)
             pnl += profit
             wins += 1
-            recovery_loss = 0.0
+            recovery_loss = max(0.0, recovery_loss - profit)
             consecutive_losses = 0
         else:
             pnl -= order_cost

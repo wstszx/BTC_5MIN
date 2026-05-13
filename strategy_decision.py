@@ -29,6 +29,8 @@ class SideDecision:
     signal_delta: float | None = None
     signal_locked: bool = False
     max_entry_price: float | None = None
+    ofi_score: float | None = None
+    order_cost_multiplier: float = 1.0
 
 
 @dataclass(slots=True)
@@ -70,6 +72,56 @@ def entry_price_skip_reason(
 
 def effective_decision_max_entry_price(cfg: AppConfig, decision: SideDecision) -> float | None:
     return decision.max_entry_price if decision.max_entry_price is not None else getattr(cfg, "max_entry_price", None)
+
+
+def strategy7_order_cost_multiplier(
+    *,
+    cfg: AppConfig,
+    decision: SideDecision,
+    price: float | None,
+    ofi_score: float | None = None,
+) -> float:
+    if getattr(cfg, "strategy_id", None) != 7 or not getattr(cfg, "strategy7_dynamic_sizing_enabled", False):
+        return 1.0
+    if price is None or price <= 0:
+        return 1.0
+
+    reference_price = float(getattr(cfg, "strategy7_sizing_reference_price", 0.50))
+    price_step = float(getattr(cfg, "strategy7_sizing_price_step", 0.01))
+    step_reduction = max(0.0, float(getattr(cfg, "strategy7_sizing_price_step_reduction", 0.0)))
+    min_multiplier = max(0.0, float(getattr(cfg, "strategy7_sizing_min_multiplier", 1.0)))
+    max_multiplier = max(min_multiplier, float(getattr(cfg, "strategy7_sizing_max_multiplier", 1.0)))
+    strong_gap = max(0.0, float(getattr(cfg, "strategy7_sizing_strong_signal_gap", 0.0)))
+    strong_boost = max(0.0, float(getattr(cfg, "strategy7_sizing_strong_signal_boost", 0.0)))
+
+    multiplier = 1.0
+    if price_step > 0 and price > reference_price:
+        multiplier -= ((price - reference_price) / price_step) * step_reduction
+
+    signal_delta = decision.signal_delta
+    effective_ofi_score = ofi_score if ofi_score is not None else decision.ofi_score
+    if signal_delta is not None and effective_ofi_score is not None:
+        ofi_gap = max(0.0, abs(effective_ofi_score) - float(getattr(cfg, "strategy7_ofi_threshold", 0.0)))
+        momentum_gap = max(0.0, abs(signal_delta) - float(getattr(cfg, "strategy7_momentum_threshold", 0.0)))
+        signal_gap = min(ofi_gap, momentum_gap)
+        if strong_gap <= 0 or signal_gap >= strong_gap:
+            multiplier += strong_boost
+
+    return max(min_multiplier, min(max_multiplier, multiplier))
+
+
+def effective_decision_order_cost_multiplier(
+    *,
+    cfg: AppConfig,
+    decision: SideDecision,
+    price: float | None,
+) -> float:
+    return strategy7_order_cost_multiplier(
+        cfg=cfg,
+        decision=decision,
+        price=price,
+        ofi_score=decision.ofi_score,
+    )
 
 
 def resolve_signal_up_price(quote: MarketQuote) -> float | None:
@@ -641,6 +693,7 @@ def resolve_side_from_strategy(
             signal_delta=signal_delta,
             signal_locked=True,
             max_entry_price=locked_max_entry_price,
+            ofi_score=signal_check.ofi_score if cfg.strategy_id in {7, 9} else None,
         )
 
     now = now or datetime.now(timezone.utc)
@@ -865,6 +918,7 @@ def resolve_side_from_strategy(
             signal_delta=momentum_delta,
             signal_locked=state.signal_round_locked_side in {"UP", "DOWN"},
             max_entry_price=dynamic_max_entry_price,
+            ofi_score=ofi_score,
         )
 
     weak_mode = cfg.signal_weak_signal_mode.upper()

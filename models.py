@@ -60,6 +60,7 @@ class TradePlan:
     order_cost: float = 0.0
     expected_profit: float = 0.0
     max_entry_price: float | None = None
+    order_cost_multiplier: float = 1.0
     skip_reason: str | None = None
     stop_loss_triggered: bool = False
     tracks_recovery_loss: bool = True
@@ -94,6 +95,7 @@ class TradeRecord:
     signal_locked: bool = False
     signal_reason: str | None = None
     signal_max_entry_price: float | None = None
+    sizing_multiplier: float = 1.0
     experiment_id: str | None = None
     balance_error: str | None = None
     tracks_recovery_loss: bool = True
@@ -119,6 +121,7 @@ class PendingPaperTrade:
     signal_locked: bool = False
     signal_reason: str | None = None
     signal_max_entry_price: float | None = None
+    sizing_multiplier: float = 1.0
     queued_at: str | None = None
     experiment_id: str | None = None
     tracks_recovery_loss: bool = True

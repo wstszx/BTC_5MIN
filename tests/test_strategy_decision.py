@@ -6,7 +6,7 @@ import pytest
 
 from config import AppConfig, build_config_from_env_values
 from models import MarketQuote, MarketWindow, SessionState
-from strategy_decision import SideDecision, resolve_side_from_strategy
+from strategy_decision import SideDecision, resolve_side_from_strategy, strategy7_order_cost_multiplier
 from trader import SideDecision as TraderSideDecision
 from trader import _resolve_side_from_strategy
 
@@ -68,6 +68,62 @@ def test_strategy7_uses_general_max_entry_price():
 
     assert decision.side is None
     assert decision.reason == "strategy7_price_too_high"
+
+
+def test_strategy7_order_cost_multiplier_reduces_high_price_weak_signal():
+    cfg = AppConfig(
+        strategy_id=7,
+        strategy7_dynamic_sizing_enabled=True,
+        strategy7_sizing_reference_price=0.50,
+        strategy7_sizing_price_step=0.01,
+        strategy7_sizing_price_step_reduction=0.10,
+        strategy7_sizing_min_multiplier=0.50,
+        strategy7_sizing_max_multiplier=1.00,
+        strategy7_sizing_strong_signal_gap=0.02,
+        strategy7_sizing_strong_signal_boost=0.20,
+    )
+    decision = SideDecision(
+        side="UP",
+        candidate_price=0.54,
+        signal_delta=0.03,
+    )
+
+    multiplier = strategy7_order_cost_multiplier(
+        cfg=cfg,
+        decision=decision,
+        price=0.54,
+        ofi_score=0.72,
+    )
+
+    assert multiplier == pytest.approx(0.60)
+
+
+def test_strategy7_order_cost_multiplier_preserves_full_size_for_strong_signal_near_fair_price():
+    cfg = AppConfig(
+        strategy_id=7,
+        strategy7_dynamic_sizing_enabled=True,
+        strategy7_sizing_reference_price=0.50,
+        strategy7_sizing_price_step=0.01,
+        strategy7_sizing_price_step_reduction=0.10,
+        strategy7_sizing_min_multiplier=0.50,
+        strategy7_sizing_max_multiplier=1.00,
+        strategy7_sizing_strong_signal_gap=0.02,
+        strategy7_sizing_strong_signal_boost=0.20,
+    )
+    decision = SideDecision(
+        side="UP",
+        candidate_price=0.51,
+        signal_delta=0.055,
+    )
+
+    multiplier = strategy7_order_cost_multiplier(
+        cfg=cfg,
+        decision=decision,
+        price=0.51,
+        ofi_score=0.76,
+    )
+
+    assert multiplier == pytest.approx(1.00)
 
 
 def test_strategy7_zero_confirm_window_allows_entry_inside_grace_window():

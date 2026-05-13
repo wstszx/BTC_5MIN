@@ -20,6 +20,66 @@ def test_build_trade_plan_without_loss_uses_target_profit_formula():
     assert round(plan.order_cost, 4) == 0.5
 
 
+def test_build_trade_plan_applies_order_cost_multiplier_after_base_sizing():
+    state = SessionState()
+    plan = build_trade_plan(
+        state=state,
+        side="UP",
+        price=0.5,
+        target_profit=0.5,
+        max_price_threshold=0.65,
+        max_stake=10,
+        max_consecutive_losses=8,
+        order_cost_multiplier=0.5,
+    )
+
+    assert plan.should_trade is True
+    assert plan.order_cost_multiplier == 0.5
+    assert round(plan.order_cost, 4) == 0.25
+    assert round(plan.order_size, 4) == 0.5
+    assert round(plan.expected_profit, 4) == 0.25
+
+
+def test_build_trade_plan_checks_min_stake_after_order_cost_multiplier():
+    state = SessionState()
+    plan = build_trade_plan(
+        state=state,
+        side="UP",
+        price=0.5,
+        target_profit=0.5,
+        max_price_threshold=0.65,
+        min_stake=0.4,
+        max_stake=10,
+        max_consecutive_losses=8,
+        order_cost_multiplier=0.5,
+    )
+
+    assert plan.should_trade is False
+    assert plan.order_cost_multiplier == 0.5
+    assert plan.skip_reason == "order_cost_below_min_stake"
+
+
+def test_dynamic_sizing_win_only_reduces_unrecovered_loss_when_profit_is_partial():
+    state = SessionState(recovery_loss=2.0, consecutive_losses=2)
+    plan = build_trade_plan(
+        state=state,
+        side="UP",
+        price=0.5,
+        target_profit=0.5,
+        max_price_threshold=0.65,
+        max_stake=10,
+        max_consecutive_losses=8,
+        order_cost_multiplier=0.5,
+    )
+
+    updated = apply_round_outcome(state, plan, won=True)
+
+    assert plan.expected_profit == 1.25
+    assert updated.cash_pnl == 1.25
+    assert updated.recovery_loss == 0.75
+    assert updated.consecutive_losses == 0
+
+
 def test_apply_round_outcome_loss_updates_recovery_pool():
     state = SessionState()
     plan = build_trade_plan(

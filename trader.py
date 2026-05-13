@@ -58,6 +58,7 @@ from strategy_decision import (
     compute_signal_threshold as _compute_signal_threshold,
     effective_strategy7_confirm_before_entry_seconds as _effective_strategy7_confirm_before_entry_seconds,
     effective_decision_max_entry_price as _effective_decision_max_entry_price,
+    effective_decision_order_cost_multiplier as _effective_decision_order_cost_multiplier,
     is_strategy6_signal_stale as _is_strategy6_signal_stale,
     is_valid_signal_price as _is_valid_signal_price,
     resolve_quote_price,
@@ -327,6 +328,45 @@ def _max_entry_price_for_decision(cfg: AppConfig, side_decision: SideDecision) -
     return _effective_decision_max_entry_price(cfg, side_decision)
 
 
+def _order_cost_multiplier_for_decision(cfg: AppConfig, side_decision: SideDecision, price: float | None) -> float:
+    multiplier = _effective_decision_order_cost_multiplier(cfg=cfg, decision=side_decision, price=price)
+    side_decision.order_cost_multiplier = multiplier
+    return multiplier
+
+
+def _market_min_order_size(market: dict[str, Any]) -> float | None:
+    for key in (
+        "orderMinSize",
+        "minimum_order_size",
+        "min_order_size",
+        "minimumOrderSize",
+        "minOrderSize",
+    ):
+        try:
+            value = float(market.get(key))
+        except (TypeError, ValueError):
+            continue
+        if value > 0:
+            return value
+    return None
+
+
+def _effective_min_order_cost(cfg: AppConfig, market: dict[str, Any]) -> float | None:
+    candidates: list[float] = []
+    configured_min_stake = getattr(cfg, "min_stake", None)
+    if configured_min_stake is not None:
+        try:
+            configured_value = float(configured_min_stake)
+        except (TypeError, ValueError):
+            configured_value = 0.0
+        if configured_value > 0:
+            candidates.append(configured_value)
+    market_min_order_size = _market_min_order_size(market)
+    if market_min_order_size is not None:
+        candidates.append(market_min_order_size)
+    return max(candidates) if candidates else None
+
+
 def _runtime_backoff_seconds(cfg: AppConfig, consecutive_errors: int) -> int:
     scaled = cfg.runtime_error_backoff_base_seconds * (2 ** max(0, consecutive_errors - 1))
     return max(1, min(cfg.runtime_error_backoff_max_seconds, scaled))
@@ -343,12 +383,14 @@ def _submit_live_strategy_order(
     clob_client: Any | None,
     token_id: str,
     plan: TradePlan,
+    user_usdc_balance: float | None = None,
 ) -> tuple[str, Any]:
     return _adapter_submit_live_strategy_order(
         cfg=cfg,
         clob_client=clob_client,
         token_id=token_id,
         plan=plan,
+        user_usdc_balance=user_usdc_balance,
         client_factory=_create_live_clob_client,
     )
 
@@ -764,11 +806,12 @@ def place_live_order(
         max_entry_price=_max_entry_price_for_decision(cfg, side_decision),
         min_price_threshold=getattr(cfg, 'min_price_threshold', None),
         max_price_threshold=cfg.max_price_threshold,
-        min_stake=getattr(cfg, "min_stake", None),
+        min_stake=_effective_min_order_cost(cfg, market),
         max_stake=cfg.max_stake,
         max_consecutive_losses=cfg.max_consecutive_losses,
         bet_sizing_mode=cfg.bet_sizing_mode,
         base_order_cost=cfg.base_order_cost,
+        order_cost_multiplier=_order_cost_multiplier_for_decision(cfg, side_decision, price),
     )
     token_ids = extract_token_ids(market.get("clobTokenIds"), market.get("outcomes"))
     token_id = token_ids.get(side)
@@ -909,15 +952,17 @@ def place_live_order(
             "signal_current_up_price": side_decision.signal_current_up_price,
             "signal_threshold": side_decision.signal_threshold,
             "signal_delta": side_decision.signal_delta,
-            "signal_locked": side_decision.signal_locked,
-        }
+                "signal_locked": side_decision.signal_locked,
+            }
 
+    remaining_live_budget = _read_available_live_balance(cfg=cfg, clob_client=live_client)
     try:
         order_id, response = _submit_live_strategy_order(
             cfg=cfg,
             clob_client=live_client,
             token_id=token_id,
             plan=plan,
+            user_usdc_balance=remaining_live_budget,
         )
     except Exception as exc:
         if not _is_live_fok_not_filled_error(exc):
@@ -1602,11 +1647,12 @@ def run_live_trading(
                             max_entry_price=_max_entry_price_for_decision(strategy_cfg, side_decision),
                             min_price_threshold=getattr(strategy_cfg, "min_price_threshold", None),
                             max_price_threshold=strategy_cfg.max_price_threshold,
-                            min_stake=getattr(strategy_cfg, "min_stake", None),
+                            min_stake=_effective_min_order_cost(strategy_cfg, market),
                             max_stake=strategy_cfg.max_stake,
                             max_consecutive_losses=strategy_cfg.max_consecutive_losses,
                             bet_sizing_mode=strategy_cfg.bet_sizing_mode,
                             base_order_cost=strategy_cfg.base_order_cost,
+                            order_cost_multiplier=_order_cost_multiplier_for_decision(strategy_cfg, side_decision, price),
                         )
                         token_ids = extract_token_ids(market.get("clobTokenIds"), market.get("outcomes"))
                         token_id = token_ids.get(side)
@@ -2321,11 +2367,12 @@ def run_paper_trading(
                     max_entry_price=_max_entry_price_for_decision(strategy_cfg, side_decision),
                     min_price_threshold=getattr(strategy_cfg, 'min_price_threshold', None),
                     max_price_threshold=strategy_cfg.max_price_threshold,
-                    min_stake=getattr(strategy_cfg, "min_stake", None),
+                    min_stake=_effective_min_order_cost(strategy_cfg, market),
                     max_stake=strategy_cfg.max_stake,
                     max_consecutive_losses=strategy_cfg.max_consecutive_losses,
                     bet_sizing_mode=strategy_cfg.bet_sizing_mode,
                     base_order_cost=strategy_cfg.base_order_cost,
+                    order_cost_multiplier=_order_cost_multiplier_for_decision(strategy_cfg, side_decision, price),
                 )
                 if dry_run_once:
                     projected_streak = (
@@ -2538,11 +2585,12 @@ def run_paper_trading(
                     max_entry_price=_max_entry_price_for_decision(strategy_cfg, side_decision),
                     min_price_threshold=getattr(strategy_cfg, 'min_price_threshold', None),
                     max_price_threshold=strategy_cfg.max_price_threshold,
-                    min_stake=getattr(strategy_cfg, "min_stake", None),
+                    min_stake=_effective_min_order_cost(strategy_cfg, market),
                     max_stake=strategy_cfg.max_stake,
                     max_consecutive_losses=strategy_cfg.max_consecutive_losses,
                     bet_sizing_mode=strategy_cfg.bet_sizing_mode,
                     base_order_cost=strategy_cfg.base_order_cost,
+                    order_cost_multiplier=_order_cost_multiplier_for_decision(strategy_cfg, side_decision, price),
                 )
                 if not plan.should_trade:
                     next_state = _session_state_to_paper_strategy_state(strategy_session)

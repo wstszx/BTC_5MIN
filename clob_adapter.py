@@ -519,6 +519,7 @@ def build_live_market_order_args(
     order_type: Any,
     market_order_price: float | None,
     use_sdk_types: bool,
+    user_usdc_balance: float | None = None,
 ):
     if use_sdk_types:
         from py_clob_client_v2 import MarketOrderArgs, Side
@@ -529,6 +530,7 @@ def build_live_market_order_args(
             side=Side.BUY,
             price=market_order_price or 0,
             order_type=order_type,
+            user_usdc_balance=user_usdc_balance or 0,
         )
 
     return type(
@@ -540,6 +542,7 @@ def build_live_market_order_args(
             "side": "BUY",
             "order_type": order_type,
             "price": market_order_price,
+            "user_usdc_balance": user_usdc_balance or 0,
         },
     )()
 
@@ -559,6 +562,7 @@ def submit_live_strategy_order(
     clob_client: Any | None,
     token_id: str,
     plan: TradePlan,
+    user_usdc_balance: float | None = None,
     client_factory: Callable[[AppConfig], Any] | None = None,
 ) -> tuple[str, Any]:
     live_client = clob_client or (client_factory or create_live_clob_client)(cfg)
@@ -575,6 +579,7 @@ def submit_live_strategy_order(
         order_type=order_type,
         market_order_price=market_order_price,
         use_sdk_types=use_sdk,
+        user_usdc_balance=user_usdc_balance,
     )
     response = post_live_market_order(live_client, order_args, order_type)
     return validate_live_submission_response(response), response
@@ -622,6 +627,7 @@ def execute_order_plan(
             clob_client=clob_client,
             token_id=token_id,
             plan=plan,
+            user_usdc_balance=remaining_budget,
             client_factory=client_factory,
         )
     except Exception as exc:

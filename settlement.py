@@ -698,6 +698,8 @@ def build_frozen_pending_paper_plan(item: PendingPaperTrade) -> TradePlan:
         order_size=item.order_size,
         order_cost=item.order_cost,
         expected_profit=item.expected_profit,
+        max_entry_price=item.signal_max_entry_price,
+        order_cost_multiplier=item.sizing_multiplier,
         tracks_recovery_loss=item.tracks_recovery_loss,
     )
 

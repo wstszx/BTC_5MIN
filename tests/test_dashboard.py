@@ -4254,8 +4254,13 @@ def test_dashboard_config_payload_includes_strategy7_fields(tmp_path: Path):
         assert payload['labels']['STRATEGY7_LATE_CONFIRM_RELAX_SECONDS'] == '策略7 强信号放宽秒数'
         assert payload['field_scope']['STRATEGY7_OFI_THRESHOLD'] == 'strategy_7_only'
         assert payload['field_scope']['STRATEGY7_LATE_CONFIRM_STRONG_SIGNAL_GAP'] == 'strategy_7_only'
+        assert payload['labels']['STRATEGY7_DYNAMIC_SIZING_ENABLED'] == '策略7 动态下注'
+        assert payload['field_scope']['STRATEGY7_DYNAMIC_SIZING_ENABLED'] == 'strategy_7_only'
+        assert payload['select_options']['STRATEGY7_DYNAMIC_SIZING_ENABLED'] == ['false', 'true']
         assert 'MAX_ENTRY_PRICE' in payload['editable_keys']
         assert 'STRATEGY7_LATE_CONFIRM_RELAX_SECONDS' in payload['editable_keys']
+        assert 'STRATEGY7_DYNAMIC_SIZING_ENABLED' in payload['editable_keys']
+        assert 'STRATEGY7_SIZING_MIN_MULTIPLIER' in payload['editable_keys']
     finally:
         state.close()
 

@@ -39,6 +39,8 @@ def build_pending_paper_trade(
         signal_delta=side_decision.signal_delta,
         signal_locked=side_decision.signal_locked,
         signal_reason=side_decision.reason,
+        signal_max_entry_price=side_decision.max_entry_price,
+        sizing_multiplier=plan.order_cost_multiplier,
         queued_at=datetime.now(timezone.utc).isoformat(),
         experiment_id=experiment_id,
         tracks_recovery_loss=plan.tracks_recovery_loss,

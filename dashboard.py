@@ -44,6 +44,7 @@ from settlement import (
 )
 from risk_and_sizing import build_trade_plan
 from strategy import get_side_for_round
+from strategy_decision import effective_decision_order_cost_multiplier as _effective_decision_order_cost_multiplier
 from runtime_control import RuntimeControl
 from runtime_helpers import session_day_key
 from state_manager import load_session_state, save_session_state
@@ -334,6 +335,14 @@ STRATEGY_PROFILE_EDITABLE_FIELDS: tuple[str, ...] = (
     "STRATEGY7_CONFIRM_BEFORE_ENTRY_SECONDS",
     "STRATEGY7_LATE_CONFIRM_STRONG_SIGNAL_GAP",
     "STRATEGY7_LATE_CONFIRM_RELAX_SECONDS",
+    "STRATEGY7_DYNAMIC_SIZING_ENABLED",
+    "STRATEGY7_SIZING_REFERENCE_PRICE",
+    "STRATEGY7_SIZING_PRICE_STEP",
+    "STRATEGY7_SIZING_PRICE_STEP_REDUCTION",
+    "STRATEGY7_SIZING_MIN_MULTIPLIER",
+    "STRATEGY7_SIZING_MAX_MULTIPLIER",
+    "STRATEGY7_SIZING_STRONG_SIGNAL_GAP",
+    "STRATEGY7_SIZING_STRONG_SIGNAL_BOOST",
     "STRATEGY9_STABILITY_SAMPLE_COUNT",
     "STRATEGY9_STABILITY_REQUIRED_COUNT",
     "STRATEGY9_STABILITY_WINDOW_SECONDS",
@@ -426,6 +435,14 @@ def _strategy_profile_field_names(strategy_id: int | str) -> list[str]:
                 "STRATEGY7_CONFIRM_BEFORE_ENTRY_SECONDS",
                 "STRATEGY7_LATE_CONFIRM_STRONG_SIGNAL_GAP",
                 "STRATEGY7_LATE_CONFIRM_RELAX_SECONDS",
+                "STRATEGY7_DYNAMIC_SIZING_ENABLED",
+                "STRATEGY7_SIZING_REFERENCE_PRICE",
+                "STRATEGY7_SIZING_PRICE_STEP",
+                "STRATEGY7_SIZING_PRICE_STEP_REDUCTION",
+                "STRATEGY7_SIZING_MIN_MULTIPLIER",
+                "STRATEGY7_SIZING_MAX_MULTIPLIER",
+                "STRATEGY7_SIZING_STRONG_SIGNAL_GAP",
+                "STRATEGY7_SIZING_STRONG_SIGNAL_BOOST",
             ]
         )
     if strategy_text == "9":
@@ -486,6 +503,14 @@ def _cfg_for_paper_timeframe(cfg: AppConfig, timeframe: str) -> AppConfig:
         strategy7_confirm_before_entry_seconds=profile.strategy7_confirm_before_entry_seconds,
         strategy7_late_confirm_strong_signal_gap=profile.strategy7_late_confirm_strong_signal_gap,
         strategy7_late_confirm_relax_seconds=profile.strategy7_late_confirm_relax_seconds,
+        strategy7_dynamic_sizing_enabled=profile.strategy7_dynamic_sizing_enabled,
+        strategy7_sizing_reference_price=profile.strategy7_sizing_reference_price,
+        strategy7_sizing_price_step=profile.strategy7_sizing_price_step,
+        strategy7_sizing_price_step_reduction=profile.strategy7_sizing_price_step_reduction,
+        strategy7_sizing_min_multiplier=profile.strategy7_sizing_min_multiplier,
+        strategy7_sizing_max_multiplier=profile.strategy7_sizing_max_multiplier,
+        strategy7_sizing_strong_signal_gap=profile.strategy7_sizing_strong_signal_gap,
+        strategy7_sizing_strong_signal_boost=profile.strategy7_sizing_strong_signal_boost,
         strategy7_max_entry_price=profile.max_entry_price,
         strategy9_stability_sample_count=profile.strategy9_stability_sample_count,
         strategy9_stability_required_count=profile.strategy9_stability_required_count,
@@ -1449,6 +1474,14 @@ def _field_groups() -> list[dict[str, Any]]:
                 "STRATEGY7_CONFIRM_BEFORE_ENTRY_SECONDS",
                 "STRATEGY7_LATE_CONFIRM_STRONG_SIGNAL_GAP",
                 "STRATEGY7_LATE_CONFIRM_RELAX_SECONDS",
+                "STRATEGY7_DYNAMIC_SIZING_ENABLED",
+                "STRATEGY7_SIZING_REFERENCE_PRICE",
+                "STRATEGY7_SIZING_PRICE_STEP",
+                "STRATEGY7_SIZING_PRICE_STEP_REDUCTION",
+                "STRATEGY7_SIZING_MIN_MULTIPLIER",
+                "STRATEGY7_SIZING_MAX_MULTIPLIER",
+                "STRATEGY7_SIZING_STRONG_SIGNAL_GAP",
+                "STRATEGY7_SIZING_STRONG_SIGNAL_BOOST",
                 "STRATEGY9_STABILITY_SAMPLE_COUNT",
                 "STRATEGY9_STABILITY_REQUIRED_COUNT",
                 "STRATEGY9_STABILITY_WINDOW_SECONDS",
@@ -1507,6 +1540,14 @@ TIMEFRAME_PRESETS: dict[str, dict[str, dict[str, str]]] = {
             "STRATEGY7_CONFIRM_BEFORE_ENTRY_SECONDS": "2",
             "STRATEGY7_LATE_CONFIRM_STRONG_SIGNAL_GAP": "0.035",
             "STRATEGY7_LATE_CONFIRM_RELAX_SECONDS": "2",
+            "STRATEGY7_DYNAMIC_SIZING_ENABLED": "false",
+            "STRATEGY7_SIZING_REFERENCE_PRICE": "0.50",
+            "STRATEGY7_SIZING_PRICE_STEP": "0.01",
+            "STRATEGY7_SIZING_PRICE_STEP_REDUCTION": "0.10",
+            "STRATEGY7_SIZING_MIN_MULTIPLIER": "0.50",
+            "STRATEGY7_SIZING_MAX_MULTIPLIER": "1.00",
+            "STRATEGY7_SIZING_STRONG_SIGNAL_GAP": "0.02",
+            "STRATEGY7_SIZING_STRONG_SIGNAL_BOOST": "0.20",
             "STRATEGY9_STABILITY_SAMPLE_COUNT": "3",
             "STRATEGY9_STABILITY_REQUIRED_COUNT": "2",
             "STRATEGY9_STABILITY_WINDOW_SECONDS": "6",
@@ -1544,6 +1585,14 @@ TIMEFRAME_PRESETS: dict[str, dict[str, dict[str, str]]] = {
             "STRATEGY7_CONFIRM_BEFORE_ENTRY_SECONDS": "3",
             "STRATEGY7_LATE_CONFIRM_STRONG_SIGNAL_GAP": "0.03",
             "STRATEGY7_LATE_CONFIRM_RELAX_SECONDS": "3",
+            "STRATEGY7_DYNAMIC_SIZING_ENABLED": "false",
+            "STRATEGY7_SIZING_REFERENCE_PRICE": "0.50",
+            "STRATEGY7_SIZING_PRICE_STEP": "0.01",
+            "STRATEGY7_SIZING_PRICE_STEP_REDUCTION": "0.10",
+            "STRATEGY7_SIZING_MIN_MULTIPLIER": "0.50",
+            "STRATEGY7_SIZING_MAX_MULTIPLIER": "1.00",
+            "STRATEGY7_SIZING_STRONG_SIGNAL_GAP": "0.02",
+            "STRATEGY7_SIZING_STRONG_SIGNAL_BOOST": "0.20",
             "STRATEGY9_STABILITY_SAMPLE_COUNT": "3",
             "STRATEGY9_STABILITY_REQUIRED_COUNT": "2",
             "STRATEGY9_STABILITY_WINDOW_SECONDS": "8",
@@ -1599,6 +1648,14 @@ class DashboardState:
         "STRATEGY7_CONFIRM_BEFORE_ENTRY_SECONDS",
         "STRATEGY7_LATE_CONFIRM_STRONG_SIGNAL_GAP",
         "STRATEGY7_LATE_CONFIRM_RELAX_SECONDS",
+        "STRATEGY7_DYNAMIC_SIZING_ENABLED",
+        "STRATEGY7_SIZING_REFERENCE_PRICE",
+        "STRATEGY7_SIZING_PRICE_STEP",
+        "STRATEGY7_SIZING_PRICE_STEP_REDUCTION",
+        "STRATEGY7_SIZING_MIN_MULTIPLIER",
+        "STRATEGY7_SIZING_MAX_MULTIPLIER",
+        "STRATEGY7_SIZING_STRONG_SIGNAL_GAP",
+        "STRATEGY7_SIZING_STRONG_SIGNAL_BOOST",
         "STRATEGY9_STABILITY_SAMPLE_COUNT",
         "STRATEGY9_STABILITY_REQUIRED_COUNT",
         "STRATEGY9_STABILITY_WINDOW_SECONDS",
@@ -1665,6 +1722,14 @@ class DashboardState:
         "STRATEGY7_CONFIRM_BEFORE_ENTRY_SECONDS": "策略7 最晚确认秒数",
         "STRATEGY7_LATE_CONFIRM_STRONG_SIGNAL_GAP": "策略7 强信号额外优势",
         "STRATEGY7_LATE_CONFIRM_RELAX_SECONDS": "策略7 强信号放宽秒数",
+        "STRATEGY7_DYNAMIC_SIZING_ENABLED": "策略7 动态下注",
+        "STRATEGY7_SIZING_REFERENCE_PRICE": "策略7 金额参考价",
+        "STRATEGY7_SIZING_PRICE_STEP": "策略7 金额价格步长",
+        "STRATEGY7_SIZING_PRICE_STEP_REDUCTION": "策略7 每步缩仓比例",
+        "STRATEGY7_SIZING_MIN_MULTIPLIER": "策略7 最小金额倍数",
+        "STRATEGY7_SIZING_MAX_MULTIPLIER": "策略7 最大金额倍数",
+        "STRATEGY7_SIZING_STRONG_SIGNAL_GAP": "策略7 加仓信号优势",
+        "STRATEGY7_SIZING_STRONG_SIGNAL_BOOST": "策略7 强信号金额补偿",
         "STRATEGY9_STABILITY_SAMPLE_COUNT": "策略9 稳定采样数",
         "STRATEGY9_STABILITY_REQUIRED_COUNT": "策略9 同向采样数",
         "STRATEGY9_STABILITY_WINDOW_SECONDS": "策略9 稳定窗口秒",
@@ -1706,6 +1771,7 @@ class DashboardState:
         "SIGNAL_WEAK_SIGNAL_MODE": ["SKIP", "FALLBACK"],
         "SIGNAL_FALLBACK_STRATEGY_ID": ["1", "2", "3", "4"],
         "WS_ENABLED": ["true", "false"],
+        "STRATEGY7_DYNAMIC_SIZING_ENABLED": ["false", "true"],
     }
 
     CONFIG_ATTR_MAP: dict[str, str] = {
@@ -1740,6 +1806,14 @@ class DashboardState:
         "STRATEGY7_CONFIRM_BEFORE_ENTRY_SECONDS": "strategy7_confirm_before_entry_seconds",
         "STRATEGY7_LATE_CONFIRM_STRONG_SIGNAL_GAP": "strategy7_late_confirm_strong_signal_gap",
         "STRATEGY7_LATE_CONFIRM_RELAX_SECONDS": "strategy7_late_confirm_relax_seconds",
+        "STRATEGY7_DYNAMIC_SIZING_ENABLED": "strategy7_dynamic_sizing_enabled",
+        "STRATEGY7_SIZING_REFERENCE_PRICE": "strategy7_sizing_reference_price",
+        "STRATEGY7_SIZING_PRICE_STEP": "strategy7_sizing_price_step",
+        "STRATEGY7_SIZING_PRICE_STEP_REDUCTION": "strategy7_sizing_price_step_reduction",
+        "STRATEGY7_SIZING_MIN_MULTIPLIER": "strategy7_sizing_min_multiplier",
+        "STRATEGY7_SIZING_MAX_MULTIPLIER": "strategy7_sizing_max_multiplier",
+        "STRATEGY7_SIZING_STRONG_SIGNAL_GAP": "strategy7_sizing_strong_signal_gap",
+        "STRATEGY7_SIZING_STRONG_SIGNAL_BOOST": "strategy7_sizing_strong_signal_boost",
         "STRATEGY9_STABILITY_SAMPLE_COUNT": "strategy9_stability_sample_count",
         "STRATEGY9_STABILITY_REQUIRED_COUNT": "strategy9_stability_required_count",
         "STRATEGY9_STABILITY_WINDOW_SECONDS": "strategy9_stability_window_seconds",
@@ -1802,6 +1876,13 @@ class DashboardState:
         "STRATEGY7_MIN_SIGNAL_GAP",
         "STRATEGY7_LATE_CONFIRM_STRONG_SIGNAL_GAP",
         "STRATEGY7_LATE_CONFIRM_RELAX_SECONDS",
+        "STRATEGY7_SIZING_REFERENCE_PRICE",
+        "STRATEGY7_SIZING_PRICE_STEP",
+        "STRATEGY7_SIZING_PRICE_STEP_REDUCTION",
+        "STRATEGY7_SIZING_MIN_MULTIPLIER",
+        "STRATEGY7_SIZING_MAX_MULTIPLIER",
+        "STRATEGY7_SIZING_STRONG_SIGNAL_GAP",
+        "STRATEGY7_SIZING_STRONG_SIGNAL_BOOST",
         "STRATEGY9_STABILITY_WINDOW_SECONDS",
         "STRATEGY9_REVERSAL_LOOKBACK_SECONDS",
         "STRATEGY9_MAX_SIGNAL_DECAY",
@@ -1817,7 +1898,7 @@ class DashboardState:
         "FINAL_PRICE_POLL_INTERVAL_SECONDS",
     )
 
-    BOOL_CONFIG_KEYS: tuple[str, ...] = ("LIVE_TRADING_ENABLED", "WS_ENABLED")
+    BOOL_CONFIG_KEYS: tuple[str, ...] = ("LIVE_TRADING_ENABLED", "WS_ENABLED", "STRATEGY7_DYNAMIC_SIZING_ENABLED")
     STRING_CONFIG_KEYS: tuple[str, ...] = (
         "POLYMARKET_PRIVATE_KEY",
         "POLYMARKET_FUNDER",
@@ -1852,6 +1933,14 @@ class DashboardState:
         "STRATEGY7_CONFIRM_BEFORE_ENTRY_SECONDS": "strategy_7_only",
         "STRATEGY7_LATE_CONFIRM_STRONG_SIGNAL_GAP": "strategy_7_only",
         "STRATEGY7_LATE_CONFIRM_RELAX_SECONDS": "strategy_7_only",
+        "STRATEGY7_DYNAMIC_SIZING_ENABLED": "strategy_7_only",
+        "STRATEGY7_SIZING_REFERENCE_PRICE": "strategy_7_only",
+        "STRATEGY7_SIZING_PRICE_STEP": "strategy_7_only",
+        "STRATEGY7_SIZING_PRICE_STEP_REDUCTION": "strategy_7_only",
+        "STRATEGY7_SIZING_MIN_MULTIPLIER": "strategy_7_only",
+        "STRATEGY7_SIZING_MAX_MULTIPLIER": "strategy_7_only",
+        "STRATEGY7_SIZING_STRONG_SIGNAL_GAP": "strategy_7_only",
+        "STRATEGY7_SIZING_STRONG_SIGNAL_BOOST": "strategy_7_only",
         "STRATEGY9_STABILITY_SAMPLE_COUNT": "strategy_9_only",
         "STRATEGY9_STABILITY_REQUIRED_COUNT": "strategy_9_only",
         "STRATEGY9_STABILITY_WINDOW_SECONDS": "strategy_9_only",
@@ -1896,6 +1985,14 @@ class DashboardState:
         "STRATEGY7_CONFIRM_BEFORE_ENTRY_SECONDS": "策略 7 需要在计划入场前至少提前这么多秒完成双信号确认。",
         "STRATEGY7_LATE_CONFIRM_STRONG_SIGNAL_GAP": "策略 7 只有在 OFI 和动量都额外强于阈值时，才允许走晚确认放宽通道。",
         "STRATEGY7_LATE_CONFIRM_RELAX_SECONDS": "满足强信号条件后，可从策略 7 的最晚确认要求里减去的秒数。",
+        "STRATEGY7_DYNAMIC_SIZING_ENABLED": "开启后策略 7 会按买入价和共识强度调整下注金额；默认关闭，建议先用于纸面测试。",
+        "STRATEGY7_SIZING_REFERENCE_PRICE": "动态下注的参考价格。高于该价格会开始按价格步长缩仓。",
+        "STRATEGY7_SIZING_PRICE_STEP": "买入价每高出参考价多少，触发一次金额缩减。",
+        "STRATEGY7_SIZING_PRICE_STEP_REDUCTION": "每个价格步长对应的金额缩减比例。例如 0.10 表示减少 10%。",
+        "STRATEGY7_SIZING_MIN_MULTIPLIER": "动态下注允许的最低金额倍数。",
+        "STRATEGY7_SIZING_MAX_MULTIPLIER": "动态下注允许的最高金额倍数；默认 1 表示不放大原始下注。",
+        "STRATEGY7_SIZING_STRONG_SIGNAL_GAP": "策略 7 判断强信号时，OFI 和动量需要额外超过阈值的幅度。",
+        "STRATEGY7_SIZING_STRONG_SIGNAL_BOOST": "强信号时给金额倍数的补偿，受最高金额倍数限制。",
         "STRATEGY9_STABILITY_SAMPLE_COUNT": "策略 9 在稳定窗口内要求的有效采样数量。",
         "STRATEGY9_STABILITY_REQUIRED_COUNT": "策略 9 在稳定窗口内要求同向共振的最少采样数量。",
         "STRATEGY9_STABILITY_WINDOW_SECONDS": "策略 9 判断稳定共振的回看秒数。",
@@ -2318,6 +2415,14 @@ class DashboardState:
                         else ""
                     ),
                     "strategy7_max_entry_price": _fmt_env(profile.strategy7_max_entry_price),
+                    "strategy7_dynamic_sizing_enabled": "true" if profile.strategy7_dynamic_sizing_enabled else "false",
+                    "strategy7_sizing_reference_price": _fmt_env(profile.strategy7_sizing_reference_price),
+                    "strategy7_sizing_price_step": _fmt_env(profile.strategy7_sizing_price_step),
+                    "strategy7_sizing_price_step_reduction": _fmt_env(profile.strategy7_sizing_price_step_reduction),
+                    "strategy7_sizing_min_multiplier": _fmt_env(profile.strategy7_sizing_min_multiplier),
+                    "strategy7_sizing_max_multiplier": _fmt_env(profile.strategy7_sizing_max_multiplier),
+                    "strategy7_sizing_strong_signal_gap": _fmt_env(profile.strategy7_sizing_strong_signal_gap),
+                    "strategy7_sizing_strong_signal_boost": _fmt_env(profile.strategy7_sizing_strong_signal_boost),
                     "strategy9_stability_sample_count": _fmt_env(profile.strategy9_stability_sample_count),
                     "strategy9_stability_required_count": _fmt_env(profile.strategy9_stability_required_count),
                     "strategy9_stability_window_seconds": _fmt_env(profile.strategy9_stability_window_seconds),
@@ -2616,7 +2721,13 @@ class DashboardState:
                     max_entry_price=getattr(effective_cfg, "max_entry_price", effective_cfg.max_price_threshold),
                     bet_sizing_mode=effective_cfg.bet_sizing_mode,
                     base_order_cost=effective_cfg.base_order_cost,
+                    order_cost_multiplier=_effective_decision_order_cost_multiplier(
+                        cfg=effective_cfg,
+                        decision=side_decision,
+                        price=price,
+                    ),
                 )
+                side_decision.order_cost_multiplier = plan_obj.order_cost_multiplier
                 plan = {
                     "should_trade": plan_obj.should_trade,
                     "side": plan_obj.side,
@@ -2624,6 +2735,7 @@ class DashboardState:
                     "order_size": plan_obj.order_size,
                     "order_cost": plan_obj.order_cost,
                     "expected_profit": plan_obj.expected_profit,
+                    "order_cost_multiplier": plan_obj.order_cost_multiplier,
                     "skip_reason": plan_obj.skip_reason,
                     "stop_loss_triggered": plan_obj.stop_loss_triggered,
                 }
@@ -5284,6 +5396,14 @@ const CONFIG_KEY_NAMES = {
   STRATEGY7_MOMENTUM_THRESHOLD: '策略7 动量阈值',
   STRATEGY7_MIN_SIGNAL_GAP: '策略7 最小信号优势',
   STRATEGY7_CONFIRM_BEFORE_ENTRY_SECONDS: '策略7 最晚确认秒数',
+  STRATEGY7_DYNAMIC_SIZING_ENABLED: '策略7 动态下注',
+  STRATEGY7_SIZING_REFERENCE_PRICE: '策略7 金额参考价',
+  STRATEGY7_SIZING_PRICE_STEP: '策略7 金额价格步长',
+  STRATEGY7_SIZING_PRICE_STEP_REDUCTION: '策略7 每步缩仓比例',
+  STRATEGY7_SIZING_MIN_MULTIPLIER: '策略7 最小金额倍数',
+  STRATEGY7_SIZING_MAX_MULTIPLIER: '策略7 最大金额倍数',
+  STRATEGY7_SIZING_STRONG_SIGNAL_GAP: '策略7 加仓信号优势',
+  STRATEGY7_SIZING_STRONG_SIGNAL_BOOST: '策略7 强信号金额补偿',
   STRATEGY9_STABILITY_SAMPLE_COUNT: '策略9 稳定采样数',
   STRATEGY9_STABILITY_REQUIRED_COUNT: '策略9 同向采样数',
   STRATEGY9_STABILITY_WINDOW_SECONDS: '策略9 稳定窗口秒',
@@ -6255,6 +6375,14 @@ function renderPaperProfiles(payload) {
     'STRATEGY7_OFI_THRESHOLD',
     'STRATEGY7_MOMENTUM_THRESHOLD',
     'STRATEGY7_MAX_MOMENTUM_DELTA',
+    'STRATEGY7_DYNAMIC_SIZING_ENABLED',
+    'STRATEGY7_SIZING_REFERENCE_PRICE',
+    'STRATEGY7_SIZING_PRICE_STEP',
+    'STRATEGY7_SIZING_PRICE_STEP_REDUCTION',
+    'STRATEGY7_SIZING_MIN_MULTIPLIER',
+    'STRATEGY7_SIZING_MAX_MULTIPLIER',
+    'STRATEGY7_SIZING_STRONG_SIGNAL_GAP',
+    'STRATEGY7_SIZING_STRONG_SIGNAL_BOOST',
   ];
 
   node.innerHTML = ''
@@ -6290,6 +6418,8 @@ function renderPaperProfiles(payload) {
               : fieldName === 'BINANCE_SIGNAL_STALE_SECONDS' ? 'binance_signal_stale_seconds'
               : fieldName === 'STRATEGY7_OFI_THRESHOLD' ? 'strategy7_ofi_threshold'
               : fieldName === 'STRATEGY7_MAX_MOMENTUM_DELTA' ? 'strategy7_max_momentum_delta'
+              : fieldName.startsWith('STRATEGY7_SIZING_') ? fieldName.toLowerCase()
+              : fieldName === 'STRATEGY7_DYNAMIC_SIZING_ENABLED' ? 'strategy7_dynamic_sizing_enabled'
               : fieldName.startsWith('STRATEGY9_') ? fieldName.toLowerCase()
               : 'strategy7_momentum_threshold'
             ] ?? '');

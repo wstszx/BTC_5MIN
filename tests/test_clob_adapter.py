@@ -4,6 +4,7 @@ import pytest
 
 import trader
 from clob_adapter import (
+    build_live_market_order_args,
     build_verified_pending_live_trade_plan,
     create_live_clob_client,
     is_live_fok_not_filled_error,
@@ -269,6 +270,23 @@ def test_clob_adapter_submits_injected_market_order_with_strategy_price_cap():
     assert client.created_orders[0].side == "BUY"
     assert client.created_orders[0].price == pytest.approx(0.55)
     assert client.posted_orders[0][1] == "FOK"
+
+
+def test_clob_adapter_passes_user_balance_to_market_buy_for_fee_adjustment():
+    plan = TradePlan(True, side="UP", price=0.54, order_size=10.0, order_cost=5.4, expected_profit=4.6)
+
+    order_args = build_live_market_order_args(
+        token_id="up-token",
+        plan=plan,
+        order_type="FOK",
+        market_order_price=0.55,
+        use_sdk_types=False,
+        user_usdc_balance=5.5,
+    )
+
+    assert order_args.amount == pytest.approx(5.4)
+    assert order_args.price == pytest.approx(0.55)
+    assert order_args.user_usdc_balance == pytest.approx(5.5)
 
 
 def test_clob_adapter_prefers_plan_dynamic_price_cap():

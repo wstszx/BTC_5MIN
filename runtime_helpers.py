@@ -116,6 +116,7 @@ def signal_record_kwargs(side_decision: SideDecision) -> dict[str, Any]:
         "signal_locked": side_decision.signal_locked,
         "signal_reason": side_decision.reason,
         "signal_max_entry_price": side_decision.max_entry_price,
+        "sizing_multiplier": side_decision.order_cost_multiplier,
     }
 
 
