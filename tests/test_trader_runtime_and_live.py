@@ -6401,14 +6401,14 @@ def test_run_paper_trading_processes_all_selected_strategies(tmp_path, monkeypat
     assert state.paper_strategies[6].strategy6_last_ofi_score == pytest.approx(signal.ofi_score)
 
 
-def test_market_order_min_stake_uses_configured_and_market_minimum():
+def test_market_order_min_stake_uses_configured_minimum_only_for_market_buys():
     assert trader._market_min_order_size({"orderMinSize": "5"}) == pytest.approx(5.0)
     assert trader._market_min_order_size({"minimum_order_size": 7}) == pytest.approx(7.0)
-    assert trader._effective_min_order_cost(AppConfig(min_stake=2.5), {"orderMinSize": "5"}) == pytest.approx(5.0)
+    assert trader._effective_min_order_cost(AppConfig(min_stake=2.5), {"orderMinSize": "5"}) == pytest.approx(2.5)
     assert trader._effective_min_order_cost(AppConfig(min_stake=8.0), {"orderMinSize": "5"}) == pytest.approx(8.0)
 
 
-def test_run_paper_trading_skips_when_market_minimum_exceeds_plan_cost(tmp_path, monkeypatch):
+def test_run_paper_trading_allows_market_buy_when_order_min_size_exceeds_plan_cost(tmp_path, monkeypatch):
     monkeypatch.setattr("trader._sleep_until_round_end", lambda cfg, window, stop_event=None: False)
     monkeypatch.setattr("trader._resolve_side_from_strategy", lambda **kwargs: SideDecision(side="UP"))
 
@@ -6423,7 +6423,8 @@ def test_run_paper_trading_skips_when_market_minimum_exceeds_plan_cost(tmp_path,
             trade_mode="paper",
             paper_strategy_ids=[2],
             bet_sizing_mode="FLAT_BASE_COST",
-            base_order_cost=1.0,
+            base_order_cost=1.2,
+            min_stake=1.05,
             poll_interval_seconds=1,
         ),
         client=_MarketMinClient(),
@@ -6433,12 +6434,14 @@ def test_run_paper_trading_skips_when_market_minimum_exceeds_plan_cost(tmp_path,
 
     assert result["status"] == "stopped"
     state = load_session_state(tmp_path / "paper_state.json", effective_paper_strategy_ids=[2])
-    assert state.paper_strategies[2].pending_paper_trades == []
-    rows = (tmp_path / "paper.csv").read_text(encoding="utf-8").splitlines()
-    assert "order_cost_below_min_stake" in rows[1]
+    pending = state.paper_strategies[2].pending_paper_trades
+    assert len(pending) == 1
+    assert pending[0].order_cost == pytest.approx(1.2)
+    assert pending[0].order_size == pytest.approx(1.2 / 0.56)
+    assert not (tmp_path / "paper.csv").exists()
 
 
-def test_run_live_trading_skips_when_market_minimum_exceeds_plan_cost(tmp_path, monkeypatch):
+def test_run_live_trading_allows_market_buy_when_order_min_size_exceeds_plan_cost(tmp_path, monkeypatch):
     stop_event = threading.Event()
     stub_clob = _StubClobClient(balance_payload={"available": 10.0})
 
@@ -6462,7 +6465,8 @@ def test_run_live_trading_skips_when_market_minimum_exceeds_plan_cost(tmp_path, 
             live_funder="0xfunder",
             live_strategy_ids=[2],
             bet_sizing_mode="FLAT_BASE_COST",
-            base_order_cost=1.0,
+            base_order_cost=1.2,
+            min_stake=1.05,
             poll_interval_seconds=1,
         ),
         market_client=_MarketMinClient(),
@@ -6473,9 +6477,8 @@ def test_run_live_trading_skips_when_market_minimum_exceeds_plan_cost(tmp_path, 
     )
 
     assert result["status"] == "stopped"
-    assert stub_clob.created_orders == []
-    rows = (tmp_path / "live.csv").read_text(encoding="utf-8").splitlines()
-    assert "order_cost_below_min_stake" in rows[-1]
+    assert len(stub_clob.created_orders) == 1
+    assert stub_clob.created_orders[0].amount == pytest.approx(1.2)
 
 
 def test_run_paper_trading_uses_simulated_budget_like_live_execution(tmp_path, monkeypatch):

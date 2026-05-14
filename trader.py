@@ -352,7 +352,6 @@ def _market_min_order_size(market: dict[str, Any]) -> float | None:
 
 
 def _effective_min_order_cost(cfg: AppConfig, market: dict[str, Any]) -> float | None:
-    candidates: list[float] = []
     configured_min_stake = getattr(cfg, "min_stake", None)
     if configured_min_stake is not None:
         try:
@@ -360,11 +359,8 @@ def _effective_min_order_cost(cfg: AppConfig, market: dict[str, Any]) -> float |
         except (TypeError, ValueError):
             configured_value = 0.0
         if configured_value > 0:
-            candidates.append(configured_value)
-    market_min_order_size = _market_min_order_size(market)
-    if market_min_order_size is not None:
-        candidates.append(market_min_order_size)
-    return max(candidates) if candidates else None
+            return configured_value
+    return None
 
 
 def _runtime_backoff_seconds(cfg: AppConfig, consecutive_errors: int) -> int:

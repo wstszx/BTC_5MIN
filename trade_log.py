@@ -105,7 +105,13 @@ def _can_migrate_header(existing_header: list[str], fieldnames: list[str]) -> bo
         return False
     if len(fieldnames) - len(existing_header) > 3:
         return False
-    return fieldnames[: len(existing_header)] == existing_header
+    field_index = 0
+    for existing_field in existing_header:
+        try:
+            field_index = fieldnames.index(existing_field, field_index) + 1
+        except ValueError:
+            return False
+    return True
 
 
 def _rewrite_with_fieldnames(path: Path, rows: list[dict[str, Any]], fieldnames: list[str]) -> None:
