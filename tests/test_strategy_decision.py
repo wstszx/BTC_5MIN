@@ -628,3 +628,121 @@ def test_strategy9_uses_dynamic_price_cap_by_signal_strength():
 
     assert strong_third.side == "UP"
     assert strong_third.max_entry_price == pytest.approx(0.53)
+
+
+def test_strategy10_buys_underpriced_up_edge():
+    now = datetime(2026, 4, 30, 1, 0, tzinfo=timezone.utc)
+    cfg = AppConfig(
+        strategy_id=10,
+        strategy7_ofi_threshold=0.5,
+        strategy7_momentum_threshold=0.01,
+        strategy7_min_signal_gap=0.0,
+        strategy7_confirm_before_entry_seconds=0,
+        binance_signal_stale_seconds=10.0,
+        strategy10_min_edge=0.04,
+        strategy10_ofi_weight=0.10,
+        strategy10_momentum_weight=1.0,
+    )
+    state = SessionState(signal_round_slug="s1", signal_round_open_up_price=0.50)
+    quote = MarketQuote(
+        slug="s1",
+        up_price=0.52,
+        up_best_ask=0.52,
+        down_price=0.48,
+        down_best_ask=0.48,
+        strategy6_ofi_score=0.8,
+        strategy6_signal_at=now,
+    )
+
+    decision = resolve_side_from_strategy(cfg=cfg, state=state, slug="s1", quote=quote, now=now)
+
+    assert decision.side == "UP"
+    assert decision.candidate_price == pytest.approx(0.52)
+    assert decision.signal_delta == pytest.approx(0.02)
+    assert decision.signal_threshold == pytest.approx(0.04)
+    assert decision.reason is None
+
+
+def test_strategy10_skips_when_best_edge_is_below_threshold():
+    now = datetime(2026, 4, 30, 1, 0, tzinfo=timezone.utc)
+    cfg = AppConfig(
+        strategy_id=10,
+        strategy7_ofi_threshold=0.5,
+        strategy7_momentum_threshold=0.01,
+        strategy7_min_signal_gap=0.0,
+        strategy7_confirm_before_entry_seconds=0,
+        binance_signal_stale_seconds=10.0,
+        strategy10_min_edge=0.12,
+        strategy10_ofi_weight=0.10,
+        strategy10_momentum_weight=1.0,
+    )
+    state = SessionState(signal_round_slug="s1", signal_round_open_up_price=0.50)
+    quote = MarketQuote(
+        slug="s1",
+        up_price=0.52,
+        up_best_ask=0.52,
+        down_price=0.48,
+        down_best_ask=0.48,
+        strategy6_ofi_score=0.8,
+        strategy6_signal_at=now,
+    )
+
+    decision = resolve_side_from_strategy(cfg=cfg, state=state, slug="s1", quote=quote, now=now)
+
+    assert decision.side is None
+    assert decision.reason == "strategy10_edge_too_low"
+    assert decision.candidate_side == "UP"
+    assert decision.candidate_price == pytest.approx(0.52)
+    assert decision.signal_delta == pytest.approx(0.02)
+    assert decision.signal_threshold == pytest.approx(0.12)
+
+
+def test_strategy10_can_choose_underpriced_down_from_fair_value():
+    now = datetime(2026, 4, 30, 1, 0, tzinfo=timezone.utc)
+    cfg = AppConfig(
+        strategy_id=10,
+        strategy7_ofi_threshold=0.5,
+        strategy7_momentum_threshold=0.01,
+        strategy7_min_signal_gap=0.0,
+        strategy7_confirm_before_entry_seconds=0,
+        binance_signal_stale_seconds=10.0,
+        strategy10_min_edge=0.04,
+        strategy10_ofi_weight=0.10,
+        strategy10_momentum_weight=1.0,
+    )
+    state = SessionState(signal_round_slug="s1", signal_round_open_up_price=0.50)
+    quote = MarketQuote(
+        slug="s1",
+        up_price=0.47,
+        up_best_ask=0.47,
+        down_price=0.46,
+        down_best_ask=0.46,
+        strategy6_ofi_score=-0.7,
+        strategy6_signal_at=now,
+    )
+
+    decision = resolve_side_from_strategy(cfg=cfg, state=state, slug="s1", quote=quote, now=now)
+
+    assert decision.side == "DOWN"
+    assert decision.candidate_price == pytest.approx(0.46)
+    assert decision.signal_delta == pytest.approx(-0.03)
+
+
+def test_strategy10_skips_stale_ofi_before_edge_model():
+    now = datetime(2026, 4, 30, 1, 0, tzinfo=timezone.utc)
+    cfg = AppConfig(strategy_id=10, binance_signal_stale_seconds=1.0)
+    state = SessionState(signal_round_slug="s1", signal_round_open_up_price=0.50)
+    quote = MarketQuote(
+        slug="s1",
+        up_price=0.52,
+        up_best_ask=0.52,
+        down_price=0.48,
+        down_best_ask=0.48,
+        strategy6_ofi_score=0.8,
+        strategy6_signal_at=now - timedelta(seconds=5),
+    )
+
+    decision = resolve_side_from_strategy(cfg=cfg, state=state, slug="s1", quote=quote, now=now)
+
+    assert decision.side is None
+    assert decision.reason == "strategy10_ofi_stale"

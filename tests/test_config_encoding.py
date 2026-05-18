@@ -31,7 +31,7 @@ def test_collect_config_warnings_reports_invalid_scalar_values():
         {
             'MAX_STAKE': 'abc',
             'WS_ENABLED': 'maybe',
-            'STRATEGY_ID': '10',
+            'STRATEGY_ID': '11',
             'MARKET_TIMEFRAME': '7m',
             'TARGET_PROFIT': '1.2',
         }
@@ -39,7 +39,7 @@ def test_collect_config_warnings_reports_invalid_scalar_values():
 
     assert warnings['MAX_STAKE'] == "Invalid value for MAX_STAKE: expected number, got 'abc'"
     assert warnings['WS_ENABLED'] == "Invalid value for WS_ENABLED: expected true/false, got 'maybe'"
-    assert warnings['STRATEGY_ID'] == "Invalid value for STRATEGY_ID: expected strategy id 1-9, got '10'"
+    assert warnings['STRATEGY_ID'] == "Invalid value for STRATEGY_ID: expected strategy id 1-10, got '11'"
     assert warnings['MARKET_TIMEFRAME'] == "Invalid value for MARKET_TIMEFRAME: expected one of 5m, 15m, got '7m'"
     assert 'TARGET_PROFIT' not in warnings
 
@@ -222,6 +222,30 @@ def test_build_config_accepts_strategy_9_in_strategy_lists():
 
     assert cfg.paper_strategy_ids == [9, 8, 6]
     assert cfg.live_strategy_ids == [9]
+
+
+def test_build_config_accepts_strategy10_and_reads_edge_values():
+    cfg = build_config_from_env_values(
+        {
+            "STRATEGY_ID": "10",
+            "PAPER_STRATEGY_IDS": "10,7",
+            "LIVE_STRATEGY_IDS": "10",
+            "STRATEGY10_MIN_EDGE": "0.045",
+            "STRATEGY10_OFI_WEIGHT": "0.12",
+            "STRATEGY10_MOMENTUM_WEIGHT": "1.4",
+            "STRATEGY10_EDGE_BUFFER": "0.01",
+            "PAPER_STRATEGY_10_STRATEGY10_MIN_EDGE": "0.06",
+        }
+    )
+
+    assert cfg.strategy_id == 10
+    assert cfg.paper_strategy_ids == [10, 7]
+    assert cfg.live_strategy_ids == [10]
+    assert cfg.strategy10_min_edge == 0.045
+    assert cfg.strategy10_ofi_weight == 0.12
+    assert cfg.strategy10_momentum_weight == 1.4
+    assert cfg.strategy10_edge_buffer == 0.01
+    assert cfg.paper_strategy_profiles[10].strategy10_min_edge == 0.06
 
 
 def test_build_config_reads_strategy7_dynamic_sizing_values():

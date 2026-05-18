@@ -17,7 +17,7 @@ _ENV_FILE_ENCODINGS: tuple[str, ...] = ("utf-8", "utf-8-sig", "gbk")
 _BOOL_TRUE_VALUES = {"1", "true", "yes", "on"}
 _BOOL_FALSE_VALUES = {"0", "false", "no", "off"}
 _STRATEGY_ID_MIN = 1
-_STRATEGY_ID_MAX = 9
+_STRATEGY_ID_MAX = 10
 
 _INT_CONFIG_KEYS: frozenset[str] = frozenset(
     {
@@ -86,6 +86,11 @@ _FLOAT_CONFIG_KEYS: frozenset[str] = frozenset(
         "STRATEGY9_ULTRA_MAX_ENTRY_PRICE",
         "STRATEGY9_STRONG_SIGNAL_GAP",
         "STRATEGY9_ULTRA_SIGNAL_GAP",
+        "STRATEGY10_MIN_EDGE",
+        "STRATEGY10_EDGE_BUFFER",
+        "STRATEGY10_OFI_WEIGHT",
+        "STRATEGY10_MOMENTUM_WEIGHT",
+        "STRATEGY10_MAX_FAIR_VALUE",
         "BINANCE_SIGNAL_STALE_SECONDS",
         "NEAR_ENTRY_POLL_WINDOW_SECONDS",
         "POLL_INTERVAL_SECONDS",
@@ -466,6 +471,11 @@ class PaperTimeframeProfile:
     strategy9_ultra_max_entry_price: float
     strategy9_strong_signal_gap: float
     strategy9_ultra_signal_gap: float
+    strategy10_min_edge: float
+    strategy10_edge_buffer: float
+    strategy10_ofi_weight: float
+    strategy10_momentum_weight: float
+    strategy10_max_fair_value: float
     min_entry_price: float | None
     max_entry_price: float
     strategy7_max_entry_price: float
@@ -528,6 +538,11 @@ class LiveStrategyProfile:
     strategy9_ultra_max_entry_price: float
     strategy9_strong_signal_gap: float
     strategy9_ultra_signal_gap: float
+    strategy10_min_edge: float
+    strategy10_edge_buffer: float
+    strategy10_ofi_weight: float
+    strategy10_momentum_weight: float
+    strategy10_max_fair_value: float
 
 
 def _base_live_profile_for_strategy(cfg: AppConfig, strategy_id: int) -> LiveStrategyProfile:
@@ -587,6 +602,11 @@ def _base_live_profile_for_strategy(cfg: AppConfig, strategy_id: int) -> LiveStr
         strategy9_ultra_max_entry_price=cfg.strategy9_ultra_max_entry_price,
         strategy9_strong_signal_gap=cfg.strategy9_strong_signal_gap,
         strategy9_ultra_signal_gap=cfg.strategy9_ultra_signal_gap,
+        strategy10_min_edge=cfg.strategy10_min_edge,
+        strategy10_edge_buffer=cfg.strategy10_edge_buffer,
+        strategy10_ofi_weight=cfg.strategy10_ofi_weight,
+        strategy10_momentum_weight=cfg.strategy10_momentum_weight,
+        strategy10_max_fair_value=cfg.strategy10_max_fair_value,
     )
 
 
@@ -651,7 +671,7 @@ def _profile_for_strategy_prefix(cfg: AppConfig, strategy_id: int, prefix: str) 
             max_entry_price=_env_float(
                 f"{prefix}_MAX_ENTRY_PRICE",
                 _env_float(legacy_strategy7_max_entry_key, cfg.max_entry_price)
-                if strategy_id in {7, 8, 9} and os.getenv(legacy_strategy7_max_entry_key) is not None
+                if strategy_id in {7, 8, 9, 10} and os.getenv(legacy_strategy7_max_entry_key) is not None
                 else cfg.max_entry_price,
             ),
             binance_signal_stale_seconds=_env_float(
@@ -792,6 +812,17 @@ def _profile_for_strategy_prefix(cfg: AppConfig, strategy_id: int, prefix: str) 
                 f"{prefix}_STRATEGY9_ULTRA_SIGNAL_GAP",
                 cfg.strategy9_ultra_signal_gap,
             ),
+            strategy10_min_edge=_env_float(f"{prefix}_STRATEGY10_MIN_EDGE", cfg.strategy10_min_edge),
+            strategy10_edge_buffer=_env_float(f"{prefix}_STRATEGY10_EDGE_BUFFER", cfg.strategy10_edge_buffer),
+            strategy10_ofi_weight=_env_float(f"{prefix}_STRATEGY10_OFI_WEIGHT", cfg.strategy10_ofi_weight),
+            strategy10_momentum_weight=_env_float(
+                f"{prefix}_STRATEGY10_MOMENTUM_WEIGHT",
+                cfg.strategy10_momentum_weight,
+            ),
+            strategy10_max_fair_value=_env_float(
+                f"{prefix}_STRATEGY10_MAX_FAIR_VALUE",
+                cfg.strategy10_max_fair_value,
+            ),
         ),
     )
 
@@ -881,6 +912,11 @@ class AppConfig:
     strategy9_ultra_max_entry_price: float = field(default_factory=lambda: _env_float("STRATEGY9_ULTRA_MAX_ENTRY_PRICE", 0.54))
     strategy9_strong_signal_gap: float = field(default_factory=lambda: _env_float("STRATEGY9_STRONG_SIGNAL_GAP", 0.02))
     strategy9_ultra_signal_gap: float = field(default_factory=lambda: _env_float("STRATEGY9_ULTRA_SIGNAL_GAP", 0.04))
+    strategy10_min_edge: float = field(default_factory=lambda: _env_float("STRATEGY10_MIN_EDGE", 0.04))
+    strategy10_edge_buffer: float = field(default_factory=lambda: _env_float("STRATEGY10_EDGE_BUFFER", 0.005))
+    strategy10_ofi_weight: float = field(default_factory=lambda: _env_float("STRATEGY10_OFI_WEIGHT", 0.08))
+    strategy10_momentum_weight: float = field(default_factory=lambda: _env_float("STRATEGY10_MOMENTUM_WEIGHT", 1.0))
+    strategy10_max_fair_value: float = field(default_factory=lambda: _env_float("STRATEGY10_MAX_FAIR_VALUE", 0.85))
     binance_ws_url: str = field(default_factory=lambda: os.getenv('BINANCE_WS_URL') or 'wss://stream.binance.com:9443/ws')
     binance_depth_stream: str = field(default_factory=lambda: os.getenv('BINANCE_DEPTH_STREAM') or 'btcusdt@depth5')
     binance_signal_stale_seconds: float = field(default_factory=lambda: _env_float('BINANCE_SIGNAL_STALE_SECONDS', 2.0))
@@ -1112,6 +1148,17 @@ class AppConfig:
                 strategy9_ultra_signal_gap=_env_float(
                     f"{prefix}_STRATEGY9_ULTRA_SIGNAL_GAP",
                     self.strategy9_ultra_signal_gap,
+                ),
+                strategy10_min_edge=_env_float(f"{prefix}_STRATEGY10_MIN_EDGE", self.strategy10_min_edge),
+                strategy10_edge_buffer=_env_float(f"{prefix}_STRATEGY10_EDGE_BUFFER", self.strategy10_edge_buffer),
+                strategy10_ofi_weight=_env_float(f"{prefix}_STRATEGY10_OFI_WEIGHT", self.strategy10_ofi_weight),
+                strategy10_momentum_weight=_env_float(
+                    f"{prefix}_STRATEGY10_MOMENTUM_WEIGHT",
+                    self.strategy10_momentum_weight,
+                ),
+                strategy10_max_fair_value=_env_float(
+                    f"{prefix}_STRATEGY10_MAX_FAIR_VALUE",
+                    self.strategy10_max_fair_value,
                 ),
                 min_entry_price=(
                     _env_optional_float(f"{prefix}_MIN_ENTRY_PRICE")

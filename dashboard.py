@@ -88,8 +88,8 @@ def _write_env_file(path: Path, values: dict[str, str]) -> None:
     atomic_write_text(path, text, encoding="utf-8")
 
 
-SUPPORTED_STRATEGY_ID_TEXTS: set[str] = {"1", "2", "3", "4", "5", "6", "7", "8", "9"}
-SUPPORTED_STRATEGY_SELECT_OPTIONS: list[str] = ["1", "2", "3", "4", "5", "6", "7", "8", "9"]
+SUPPORTED_STRATEGY_ID_TEXTS: set[str] = {"1", "2", "3", "4", "5", "6", "7", "8", "9", "10"}
+SUPPORTED_STRATEGY_SELECT_OPTIONS: list[str] = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10"]
 
 
 def _normalize_strategy_id_list_for_key(value: str, key: str, attr_name: str) -> str:
@@ -99,10 +99,10 @@ def _normalize_strategy_id_list_for_key(value: str, key: str, attr_name: str) ->
     if raw and len(normalized_ids) == 1 and normalized_ids[0] == cfg.strategy_id:
         has_valid = any(item in SUPPORTED_STRATEGY_ID_TEXTS for item in raw)
         if not has_valid:
-            raise ValueError(f"Invalid value for {key}: expected comma-separated strategy ids 1-9, got {value!r}")
+            raise ValueError(f"Invalid value for {key}: expected comma-separated strategy ids 1-10, got {value!r}")
     normalized = [str(item) for item in normalized_ids]
     if not normalized:
-        raise ValueError(f"Invalid value for {key}: expected comma-separated strategy ids 1-9, got {value!r}")
+        raise ValueError(f"Invalid value for {key}: expected comma-separated strategy ids 1-10, got {value!r}")
     return ",".join(normalized)
 
 
@@ -361,6 +361,11 @@ STRATEGY_PROFILE_EDITABLE_FIELDS: tuple[str, ...] = (
     "STRATEGY9_ULTRA_MAX_ENTRY_PRICE",
     "STRATEGY9_STRONG_SIGNAL_GAP",
     "STRATEGY9_ULTRA_SIGNAL_GAP",
+    "STRATEGY10_MIN_EDGE",
+    "STRATEGY10_EDGE_BUFFER",
+    "STRATEGY10_OFI_WEIGHT",
+    "STRATEGY10_MOMENTUM_WEIGHT",
+    "STRATEGY10_MAX_FAIR_VALUE",
 )
 
 STRATEGY_PROFILE_COMMON_FIELDS: tuple[str, ...] = (
@@ -402,7 +407,7 @@ def _strategy_profile_prefix(mode: str, strategy_id: int | str) -> str:
 
 
 def _split_strategy_profile_key(key: str) -> tuple[str, str, str] | None:
-    match = re.match(r"^(LIVE|PAPER)_STRATEGY_([1-9])_(.+)$", str(key or ""))
+    match = re.match(r"^(LIVE|PAPER)_STRATEGY_(10|[1-9])_(.+)$", str(key or ""))
     if not match:
         return None
     mode = match.group(1).lower()
@@ -431,7 +436,7 @@ def _strategy_profile_field_names(strategy_id: int | str) -> list[str]:
         )
     if strategy_text == "6":
         fields.extend(["OFI_THRESHOLD", "BINANCE_SIGNAL_STALE_SECONDS"])
-    if strategy_text in {"7", "8", "9"}:
+    if strategy_text in {"7", "8", "9", "10"}:
         fields.extend(
             [
                 "OFI_THRESHOLD",
@@ -474,6 +479,16 @@ def _strategy_profile_field_names(strategy_id: int | str) -> list[str]:
                 "STRATEGY9_ULTRA_MAX_ENTRY_PRICE",
                 "STRATEGY9_STRONG_SIGNAL_GAP",
                 "STRATEGY9_ULTRA_SIGNAL_GAP",
+            ]
+        )
+    if strategy_text == "10":
+        fields.extend(
+            [
+                "STRATEGY10_MIN_EDGE",
+                "STRATEGY10_EDGE_BUFFER",
+                "STRATEGY10_OFI_WEIGHT",
+                "STRATEGY10_MOMENTUM_WEIGHT",
+                "STRATEGY10_MAX_FAIR_VALUE",
             ]
         )
     return fields
@@ -546,6 +561,11 @@ def _cfg_for_paper_timeframe(cfg: AppConfig, timeframe: str) -> AppConfig:
         strategy9_ultra_max_entry_price=profile.strategy9_ultra_max_entry_price,
         strategy9_strong_signal_gap=profile.strategy9_strong_signal_gap,
         strategy9_ultra_signal_gap=profile.strategy9_ultra_signal_gap,
+        strategy10_min_edge=profile.strategy10_min_edge,
+        strategy10_edge_buffer=profile.strategy10_edge_buffer,
+        strategy10_ofi_weight=profile.strategy10_ofi_weight,
+        strategy10_momentum_weight=profile.strategy10_momentum_weight,
+        strategy10_max_fair_value=profile.strategy10_max_fair_value,
     )
 
 
@@ -1439,6 +1459,12 @@ def _strategy_catalog() -> dict[str, dict[str, Any]]:
             "preview": ["OFI", "MOMENTUM", "STABILITY", "PRICE CAP"],
             "detail": "只在信号持续同向、没有明显衰减且价格低于动态上限时给出方向。",
         },
+        "10": {
+            "label": "估值优势",
+            "summary": "用 Polymarket 价格、币安盘口失衡和本轮动量估算公平概率，只买明显低估的一边。",
+            "preview": ["FAIR VALUE", "EDGE", "BUFFER", "SKIP"],
+            "detail": "只有估算胜率减去当前买入价和成本缓冲后仍超过阈值时才给出方向。",
+        },
     }
 
 
@@ -1524,6 +1550,11 @@ def _field_groups() -> list[dict[str, Any]]:
                 "STRATEGY9_ULTRA_MAX_ENTRY_PRICE",
                 "STRATEGY9_STRONG_SIGNAL_GAP",
                 "STRATEGY9_ULTRA_SIGNAL_GAP",
+                "STRATEGY10_MIN_EDGE",
+                "STRATEGY10_EDGE_BUFFER",
+                "STRATEGY10_OFI_WEIGHT",
+                "STRATEGY10_MOMENTUM_WEIGHT",
+                "STRATEGY10_MAX_FAIR_VALUE",
             ],
         },
         {
@@ -1722,6 +1753,11 @@ class DashboardState:
         "STRATEGY9_ULTRA_MAX_ENTRY_PRICE",
         "STRATEGY9_STRONG_SIGNAL_GAP",
         "STRATEGY9_ULTRA_SIGNAL_GAP",
+        "STRATEGY10_MIN_EDGE",
+        "STRATEGY10_EDGE_BUFFER",
+        "STRATEGY10_OFI_WEIGHT",
+        "STRATEGY10_MOMENTUM_WEIGHT",
+        "STRATEGY10_MAX_FAIR_VALUE",
         "SIGNAL_MOMENTUM_THRESHOLD",
         "SIGNAL_WEAK_SIGNAL_MODE",
         "SIGNAL_FALLBACK_STRATEGY_ID",
@@ -1804,6 +1840,11 @@ class DashboardState:
         "STRATEGY9_ULTRA_MAX_ENTRY_PRICE": "策略9 超强信号价帽",
         "STRATEGY9_STRONG_SIGNAL_GAP": "策略9 强信号优势",
         "STRATEGY9_ULTRA_SIGNAL_GAP": "策略9 超强信号优势",
+        "STRATEGY10_MIN_EDGE": "策略10 最小期望优势",
+        "STRATEGY10_EDGE_BUFFER": "策略10 成本缓冲",
+        "STRATEGY10_OFI_WEIGHT": "策略10 OFI 权重",
+        "STRATEGY10_MOMENTUM_WEIGHT": "策略10 动量权重",
+        "STRATEGY10_MAX_FAIR_VALUE": "策略10 估值上限",
         "SIGNAL_MOMENTUM_THRESHOLD": "动量阈值",
         "SIGNAL_WEAK_SIGNAL_MODE": "弱信号处理",
         "SIGNAL_FALLBACK_STRATEGY_ID": "弱信号回退基础策略",
@@ -1897,6 +1938,11 @@ class DashboardState:
         "STRATEGY9_ULTRA_MAX_ENTRY_PRICE": "strategy9_ultra_max_entry_price",
         "STRATEGY9_STRONG_SIGNAL_GAP": "strategy9_strong_signal_gap",
         "STRATEGY9_ULTRA_SIGNAL_GAP": "strategy9_ultra_signal_gap",
+        "STRATEGY10_MIN_EDGE": "strategy10_min_edge",
+        "STRATEGY10_EDGE_BUFFER": "strategy10_edge_buffer",
+        "STRATEGY10_OFI_WEIGHT": "strategy10_ofi_weight",
+        "STRATEGY10_MOMENTUM_WEIGHT": "strategy10_momentum_weight",
+        "STRATEGY10_MAX_FAIR_VALUE": "strategy10_max_fair_value",
         "SIGNAL_MOMENTUM_THRESHOLD": "signal_momentum_threshold",
         "SIGNAL_WEAK_SIGNAL_MODE": "signal_weak_signal_mode",
         "SIGNAL_FALLBACK_STRATEGY_ID": "signal_fallback_strategy_id",
@@ -1971,6 +2017,11 @@ class DashboardState:
         "STRATEGY9_ULTRA_MAX_ENTRY_PRICE",
         "STRATEGY9_STRONG_SIGNAL_GAP",
         "STRATEGY9_ULTRA_SIGNAL_GAP",
+        "STRATEGY10_MIN_EDGE",
+        "STRATEGY10_EDGE_BUFFER",
+        "STRATEGY10_OFI_WEIGHT",
+        "STRATEGY10_MOMENTUM_WEIGHT",
+        "STRATEGY10_MAX_FAIR_VALUE",
         "SIGNAL_MOMENTUM_THRESHOLD",
         "SIGNAL_DYNAMIC_THRESHOLD_K",
         "WS_TRADE_GUARD_STALE_SECONDS",
@@ -2044,12 +2095,22 @@ class DashboardState:
         "STRATEGY9_ULTRA_MAX_ENTRY_PRICE": "strategy_9_only",
         "STRATEGY9_STRONG_SIGNAL_GAP": "strategy_9_only",
         "STRATEGY9_ULTRA_SIGNAL_GAP": "strategy_9_only",
+        "STRATEGY10_MIN_EDGE": "strategy_10_only",
+        "STRATEGY10_EDGE_BUFFER": "strategy_10_only",
+        "STRATEGY10_OFI_WEIGHT": "strategy_10_only",
+        "STRATEGY10_MOMENTUM_WEIGHT": "strategy_10_only",
+        "STRATEGY10_MAX_FAIR_VALUE": "strategy_10_only",
     }
     FIELD_HELP: dict[str, str] = {
-        "STRATEGY_ID": "策略 1-4 是固定节奏策略，策略 5 是动量策略，策略 6 是 Binance OFI，策略 7/8/9 是组合信号策略，其中策略 9 是稳定共振策略。",
+        "STRATEGY_ID": "策略 1-4 是固定节奏策略，策略 5 是动量策略，策略 6 是 Binance OFI，策略 7/8/9 是组合信号策略，策略 10 是估值优势策略。",
         "STRATEGY_IDS": "统一策略组合。设置后纸面和实盘都使用同一组策略和同一套参数，切换模式只改变执行环境。",
         "LIVE_STRATEGY_IDS": "实盘运行时可轮询的策略列表，按输入顺序去重，例如 2,6。未填写时会回退到 STRATEGY_ID。",
         "PAPER_STRATEGY_IDS": "纸面测试可同时运行多个策略，按输入顺序去重，例如 1,2,6。",
+        "STRATEGY10_MIN_EDGE": "策略10 估算胜率减去当前买入价和成本缓冲后的最小优势，低于该值就跳过。",
+        "STRATEGY10_EDGE_BUFFER": "策略10 对手续费、价差和延迟预留的额外安全边际。",
+        "STRATEGY10_OFI_WEIGHT": "策略10 将 Binance 盘口失衡映射到估值概率的权重。",
+        "STRATEGY10_MOMENTUM_WEIGHT": "策略10 将本轮 Polymarket 动量映射到估值概率的权重。",
+        "STRATEGY10_MAX_FAIR_VALUE": "策略10 对估算概率做截断，避免单一信号把估值推到极端。",
         "TARGET_PROFIT": "在目标收益模式下，这里表示每轮期望净利；在固定金额模式下，它更多用于观察研究，不直接决定首笔下注金额。",
         "BET_SIZING_MODE": "纯固定金额模式每轮只下 BASE_ORDER_COST 且不追亏；固定金额模式首笔固定但亏损后会回补；目标收益模式会根据目标净利反推下注金额。",
         "ENABLE_LIVE_TRADING": "运行模式选择实盘或纸面+实盘时会自动开启；关闭后只能安全运行纸面测试。",
@@ -2277,7 +2338,8 @@ class DashboardState:
             strategy_ids = []
             strategy_ids.extend(getattr(cfg, "paper_strategy_ids", []) or [])
             strategy_ids.extend(getattr(cfg, "live_strategy_ids", []) or [])
-        if cfg.strategy_id not in {6, 7, 8, 9} and not any(strategy_id in {6, 7, 8, 9} for strategy_id in strategy_ids):
+        ofi_strategy_ids = {6, 7, 8, 9, 10}
+        if cfg.strategy_id not in ofi_strategy_ids and not any(strategy_id in ofi_strategy_ids for strategy_id in strategy_ids):
             return None
         service = BinanceDepth5SignalService(ws_url=cfg.binance_ws_url, stream=cfg.binance_depth_stream)
         service.start()
@@ -2542,6 +2604,11 @@ class DashboardState:
                     "strategy9_ultra_max_entry_price": _fmt_env(profile.strategy9_ultra_max_entry_price),
                     "strategy9_strong_signal_gap": _fmt_env(profile.strategy9_strong_signal_gap),
                     "strategy9_ultra_signal_gap": _fmt_env(profile.strategy9_ultra_signal_gap),
+                    "strategy10_min_edge": _fmt_env(profile.strategy10_min_edge),
+                    "strategy10_edge_buffer": _fmt_env(profile.strategy10_edge_buffer),
+                    "strategy10_ofi_weight": _fmt_env(profile.strategy10_ofi_weight),
+                    "strategy10_momentum_weight": _fmt_env(profile.strategy10_momentum_weight),
+                    "strategy10_max_fair_value": _fmt_env(profile.strategy10_max_fair_value),
                 }
                 for timeframe, profile in getattr(self._cfg, "paper_profiles", {}).items()
             }
@@ -5470,6 +5537,14 @@ const REASON_LABELS = {
   strategy9_dynamic_price_too_high: '策略9 动态价帽过高',
   strategy9_price_too_low: '策略9 入场价格过低',
   strategy9_price_too_high: '策略9 入场价格过高',
+  strategy10_ofi_unavailable: '策略10 盘口失衡信号不可用',
+  strategy10_ofi_stale: '策略10 盘口失衡信号已过期',
+  strategy10_momentum_unavailable: '策略10 动量信号不可用',
+  strategy10_edge_too_low: '策略10 估值优势不足',
+  strategy10_signal_conflict: '策略10 锁边后信号反向',
+  strategy10_entry_too_late: '策略10 确认出现过晚',
+  strategy10_price_too_low: '策略10 入场价格过低',
+  strategy10_price_too_high: '策略10 入场价格过高',
   live_fok_not_filled: '策略7 实时 FOK 订单未成交',
   awaiting_fill_confirmation: '等待成交确认',
   round_in_progress: '轮次仍在进行中',
@@ -6702,8 +6777,9 @@ function applyAdvancedConfigVisibility(values) {
   }
   const strategyId = String(resolveUnifiedStrategySelection(state.config || {}, values || {}).focus || '');
   const isStrategyFive = strategyId === '5';
-  const isStrategySeven = strategyId === '7' || strategyId === '8' || strategyId === '9';
+  const isStrategySeven = strategyId === '7' || strategyId === '8' || strategyId === '9' || strategyId === '10';
   const isStrategyNine = strategyId === '9';
+  const isStrategyTen = strategyId === '10';
 
   panel.querySelectorAll('.config-group').forEach((section) => {
     const advancedGroup = section.dataset.advancedGroup === 'true';
@@ -6716,6 +6792,7 @@ function applyAdvancedConfigVisibility(values) {
       scope === 'strategy_5_only' ? isStrategyFive
       : scope === 'strategy_7_only' ? isStrategySeven
       : scope === 'strategy_9_only' ? isStrategyNine
+      : scope === 'strategy_10_only' ? isStrategyTen
       : true;
     field.style.display = panel.hidden ? 'none' : (shouldShow ? '' : 'none');
   });

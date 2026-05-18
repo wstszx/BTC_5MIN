@@ -129,6 +129,11 @@ def _paper_strategy_profile_from_cfg(cfg: AppConfig, strategy_id: int) -> LiveSt
         strategy9_ultra_max_entry_price=cfg.strategy9_ultra_max_entry_price,
         strategy9_strong_signal_gap=cfg.strategy9_strong_signal_gap,
         strategy9_ultra_signal_gap=cfg.strategy9_ultra_signal_gap,
+        strategy10_min_edge=cfg.strategy10_min_edge,
+        strategy10_edge_buffer=cfg.strategy10_edge_buffer,
+        strategy10_ofi_weight=cfg.strategy10_ofi_weight,
+        strategy10_momentum_weight=cfg.strategy10_momentum_weight,
+        strategy10_max_fair_value=cfg.strategy10_max_fair_value,
     )
 
 
@@ -187,6 +192,11 @@ def _paper_cfg_for_timeframe(cfg: AppConfig, timeframe: str) -> AppConfig:
         strategy9_ultra_max_entry_price=profile.strategy9_ultra_max_entry_price,
         strategy9_strong_signal_gap=profile.strategy9_strong_signal_gap,
         strategy9_ultra_signal_gap=profile.strategy9_ultra_signal_gap,
+        strategy10_min_edge=profile.strategy10_min_edge,
+        strategy10_edge_buffer=profile.strategy10_edge_buffer,
+        strategy10_ofi_weight=profile.strategy10_ofi_weight,
+        strategy10_momentum_weight=profile.strategy10_momentum_weight,
+        strategy10_max_fair_value=profile.strategy10_max_fair_value,
     )
     timeframe_cfg.paper_strategy_profiles = {
         strategy_id: _paper_strategy_profile_from_cfg(timeframe_cfg, strategy_id)
