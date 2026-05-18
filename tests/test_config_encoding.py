@@ -136,9 +136,7 @@ def test_build_config_applies_live_strategy_profile_overrides():
 def test_build_config_accepts_flat_base_cost_for_strategy_profiles():
     warnings = collect_config_warnings(
         {
-            'BET_SIZING_MODE': 'FLAT_BASE_COST',
-            'PAPER_STRATEGY_7_BET_SIZING_MODE': 'FLAT_BASE_COST',
-            'LIVE_STRATEGY_7_BET_SIZING_MODE': 'FLAT_BASE_COST',
+            'STRATEGY_7_BET_SIZING_MODE': 'FLAT_BASE_COST',
         }
     )
     cfg = build_config_from_env_values(
@@ -146,15 +144,47 @@ def test_build_config_accepts_flat_base_cost_for_strategy_profiles():
             'STRATEGY_ID': '7',
             'PAPER_STRATEGY_IDS': '7',
             'LIVE_STRATEGY_IDS': '7',
-            'BET_SIZING_MODE': 'FLAT_BASE_COST',
-            'PAPER_STRATEGY_7_BET_SIZING_MODE': 'FLAT_BASE_COST',
+            'BET_SIZING_MODE': 'TARGET_PROFIT',
+            'STRATEGY_7_BET_SIZING_MODE': 'FLAT_BASE_COST',
+        }
+    )
+
+    assert 'STRATEGY_7_BET_SIZING_MODE' not in warnings
+    assert cfg.bet_sizing_mode == 'TARGET_PROFIT'
+    assert cfg.paper_strategy_profiles[7].bet_sizing_mode == 'FLAT_BASE_COST'
+    assert cfg.live_profiles[7].bet_sizing_mode == 'FLAT_BASE_COST'
+
+
+def test_build_config_keeps_legacy_mode_overrides_but_prefers_strategy_mode():
+    cfg = build_config_from_env_values(
+        {
+            'STRATEGY_ID': '7',
+            'PAPER_STRATEGY_IDS': '7',
+            'LIVE_STRATEGY_IDS': '7',
+            'BET_SIZING_MODE': 'FIXED_BASE_COST',
+            'PAPER_STRATEGY_7_BET_SIZING_MODE': 'TARGET_PROFIT',
+            'LIVE_STRATEGY_7_BET_SIZING_MODE': 'FIXED_BASE_COST',
+            'STRATEGY_7_BET_SIZING_MODE': 'FLAT_BASE_COST',
+        }
+    )
+
+    assert cfg.paper_strategy_profiles[7].bet_sizing_mode == 'FLAT_BASE_COST'
+    assert cfg.live_profiles[7].bet_sizing_mode == 'FLAT_BASE_COST'
+
+
+def test_build_config_uses_legacy_mode_overrides_when_strategy_mode_missing():
+    cfg = build_config_from_env_values(
+        {
+            'STRATEGY_ID': '7',
+            'PAPER_STRATEGY_IDS': '7',
+            'LIVE_STRATEGY_IDS': '7',
+            'BET_SIZING_MODE': 'FIXED_BASE_COST',
+            'PAPER_STRATEGY_7_BET_SIZING_MODE': 'TARGET_PROFIT',
             'LIVE_STRATEGY_7_BET_SIZING_MODE': 'FLAT_BASE_COST',
         }
     )
 
-    assert 'BET_SIZING_MODE' not in warnings
-    assert cfg.bet_sizing_mode == 'FLAT_BASE_COST'
-    assert cfg.paper_strategy_profiles[7].bet_sizing_mode == 'FLAT_BASE_COST'
+    assert cfg.paper_strategy_profiles[7].bet_sizing_mode == 'TARGET_PROFIT'
     assert cfg.live_profiles[7].bet_sizing_mode == 'FLAT_BASE_COST'
 
 

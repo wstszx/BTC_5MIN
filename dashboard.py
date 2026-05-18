@@ -292,7 +292,6 @@ PAPER_PROFILE_EDITABLE_FIELDS: tuple[str, ...] = (
     "STRATEGY_ID",
     "STRATEGY_IDS",
     "TARGET_PROFIT",
-    "BET_SIZING_MODE",
     "BASE_ORDER_COST",
     "MIN_STAKE",
     "MAX_CONSECUTIVE_LOSSES",
@@ -406,13 +405,23 @@ def _strategy_profile_prefix(mode: str, strategy_id: int | str) -> str:
     return f"{normalized_mode.upper()}_STRATEGY_{strategy_id}"
 
 
+def _shared_strategy_profile_prefix(strategy_id: int | str) -> str:
+    return f"STRATEGY_{strategy_id}"
+
+
 def _split_strategy_profile_key(key: str) -> tuple[str, str, str] | None:
     match = re.match(r"^(LIVE|PAPER)_STRATEGY_(10|[1-9])_(.+)$", str(key or ""))
     if not match:
-        return None
-    mode = match.group(1).lower()
-    strategy_id = match.group(2)
-    base_key = match.group(3)
+        shared_match = re.match(r"^STRATEGY_(10|[1-9])_(.+)$", str(key or ""))
+        if not shared_match:
+            return None
+        mode = "shared"
+        strategy_id = shared_match.group(1)
+        base_key = shared_match.group(2)
+    else:
+        mode = match.group(1).lower()
+        strategy_id = match.group(2)
+        base_key = match.group(3)
     if base_key not in STRATEGY_PROFILE_EDITABLE_FIELDS:
         return None
     return mode, strategy_id, base_key
@@ -1492,7 +1501,6 @@ def _field_groups() -> list[dict[str, Any]]:
                 "STRATEGY_IDS",
                 "OPEN_DELAY_SECONDS",
                 "TARGET_PROFIT",
-                "BET_SIZING_MODE",
                 "BASE_ORDER_COST",
                 "PAPER_SIMULATED_WALLET_BALANCE",
                 "MAX_CONSECUTIVE_LOSSES",
@@ -1710,7 +1718,6 @@ class DashboardState:
         "PAPER_STRATEGY_IDS",
         "OPEN_DELAY_SECONDS",
         "TARGET_PROFIT",
-        "BET_SIZING_MODE",
         "BASE_ORDER_COST",
         "MIN_STAKE",
         "PAPER_SIMULATED_WALLET_BALANCE",
@@ -2410,7 +2417,12 @@ class DashboardState:
             strategy_text = str(strategy_id)
             fields: dict[str, Any] = {}
             for base_key in _strategy_profile_field_names(strategy_id):
-                prefixed_key = f"{_strategy_profile_prefix(mode, strategy_text)}_{base_key}"
+                shared_profile_key = f"{_shared_strategy_profile_prefix(strategy_text)}_{base_key}"
+                prefixed_key = (
+                    shared_profile_key
+                    if base_key == "BET_SIZING_MODE"
+                    else f"{_strategy_profile_prefix(mode, strategy_text)}_{base_key}"
+                )
                 inherited_value = self._effective_config_value(base_key)
                 explicit_value = self._env_values.get(prefixed_key)
                 value = explicit_value if explicit_value is not None else self._effective_config_value(prefixed_key)
@@ -6553,7 +6565,6 @@ function renderPaperProfiles(payload) {
     'STRATEGY_ID',
     'STRATEGY_IDS',
     'TARGET_PROFIT',
-    'BET_SIZING_MODE',
     'BASE_ORDER_COST',
     'MIN_STAKE',
     'MAX_CONSECUTIVE_LOSSES',
@@ -6605,7 +6616,6 @@ function renderPaperProfiles(payload) {
           : String(envValues[scopedKey] ?? profile[
               fieldName === 'STRATEGY_ID' ? 'strategy_id'
               : fieldName === 'TARGET_PROFIT' ? 'target_profit'
-              : fieldName === 'BET_SIZING_MODE' ? 'bet_sizing_mode'
               : fieldName === 'BASE_ORDER_COST' ? 'base_order_cost'
               : fieldName === 'MAX_CONSECUTIVE_LOSSES' ? 'max_consecutive_losses'
               : fieldName === 'MIN_STAKE' ? 'min_stake'

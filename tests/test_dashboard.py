@@ -869,6 +869,8 @@ def test_dashboard_payload_includes_strategy_catalog_and_field_groups(tmp_path: 
         assert payload["field_help"]["STRATEGY_ID"]
         assert payload["field_scope"]["SIGNAL_MOMENTUM_THRESHOLD"] == "strategy_5_only"
         assert payload["field_groups"][0]["title"] == "\u8fd0\u884c\u6a21\u5f0f"
+        assert "BET_SIZING_MODE" not in payload["editable_keys"]
+        assert all("BET_SIZING_MODE" not in group.get("keys", []) for group in payload["field_groups"])
     finally:
         state.close()
 
@@ -2870,6 +2872,7 @@ def test_dashboard_config_payload_exposes_and_saves_strategy_profile_overrides(t
         'LIVE_TRADING_ENABLED=true\n'
         'LIVE_STRATEGY_IDS=3,7\n'
         'BASE_ORDER_COST=2\n'
+        'STRATEGY_7_BET_SIZING_MODE=FLAT_BASE_COST\n'
         'LIVE_STRATEGY_7_BASE_ORDER_COST=5.5\n',
         encoding='utf-8',
     )
@@ -2882,13 +2885,19 @@ def test_dashboard_config_payload_exposes_and_saves_strategy_profile_overrides(t
         assert strategy_seven['fields']['BASE_ORDER_COST']['key'] == 'LIVE_STRATEGY_7_BASE_ORDER_COST'
         assert strategy_seven['fields']['BASE_ORDER_COST']['value'] == '5.5'
         assert strategy_seven['fields']['BASE_ORDER_COST']['inherited'] is False
+        assert strategy_seven['fields']['BET_SIZING_MODE']['key'] == 'STRATEGY_7_BET_SIZING_MODE'
+        assert strategy_seven['fields']['BET_SIZING_MODE']['value'] == 'FLAT_BASE_COST'
+        assert strategy_seven['fields']['BET_SIZING_MODE']['inherited'] is False
         assert payload['strategy_profiles']['strategies']['3']['fields']['BASE_ORDER_COST']['value'] == '2.0'
         assert payload['strategy_profiles']['strategies']['3']['fields']['BASE_ORDER_COST']['inherited'] is True
 
-        updated = state.update_config({'LIVE_STRATEGY_3_BASE_ORDER_COST': '4.25'})
+        updated = state.update_config({'LIVE_STRATEGY_3_BASE_ORDER_COST': '4.25', 'STRATEGY_3_BET_SIZING_MODE': 'TARGET_PROFIT'})
 
         assert updated['strategy_profiles']['strategies']['3']['fields']['BASE_ORDER_COST']['value'] == '4.25'
+        assert updated['strategy_profiles']['strategies']['3']['fields']['BET_SIZING_MODE']['key'] == 'STRATEGY_3_BET_SIZING_MODE'
+        assert updated['strategy_profiles']['strategies']['3']['fields']['BET_SIZING_MODE']['value'] == 'TARGET_PROFIT'
         assert 'LIVE_STRATEGY_3_BASE_ORDER_COST=4.25' in env_file.read_text(encoding='utf-8')
+        assert 'STRATEGY_3_BET_SIZING_MODE=TARGET_PROFIT' in env_file.read_text(encoding='utf-8')
     finally:
         state.close()
 
@@ -3684,7 +3693,7 @@ def test_live_recent_orders_auto_reconcile_does_not_restore_legacy_flat_sizing_s
         "TRADE_MODE=live\n"
         "STRATEGY_ID=7\n"
         "LIVE_STRATEGY_IDS=7\n"
-        "LIVE_STRATEGY_7_BET_SIZING_MODE=FLAT_BASE_COST\n",
+        "STRATEGY_7_BET_SIZING_MODE=FLAT_BASE_COST\n",
         encoding="utf-8",
     )
     state = DashboardState(env_file=env_file)

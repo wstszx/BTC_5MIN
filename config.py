@@ -123,6 +123,8 @@ def _base_config_key(key: str) -> str:
         return "_".join(parts[2:])
     if len(parts) >= 4 and parts[0] in {"LIVE", "PAPER"} and parts[1] == "STRATEGY" and parts[2].isdigit():
         return "_".join(parts[3:])
+    if len(parts) >= 3 and parts[0] == "STRATEGY" and parts[1].isdigit():
+        return "_".join(parts[2:])
     return key
 
 
@@ -423,6 +425,18 @@ def _paper_strategy_profile_prefix(strategy_id: int) -> str:
     return f"PAPER_STRATEGY_{strategy_id}"
 
 
+def _strategy_profile_prefix(strategy_id: int) -> str:
+    return f"STRATEGY_{strategy_id}"
+
+
+def _strategy_mode_env(strategy_id: int, *, legacy_prefix: str, global_mode: str) -> str:
+    return (
+        os.getenv(f"{_strategy_profile_prefix(strategy_id)}_BET_SIZING_MODE")
+        or os.getenv(f"{legacy_prefix}_BET_SIZING_MODE")
+        or global_mode
+    ).upper()
+
+
 @dataclass(frozen=True, slots=True)
 class PaperTimeframeProfile:
     timeframe: str
@@ -628,7 +642,7 @@ def _profile_for_strategy_prefix(cfg: AppConfig, strategy_id: int, prefix: str) 
         LiveStrategyProfile(
             strategy_id=strategy_id,
             target_profit=_env_float(f"{prefix}_TARGET_PROFIT", cfg.target_profit),
-            bet_sizing_mode=(os.getenv(f"{prefix}_BET_SIZING_MODE") or cfg.bet_sizing_mode).upper(),
+            bet_sizing_mode=_strategy_mode_env(strategy_id, legacy_prefix=prefix, global_mode=cfg.bet_sizing_mode),
             base_order_cost=_env_float(f"{prefix}_BASE_ORDER_COST", cfg.base_order_cost),
             max_consecutive_losses=_env_int(f"{prefix}_MAX_CONSECUTIVE_LOSSES", cfg.max_consecutive_losses),
             min_stake=_env_optional_float(min_stake_key) if os.getenv(min_stake_key) is not None else cfg.min_stake,
@@ -993,7 +1007,7 @@ class AppConfig:
                 strategy_id=strategy_id,
                 paper_strategy_ids=_paper_profile_strategy_ids(prefix, self.paper_strategy_ids, strategy_id),
                 target_profit=_env_float(f"{prefix}_TARGET_PROFIT", self.target_profit),
-                bet_sizing_mode=(os.getenv(f"{prefix}_BET_SIZING_MODE") or self.bet_sizing_mode).upper(),
+                bet_sizing_mode=_strategy_mode_env(strategy_id, legacy_prefix=prefix, global_mode=self.bet_sizing_mode),
                 base_order_cost=_env_float(f"{prefix}_BASE_ORDER_COST", self.base_order_cost),
                 max_consecutive_losses=_env_int(f"{prefix}_MAX_CONSECUTIVE_LOSSES", self.max_consecutive_losses),
                 min_stake=(
