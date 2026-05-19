@@ -1,4 +1,4 @@
-import csv
+﻿import csv
 from pathlib import Path
 from datetime import datetime, timedelta, timezone
 
@@ -27,14 +27,14 @@ def test_build_candidate_configs_creates_strategy_specific_parameter_bundles():
     candidates = build_candidate_configs(
         cfg,
         strategy_ids=[5],
-        target_profits=[0.8, 1.2],
+        base_order_costs=[0.8, 1.2],
         max_price_thresholds=[0.55],
         strategy5_thresholds=[0.012, 0.018],
     )
 
     assert len(candidates) == 4
     assert all(candidate.base_strategy_id == 5 for candidate in candidates)
-    assert {candidate.params["TARGET_PROFIT"] for candidate in candidates} == {0.8, 1.2}
+    assert {candidate.params["BASE_ORDER_COST"] for candidate in candidates} == {0.8, 1.2}
     assert {candidate.params["SIGNAL_MOMENTUM_THRESHOLD"] for candidate in candidates} == {0.012, 0.018}
 
 
@@ -44,14 +44,13 @@ def test_build_candidate_configs_creates_strategy7_parameter_bundles():
     candidates = build_candidate_configs(
         cfg,
         strategy_ids=[7],
-        target_profits=[1.0],
+        base_order_costs=[1.0],
         max_price_thresholds=[0.55],
         strategy5_thresholds=[0.012],
     )
 
     assert len(candidates) > 0
     assert all(candidate.base_strategy_id == 7 for candidate in candidates)
-    assert all(candidate.params["BET_SIZING_MODE"] == "FLAT_BASE_COST" for candidate in candidates)
     assert all('STRATEGY7_OFI_THRESHOLD' in candidate.params for candidate in candidates)
     assert all('STRATEGY7_MOMENTUM_THRESHOLD' in candidate.params for candidate in candidates)
     assert all('STRATEGY7_MAX_ENTRY_PRICE' in candidate.params for candidate in candidates)
@@ -75,7 +74,7 @@ def test_build_optimizer_state_selects_top_challengers_and_promotable_candidates
             {
                 "candidate_id": "cand-a",
                 "base_strategy_id": 5,
-                "params": {"TARGET_PROFIT": 1.2},
+                "params": {"BASE_ORDER_COST": 1.2},
                 "validation_score": 0.9,
                 "promotable": True,
             },
@@ -89,7 +88,7 @@ def test_build_optimizer_state_selects_top_challengers_and_promotable_candidates
             {
                 "candidate_id": "cand-c",
                 "base_strategy_id": 5,
-                "params": {"TARGET_PROFIT": 0.8},
+                "params": {"BASE_ORDER_COST": 0.8},
                 "validation_score": 0.7,
                 "promotable": False,
             },
@@ -130,7 +129,7 @@ def test_run_optimizer_cycle_writes_optimizer_state_file(tmp_path):
             {
                 "candidate_id": "cand-a",
                 "base_strategy_id": 5,
-                "params": {"TARGET_PROFIT": 1.2},
+                "params": {"BASE_ORDER_COST": 1.2},
                 "validation_score": 0.9,
                 "promotable": True,
             },
@@ -158,7 +157,7 @@ def test_evaluate_candidates_with_walk_forward_aggregates_validation_scores():
         {
             "candidate_id": "cand-a",
             "base_strategy_id": 5,
-            "params": {"TARGET_PROFIT": 1.2},
+            "params": {"BASE_ORDER_COST": 1.2},
         },
         {
             "candidate_id": "cand-b",
@@ -202,7 +201,7 @@ def test_score_candidate_with_backtest_rows_returns_backtest_metrics():
             "candidate_id": "cand-s2",
             "base_strategy_id": 2,
             "params": {
-                "TARGET_PROFIT": 1.0,
+                "BASE_ORDER_COST": 1.0,
                 "MAX_PRICE_THRESHOLD": 0.65,
             },
         },
@@ -260,7 +259,7 @@ def test_run_optimizer_from_history_csv_writes_optimizer_state_from_real_history
         base_cfg=AppConfig(strategy_id=2),
         output_path=output_path,
         strategy_ids=[2],
-        target_profits=[1.0],
+        base_order_costs=[1.0],
         max_price_thresholds=[0.65],
         strategy5_thresholds=[0.015],
         train_size=3,
@@ -395,7 +394,7 @@ def test_refresh_optimizer_state_from_paper_results_updates_challenger_decisions
                 {
                     "candidate_id": "challenger-a",
                     "base_strategy_id": 5,
-                    "params": {"TARGET_PROFIT": 1.2},
+                    "params": {"BASE_ORDER_COST": 1.2},
                     "validation_score": 0.9,
                 }
             ],
@@ -485,3 +484,4 @@ def test_run_optimizer_scheduler_triggers_optimize_and_refresh_when_due(tmp_path
         ("optimize", output_path),
         ("refresh", output_path),
     ]
+

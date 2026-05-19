@@ -117,16 +117,16 @@ def test_dashboard_config_roundtrip_updates_env_file(tmp_path: Path):
         payload = state.update_config(
             {
                 "STRATEGY_ID": "5",
-                "SIGNAL_MOMENTUM_THRESHOLD": "0.012",
+                "STRATEGY_5_SIGNAL_MOMENTUM_THRESHOLD": "0.012",
                 "WS_TRADE_GUARD_STALE_SECONDS": "1.2",
             }
         )
         assert payload["env_values"]["STRATEGY_ID"] == "5"
-        assert payload["env_values"]["SIGNAL_MOMENTUM_THRESHOLD"] == "0.012"
+        assert payload["strategy_profiles"]["strategies"]["5"]["fields"]["SIGNAL_MOMENTUM_THRESHOLD"]["value"] == "0.012"
         assert payload["env_values"]["WS_TRADE_GUARD_STALE_SECONDS"] == "1.2"
         text = env_file.read_text(encoding="utf-8")
         assert "STRATEGY_ID=5" in text
-        assert "SIGNAL_MOMENTUM_THRESHOLD=0.012" in text
+        assert "STRATEGY_5_SIGNAL_MOMENTUM_THRESHOLD=0.012" in text
     finally:
         state.close()
 
@@ -149,16 +149,16 @@ def test_dashboard_rejects_invalid_config_values(tmp_path: Path):
     state = DashboardState(env_file=env_file)
     try:
         try:
-            state.update_config({"MAX_STAKE": "abc", "WS_ENABLED": "maybe"})
+            state.update_config({"STRATEGY_7_MAX_STAKE": "abc", "WS_ENABLED": "maybe"})
         except ConfigValidationError as exc:
             message = str(exc)
             field_errors = exc.field_errors
         else:
             raise AssertionError("Expected ConfigValidationError")
 
-        assert "MAX_STAKE" in message
+        assert "STRATEGY_7_MAX_STAKE" in message
         assert "WS_ENABLED" in message
-        assert field_errors["MAX_STAKE"].startswith("Invalid value for MAX_STAKE")
+        assert field_errors["STRATEGY_7_MAX_STAKE"].startswith("Invalid value for STRATEGY_7_MAX_STAKE")
         assert field_errors["WS_ENABLED"].startswith("Invalid value for WS_ENABLED")
         assert not env_file.exists()
     finally:
@@ -167,31 +167,27 @@ def test_dashboard_rejects_invalid_config_values(tmp_path: Path):
 
 def test_dashboard_payload_uses_effective_values_for_invalid_env_file(tmp_path: Path):
     env_file = tmp_path / ".env.dashboard"
-    env_file.write_text("MAX_STAKE=abc\nWS_ENABLED=maybe\nTARGET_PROFIT=1.2\n", encoding="utf-8")
+    env_file.write_text("STRATEGY_7_MAX_STAKE=abc\nWS_ENABLED=maybe\nTARGET_PROFIT=1.2\n", encoding="utf-8")
     state = DashboardState(env_file=env_file)
     try:
         payload = state.get_config_payload()
 
-        assert payload["env_values"]["MAX_STAKE"] == ""
         assert payload["env_values"]["WS_ENABLED"] == "true"
-        assert payload["env_values"]["TARGET_PROFIT"] == "1.2"
-        assert payload["validation_errors"]["MAX_STAKE"]
+        assert "TARGET_PROFIT" not in payload["env_values"]
+        assert payload["env_values"]["STRATEGY_7_MAX_STAKE"] == "abc"
+        assert "STRATEGY_7_MAX_STAKE" not in payload["validation_errors"]
         assert payload["validation_errors"]["WS_ENABLED"]
     finally:
         state.close()
 
 
-def test_dashboard_bet_sizing_select_includes_flat_base_cost(tmp_path: Path):
+def test_dashboard_payload_omits_bet_sizing_select(tmp_path: Path):
     state = DashboardState(env_file=tmp_path / ".env.dashboard")
     try:
         payload = state.get_config_payload()
-        assert "FLAT_BASE_COST" in payload["select_options"]["BET_SIZING_MODE"]
+        assert "BET_SIZING_MODE" not in payload["select_options"]
     finally:
         state.close()
-
-    js = _dashboard_js()
-    assert "纯固定金额模式" in js
-
 
 def test_recent_trades_payload_includes_pending_paper_trades(tmp_path: Path):
     old_cwd = Path.cwd()
@@ -486,7 +482,7 @@ def test_auto_reconcile_live_ledger_updates_session_state_for_numeric_strategy_i
     payload = json.loads(state_path.read_text(encoding="utf-8"))
     assert payload["cash_pnl"] == pytest.approx(-1.1999994)
     assert payload["daily_realized_pnl"] == pytest.approx(-1.1999994)
-    assert payload["recovery_loss"] == pytest.approx(1.1999994)
+    assert payload["recovery_loss"] == pytest.approx(0.0)
     assert payload["consecutive_losses"] == 1
     assert payload["live_strategies"]["7"]["cash_pnl"] == pytest.approx(-1.1999994)
 
@@ -592,7 +588,7 @@ def test_auto_reconcile_live_ledger_counts_provisional_loss_for_risk_state(tmp_p
     assert changed == 0
     assert rows[0]["result"] == "PROVISIONAL_LOSS"
     assert payload["cash_pnl"] == pytest.approx(-1.0)
-    assert payload["recovery_loss"] == pytest.approx(1.0)
+    assert payload["recovery_loss"] == pytest.approx(0.0)
     assert payload["consecutive_losses"] == 1
     assert payload["live_strategies"]["7"]["cash_pnl"] == pytest.approx(-1.0)
 
@@ -870,7 +866,20 @@ def test_dashboard_payload_includes_strategy_catalog_and_field_groups(tmp_path: 
         assert payload["field_scope"]["SIGNAL_MOMENTUM_THRESHOLD"] == "strategy_5_only"
         assert payload["field_groups"][0]["title"] == "\u8fd0\u884c\u6a21\u5f0f"
         assert "BET_SIZING_MODE" not in payload["editable_keys"]
-        assert all("BET_SIZING_MODE" not in group.get("keys", []) for group in payload["field_groups"])
+        strategy_owned_keys = {
+            "BET_SIZING_MODE",
+            "BASE_ORDER_COST",
+            "TARGET_PROFIT",
+            "MAX_STAKE",
+            "MAX_ENTRY_PRICE",
+            "STRATEGY7_MOMENTUM_THRESHOLD",
+            "STRATEGY10_MIN_EDGE",
+        }
+        assert all(
+            key not in group.get("keys", [])
+            for group in payload["field_groups"]
+            for key in strategy_owned_keys
+        )
     finally:
         state.close()
 
@@ -1073,7 +1082,7 @@ def test_dashboard_update_config_preserves_masked_private_key_on_unrelated_save(
         payload = state.update_config(
             {
                 'TRADE_MODE': 'live',
-                'TARGET_PROFIT': '2.5',
+                'STRATEGY_2_BASE_ORDER_COST': '2.5',
                 'POLYMARKET_PRIVATE_KEY': masked,
             }
         )
@@ -1081,7 +1090,7 @@ def test_dashboard_update_config_preserves_masked_private_key_on_unrelated_save(
         text = env_file.read_text(encoding='utf-8')
         assert 'POLYMARKET_PRIVATE_KEY=super-secret-private-key' in text
         assert payload['env_values']['POLYMARKET_PRIVATE_KEY'] == masked
-        assert payload['env_values']['TARGET_PROFIT'] == '2.5'
+        assert payload['env_values']['STRATEGY_2_BASE_ORDER_COST'] == '2.5'
     finally:
         state.close()
 
@@ -1354,12 +1363,12 @@ def test_dashboard_live_recent_orders_all_returns_all_report_rows_even_with_live
 
 def test_dashboard_config_payload_exposes_runtime_config_warnings(tmp_path: Path):
     env_file = tmp_path / ".env.dashboard"
-    env_file.write_text("MAX_STAKE=abc\nSTRATEGY_IDS=2,x\n", encoding="utf-8")
+    env_file.write_text("STRATEGY_7_MAX_STAKE=abc\nSTRATEGY_IDS=2,x\n", encoding="utf-8")
     state = DashboardState(env_file=env_file)
     try:
         payload = state.get_config_payload()
 
-        assert payload["config_warnings"]["MAX_STAKE"].startswith("Invalid value for MAX_STAKE")
+        assert payload["config_warnings"]["STRATEGY_7_MAX_STAKE"].startswith("Invalid value for STRATEGY_7_MAX_STAKE")
         assert payload["config_warnings"]["STRATEGY_IDS"] == "Invalid entries for STRATEGY_IDS ignored: x"
         assert payload["runtime_status"]["config_warning_count"] == 2
     finally:
@@ -1724,7 +1733,7 @@ def test_auto_reconcile_live_ledger_downgrades_existing_result_without_final_pri
     assert rows[0]["result"] == "PROVISIONAL_LOSS"
     assert rows[0]["trade_pnl"] == "-2.209361"
     assert payload["cash_pnl"] == pytest.approx(-2.209361)
-    assert payload["recovery_loss"] == pytest.approx(2.209361)
+    assert payload["recovery_loss"] == pytest.approx(0.0)
     assert payload["consecutive_losses"] == 1
 
 
@@ -1843,7 +1852,7 @@ def test_auto_reconcile_live_ledger_uses_market_endpoint_final_price_pair(tmp_pa
     assert rows[0]["result"] == "UP"
     assert rows[0]["trade_pnl"] == "-2.209361"
     assert payload["cash_pnl"] == pytest.approx(-2.209361)
-    assert payload["recovery_loss"] == pytest.approx(2.209361)
+    assert payload["recovery_loss"] == pytest.approx(0.0)
     assert payload["consecutive_losses"] == 1
 
 
@@ -1927,10 +1936,10 @@ def test_live_recent_orders_rechecks_existing_results_and_reconciles_mismatch(tm
         assert persisted_row["result"] == "DOWN"
         assert persisted_row["trade_pnl"] == "-6.779999200000001"
         assert persisted_row["cash_pnl"] == "-6.779999200000001"
-        assert persisted_row["recovery_loss"] == "6.779999200000001"
+        assert persisted_row["recovery_loss"] == "0.0"
         assert persisted_row["consecutive_losses"] == "1"
         assert state_payload["live_strategies"]["7"]["cash_pnl"] == -6.779999200000001
-        assert state_payload["live_strategies"]["7"]["recovery_loss"] == 6.779999200000001
+        assert state_payload["live_strategies"]["7"]["recovery_loss"] == 0.0
         assert state_payload["live_strategies"]["7"]["consecutive_losses"] == 1
     finally:
         state.close()
@@ -2622,7 +2631,7 @@ def test_dashboard_assets_render_compact_inputs_for_short_numeric_fields():
     css = dashboard._dashboard_css()
 
     assert "function isCompactConfigField(key) {" in js
-    assert "'TARGET_PROFIT'" in js
+    assert "'BASE_ORDER_COST'" in js
     assert "input.classList.add('input-compact');" in js
     assert "select.classList.add('input-compact');" in js
     assert '.field input.input-compact,' in css
@@ -2872,8 +2881,7 @@ def test_dashboard_config_payload_exposes_and_saves_strategy_profile_overrides(t
         'LIVE_TRADING_ENABLED=true\n'
         'LIVE_STRATEGY_IDS=3,7\n'
         'BASE_ORDER_COST=2\n'
-        'STRATEGY_7_BET_SIZING_MODE=FLAT_BASE_COST\n'
-        'LIVE_STRATEGY_7_BASE_ORDER_COST=5.5\n',
+        'STRATEGY_7_BASE_ORDER_COST=5.5\n',
         encoding='utf-8',
     )
     state = DashboardState(env_file=env_file)
@@ -2882,22 +2890,19 @@ def test_dashboard_config_payload_exposes_and_saves_strategy_profile_overrides(t
 
         assert payload['strategy_profiles']['mode'] == 'live'
         strategy_seven = payload['strategy_profiles']['strategies']['7']
-        assert strategy_seven['fields']['BASE_ORDER_COST']['key'] == 'LIVE_STRATEGY_7_BASE_ORDER_COST'
+        assert strategy_seven['fields']['BASE_ORDER_COST']['key'] == 'STRATEGY_7_BASE_ORDER_COST'
         assert strategy_seven['fields']['BASE_ORDER_COST']['value'] == '5.5'
         assert strategy_seven['fields']['BASE_ORDER_COST']['inherited'] is False
-        assert strategy_seven['fields']['BET_SIZING_MODE']['key'] == 'STRATEGY_7_BET_SIZING_MODE'
-        assert strategy_seven['fields']['BET_SIZING_MODE']['value'] == 'FLAT_BASE_COST'
-        assert strategy_seven['fields']['BET_SIZING_MODE']['inherited'] is False
-        assert payload['strategy_profiles']['strategies']['3']['fields']['BASE_ORDER_COST']['value'] == '2.0'
+        assert payload['strategy_profiles']['strategies']['3']['fields']['BASE_ORDER_COST']['value'] == '1.0'
         assert payload['strategy_profiles']['strategies']['3']['fields']['BASE_ORDER_COST']['inherited'] is True
 
-        updated = state.update_config({'LIVE_STRATEGY_3_BASE_ORDER_COST': '4.25', 'STRATEGY_3_BET_SIZING_MODE': 'TARGET_PROFIT'})
+        updated = state.update_config({'STRATEGY_3_BASE_ORDER_COST': '4.25'})
 
         assert updated['strategy_profiles']['strategies']['3']['fields']['BASE_ORDER_COST']['value'] == '4.25'
-        assert updated['strategy_profiles']['strategies']['3']['fields']['BET_SIZING_MODE']['key'] == 'STRATEGY_3_BET_SIZING_MODE'
-        assert updated['strategy_profiles']['strategies']['3']['fields']['BET_SIZING_MODE']['value'] == 'TARGET_PROFIT'
-        assert 'LIVE_STRATEGY_3_BASE_ORDER_COST=4.25' in env_file.read_text(encoding='utf-8')
-        assert 'STRATEGY_3_BET_SIZING_MODE=TARGET_PROFIT' in env_file.read_text(encoding='utf-8')
+        assert updated['strategy_profiles']['strategies']['3']['fields']['BASE_ORDER_COST']['key'] == 'STRATEGY_3_BASE_ORDER_COST'
+        text = env_file.read_text(encoding='utf-8')
+        assert 'STRATEGY_3_BASE_ORDER_COST=4.25' in text
+        assert 'LIVE_STRATEGY_3_BASE_ORDER_COST=4.25' not in text
     finally:
         state.close()
 
@@ -3647,10 +3652,10 @@ def test_live_recent_orders_auto_reconciles_mismatched_result(tmp_path: Path, mo
         assert rows[0]["result"] == "DOWN"
         assert rows[0]["trade_pnl"] == "-2.2"
         assert rows[0]["cash_pnl"] == "-2.2"
-        assert rows[0]["recovery_loss"] == "2.2"
+        assert rows[0]["recovery_loss"] == "0.0"
         assert rows[0]["consecutive_losses"] == "1"
         assert state_payload["live_strategies"]["4"]["cash_pnl"] == -2.2
-        assert state_payload["live_strategies"]["4"]["recovery_loss"] == 2.2
+        assert state_payload["live_strategies"]["4"]["recovery_loss"] == 0.0
         assert state_payload["live_strategies"]["4"]["consecutive_losses"] == 1
         assert backups
     finally:
@@ -3692,8 +3697,7 @@ def test_live_recent_orders_auto_reconcile_does_not_restore_legacy_flat_sizing_s
     env_file.write_text(
         "TRADE_MODE=live\n"
         "STRATEGY_ID=7\n"
-        "LIVE_STRATEGY_IDS=7\n"
-        "STRATEGY_7_BET_SIZING_MODE=FLAT_BASE_COST\n",
+        "LIVE_STRATEGY_IDS=7\n",
         encoding="utf-8",
     )
     state = DashboardState(env_file=env_file)
@@ -3735,10 +3739,10 @@ def test_live_recent_orders_auto_reconcile_does_not_restore_legacy_flat_sizing_s
         assert rows[0]["trade_pnl"] == "-2.2"
         assert rows[0]["cash_pnl"] == "-2.2"
         assert rows[0]["recovery_loss"] == "0.0"
-        assert rows[0]["consecutive_losses"] == "0"
+        assert rows[0]["consecutive_losses"] == "1"
         assert state_payload["live_strategies"]["7"]["cash_pnl"] == -2.2
         assert state_payload["live_strategies"]["7"]["recovery_loss"] == 0.0
-        assert state_payload["live_strategies"]["7"]["consecutive_losses"] == 0
+        assert state_payload["live_strategies"]["7"]["consecutive_losses"] == 1
     finally:
         state.close()
         os.chdir(old_cwd)
@@ -3916,12 +3920,8 @@ def test_dashboard_config_payload_includes_structured_timeframe_presets(tmp_path
         payload = state.get_config_payload()
         presets = payload['timeframe_presets']
         assert set(presets) == {'5m', '15m'}
-        assert set(presets['5m']) == {'shared', 'strategy5', 'strategy6', 'strategy7'}
-        assert set(presets['15m']) == {'shared', 'strategy5', 'strategy6', 'strategy7'}
-        assert presets['5m']['shared']['OPEN_DELAY_SECONDS'] == '12'
-        assert presets['5m']['strategy5']['SIGNAL_MOMENTUM_THRESHOLD'] == '0.020'
-        assert presets['5m']['strategy6']['OFI_THRESHOLD'] == '0.72'
-        assert presets['5m']['strategy7']['STRATEGY7_OFI_THRESHOLD'] == '0.58'
+        assert presets['5m'] == {}
+        assert presets['15m'] == {}
     finally:
         state.close()
 
@@ -3999,18 +3999,7 @@ def test_dashboard_timeframe_presets_only_include_timeframe_sensitive_fields(tmp
         payload = state.get_config_payload()
         presets = payload['timeframe_presets']
         for timeframe in ('5m', '15m'):
-            preset = presets[timeframe]
-            assert set(preset) == {'shared', 'strategy5', 'strategy6', 'strategy7'}
-            assert 'OPEN_DELAY_SECONDS' in preset['shared']
-            assert 'SIGNAL_LOCK_BEFORE_ENTRY_SECONDS' in preset['shared']
-            assert 'SIGNAL_MOMENTUM_THRESHOLD' in preset['strategy5']
-            assert 'SIGNAL_FALLBACK_STRATEGY_ID' in preset['strategy5']
-            assert 'OFI_THRESHOLD' in preset['strategy6']
-            assert 'BINANCE_SIGNAL_STALE_SECONDS' in preset['strategy6']
-            assert 'STRATEGY7_OFI_THRESHOLD' in preset['strategy7']
-            assert 'TRADE_MODE' not in preset['shared']
-            assert 'POLYMARKET_PRIVATE_KEY' not in preset['strategy5']
-            assert 'LIVE_TRADING_ENABLED' not in preset['strategy6']
+            assert presets[timeframe] == {}
     finally:
         state.close()
 
@@ -4022,29 +4011,8 @@ def test_dashboard_update_config_notifies_runtime_reload_after_market_timeframe_
         notify_runtime_reload=lambda reason: calls.append(reason),
     )
     try:
-        payload = state.update_config(
-            {
-                'MARKET_TIMEFRAME': '15m',
-                'OPEN_DELAY_SECONDS': '25',
-                'SIGNAL_LOCK_BEFORE_ENTRY_SECONDS': '20',
-                'SIGNAL_MOMENTUM_THRESHOLD': '0.015',
-                'SIGNAL_FALLBACK_STRATEGY_ID': '2',
-                'MAX_PRICE_THRESHOLD': '0.65',
-                'TARGET_PROFIT': '1.0',
-                'OFI_THRESHOLD': '0.65',
-                'BINANCE_SIGNAL_STALE_SECONDS': '2.0',
-                'STRATEGY7_OFI_THRESHOLD': '0.50',
-                'STRATEGY7_MOMENTUM_THRESHOLD': '0.005',
-                'MAX_ENTRY_PRICE': '0.55',
-                'STRATEGY7_MIN_SIGNAL_GAP': '0.01',
-                'STRATEGY7_CONFIRM_BEFORE_ENTRY_SECONDS': '3',
-                'STRATEGY7_LATE_CONFIRM_STRONG_SIGNAL_GAP': '0.03',
-                'STRATEGY7_LATE_CONFIRM_RELAX_SECONDS': '3',
-            }
-        )
+        payload = state.update_config({'MARKET_TIMEFRAME': '15m'})
         assert payload['env_values']['MARKET_TIMEFRAME'] == '15m'
-        assert payload['env_values']['SIGNAL_MOMENTUM_THRESHOLD'] == '0.015'
-        assert payload['env_values']['OFI_THRESHOLD'] == '0.65'
         assert calls == ['market_timeframe']
     finally:
         state.close()
@@ -4095,8 +4063,8 @@ def test_dashboard_paper_profile_copy_is_localized(tmp_path: Path):
         payload = state.get_config_payload()
         assert payload['labels']['PAPER_15M_STRATEGY_ID'] == '15m 纸面配置 · 基础策略'
         assert payload['labels']['PAPER_15M_STRATEGY_IDS'] == '15m 纸面配置 · 纸面策略组合'
-        assert payload['labels']['PAPER_15M_TARGET_PROFIT'] == '15m 纸面配置 · 每次目标净利'
-        assert payload['field_help']['PAPER_15M_TARGET_PROFIT'] == '仅作用于 15m 纸面配置。'
+        assert 'PAPER_15M_TARGET_PROFIT' not in payload['labels']
+        assert 'PAPER_15M_TARGET_PROFIT' not in payload['field_help']
     finally:
         state.close()
 
@@ -4105,9 +4073,9 @@ def test_dashboard_paper_profile_copy_is_localized(tmp_path: Path):
     assert '独立 paper profile' not in js
     assert 'paper runtime card' not in js
     assert '按 timeframe 独立编辑 paper 配置。' not in js
-    assert '纸面配置组' in js
-    assert '按时间频次独立编辑纸面配置。' in js
-    assert '独立纸面配置' in js
+    assert '纸面配置组' not in js
+    assert '按时间频次独立编辑纸面配置。' not in js
+    assert '独立纸面配置' not in js
 
 
 def test_dashboard_config_labels_omit_auto_redeem_credentials(tmp_path: Path):
@@ -4221,20 +4189,20 @@ def test_dashboard_update_config_accepts_paper_timeframe_profile_fields(tmp_path
                 'PAPER_TIMEFRAMES': '5m,15m',
                 'PAPER_5M_STRATEGY_ID': '5',
                 'PAPER_5M_STRATEGY_IDS': '5,6',
-                'PAPER_5M_TARGET_PROFIT': '0.8',
                 'PAPER_15M_STRATEGY_ID': '2',
                 'PAPER_15M_STRATEGY_IDS': '1,2',
-                'PAPER_15M_TARGET_PROFIT': '1.0',
             }
         )
 
         assert payload['env_values']['PAPER_TIMEFRAMES'] == '5m,15m'
-        assert payload['env_values']['PAPER_5M_TARGET_PROFIT'] == '0.8'
-        assert payload['env_values']['PAPER_15M_TARGET_PROFIT'] == '1.0'
+        assert 'PAPER_5M_TARGET_PROFIT' not in payload['env_values']
+        assert 'PAPER_15M_TARGET_PROFIT' not in payload['env_values']
         text = env_file.read_text(encoding='utf-8')
         assert 'PAPER_TIMEFRAMES=5m,15m' in text
         assert 'PAPER_5M_STRATEGY_IDS=5,6' in text
         assert 'PAPER_15M_STRATEGY_IDS=1,2' in text
+        assert 'PAPER_5M_TARGET_PROFIT' not in text
+        assert 'PAPER_15M_TARGET_PROFIT' not in text
     finally:
         state.close()
 
@@ -4266,10 +4234,10 @@ def test_dashboard_config_payload_includes_strategy7_fields(tmp_path: Path):
         assert payload['labels']['STRATEGY7_DYNAMIC_SIZING_ENABLED'] == '策略7 动态下注'
         assert payload['field_scope']['STRATEGY7_DYNAMIC_SIZING_ENABLED'] == 'strategy_7_only'
         assert payload['select_options']['STRATEGY7_DYNAMIC_SIZING_ENABLED'] == ['false', 'true']
-        assert 'MAX_ENTRY_PRICE' in payload['editable_keys']
-        assert 'STRATEGY7_LATE_CONFIRM_RELAX_SECONDS' in payload['editable_keys']
-        assert 'STRATEGY7_DYNAMIC_SIZING_ENABLED' in payload['editable_keys']
-        assert 'STRATEGY7_SIZING_MIN_MULTIPLIER' in payload['editable_keys']
+        assert 'MAX_ENTRY_PRICE' not in payload['editable_keys']
+        assert 'STRATEGY7_LATE_CONFIRM_RELAX_SECONDS' not in payload['editable_keys']
+        assert 'STRATEGY7_DYNAMIC_SIZING_ENABLED' not in payload['editable_keys']
+        assert 'STRATEGY7_SIZING_MIN_MULTIPLIER' not in payload['editable_keys']
     finally:
         state.close()
 
@@ -4286,10 +4254,10 @@ def test_dashboard_config_payload_includes_strategy9_fields(tmp_path: Path):
         assert payload['field_scope']['STRATEGY9_BASE_MAX_ENTRY_PRICE'] == 'strategy_9_only'
         assert payload['field_scope']['STRATEGY9_DYNAMIC_SIZING_ENABLED'] == 'strategy_9_only'
         assert payload['select_options']['STRATEGY9_DYNAMIC_SIZING_ENABLED'] == ['false', 'true']
-        assert 'STRATEGY9_STABILITY_SAMPLE_COUNT' in payload['editable_keys']
-        assert 'STRATEGY9_ULTRA_MAX_ENTRY_PRICE' in payload['editable_keys']
-        assert 'STRATEGY9_DYNAMIC_SIZING_ENABLED' in payload['editable_keys']
-        assert 'STRATEGY9_SIZING_MIN_MULTIPLIER' in payload['editable_keys']
+        assert 'STRATEGY9_STABILITY_SAMPLE_COUNT' not in payload['editable_keys']
+        assert 'STRATEGY9_ULTRA_MAX_ENTRY_PRICE' not in payload['editable_keys']
+        assert 'STRATEGY9_DYNAMIC_SIZING_ENABLED' not in payload['editable_keys']
+        assert 'STRATEGY9_SIZING_MIN_MULTIPLIER' not in payload['editable_keys']
     finally:
         state.close()
 
@@ -4303,8 +4271,8 @@ def test_dashboard_config_payload_includes_strategy10_fields(tmp_path: Path):
         assert payload['labels']['STRATEGY10_EDGE_BUFFER'] == '策略10 成本缓冲'
         assert payload['field_scope']['STRATEGY10_MIN_EDGE'] == 'strategy_10_only'
         assert payload['field_scope']['STRATEGY10_MAX_FAIR_VALUE'] == 'strategy_10_only'
-        assert 'STRATEGY10_MIN_EDGE' in payload['editable_keys']
-        assert 'STRATEGY10_MAX_FAIR_VALUE' in payload['editable_keys']
+        assert 'STRATEGY10_MIN_EDGE' not in payload['editable_keys']
+        assert 'STRATEGY10_MAX_FAIR_VALUE' not in payload['editable_keys']
     finally:
         state.close()
 
@@ -4316,20 +4284,20 @@ def test_dashboard_update_config_accepts_strategy7_values(tmp_path: Path):
         payload = state.update_config({
             'STRATEGY_ID': '7',
             'PAPER_STRATEGY_IDS': '7',
-            'STRATEGY7_OFI_THRESHOLD': '0.7',
-            'STRATEGY7_MOMENTUM_THRESHOLD': '0.025',
-            'MAX_ENTRY_PRICE': '0.54',
-            'STRATEGY7_MIN_SIGNAL_GAP': '0.03',
-            'STRATEGY7_CONFIRM_BEFORE_ENTRY_SECONDS': '12',
-            'STRATEGY7_LATE_CONFIRM_STRONG_SIGNAL_GAP': '0.02',
-            'STRATEGY7_LATE_CONFIRM_RELAX_SECONDS': '4',
+            'STRATEGY_7_OFI_THRESHOLD': '0.7',
+            'STRATEGY_7_MOMENTUM_THRESHOLD': '0.025',
+            'STRATEGY_7_MAX_ENTRY_PRICE': '0.54',
+            'STRATEGY_7_MIN_SIGNAL_GAP': '0.03',
+            'STRATEGY_7_CONFIRM_BEFORE_ENTRY_SECONDS': '12',
+            'STRATEGY_7_LATE_CONFIRM_STRONG_SIGNAL_GAP': '0.02',
+            'STRATEGY_7_LATE_CONFIRM_RELAX_SECONDS': '4',
         })
         assert payload['env_values']['STRATEGY_ID'] == '7'
-        assert payload['env_values']['STRATEGY7_OFI_THRESHOLD'] == '0.7'
-        assert payload['env_values']['MAX_ENTRY_PRICE'] == '0.54'
-        assert payload['env_values']['STRATEGY7_CONFIRM_BEFORE_ENTRY_SECONDS'] == '12'
-        assert payload['env_values']['STRATEGY7_LATE_CONFIRM_STRONG_SIGNAL_GAP'] == '0.02'
-        assert payload['env_values']['STRATEGY7_LATE_CONFIRM_RELAX_SECONDS'] == '4.0'
+        assert payload['env_values']['STRATEGY_7_OFI_THRESHOLD'] == '0.7'
+        assert payload['env_values']['STRATEGY_7_MAX_ENTRY_PRICE'] == '0.54'
+        assert payload['env_values']['STRATEGY_7_CONFIRM_BEFORE_ENTRY_SECONDS'] == '12'
+        assert payload['env_values']['STRATEGY_7_LATE_CONFIRM_STRONG_SIGNAL_GAP'] == '0.02'
+        assert payload['env_values']['STRATEGY_7_LATE_CONFIRM_RELAX_SECONDS'] == '4.0'
     finally:
         state.close()
 
@@ -4577,8 +4545,6 @@ def test_dashboard_report_strategy_selection_survives_market_refresh_browser_reg
                 '15m': {
                     'strategy_id': '1',
                     'paper_strategy_ids': ['1', '7'],
-                    'target_profit': '1.0',
-                    'bet_sizing_mode': 'FIXED_BASE_COST',
                     'base_order_cost': '1.0',
                     'max_consecutive_losses': '7',
                     'max_stake': '',
@@ -4781,8 +4747,6 @@ def test_dashboard_report_strategy_selector_reflects_saved_paper_strategy_ids_br
                 '15m': {
                     'strategy_id': current_env_values['PAPER_15M_STRATEGY_ID'],
                     'paper_strategy_ids': current_env_values['PAPER_15M_STRATEGY_IDS'].split(','),
-                    'target_profit': '1.0',
-                    'bet_sizing_mode': 'FIXED_BASE_COST',
                     'base_order_cost': '1.0',
                     'max_consecutive_losses': '7',
                     'max_stake': '',
@@ -5003,8 +4967,6 @@ def test_dashboard_report_strategy_switch_ignores_stale_browser_responses(tmp_pa
                 '15m': {
                     'strategy_id': '1',
                     'paper_strategy_ids': ['1', '7'],
-                    'target_profit': '1.0',
-                    'bet_sizing_mode': 'FIXED_BASE_COST',
                     'base_order_cost': '1.0',
                     'max_consecutive_losses': '7',
                     'max_stake': '',

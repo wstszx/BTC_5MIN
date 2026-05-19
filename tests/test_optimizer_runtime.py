@@ -8,21 +8,19 @@ from trader import _candidate_cfg_with_params, _paper_experiment_id
 
 
 def test_optimizer_runtime_applies_candidate_params_and_trader_reexports_helpers():
-    base_cfg = AppConfig(strategy_id=7, target_profit=1.0, max_entry_price=0.65, strategy7_max_entry_price=0.56)
+    base_cfg = AppConfig(strategy_id=7, max_entry_price=0.65, strategy7_max_entry_price=0.56)
     candidate_cfg = candidate_cfg_with_params(
         base_cfg,
         7,
         {
-            "TARGET_PROFIT": "1.25",
-            "BET_SIZING_MODE": "FLAT_BASE_COST",
+            "BASE_ORDER_COST": "1.25",
             "STRATEGY7_MAX_ENTRY_PRICE": "0.53",
         },
     )
     state = PaperStrategyState()
 
     assert candidate_cfg.strategy_id == 7
-    assert candidate_cfg.target_profit == 1.25
-    assert candidate_cfg.bet_sizing_mode == "FLAT_BASE_COST"
+    assert candidate_cfg.base_order_cost == 1.25
     assert candidate_cfg.strategy7_max_entry_price == 0.53
     assert candidate_cfg.max_entry_price == 0.53
     assert paper_experiment_id(5, state) == "strategy-5"

@@ -72,7 +72,7 @@ def test_paper_pending_preserves_flat_sizing_recovery_policy():
         tracks_recovery_loss=False,
     )
     decision = SideDecision(side="UP")
-    cfg = AppConfig(strategy_id=7, entry_timing="OPEN", bet_sizing_mode="FLAT_BASE_COST")
+    cfg = AppConfig(strategy_id=7, entry_timing="OPEN")
 
     assert queue_pending_paper_trade(
         state=state,

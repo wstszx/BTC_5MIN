@@ -34,7 +34,7 @@ class SegmentMetrics:
 class CandidateMetrics:
     strategy_id: int
     reset_round: int
-    target_profit: float
+    base_order_cost: float
     entry_timing: str
     total_pnl: float
     trades: int
@@ -175,12 +175,11 @@ def _simulate_segment(
     *,
     strategy_id: int,
     reset_round: int,
-    target_profit: float,
+    base_order_cost: float,
     entry_timing: str,
     start_round_index: int,
 ) -> SegmentMetrics:
     pnl = 0.0
-    recovery_loss = 0.0
     consecutive_losses = 0
     peak_pnl = 0.0
     max_drawdown = 0.0
@@ -193,10 +192,8 @@ def _simulate_segment(
     skipped = 0
 
     round_index = start_round_index
-    sizing_mode = cfg.bet_sizing_mode.upper()
     for row in rows:
         if consecutive_losses >= reset_round:
-            recovery_loss = 0.0
             consecutive_losses = 0
 
         signal_open_up_price = _optional_float(row.get("entry_price_open_up"))
@@ -348,30 +345,11 @@ def _simulate_segment(
             else 1.0
         )
 
-        tracks_recovery_loss = True
-        if sizing_mode == "FLAT_BASE_COST":
-            base_order_cost = cfg.base_order_cost
-            if base_order_cost <= 0:
-                skipped += 1
-                continue
-            order_cost = base_order_cost
-            order_size = order_cost / price
-            tracks_recovery_loss = False
-        elif sizing_mode == "FIXED_BASE_COST":
-            base_order_cost = cfg.base_order_cost
-            if base_order_cost <= 0:
-                skipped += 1
-                continue
-            if recovery_loss <= 0:
-                order_cost = base_order_cost
-                order_size = order_cost / price
-            else:
-                expected_profit_target = recovery_loss + base_order_cost
-                order_size = expected_profit_target / (1 - price)
-                order_cost = order_size * price
-        else:
-            order_size = (recovery_loss + target_profit) / (1 - price)
-            order_cost = order_size * price
+        if base_order_cost <= 0:
+            skipped += 1
+            continue
+        order_cost = base_order_cost
+        order_size = order_cost / price
         if order_cost_multiplier != 1.0:
             order_cost *= order_cost_multiplier
             order_size *= order_cost_multiplier
@@ -392,15 +370,10 @@ def _simulate_segment(
             profit = order_size * (1 - price)
             pnl += profit
             wins += 1
-            recovery_loss = max(0.0, recovery_loss - profit)
             consecutive_losses = 0
         else:
             pnl -= order_cost
             losses += 1
-            if tracks_recovery_loss:
-                recovery_loss += order_cost
-            else:
-                recovery_loss = 0.0
             consecutive_losses += 1
             max_loss_streak = max(max_loss_streak, consecutive_losses)
 
@@ -426,7 +399,7 @@ def run_strategy_research(
     *,
     strategy_ids: Iterable[int],
     reset_rounds: Iterable[int],
-    target_profits: Iterable[float],
+    base_order_costs: Iterable[float] | None = None,
     entry_timing: str = "OPEN",
     segments: int = 5,
     bankroll_safety_multiplier: float = 1.5,
@@ -453,8 +426,10 @@ def run_strategy_research(
     segment_rows = _split_segments(rows, segments)
     candidates: list[CandidateMetrics] = []
 
-    for strategy_id, reset_round, target_profit in product(strategy_ids, reset_rounds, target_profits):
-        if reset_round < 1 or target_profit <= 0:
+    candidate_base_order_costs = list(base_order_costs if base_order_costs is not None else [cfg.base_order_cost])
+
+    for strategy_id, reset_round, base_order_cost in product(strategy_ids, reset_rounds, candidate_base_order_costs):
+        if reset_round < 1 or base_order_cost <= 0:
             continue
 
         full = _simulate_segment(
@@ -462,7 +437,7 @@ def run_strategy_research(
             cfg,
             strategy_id=strategy_id,
             reset_round=reset_round,
-            target_profit=target_profit,
+            base_order_cost=base_order_cost,
             entry_timing=entry_timing,
             start_round_index=0,
         )
@@ -473,7 +448,7 @@ def run_strategy_research(
                 cfg,
                 strategy_id=strategy_id,
                 reset_round=reset_round,
-                target_profit=target_profit,
+                base_order_cost=base_order_cost,
                 entry_timing=entry_timing,
                 start_round_index=offset,
             )
@@ -493,7 +468,7 @@ def run_strategy_research(
             CandidateMetrics(
                 strategy_id=strategy_id,
                 reset_round=reset_round,
-                target_profit=target_profit,
+                base_order_cost=base_order_cost,
                 entry_timing=entry_timing.upper(),
                 total_pnl=full.pnl,
                 trades=full.trades,
@@ -537,7 +512,7 @@ def export_strategy_research_csv(output_path: Path, report: StrategyResearchRepo
     fieldnames = [
         "strategy_id",
         "reset_round",
-        "target_profit",
+        "base_order_cost",
         "entry_timing",
         "total_pnl",
         "trades",
@@ -564,7 +539,7 @@ def export_strategy_research_csv(output_path: Path, report: StrategyResearchRepo
                 {
                     "strategy_id": row.strategy_id,
                     "reset_round": row.reset_round,
-                    "target_profit": row.target_profit,
+                    "base_order_cost": row.base_order_cost,
                     "entry_timing": row.entry_timing,
                     "total_pnl": row.total_pnl,
                     "trades": row.trades,

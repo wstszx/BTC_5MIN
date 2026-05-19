@@ -22,6 +22,8 @@ from config import (
     MARKET_TIMEFRAME_DEFINITIONS,
     build_config_from_env_values,
     collect_config_warnings,
+    canonical_strategy_profile_base_key,
+    display_strategy_profile_base_key,
     load_env_file_values,
     LIVE_STRATEGY_IDS,
     PAPER_STRATEGY_IDS,
@@ -291,31 +293,16 @@ SUPPORTED_PAPER_TIMEFRAMES: tuple[str, ...] = ("5m", "15m")
 PAPER_PROFILE_EDITABLE_FIELDS: tuple[str, ...] = (
     "STRATEGY_ID",
     "STRATEGY_IDS",
-    "TARGET_PROFIT",
-    "BASE_ORDER_COST",
-    "MIN_STAKE",
-    "MAX_CONSECUTIVE_LOSSES",
-    "MAX_STAKE",
-    "MIN_ENTRY_PRICE",
-    "MAX_ENTRY_PRICE",
-    "OPEN_DELAY_SECONDS",
-    "SIGNAL_MOMENTUM_THRESHOLD",
-    "OFI_THRESHOLD",
-    "BINANCE_SIGNAL_STALE_SECONDS",
-    "STRATEGY7_OFI_THRESHOLD",
-    "STRATEGY7_MOMENTUM_THRESHOLD",
-    "STRATEGY7_MAX_MOMENTUM_DELTA",
 )
 
 STRATEGY_PROFILE_EDITABLE_FIELDS: tuple[str, ...] = (
-    "TARGET_PROFIT",
-    "BET_SIZING_MODE",
     "BASE_ORDER_COST",
     "MIN_STAKE",
     "MAX_STAKE",
     "MIN_ENTRY_PRICE",
     "MAX_ENTRY_PRICE",
     "MAX_CONSECUTIVE_LOSSES",
+    "MAX_STAKE_SKIP_ALERT_THRESHOLD",
     "OPEN_DELAY_SECONDS",
     "SIGNAL_MOMENTUM_THRESHOLD",
     "SIGNAL_WEAK_SIGNAL_MODE",
@@ -368,14 +355,13 @@ STRATEGY_PROFILE_EDITABLE_FIELDS: tuple[str, ...] = (
 )
 
 STRATEGY_PROFILE_COMMON_FIELDS: tuple[str, ...] = (
-    "TARGET_PROFIT",
-    "BET_SIZING_MODE",
     "BASE_ORDER_COST",
     "MIN_STAKE",
     "MAX_STAKE",
     "MIN_ENTRY_PRICE",
     "MAX_ENTRY_PRICE",
     "MAX_CONSECUTIVE_LOSSES",
+    "MAX_STAKE_SKIP_ALERT_THRESHOLD",
     "OPEN_DELAY_SECONDS",
 )
 
@@ -400,28 +386,23 @@ def _split_paper_profile_key(key: str) -> tuple[str, str] | None:
     return None
 
 
-def _strategy_profile_prefix(mode: str, strategy_id: int | str) -> str:
-    normalized_mode = "live" if str(mode or "").lower() == "live" else "paper"
-    return f"{normalized_mode.upper()}_STRATEGY_{strategy_id}"
-
-
 def _shared_strategy_profile_prefix(strategy_id: int | str) -> str:
     return f"STRATEGY_{strategy_id}"
 
 
+def _shared_strategy_profile_key(strategy_id: int | str, base_key: str) -> str:
+    display_base_key = display_strategy_profile_base_key(strategy_id, base_key)
+    return f"{_shared_strategy_profile_prefix(strategy_id)}_{display_base_key}"
+
+
 def _split_strategy_profile_key(key: str) -> tuple[str, str, str] | None:
-    match = re.match(r"^(LIVE|PAPER)_STRATEGY_(10|[1-9])_(.+)$", str(key or ""))
+    match = re.match(r"^STRATEGY_(10|[1-9])_(.+)$", str(key or ""))
     if not match:
-        shared_match = re.match(r"^STRATEGY_(10|[1-9])_(.+)$", str(key or ""))
-        if not shared_match:
-            return None
-        mode = "shared"
-        strategy_id = shared_match.group(1)
-        base_key = shared_match.group(2)
-    else:
-        mode = match.group(1).lower()
-        strategy_id = match.group(2)
-        base_key = match.group(3)
+        return None
+    mode = "shared"
+    strategy_id = match.group(1)
+    base_key = match.group(2)
+    base_key = canonical_strategy_profile_base_key(strategy_id, base_key)
     if base_key not in STRATEGY_PROFILE_EDITABLE_FIELDS:
         return None
     return mode, strategy_id, base_key
@@ -524,8 +505,6 @@ def _cfg_for_paper_timeframe(cfg: AppConfig, timeframe: str) -> AppConfig:
         market_timeframe=target_timeframe,
         strategy_id=profile.strategy_id,
         paper_strategy_ids=list(profile.paper_strategy_ids),
-        target_profit=profile.target_profit,
-        bet_sizing_mode=profile.bet_sizing_mode,
         base_order_cost=profile.base_order_cost,
         max_consecutive_losses=profile.max_consecutive_losses,
         min_stake=profile.min_stake,
@@ -1134,35 +1113,19 @@ def _live_row_counts_for_ledger(row: dict[str, str], result: str) -> bool:
 
 
 def _live_strategy_uses_recovery_loss(cfg: AppConfig | None, strategy_id: str) -> bool:
-    if cfg is None:
-        return True
-    try:
-        numeric_strategy_id = int(strategy_id)
-    except (TypeError, ValueError):
-        return True
-    profile = getattr(cfg, "live_profiles", {}).get(numeric_strategy_id)
-    mode = getattr(profile, "bet_sizing_mode", getattr(cfg, "bet_sizing_mode", "FIXED_BASE_COST"))
-    return str(mode or "").strip().upper() != "FLAT_BASE_COST"
+    return False
 
 
 def _live_row_explicit_tracks_recovery_loss(row: dict[str, str]) -> bool | None:
-    raw_value = row.get("tracks_recovery_loss")
-    if raw_value is not None and str(raw_value).strip():
-        return str(raw_value).strip().lower() in {"1", "true", "yes", "on"}
-    return None
+    return False
 
 
 def _live_row_tracks_recovery_loss(row: dict[str, str], cfg: AppConfig | None, strategy_id: str) -> bool:
-    explicit_value = _live_row_explicit_tracks_recovery_loss(row)
-    if explicit_value is not None:
-        return explicit_value
-    return _live_strategy_uses_recovery_loss(cfg, strategy_id)
+    return False
 
 
 def _live_row_tracks_loss_streak(row: dict[str, str], cfg: AppConfig | None, strategy_id: str) -> bool:
-    if _live_row_explicit_tracks_recovery_loss(row) is not None:
-        return True
-    return _live_strategy_uses_recovery_loss(cfg, strategy_id)
+    return True
 
 
 def _recompute_live_ledger_rows(
@@ -1495,80 +1458,12 @@ def _field_groups() -> list[dict[str, Any]]:
         },
         {
             "title": "基础策略",
-            "description": "决定方向节奏、下注模式和主要风险边界。",
+            "description": "只保留策略选择和纸面资金；具体下注与信号参数在每个策略自己的配置区调整。",
             "keys": [
                 "STRATEGY_ID",
                 "STRATEGY_IDS",
-                "OPEN_DELAY_SECONDS",
-                "TARGET_PROFIT",
-                "BASE_ORDER_COST",
                 "PAPER_SIMULATED_WALLET_BALANCE",
-                "MAX_CONSECUTIVE_LOSSES",
-                "MIN_STAKE",
-                "MAX_STAKE",
-                "MIN_ENTRY_PRICE",
-                "MAX_ENTRY_PRICE",
-                "OFI_THRESHOLD",
             ],
-        },
-        {
-            "title": "动量信号",
-            "description": "仅策略 5 使用，用于判定强弱信号、回退逻辑和锁边。",
-            "scope": "strategy_5_only",
-            "keys": [
-                "SIGNAL_MOMENTUM_THRESHOLD",
-                "SIGNAL_WEAK_SIGNAL_MODE",
-                "SIGNAL_FALLBACK_STRATEGY_ID",
-                "SIGNAL_HISTORY_FIDELITY_SECONDS",
-                "SIGNAL_ANCHOR_MAX_OFFSET_SECONDS",
-                "SIGNAL_DYNAMIC_THRESHOLD_K",
-                "SIGNAL_DYNAMIC_THRESHOLD_MIN_POINTS",
-                "SIGNAL_LOCK_BEFORE_ENTRY_SECONDS",
-                "BINANCE_SIGNAL_STALE_SECONDS",
-                "STRATEGY7_OFI_THRESHOLD",
-                "STRATEGY7_MOMENTUM_THRESHOLD",
-                "STRATEGY7_MAX_MOMENTUM_DELTA",
-                "STRATEGY7_MIN_SIGNAL_GAP",
-                "STRATEGY7_CONFIRM_BEFORE_ENTRY_SECONDS",
-                "STRATEGY7_LATE_CONFIRM_STRONG_SIGNAL_GAP",
-                "STRATEGY7_LATE_CONFIRM_RELAX_SECONDS",
-                "STRATEGY7_DYNAMIC_SIZING_ENABLED",
-                "STRATEGY7_SIZING_REFERENCE_PRICE",
-                "STRATEGY7_SIZING_PRICE_STEP",
-                "STRATEGY7_SIZING_PRICE_STEP_REDUCTION",
-                "STRATEGY7_SIZING_MIN_MULTIPLIER",
-                "STRATEGY7_SIZING_MAX_MULTIPLIER",
-                "STRATEGY7_SIZING_STRONG_SIGNAL_GAP",
-                "STRATEGY7_SIZING_STRONG_SIGNAL_BOOST",
-                "STRATEGY9_DYNAMIC_SIZING_ENABLED",
-                "STRATEGY9_SIZING_REFERENCE_PRICE",
-                "STRATEGY9_SIZING_PRICE_STEP",
-                "STRATEGY9_SIZING_PRICE_STEP_REDUCTION",
-                "STRATEGY9_SIZING_MIN_MULTIPLIER",
-                "STRATEGY9_SIZING_MAX_MULTIPLIER",
-                "STRATEGY9_SIZING_STRONG_SIGNAL_GAP",
-                "STRATEGY9_SIZING_STRONG_SIGNAL_BOOST",
-                "STRATEGY9_STABILITY_SAMPLE_COUNT",
-                "STRATEGY9_STABILITY_REQUIRED_COUNT",
-                "STRATEGY9_STABILITY_WINDOW_SECONDS",
-                "STRATEGY9_REVERSAL_LOOKBACK_SECONDS",
-                "STRATEGY9_MAX_SIGNAL_DECAY",
-                "STRATEGY9_BASE_MAX_ENTRY_PRICE",
-                "STRATEGY9_STRONG_MAX_ENTRY_PRICE",
-                "STRATEGY9_ULTRA_MAX_ENTRY_PRICE",
-                "STRATEGY9_STRONG_SIGNAL_GAP",
-                "STRATEGY9_ULTRA_SIGNAL_GAP",
-                "STRATEGY10_MIN_EDGE",
-                "STRATEGY10_EDGE_BUFFER",
-                "STRATEGY10_OFI_WEIGHT",
-                "STRATEGY10_MOMENTUM_WEIGHT",
-                "STRATEGY10_MAX_FAIR_VALUE",
-            ],
-        },
-        {
-            "title": "风险与告警",
-            "description": "控制连续超限提醒，避免异常状态被忽略。",
-            "keys": ["MAX_STAKE_SKIP_ALERT_THRESHOLD"],
         },
         {
             "title": "实时连接保护",
@@ -1585,114 +1480,7 @@ def _field_groups() -> list[dict[str, Any]]:
     ]
 
 
-TIMEFRAME_PRESETS: dict[str, dict[str, dict[str, str]]] = {
-    "5m": {
-        "shared": {
-            "OPEN_DELAY_SECONDS": "12",
-            "SIGNAL_LOCK_BEFORE_ENTRY_SECONDS": "10",
-        },
-        "strategy5": {
-            "SIGNAL_MOMENTUM_THRESHOLD": "0.020",
-            "SIGNAL_FALLBACK_STRATEGY_ID": "2",
-            "MAX_PRICE_THRESHOLD": "0.60",
-            "TARGET_PROFIT": "0.8",
-        },
-        "strategy6": {
-            "OFI_THRESHOLD": "0.72",
-            "BINANCE_SIGNAL_STALE_SECONDS": "1.0",
-            "TARGET_PROFIT": "0.8",
-        },
-        "strategy7": {
-            "STRATEGY7_OFI_THRESHOLD": "0.58",
-            "STRATEGY7_MOMENTUM_THRESHOLD": "0.008",
-            "STRATEGY7_MAX_MOMENTUM_DELTA": "",
-            "MAX_ENTRY_PRICE": "0.54",
-            "STRATEGY7_MIN_SIGNAL_GAP": "0.015",
-            "STRATEGY7_CONFIRM_BEFORE_ENTRY_SECONDS": "2",
-            "STRATEGY7_LATE_CONFIRM_STRONG_SIGNAL_GAP": "0.035",
-            "STRATEGY7_LATE_CONFIRM_RELAX_SECONDS": "2",
-            "STRATEGY7_DYNAMIC_SIZING_ENABLED": "false",
-            "STRATEGY7_SIZING_REFERENCE_PRICE": "0.50",
-            "STRATEGY7_SIZING_PRICE_STEP": "0.01",
-            "STRATEGY7_SIZING_PRICE_STEP_REDUCTION": "0.10",
-            "STRATEGY7_SIZING_MIN_MULTIPLIER": "0.50",
-            "STRATEGY7_SIZING_MAX_MULTIPLIER": "1.00",
-            "STRATEGY7_SIZING_STRONG_SIGNAL_GAP": "0.02",
-            "STRATEGY7_SIZING_STRONG_SIGNAL_BOOST": "0.20",
-            "STRATEGY9_DYNAMIC_SIZING_ENABLED": "false",
-            "STRATEGY9_SIZING_REFERENCE_PRICE": "0.50",
-            "STRATEGY9_SIZING_PRICE_STEP": "0.01",
-            "STRATEGY9_SIZING_PRICE_STEP_REDUCTION": "0.10",
-            "STRATEGY9_SIZING_MIN_MULTIPLIER": "0.50",
-            "STRATEGY9_SIZING_MAX_MULTIPLIER": "1.00",
-            "STRATEGY9_SIZING_STRONG_SIGNAL_GAP": "0.02",
-            "STRATEGY9_SIZING_STRONG_SIGNAL_BOOST": "0.20",
-            "STRATEGY9_STABILITY_SAMPLE_COUNT": "3",
-            "STRATEGY9_STABILITY_REQUIRED_COUNT": "2",
-            "STRATEGY9_STABILITY_WINDOW_SECONDS": "6",
-            "STRATEGY9_REVERSAL_LOOKBACK_SECONDS": "6",
-            "STRATEGY9_MAX_SIGNAL_DECAY": "0.35",
-            "STRATEGY9_BASE_MAX_ENTRY_PRICE": "0.52",
-            "STRATEGY9_STRONG_MAX_ENTRY_PRICE": "0.53",
-            "STRATEGY9_ULTRA_MAX_ENTRY_PRICE": "0.54",
-            "STRATEGY9_STRONG_SIGNAL_GAP": "0.02",
-            "STRATEGY9_ULTRA_SIGNAL_GAP": "0.04",
-        },
-    },
-    "15m": {
-        "shared": {
-            "OPEN_DELAY_SECONDS": "25",
-            "SIGNAL_LOCK_BEFORE_ENTRY_SECONDS": "20",
-        },
-        "strategy5": {
-            "SIGNAL_MOMENTUM_THRESHOLD": "0.015",
-            "SIGNAL_FALLBACK_STRATEGY_ID": "2",
-            "MAX_PRICE_THRESHOLD": "0.65",
-            "TARGET_PROFIT": "1.0",
-        },
-        "strategy6": {
-            "OFI_THRESHOLD": "0.65",
-            "BINANCE_SIGNAL_STALE_SECONDS": "2.0",
-            "TARGET_PROFIT": "1.0",
-        },
-        "strategy7": {
-            "STRATEGY7_OFI_THRESHOLD": "0.50",
-            "STRATEGY7_MOMENTUM_THRESHOLD": "0.005",
-            "STRATEGY7_MAX_MOMENTUM_DELTA": "",
-            "MAX_ENTRY_PRICE": "0.55",
-            "STRATEGY7_MIN_SIGNAL_GAP": "0.01",
-            "STRATEGY7_CONFIRM_BEFORE_ENTRY_SECONDS": "3",
-            "STRATEGY7_LATE_CONFIRM_STRONG_SIGNAL_GAP": "0.03",
-            "STRATEGY7_LATE_CONFIRM_RELAX_SECONDS": "3",
-            "STRATEGY7_DYNAMIC_SIZING_ENABLED": "false",
-            "STRATEGY7_SIZING_REFERENCE_PRICE": "0.50",
-            "STRATEGY7_SIZING_PRICE_STEP": "0.01",
-            "STRATEGY7_SIZING_PRICE_STEP_REDUCTION": "0.10",
-            "STRATEGY7_SIZING_MIN_MULTIPLIER": "0.50",
-            "STRATEGY7_SIZING_MAX_MULTIPLIER": "1.00",
-            "STRATEGY7_SIZING_STRONG_SIGNAL_GAP": "0.02",
-            "STRATEGY7_SIZING_STRONG_SIGNAL_BOOST": "0.20",
-            "STRATEGY9_DYNAMIC_SIZING_ENABLED": "false",
-            "STRATEGY9_SIZING_REFERENCE_PRICE": "0.50",
-            "STRATEGY9_SIZING_PRICE_STEP": "0.01",
-            "STRATEGY9_SIZING_PRICE_STEP_REDUCTION": "0.10",
-            "STRATEGY9_SIZING_MIN_MULTIPLIER": "0.50",
-            "STRATEGY9_SIZING_MAX_MULTIPLIER": "1.00",
-            "STRATEGY9_SIZING_STRONG_SIGNAL_GAP": "0.02",
-            "STRATEGY9_SIZING_STRONG_SIGNAL_BOOST": "0.20",
-            "STRATEGY9_STABILITY_SAMPLE_COUNT": "3",
-            "STRATEGY9_STABILITY_REQUIRED_COUNT": "2",
-            "STRATEGY9_STABILITY_WINDOW_SECONDS": "8",
-            "STRATEGY9_REVERSAL_LOOKBACK_SECONDS": "8",
-            "STRATEGY9_MAX_SIGNAL_DECAY": "0.35",
-            "STRATEGY9_BASE_MAX_ENTRY_PRICE": "0.52",
-            "STRATEGY9_STRONG_MAX_ENTRY_PRICE": "0.53",
-            "STRATEGY9_ULTRA_MAX_ENTRY_PRICE": "0.54",
-            "STRATEGY9_STRONG_SIGNAL_GAP": "0.02",
-            "STRATEGY9_ULTRA_SIGNAL_GAP": "0.04",
-        },
-    },
-}
+TIMEFRAME_PRESETS: dict[str, dict[str, dict[str, str]]] = {"5m": {}, "15m": {}}
 
 
 class ConfigValidationError(ValueError):
@@ -1716,65 +1504,7 @@ class DashboardState:
         "STRATEGY_IDS",
         "LIVE_STRATEGY_IDS",
         "PAPER_STRATEGY_IDS",
-        "OPEN_DELAY_SECONDS",
-        "TARGET_PROFIT",
-        "BASE_ORDER_COST",
-        "MIN_STAKE",
         "PAPER_SIMULATED_WALLET_BALANCE",
-        "MAX_CONSECUTIVE_LOSSES",
-        "MAX_STAKE",
-        "MIN_ENTRY_PRICE",
-        "MAX_ENTRY_PRICE",
-        "MAX_PRICE_THRESHOLD",
-        "OFI_THRESHOLD",
-        "STRATEGY7_OFI_THRESHOLD",
-        "STRATEGY7_MOMENTUM_THRESHOLD",
-        "STRATEGY7_MAX_MOMENTUM_DELTA",
-        "STRATEGY7_MIN_SIGNAL_GAP",
-        "STRATEGY7_CONFIRM_BEFORE_ENTRY_SECONDS",
-        "STRATEGY7_LATE_CONFIRM_STRONG_SIGNAL_GAP",
-        "STRATEGY7_LATE_CONFIRM_RELAX_SECONDS",
-        "STRATEGY7_DYNAMIC_SIZING_ENABLED",
-        "STRATEGY7_SIZING_REFERENCE_PRICE",
-        "STRATEGY7_SIZING_PRICE_STEP",
-        "STRATEGY7_SIZING_PRICE_STEP_REDUCTION",
-        "STRATEGY7_SIZING_MIN_MULTIPLIER",
-        "STRATEGY7_SIZING_MAX_MULTIPLIER",
-        "STRATEGY7_SIZING_STRONG_SIGNAL_GAP",
-        "STRATEGY7_SIZING_STRONG_SIGNAL_BOOST",
-        "STRATEGY9_DYNAMIC_SIZING_ENABLED",
-        "STRATEGY9_SIZING_REFERENCE_PRICE",
-        "STRATEGY9_SIZING_PRICE_STEP",
-        "STRATEGY9_SIZING_PRICE_STEP_REDUCTION",
-        "STRATEGY9_SIZING_MIN_MULTIPLIER",
-        "STRATEGY9_SIZING_MAX_MULTIPLIER",
-        "STRATEGY9_SIZING_STRONG_SIGNAL_GAP",
-        "STRATEGY9_SIZING_STRONG_SIGNAL_BOOST",
-        "STRATEGY9_STABILITY_SAMPLE_COUNT",
-        "STRATEGY9_STABILITY_REQUIRED_COUNT",
-        "STRATEGY9_STABILITY_WINDOW_SECONDS",
-        "STRATEGY9_REVERSAL_LOOKBACK_SECONDS",
-        "STRATEGY9_MAX_SIGNAL_DECAY",
-        "STRATEGY9_BASE_MAX_ENTRY_PRICE",
-        "STRATEGY9_STRONG_MAX_ENTRY_PRICE",
-        "STRATEGY9_ULTRA_MAX_ENTRY_PRICE",
-        "STRATEGY9_STRONG_SIGNAL_GAP",
-        "STRATEGY9_ULTRA_SIGNAL_GAP",
-        "STRATEGY10_MIN_EDGE",
-        "STRATEGY10_EDGE_BUFFER",
-        "STRATEGY10_OFI_WEIGHT",
-        "STRATEGY10_MOMENTUM_WEIGHT",
-        "STRATEGY10_MAX_FAIR_VALUE",
-        "SIGNAL_MOMENTUM_THRESHOLD",
-        "SIGNAL_WEAK_SIGNAL_MODE",
-        "SIGNAL_FALLBACK_STRATEGY_ID",
-        "SIGNAL_HISTORY_FIDELITY_SECONDS",
-        "SIGNAL_ANCHOR_MAX_OFFSET_SECONDS",
-        "SIGNAL_DYNAMIC_THRESHOLD_K",
-        "SIGNAL_DYNAMIC_THRESHOLD_MIN_POINTS",
-        "SIGNAL_LOCK_BEFORE_ENTRY_SECONDS",
-        "BINANCE_SIGNAL_STALE_SECONDS",
-        "MAX_STAKE_SKIP_ALERT_THRESHOLD",
         "WS_ENABLED",
         "WS_QUOTE_STALE_SECONDS",
         "WS_TRADE_GUARD_STALE_SECONDS",
@@ -1803,9 +1533,7 @@ class DashboardState:
         "LIVE_STRATEGY_IDS": "实盘策略组合",
         "PAPER_STRATEGY_IDS": "纸面策略组合",
         "OPEN_DELAY_SECONDS": "开盘后入场秒数",
-        "TARGET_PROFIT": "每次目标净利",
-        "BET_SIZING_MODE": "下注模式",
-        "BASE_ORDER_COST": "固定起始下注金额",
+        "BASE_ORDER_COST": "固定下注金额",
         "MIN_STAKE": "单笔最小下注金额",
         "PAPER_SIMULATED_WALLET_BALANCE": "纸面模拟钱包余额",
         "MAX_CONSECUTIVE_LOSSES": "连亏重置轮数",
@@ -1879,7 +1607,6 @@ class DashboardState:
         "STRATEGY_IDS": SUPPORTED_STRATEGY_SELECT_OPTIONS,
         "LIVE_STRATEGY_IDS": SUPPORTED_STRATEGY_SELECT_OPTIONS,
         "PAPER_STRATEGY_IDS": SUPPORTED_STRATEGY_SELECT_OPTIONS,
-        "BET_SIZING_MODE": ["FLAT_BASE_COST", "FIXED_BASE_COST", "TARGET_PROFIT"],
         "SIGNAL_WEAK_SIGNAL_MODE": ["SKIP", "FALLBACK"],
         "SIGNAL_FALLBACK_STRATEGY_ID": ["1", "2", "3", "4"],
         "WS_ENABLED": ["true", "false"],
@@ -1901,8 +1628,6 @@ class DashboardState:
         "LIVE_STRATEGY_IDS": "live_strategy_ids",
         "PAPER_STRATEGY_IDS": "paper_strategy_ids",
         "OPEN_DELAY_SECONDS": "open_delay_seconds",
-        "TARGET_PROFIT": "target_profit",
-        "BET_SIZING_MODE": "bet_sizing_mode",
         "BASE_ORDER_COST": "base_order_cost",
         "MIN_STAKE": "min_stake",
         "PAPER_SIMULATED_WALLET_BALANCE": "paper_simulated_wallet_balance",
@@ -1986,7 +1711,6 @@ class DashboardState:
     )
 
     FLOAT_CONFIG_KEYS: tuple[str, ...] = (
-        "TARGET_PROFIT",
         "BASE_ORDER_COST",
         "MIN_STAKE",
         "PAPER_SIMULATED_WALLET_BALANCE",
@@ -2118,8 +1842,6 @@ class DashboardState:
         "STRATEGY10_OFI_WEIGHT": "策略10 将 Binance 盘口失衡映射到估值概率的权重。",
         "STRATEGY10_MOMENTUM_WEIGHT": "策略10 将本轮 Polymarket 动量映射到估值概率的权重。",
         "STRATEGY10_MAX_FAIR_VALUE": "策略10 对估算概率做截断，避免单一信号把估值推到极端。",
-        "TARGET_PROFIT": "在目标收益模式下，这里表示每轮期望净利；在固定金额模式下，它更多用于观察研究，不直接决定首笔下注金额。",
-        "BET_SIZING_MODE": "纯固定金额模式每轮只下 BASE_ORDER_COST 且不追亏；固定金额模式首笔固定但亏损后会回补；目标收益模式会根据目标净利反推下注金额。",
         "ENABLE_LIVE_TRADING": "运行模式选择实盘或纸面+实盘时会自动开启；关闭后只能安全运行纸面测试。",
         "MARKET_TIMEFRAME": "选择当前要玩的 Polymarket BTC 预测频次，仅支持 5 分钟和 15 分钟。",
         "OPEN_DELAY_SECONDS": "OPEN 模式下，从每轮开始后延迟多少秒再尝试入场。",
@@ -2130,7 +1852,7 @@ class DashboardState:
         "POLYMARKET_API_PASSPHRASE": "CLOB 实盘下单通行口令，仅用于实盘下单私有接口。",
         "FINAL_PRICE_WAIT_SECONDS": "实盘轮次结束后，最多等待官方 priceToBeat + finalPrice 的秒数；过期仍未取得时，先按 PROVISIONAL_LOSS 进入下一轮 sizing。",
         "FINAL_PRICE_POLL_INTERVAL_SECONDS": "等待官方 finalPrice 期间的快速重试间隔；建议小于 OPEN_DELAY_SECONDS，避免错过下一轮 sizing。",
-        "BASE_ORDER_COST": "仅固定金额模式使用；获胜后策略会重置回这个起始下注金额。",
+        "BASE_ORDER_COST": "每轮固定下注金额；不会根据上一轮亏损自动放大。",
         "MIN_STAKE": "单笔订单允许投入的最小 USDC；低于它时会跳过本轮。",
         "PAPER_SIMULATED_WALLET_BALANCE": "仅纸面模式使用，作为 dry-run 的模拟钱包余额；纸面不会读取真实钱包，但会经过与实盘相同的预算检查节点。",
         "MAX_CONSECUTIVE_LOSSES": "连续亏损达到这个次数后，策略会执行一次止损重置。",
@@ -2364,12 +2086,15 @@ class DashboardState:
         strategy_profile_key = _split_strategy_profile_key(key)
         if strategy_profile_key is not None:
             mode, strategy_id_text, base_key = strategy_profile_key
-            profile_map = (
-                getattr(self._cfg, "live_profiles", {})
-                if mode == "live"
-                else getattr(self._cfg, "paper_strategy_profiles", {})
-            )
-            profile = profile_map.get(int(strategy_id_text))
+            if mode == "live":
+                profile = getattr(self._cfg, "live_profiles", {}).get(int(strategy_id_text))
+            elif mode == "paper":
+                profile = getattr(self._cfg, "paper_strategy_profiles", {}).get(int(strategy_id_text))
+            else:
+                profile = (
+                    getattr(self._cfg, "paper_strategy_profiles", {}).get(int(strategy_id_text))
+                    or getattr(self._cfg, "live_profiles", {}).get(int(strategy_id_text))
+                )
             if profile is None:
                 return self._effective_config_value(base_key)
             value = getattr(profile, self.CONFIG_ATTR_MAP[base_key])
@@ -2417,12 +2142,7 @@ class DashboardState:
             strategy_text = str(strategy_id)
             fields: dict[str, Any] = {}
             for base_key in _strategy_profile_field_names(strategy_id):
-                shared_profile_key = f"{_shared_strategy_profile_prefix(strategy_text)}_{base_key}"
-                prefixed_key = (
-                    shared_profile_key
-                    if base_key == "BET_SIZING_MODE"
-                    else f"{_strategy_profile_prefix(mode, strategy_text)}_{base_key}"
-                )
+                prefixed_key = _shared_strategy_profile_key(strategy_text, base_key)
                 inherited_value = self._effective_config_value(base_key)
                 explicit_value = self._env_values.get(prefixed_key)
                 value = explicit_value if explicit_value is not None else self._effective_config_value(prefixed_key)
@@ -2570,8 +2290,6 @@ class DashboardState:
                 timeframe: {
                     "strategy_id": str(profile.strategy_id),
                     "paper_strategy_ids": [str(item) for item in profile.paper_strategy_ids],
-                    "target_profit": _fmt_env(profile.target_profit),
-                    "bet_sizing_mode": profile.bet_sizing_mode,
                     "base_order_cost": _fmt_env(profile.base_order_cost),
                     "max_consecutive_losses": _fmt_env(profile.max_consecutive_losses),
                     "min_stake": _fmt_env(profile.min_stake) if profile.min_stake is not None else "",
@@ -2899,7 +2617,6 @@ class DashboardState:
                     state=strategy_session,
                     side=side,
                     price=price,
-                    target_profit=effective_cfg.target_profit,
                     min_price_threshold=getattr(effective_cfg, 'min_price_threshold', None),
                     max_price_threshold=effective_cfg.max_price_threshold,
                     max_stake=effective_cfg.max_stake,
@@ -2907,7 +2624,6 @@ class DashboardState:
                     min_stake=getattr(effective_cfg, "min_stake", None),
                     min_entry_price=getattr(effective_cfg, "min_entry_price", getattr(effective_cfg, "min_price_threshold", None)),
                     max_entry_price=getattr(effective_cfg, "max_entry_price", effective_cfg.max_price_threshold),
-                    bet_sizing_mode=effective_cfg.bet_sizing_mode,
                     base_order_cost=effective_cfg.base_order_cost,
                     order_cost_multiplier=_effective_decision_order_cost_multiplier(
                         cfg=effective_cfg,
@@ -3483,25 +3199,15 @@ class DashboardRuntime:
 
 
 def _install_dashboard_min_price_threshold() -> None:
-    if 'MIN_PRICE_THRESHOLD' not in DashboardState.EDITABLE_CONFIG_KEYS:
-        editable = list(DashboardState.EDITABLE_CONFIG_KEYS)
-        editable.insert(editable.index('MAX_PRICE_THRESHOLD'), 'MIN_PRICE_THRESHOLD')
-        DashboardState.EDITABLE_CONFIG_KEYS = tuple(editable)
-
     DashboardState.CONFIG_LABELS['MIN_PRICE_THRESHOLD'] = '最低买入价格阈值'
     DashboardState.CONFIG_ATTR_MAP['MIN_PRICE_THRESHOLD'] = 'min_price_threshold'
     DashboardState.FIELD_HELP['MIN_PRICE_THRESHOLD'] = '目标方向价格低于此阈值就不入场，和最高价格阈值一起构成允许入场的价格区间。'
 
     if 'MIN_PRICE_THRESHOLD' not in DashboardState.FLOAT_CONFIG_KEYS:
         float_keys = list(DashboardState.FLOAT_CONFIG_KEYS)
-        float_keys.insert(float_keys.index('MAX_PRICE_THRESHOLD'), 'MIN_PRICE_THRESHOLD')
+        insert_at = float_keys.index('MAX_PRICE_THRESHOLD') if 'MAX_PRICE_THRESHOLD' in float_keys else len(float_keys)
+        float_keys.insert(insert_at, 'MIN_PRICE_THRESHOLD')
         DashboardState.FLOAT_CONFIG_KEYS = tuple(float_keys)
-
-    for group in DashboardState.FIELD_GROUPS:
-        keys = group.get('keys') or []
-        if 'MAX_PRICE_THRESHOLD' in keys and 'MIN_PRICE_THRESHOLD' not in keys:
-            keys.insert(keys.index('MAX_PRICE_THRESHOLD'), 'MIN_PRICE_THRESHOLD')
-            break
 
 
 _install_dashboard_min_price_threshold()
@@ -5295,14 +5001,14 @@ const HELP_TABS = [
 const HELP_SECTIONS = {
   quickstart: {
     title: '快速上手',
-    intro: '先确认基础策略、下注模式和单笔最大下注金额，再连续观察 3-5 轮后再决定是否同时改多个参数。',
+    intro: '先确认基础策略、固定下注金额和单笔最大下注金额，再连续观察 3-5 轮后再决定是否同时改多个参数。',
     sections: [
       {
         title: '先看哪里',
         bullets: [
           '先看行情与信号，确认当前轮次、方向判断和倒计时是否正常。',
           '再看下注计划与风控，确认当前是否准备下注、为什么跳过、以及预期收益是多少。',
-          '然后看会话状态，关注累计盈亏、待回补亏损和连续亏损轮数。',
+          '然后看会话状态，关注累计盈亏、连续亏损轮数和当日已实现盈亏。',
           '最后看实时连接状态，判断实时连接数据是否可靠。',
         ],
       },
@@ -5333,7 +5039,7 @@ const HELP_SECTIONS = {
         title: '参数引擎',
         bullets: [
           '用于查看并编辑运行参数。',
-          '重点关注基础策略、下注模式、风控边界，以及哪些字段只对策略 5 生效。',
+          '重点关注基础策略、固定下注金额、风控边界，以及哪些字段只对策略 5 生效。',
         ],
       },
       {
@@ -5353,8 +5059,8 @@ const HELP_SECTIONS = {
       {
         title: '会话状态',
         bullets: [
-          '用于看累计收益和当前恢复状态。',
-          '重点关注累计盈亏、待回补亏损、连续亏损轮数和当日已实现盈亏。',
+          '用于看累计收益和当前风控状态。',
+          '重点关注累计盈亏、连续亏损轮数和当日已实现盈亏。',
         ],
       },
       {
@@ -5386,11 +5092,10 @@ const HELP_SECTIONS = {
       {
         title: '所有模式通用',
         bullets: [
-          '纸面和实盘都会先经过同一套下注计划检查：价格、下注金额、连续亏损、下注模式和止损重置都会先判断。',
-          'MAX_CONSECUTIVE_LOSSES 控制连续亏损达到多少轮后触发止损重置，重置会清空待回补亏损和连续亏损计数。',
+          '纸面和实盘都会先经过同一套下注计划检查：价格、下注金额、连续亏损和止损重置都会先判断。',
+          'MAX_CONSECUTIVE_LOSSES 控制连续亏损达到多少轮后触发止损重置，重置会清空连续亏损计数。',
           'MAX_STAKE 是单笔最大下注金额；计算出的 order_cost 超过它时，本轮会跳过并显示 order_cost_above_max_stake。',
           'MAX_PRICE_THRESHOLD 限制目标方向最高买入价；MIN_PRICE_THRESHOLD 可选限制最低买入价。',
-          'BET_SIZING_MODE 决定下注金额计算方式；FLAT_BASE_COST 每轮固定金额且不累积追亏，FIXED_BASE_COST 从 BASE_ORDER_COST 起步但亏损后会回补，TARGET_PROFIT 按目标利润反推下注额。',
         ],
       },
       {
@@ -5423,7 +5128,7 @@ const HELP_SECTIONS = {
       {
         title: '重置与告警',
         bullets: [
-          'FIXED_BASE_COST/TARGET_PROFIT 每次亏损会增加 recovery_loss 和 consecutive_losses；FLAT_BASE_COST 不累积 recovery_loss。',
+          '亏损只会增加 consecutive_losses，不会增加 recovery_loss 或放大下一单。',
           '连续亏损达到 MAX_CONSECUTIVE_LOSSES 会触发止损重置，并增加 stop_loss_count。',
           '连续因 MAX_STAKE 超额而跳过也会累积计数，达到 MAX_CONSECUTIVE_LOSSES 时会按风险门处理并重置。',
           'MAX_STAKE_SKIP_ALERT_THRESHOLD 控制连续超额跳过多少次后打印提醒。',
@@ -5442,7 +5147,7 @@ const HELP_FAQ = [
   ['为什么当日已实现盈亏会重置？', '这是按天统计的自然切日行为；累计盈亏仍然保留在会话状态里。'],
   ['实盘自动赎回开关是什么意思？', '这是实盘自动赎回开关。开启后，并行实盘会启动单独的自动赎回线程，自动扫描并尝试赎回获胜仓位。'],
   ['自动赎回演练模式需要关闭吗？', '不需要一直关闭。它是一个安全阀：开启时只做演练，不会发送真实的 Polygon 赎回交易。正常实盘应保持关闭，仅在首次验证或调试时开启。'],
-  ['为什么触发最大下注金额后会连续跳过？', '待回补亏损和当前价格条件可能会把本轮所需金额推高到最大下注金额之上，需要结合待回补亏损一起判断。'],
+  ['为什么触发最大下注金额后会连续跳过？', '当前固定下注金额、信号金额倍数或价格条件可能会让本轮 order_cost 超过最大下注金额。'],
   ['新用户最容易配错什么？', '最常见的是一次改太多参数、把固定节奏和动量逻辑混在一起看，以及把实时连接保护误当成策略故障。'],
 ];
 
@@ -5476,11 +5181,6 @@ const OPTION_LABELS = {
     true: '开启',
     false: '关闭',
   },
-  BET_SIZING_MODE: {
-    FLAT_BASE_COST: '纯固定金额模式',
-    FIXED_BASE_COST: '固定金额模式',
-    TARGET_PROFIT: '目标收益模式',
-  },
   SIGNAL_WEAK_SIGNAL_MODE: {
     SKIP: '弱信号跳过',
     FALLBACK: '按跳过处理',
@@ -5505,8 +5205,7 @@ const REASON_LABELS = {
   price_above_threshold: '价格超过上限阈值',
   price_below_threshold: '价格低于下限阈值',
   invalid_price: '价格无效',
-  invalid_base_order_cost: '固定起始下注金额无效',
-  invalid_bet_sizing_mode: '下注模式无效',
+  invalid_base_order_cost: '固定下注金额无效',
   order_cost_below_min_stake: '下单金额低于单笔下限',
   order_cost_above_max_stake: '下单金额超过单笔上限',
   order_size_not_positive: '下单份额无效',
@@ -5578,9 +5277,7 @@ const CONFIG_KEY_NAMES = {
   POLYMARKET_FUNDER: '\u5b9e\u76d8\u94b1\u5305\u5730\u5740',
   STRATEGY_ID: '基础策略',
   STRATEGY_IDS: '统一策略组合',
-  TARGET_PROFIT: '每次目标净利',
-  BET_SIZING_MODE: '下注模式',
-  BASE_ORDER_COST: '固定起始下注金额',
+  BASE_ORDER_COST: '固定下注金额',
   MIN_STAKE: '单笔最小下注金额',
   PAPER_SIMULATED_WALLET_BALANCE: '纸面模拟钱包余额',
   MAX_CONSECUTIVE_LOSSES: '连亏重置轮数',
@@ -6544,131 +6241,6 @@ function renderPaperProfiles(payload) {
     return;
   }
   node.innerHTML = '';
-  return;
-  const timeframes = Array.isArray((payload || {}).paper_timeframes) ? payload.paper_timeframes : [];
-  const profiles = ((payload || {}).paper_profiles) || {};
-  const envValues = ((payload || {}).env_values) || {};
-  const selectOptions = ((payload || {}).select_options) || {};
-  const labels = ((payload || {}).labels) || {};
-  const enabled = parsePaperTimeframeList(envValues.PAPER_TIMEFRAMES || timeframes.join(','));
-  if (!timeframes.length) {
-    node.innerHTML = '';
-    return;
-  }
-
-  const timeframeToggleHtml = timeframes.map((timeframe) => {
-    const checked = enabled.indexOf(String(timeframe).toLowerCase()) >= 0 ? ' checked' : '';
-    return '<label class="strategy-panel-toggle"><input type="checkbox" data-paper-timeframe="' + esc(timeframe) + '"' + checked + '>运行 ' + esc(paperTimeframeLabel(timeframe)) + '</label>';
-  }).join('');
-
-  const fieldNames = [
-    'STRATEGY_ID',
-    'STRATEGY_IDS',
-    'TARGET_PROFIT',
-    'BASE_ORDER_COST',
-    'MIN_STAKE',
-    'MAX_CONSECUTIVE_LOSSES',
-    'MAX_STAKE',
-    'MIN_ENTRY_PRICE',
-    'MAX_ENTRY_PRICE',
-    'OPEN_DELAY_SECONDS',
-    'SIGNAL_MOMENTUM_THRESHOLD',
-    'OFI_THRESHOLD',
-    'BINANCE_SIGNAL_STALE_SECONDS',
-    'STRATEGY7_OFI_THRESHOLD',
-    'STRATEGY7_MOMENTUM_THRESHOLD',
-    'STRATEGY7_MAX_MOMENTUM_DELTA',
-    'STRATEGY7_DYNAMIC_SIZING_ENABLED',
-    'STRATEGY7_SIZING_REFERENCE_PRICE',
-    'STRATEGY7_SIZING_PRICE_STEP',
-    'STRATEGY7_SIZING_PRICE_STEP_REDUCTION',
-    'STRATEGY7_SIZING_MIN_MULTIPLIER',
-    'STRATEGY7_SIZING_MAX_MULTIPLIER',
-    'STRATEGY7_SIZING_STRONG_SIGNAL_GAP',
-    'STRATEGY7_SIZING_STRONG_SIGNAL_BOOST',
-    'STRATEGY9_DYNAMIC_SIZING_ENABLED',
-    'STRATEGY9_SIZING_REFERENCE_PRICE',
-    'STRATEGY9_SIZING_PRICE_STEP',
-    'STRATEGY9_SIZING_PRICE_STEP_REDUCTION',
-    'STRATEGY9_SIZING_MIN_MULTIPLIER',
-    'STRATEGY9_SIZING_MAX_MULTIPLIER',
-    'STRATEGY9_SIZING_STRONG_SIGNAL_GAP',
-    'STRATEGY9_SIZING_STRONG_SIGNAL_BOOST',
-  ];
-
-  node.innerHTML = ''
-    + '<section class="strategy-guide-card">'
-    +   '<div class="strategy-guide-head">'
-    +     '<div><div class="strategy-guide-title">纸面配置组</div><div class="strategy-guide-subtitle">按时间频次独立编辑纸面配置。</div></div>'
-    +     '<span class="chip ok">已配置</span>'
-    +   '</div>'
-    +   '<div class="rows">' + timeframeToggleHtml + '<input id="cfg_PAPER_TIMEFRAMES" type="hidden" value="' + esc(enabled.join(',')) + '"></div>'
-    + '</section>'
-    + timeframes.map((timeframe) => {
-      const profile = profiles[timeframe] || {};
-      const lowerTimeframe = String(timeframe).toLowerCase();
-      const hiddenStyle = enabled.indexOf(lowerTimeframe) >= 0 ? '' : ' style="display:none"';
-      const fieldsHtml = fieldNames.map((fieldName) => {
-        const scopedKey = 'PAPER_' + String(timeframe).toUpperCase() + '_' + fieldName;
-        const label = (labels && labels[scopedKey]) || scopedKey;
-        const normalizedValue = fieldName === 'STRATEGY_IDS' && Array.isArray(profile.paper_strategy_ids)
-          ? String(envValues[scopedKey] ?? profile.paper_strategy_ids.join(','))
-          : String(envValues[scopedKey] ?? profile[
-              fieldName === 'STRATEGY_ID' ? 'strategy_id'
-              : fieldName === 'TARGET_PROFIT' ? 'target_profit'
-              : fieldName === 'BASE_ORDER_COST' ? 'base_order_cost'
-              : fieldName === 'MAX_CONSECUTIVE_LOSSES' ? 'max_consecutive_losses'
-              : fieldName === 'MIN_STAKE' ? 'min_stake'
-              : fieldName === 'MAX_STAKE' ? 'max_stake'
-              : fieldName === 'MIN_ENTRY_PRICE' ? 'min_entry_price'
-              : fieldName === 'MAX_ENTRY_PRICE' ? 'max_entry_price'
-              : fieldName === 'OPEN_DELAY_SECONDS' ? 'open_delay_seconds'
-              : fieldName === 'SIGNAL_MOMENTUM_THRESHOLD' ? 'signal_momentum_threshold'
-              : fieldName === 'OFI_THRESHOLD' ? 'ofi_threshold'
-              : fieldName === 'BINANCE_SIGNAL_STALE_SECONDS' ? 'binance_signal_stale_seconds'
-              : fieldName === 'STRATEGY7_OFI_THRESHOLD' ? 'strategy7_ofi_threshold'
-              : fieldName === 'STRATEGY7_MAX_MOMENTUM_DELTA' ? 'strategy7_max_momentum_delta'
-              : fieldName.startsWith('STRATEGY7_SIZING_') ? fieldName.toLowerCase()
-              : fieldName === 'STRATEGY7_DYNAMIC_SIZING_ENABLED' ? 'strategy7_dynamic_sizing_enabled'
-              : fieldName.startsWith('STRATEGY9_') ? fieldName.toLowerCase()
-              : 'strategy7_momentum_threshold'
-            ] ?? '');
-        const options = selectOptions[scopedKey] || selectOptions[fieldName] || null;
-        const controlHtml = Array.isArray(options)
-          ? ('<select id="cfg_' + esc(scopedKey) + '">' + options.map((opt) => {
-              const selected = String(opt) === normalizedValue ? ' selected' : '';
-              return '<option value="' + esc(opt) + '"' + selected + '>' + esc(String(opt)) + '</option>';
-            }).join('') + '</select>')
-          : ('<input id="cfg_' + esc(scopedKey) + '" type="text" value="' + esc(normalizedValue) + '">');
-        return '<div class="field"><label for="cfg_' + esc(scopedKey) + '">' + esc(label) + '</label>' + controlHtml + '</div>';
-      }).join('');
-      return ''
-        + '<section class="strategy-guide-card" data-paper-profile="' + esc(timeframe) + '"' + hiddenStyle + '>'
-        +   '<div class="strategy-guide-head">'
-        +     '<div><div class="strategy-guide-title">' + esc(paperTimeframeLabel(timeframe)) + ' 纸面配置</div><div class="strategy-guide-subtitle">独立纸面配置</div></div>'
-        +     '<span class="chip ok">可编辑</span>'
-        +   '</div>'
-        +   '<div class="group-grid">' + fieldsHtml + '</div>'
-        + '</section>';
-    }).join('');
-
-  const hiddenInput = el('cfg_PAPER_TIMEFRAMES');
-  const syncVisibility = () => {
-    const selected = Array.from(node.querySelectorAll('input[data-paper-timeframe]'))
-      .filter((checkbox) => checkbox.checked)
-      .map((checkbox) => String(checkbox.getAttribute('data-paper-timeframe') || '').toLowerCase());
-    if (hiddenInput) {
-      hiddenInput.value = selected.join(',');
-    }
-    node.querySelectorAll('[data-paper-profile]').forEach((section) => {
-      const sectionTimeframe = String(section.getAttribute('data-paper-profile') || '').toLowerCase();
-      section.style.display = selected.indexOf(sectionTimeframe) >= 0 ? '' : 'none';
-    });
-  };
-  node.querySelectorAll('input[data-paper-timeframe]').forEach((checkbox) => {
-    checkbox.addEventListener('change', syncVisibility);
-  });
-  syncVisibility();
 }
 
 function paperRuntimeCardsFromConfig(payload) {
@@ -7222,7 +6794,6 @@ function isSingleLiveToggleKey(key) {
 
 function isCompactConfigField(key) {
   return [
-    'TARGET_PROFIT',
     'BASE_ORDER_COST',
     'MIN_STAKE',
     'PAPER_SIMULATED_WALLET_BALANCE',

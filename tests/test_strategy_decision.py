@@ -6,6 +6,7 @@ import pytest
 
 from config import AppConfig, build_config_from_env_values
 from models import MarketQuote, MarketWindow, SessionState
+from runtime_config import cfg_for_paper_strategy
 from strategy_decision import SideDecision, effective_decision_order_cost_multiplier, resolve_side_from_strategy, strategy7_order_cost_multiplier
 from trader import SideDecision as TraderSideDecision
 from trader import _resolve_side_from_strategy
@@ -38,15 +39,17 @@ def test_strategy7_uses_general_max_entry_price():
     cfg = build_config_from_env_values(
         {
             "STRATEGY_ID": "7",
-            "MAX_ENTRY_PRICE": "0.54",
-            "STRATEGY7_MAX_ENTRY_PRICE": "0.90",
-            "STRATEGY7_OFI_THRESHOLD": "0.5",
-            "STRATEGY7_MOMENTUM_THRESHOLD": "0.01",
-            "STRATEGY7_MIN_SIGNAL_GAP": "0.0",
-            "STRATEGY7_CONFIRM_BEFORE_ENTRY_SECONDS": "0",
-            "BINANCE_SIGNAL_STALE_SECONDS": "10.0",
+            "PAPER_STRATEGY_IDS": "7",
+            "STRATEGY_7_MAX_ENTRY_PRICE": "0.54",
+            "STRATEGY_7_MAX_MOMENTUM_DELTA": "",
+            "STRATEGY_7_OFI_THRESHOLD": "0.5",
+            "STRATEGY_7_MOMENTUM_THRESHOLD": "0.01",
+            "STRATEGY_7_MIN_SIGNAL_GAP": "0.0",
+            "STRATEGY_7_CONFIRM_BEFORE_ENTRY_SECONDS": "0",
+            "STRATEGY_7_BINANCE_SIGNAL_STALE_SECONDS": "10.0",
         }
     )
+    cfg = cfg_for_paper_strategy(cfg, 7)
     state = SessionState(signal_round_slug="s1", signal_round_open_up_price=0.50)
     quote = MarketQuote(
         slug="s1",
@@ -167,15 +170,17 @@ def test_strategy7_zero_confirm_window_allows_entry_inside_grace_window():
     cfg = build_config_from_env_values(
         {
             "STRATEGY_ID": "7",
-            "OPEN_DELAY_SECONDS": "12",
             "ENTRY_GRACE_SECONDS": "18",
-            "STRATEGY7_OFI_THRESHOLD": "0.5",
-            "STRATEGY7_MOMENTUM_THRESHOLD": "0.01",
-            "STRATEGY7_MIN_SIGNAL_GAP": "0.0",
-            "STRATEGY7_CONFIRM_BEFORE_ENTRY_SECONDS": "0",
-            "BINANCE_SIGNAL_STALE_SECONDS": "10.0",
+            "PAPER_STRATEGY_IDS": "7",
+            "STRATEGY_7_OPEN_DELAY_SECONDS": "12",
+            "STRATEGY_7_OFI_THRESHOLD": "0.5",
+            "STRATEGY_7_MOMENTUM_THRESHOLD": "0.01",
+            "STRATEGY_7_MIN_SIGNAL_GAP": "0.0",
+            "STRATEGY_7_CONFIRM_BEFORE_ENTRY_SECONDS": "0",
+            "STRATEGY_7_BINANCE_SIGNAL_STALE_SECONDS": "10.0",
         }
     )
+    cfg = cfg_for_paper_strategy(cfg, 7)
     state = SessionState(signal_round_slug="s1", signal_round_open_up_price=0.50)
     quote = MarketQuote(
         slug="s1",

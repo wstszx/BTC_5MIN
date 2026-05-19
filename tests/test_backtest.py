@@ -17,8 +17,7 @@ def test_backtest_returns_summary_metrics():
     cfg = AppConfig(
         strategy_id=1,
         max_consecutive_losses=2,
-        target_profit=0.5,
-        bet_sizing_mode="TARGET_PROFIT",
+        base_order_cost=1.0,
         max_stake=25.0,
         max_price_threshold=0.65,
     )
@@ -27,8 +26,8 @@ def test_backtest_returns_summary_metrics():
     assert result.skipped_round_count == 2
     assert result.stop_loss_count == 1
     assert result.max_consecutive_losses == 2
-    assert round(result.total_pnl, 4) == -0.5833
-    assert round(result.max_drawdown, 4) == 1.5833
+    assert round(result.total_pnl, 4) == -0.1818
+    assert round(result.max_drawdown, 4) == 2.0
 
 
 def test_backtest_supports_strategy_7_with_historical_ofi_and_momentum(tmp_path):
@@ -75,7 +74,6 @@ def test_backtest_strategy_7_dynamic_sizing_scales_high_price_trade(tmp_path):
     cfg = AppConfig(
         strategy_id=7,
         entry_timing="PRE_CLOSE",
-        bet_sizing_mode="FLAT_BASE_COST",
         base_order_cost=10.0,
         max_stake=25.0,
         strategy7_dynamic_sizing_enabled=True,
@@ -113,7 +111,6 @@ def test_backtest_strategy_9_dynamic_sizing_scales_high_price_trade(tmp_path):
     cfg = AppConfig(
         strategy_id=9,
         entry_timing="PRE_CLOSE",
-        bet_sizing_mode="FLAT_BASE_COST",
         base_order_cost=10.0,
         max_stake=25.0,
         strategy7_ofi_threshold=0.65,

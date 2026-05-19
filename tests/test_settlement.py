@@ -160,7 +160,7 @@ def test_settle_pending_live_trade_flat_plan_does_not_accrue_recovery_loss():
     assert updated_state.cash_pnl == -1.0
     assert updated_state.recovery_loss == 0.0
     assert updated_state.consecutive_losses == 3
-    assert updated_state.pending_live_tracks_recovery_loss is True
+    assert updated_state.pending_live_tracks_recovery_loss is False
 
 
 def test_official_result_uses_terminal_prices_when_final_price_is_missing():

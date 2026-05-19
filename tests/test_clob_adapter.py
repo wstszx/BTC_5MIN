@@ -254,10 +254,18 @@ def test_clob_adapter_reads_available_balance_from_nested_payload():
 
 def test_clob_adapter_submits_injected_market_order_with_strategy_price_cap():
     client = _InjectedOrderClient()
-    plan = TradePlan(True, side="UP", price=0.54, order_size=2.0, order_cost=1.08, expected_profit=0.92)
+    plan = TradePlan(
+        True,
+        side="UP",
+        price=0.54,
+        order_size=2.0,
+        order_cost=1.08,
+        expected_profit=0.92,
+        max_entry_price=0.55,
+    )
 
     order_id, response = submit_live_strategy_order(
-        cfg=AppConfig(strategy_id=7, strategy7_max_entry_price=0.55),
+        cfg=AppConfig(strategy_id=7),
         clob_client=client,
         token_id="up-token",
         plan=plan,

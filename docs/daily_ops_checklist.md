@@ -95,8 +95,8 @@ for item in summarize_paper_trades(Path('logs/paper/5m/paper_trades.csv'), tz_of
 出现 `order_cost_above_max_stake` 频繁跳过：
 
 ```powershell
-# 临时降低目标收益（下次启动生效）
-$env:TARGET_PROFIT='0.8'
+# 临时降低固定下注金额（下次启动生效）
+$env:STRATEGY_7_BASE_ORDER_COST='1.0'
 ```
 
 出现 `signal_too_weak_skip` 过多：

@@ -30,22 +30,23 @@ def build_candidate_configs(
     cfg: AppConfig,
     *,
     strategy_ids: Iterable[int],
-    target_profits: Iterable[float],
+    base_order_costs: Iterable[float] | None = None,
     max_price_thresholds: Iterable[float],
     strategy5_thresholds: Iterable[float],
 ) -> list[OptimizerCandidate]:
     candidates: list[OptimizerCandidate] = []
-    for strategy_id, target_profit, max_price_threshold in product(strategy_ids, target_profits, max_price_thresholds):
+    candidate_base_order_costs = list(base_order_costs if base_order_costs is not None else [cfg.base_order_cost])
+    for strategy_id, base_order_cost, max_price_threshold in product(strategy_ids, candidate_base_order_costs, max_price_thresholds):
         if strategy_id == 5:
             for momentum_threshold in strategy5_thresholds:
                 params = {
-                    "TARGET_PROFIT": float(target_profit),
+                    "BASE_ORDER_COST": float(base_order_cost),
                     "MAX_PRICE_THRESHOLD": float(max_price_threshold),
                     "SIGNAL_MOMENTUM_THRESHOLD": float(momentum_threshold),
                 }
                 candidates.append(
                     OptimizerCandidate(
-                        candidate_id=f"s{strategy_id}-tp{target_profit}-mp{max_price_threshold}-sm{momentum_threshold}",
+                        candidate_id=f"s{strategy_id}-bc{base_order_cost}-mp{max_price_threshold}-sm{momentum_threshold}",
                         base_strategy_id=strategy_id,
                         params=params,
                     )
@@ -57,27 +58,26 @@ def build_candidate_configs(
                 [0.53, 0.54, 0.55],
             ):
                 params = {
-                    "TARGET_PROFIT": float(target_profit),
-                    "BET_SIZING_MODE": "FLAT_BASE_COST",
+                    "BASE_ORDER_COST": float(base_order_cost),
                     "STRATEGY7_OFI_THRESHOLD": float(ofi_threshold),
                     "STRATEGY7_MOMENTUM_THRESHOLD": float(momentum_threshold),
                     "STRATEGY7_MAX_ENTRY_PRICE": float(max_entry_price),
                 }
                 candidates.append(
                     OptimizerCandidate(
-                        candidate_id=f"s{strategy_id}-tp{target_profit}-ofi{ofi_threshold}-sm{momentum_threshold}-me{max_entry_price}",
+                        candidate_id=f"s{strategy_id}-bc{base_order_cost}-ofi{ofi_threshold}-sm{momentum_threshold}-me{max_entry_price}",
                         base_strategy_id=strategy_id,
                         params=params,
                     )
                 )
         else:
             params = {
-                "TARGET_PROFIT": float(target_profit),
+                "BASE_ORDER_COST": float(base_order_cost),
                 "MAX_PRICE_THRESHOLD": float(max_price_threshold),
             }
             candidates.append(
                 OptimizerCandidate(
-                    candidate_id=f"s{strategy_id}-tp{target_profit}-mp{max_price_threshold}",
+                    candidate_id=f"s{strategy_id}-bc{base_order_cost}-mp{max_price_threshold}",
                     base_strategy_id=strategy_id,
                     params=params,
                 )
@@ -276,8 +276,7 @@ def refresh_optimizer_state_from_paper_results(
 
 
 _CANDIDATE_PARAM_ATTR_MAP: dict[str, str] = {
-    "TARGET_PROFIT": "target_profit",
-    "BET_SIZING_MODE": "bet_sizing_mode",
+    "BASE_ORDER_COST": "base_order_cost",
     "MAX_PRICE_THRESHOLD": "max_price_threshold",
     "SIGNAL_MOMENTUM_THRESHOLD": "signal_momentum_threshold",
     "OFI_THRESHOLD": "ofi_threshold",
@@ -334,7 +333,7 @@ def run_optimizer_from_history_csv(
     base_cfg: AppConfig,
     output_path: Path,
     strategy_ids: Iterable[int],
-    target_profits: Iterable[float],
+    base_order_costs: Iterable[float] | None = None,
     max_price_thresholds: Iterable[float],
     strategy5_thresholds: Iterable[float],
     train_size: int,
@@ -355,7 +354,7 @@ def run_optimizer_from_history_csv(
     candidates = build_candidate_configs(
         base_cfg,
         strategy_ids=strategy_ids,
-        target_profits=target_profits,
+        base_order_costs=base_order_costs,
         max_price_thresholds=max_price_thresholds,
         strategy5_thresholds=strategy5_thresholds,
     )
@@ -408,7 +407,7 @@ def run_optimizer_scheduler(
                 base_cfg=base_cfg,
                 output_path=output_path,
                 strategy_ids=[5, 6],
-                target_profits=[0.8, 1.0, 1.2],
+                base_order_costs=[0.8, 1.0, 1.2],
                 max_price_thresholds=[0.55, 0.60, 0.65],
                 strategy5_thresholds=[0.012, 0.015, 0.018],
                 train_size=3,
@@ -472,7 +471,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         base_cfg=cfg,
         output_path=output_path,
         strategy_ids=[5, 6],
-        target_profits=[0.8, 1.0, 1.2],
+        base_order_costs=[0.8, 1.0, 1.2],
         max_price_thresholds=[0.55, 0.60, 0.65],
         strategy5_thresholds=[0.012, 0.015, 0.018],
         train_size=3,

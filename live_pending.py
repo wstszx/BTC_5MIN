@@ -25,7 +25,7 @@ def clear_legacy_pending_live_trade(state: LivePendingState) -> None:
     state.pending_live_expected_profit = None
     state.pending_live_order_id = None
     state.pending_live_end_time = None
-    state.pending_live_tracks_recovery_loss = True
+    state.pending_live_tracks_recovery_loss = False
 
 
 def pending_live_trade_from_legacy(
@@ -52,7 +52,7 @@ def pending_live_trade_from_legacy(
         entry_timing=entry_timing,
         order_id=state.pending_live_order_id,
         queued_at=None,
-        tracks_recovery_loss=bool(state.pending_live_tracks_recovery_loss),
+        tracks_recovery_loss=False,
     )
 
 
@@ -65,7 +65,7 @@ def apply_pending_live_trade_to_legacy(state: LivePendingState, item: PendingLiv
     state.pending_live_expected_profit = item.expected_profit
     state.pending_live_order_id = item.order_id
     state.pending_live_end_time = item.end_time
-    state.pending_live_tracks_recovery_loss = item.tracks_recovery_loss
+    state.pending_live_tracks_recovery_loss = False
 
 
 def pending_live_trade_exists(
@@ -154,7 +154,7 @@ def queue_pending_live_trade(
         entry_timing=entry_timing,
         order_id=order_id,
         queued_at=datetime.now(timezone.utc).isoformat(),
-        tracks_recovery_loss=plan.tracks_recovery_loss,
+        tracks_recovery_loss=False,
     )
     state.pending_live_trades.append(item)
     apply_pending_live_trade_to_legacy(state, item)

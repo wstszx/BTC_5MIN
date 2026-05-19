@@ -8,7 +8,6 @@ def test_build_trade_plan_skips_when_price_below_threshold():
         state=state,
         side='UP',
         price=0.35,
-        target_profit=0.5,
         min_price_threshold=0.4,
         max_price_threshold=0.65,
         max_stake=10,

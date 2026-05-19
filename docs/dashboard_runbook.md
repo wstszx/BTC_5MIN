@@ -30,7 +30,7 @@ The runtime status card is the source of truth for live-switch progress and curr
 
 ## 3. What you can do
 
-- Edit strategy parameters such as `STRATEGY_ID`, `TARGET_PROFIT`, and `MAX_STAKE`, then save them back to `.env.dashboard`.
+- Edit strategy parameters such as `STRATEGY_ID`, `BASE_ORDER_COST`, and `MAX_STAKE`, then save them back to `.env.dashboard`.
 - Use the `启用实盘` switch in the config editor while `python main.py` is still running. Turning it on maps to `TRADE_MODE=live` plus `LIVE_TRADING_ENABLED=true`; turning it off maps to paper mode. The runtime then waits for the current round to finish before switching.
 - Watch the real-time connection health area for connection status, reconnect activity, quote freshness, and whether stale-trade protection has been triggered.
 - Review the recent trade list to confirm the runtime is still healthy. The dashboard reads recent orders from the actual active mode, not just the saved target mode.

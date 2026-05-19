@@ -9,11 +9,6 @@ def validate_price(price: float | None) -> bool:
     return price is not None and 0 < price < 1
 
 
-def compute_order_size(recovery_loss: float, target_profit: float, price: float) -> float:
-    base = target_profit if recovery_loss <= 0 else recovery_loss + target_profit
-    return base / (1 - price)
-
-
 def compute_order_cost(order_size: float, price: float) -> float:
     return order_size * price
 
@@ -35,7 +30,6 @@ def build_trade_plan(
     state: SessionState,
     side: str,
     price: float | None,
-    target_profit: float,
     max_stake: float | None,
     max_consecutive_losses: int,
     min_entry_price: float | None = None,
@@ -43,7 +37,6 @@ def build_trade_plan(
     min_price_threshold: float | None = None,
     max_price_threshold: float | None = None,
     min_stake: float | None = None,
-    bet_sizing_mode: str = "TARGET_PROFIT",
     base_order_cost: float = 1.0,
     order_cost_multiplier: float = 1.0,
 ) -> TradePlan:
@@ -93,53 +86,19 @@ def build_trade_plan(
             order_cost_multiplier=order_cost_multiplier,
             skip_reason="price_above_threshold",
         )
-    mode = bet_sizing_mode.upper()
-    tracks_recovery_loss = True
-    if mode == "FLAT_BASE_COST":
-        if base_order_cost <= 0:
-            return TradePlan(
-                False,
-                side=side,
-                price=price,
-                max_entry_price=effective_max_entry_price,
-                order_cost_multiplier=order_cost_multiplier,
-                skip_reason="invalid_base_order_cost",
-            )
-        order_cost = base_order_cost
-        order_size = order_cost / price
-        expected_profit = order_size * (1 - price)
-        tracks_recovery_loss = False
-    elif mode == "FIXED_BASE_COST":
-        if base_order_cost <= 0:
-            return TradePlan(
-                False,
-                side=side,
-                price=price,
-                max_entry_price=effective_max_entry_price,
-                order_cost_multiplier=order_cost_multiplier,
-                skip_reason="invalid_base_order_cost",
-            )
-        if state.recovery_loss <= 0:
-            order_cost = base_order_cost
-            order_size = order_cost / price
-            expected_profit = order_size * (1 - price)
-        else:
-            expected_profit = state.recovery_loss + base_order_cost
-            order_size = expected_profit / (1 - price)
-            order_cost = compute_order_cost(order_size, price)
-    elif mode == "TARGET_PROFIT":
-        order_size = compute_order_size(state.recovery_loss, target_profit, price)
-        order_cost = compute_order_cost(order_size, price)
-        expected_profit = order_size * (1 - price)
-    else:
+    if base_order_cost <= 0:
         return TradePlan(
             False,
             side=side,
             price=price,
             max_entry_price=effective_max_entry_price,
             order_cost_multiplier=order_cost_multiplier,
-            skip_reason="invalid_bet_sizing_mode",
+            skip_reason="invalid_base_order_cost",
         )
+    order_cost = base_order_cost
+    order_size = order_cost / price
+    expected_profit = order_size * (1 - price)
+    tracks_recovery_loss = False
 
     effective_multiplier = max(0.0, float(order_cost_multiplier))
     if effective_multiplier != 1.0:
@@ -190,16 +149,13 @@ def apply_round_outcome(state: SessionState, plan: TradePlan, *, won: bool) -> S
         trade_pnl = plan.order_size * (1 - (plan.price or 0.0))
         updated.cash_pnl += trade_pnl
         updated.daily_realized_pnl += trade_pnl
-        updated.recovery_loss = max(0.0, updated.recovery_loss - trade_pnl)
+        updated.recovery_loss = 0.0
         updated.consecutive_losses = 0
         return updated
 
     trade_loss = plan.order_cost
     updated.cash_pnl -= trade_loss
     updated.daily_realized_pnl -= trade_loss
-    if plan.tracks_recovery_loss:
-        updated.recovery_loss += trade_loss
-    else:
-        updated.recovery_loss = 0.0
+    updated.recovery_loss = 0.0
     updated.consecutive_losses += 1
     return updated

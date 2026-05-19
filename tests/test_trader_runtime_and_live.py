@@ -5,7 +5,7 @@ import json
 import os
 import threading
 from pathlib import Path
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -141,7 +141,7 @@ def test_sync_live_state_ledger_from_trade_log_uses_reconciled_loss(tmp_path: Pa
     live_state = state.live_strategies[7]
     assert live_state.cash_pnl == pytest.approx(0.8000006)
     assert live_state.daily_realized_pnl == pytest.approx(-1.1999994)
-    assert live_state.recovery_loss == pytest.approx(1.1999994)
+    assert live_state.recovery_loss == 0.0
     assert live_state.consecutive_losses == 1
     assert live_state.pending_live_slug == "btc-updown-5m-current"
     assert state.cash_pnl == pytest.approx(0.8000006)
@@ -175,7 +175,7 @@ def test_sync_live_state_ledger_from_trade_log_does_not_restore_legacy_flat_sizi
             }
         )
 
-    cfg = AppConfig(strategy_id=7, live_strategy_ids=[7], bet_sizing_mode="FLAT_BASE_COST")
+    cfg = AppConfig(strategy_id=7, live_strategy_ids=[7])
     state = SessionState(
         cash_pnl=0.0,
         daily_realized_pnl=0.0,
@@ -197,9 +197,9 @@ def test_sync_live_state_ledger_from_trade_log_does_not_restore_legacy_flat_sizi
     assert live_state.cash_pnl == pytest.approx(-1.1999994)
     assert live_state.daily_realized_pnl == pytest.approx(-1.1999994)
     assert live_state.recovery_loss == 0.0
-    assert live_state.consecutive_losses == 0
+    assert live_state.consecutive_losses == 1
     assert state.recovery_loss == 0.0
-    assert state.consecutive_losses == 0
+    assert state.consecutive_losses == 1
 
 
 def test_sync_live_state_ledger_from_trade_log_respects_stop_loss_reset(tmp_path: Path):
@@ -1089,7 +1089,7 @@ def test_run_live_trading_books_provisional_loss_when_final_price_is_missing_eve
     assert result["status"] == "stopped"
     assert reloaded.live_strategies[7].pending_live_slug is None
     assert reloaded.live_strategies[7].cash_pnl == pytest.approx(-1.0)
-    assert reloaded.live_strategies[7].recovery_loss == pytest.approx(1.0)
+    assert reloaded.live_strategies[7].recovery_loss == 0.0
     assert reloaded.live_strategies[7].consecutive_losses == 1
     assert rows[0]["result"] == "PROVISIONAL_LOSS"
     assert rows[0]["trade_pnl"] == "-1.0"
@@ -1172,10 +1172,10 @@ def test_run_live_trading_books_provisional_loss_when_final_price_is_missing(tmp
     reloaded = load_session_state(state_path, effective_live_strategy_ids=[7])
     rows = list(csv.DictReader((tmp_path / "live_orders.csv").open(newline="", encoding="utf-8")))
     assert result["status"] == "stopped"
-    assert captured == {"recovery_loss": 1.0, "consecutive_losses": 1}
+    assert captured == {"recovery_loss": 0.0, "consecutive_losses": 1}
     assert reloaded.live_strategies[7].pending_live_slug is None
     assert reloaded.live_strategies[7].cash_pnl == pytest.approx(-1.0)
-    assert reloaded.live_strategies[7].recovery_loss == pytest.approx(1.0)
+    assert reloaded.live_strategies[7].recovery_loss == 0.0
     assert reloaded.live_strategies[7].consecutive_losses == 1
     assert rows[0]["event_slug"] == "btc-updown-5m-prev"
     assert rows[0]["result"] == "PROVISIONAL_LOSS"
@@ -1305,7 +1305,6 @@ def test_run_live_strategy7_flat_continues_with_unresolved_pending_trade(tmp_pat
             live_funder="0xfunder",
             strategy_id=7,
             live_strategy_ids=[7],
-            bet_sizing_mode="FLAT_BASE_COST",
             poll_interval_seconds=1,
         ),
         market_client=_LiveMarketClient(),
@@ -2222,7 +2221,7 @@ def test_load_session_state_live_strategies_wraps_legacy_live_state_for_effectiv
     live_state = state.live_strategies[7]
     assert live_state.round_index == 5
     assert live_state.cash_pnl == 2.5
-    assert live_state.recovery_loss == 0.75
+    assert live_state.recovery_loss == 0.0
     assert live_state.consecutive_losses == 2
     assert live_state.consecutive_max_stake_skips == 1
     assert live_state.signal_round_slug == "btc-updown-5m-live-prev"
@@ -2555,7 +2554,6 @@ def test_run_paper_strategy7_flat_continues_with_unresolved_pending_trade(tmp_pa
         AppConfig(
             strategy_id=7,
             paper_strategy_ids=[7],
-            bet_sizing_mode="FLAT_BASE_COST",
             poll_interval_seconds=1,
         ),
         client=_UnresolvedStrategy7PaperClient(),
@@ -2574,7 +2572,7 @@ def test_run_paper_strategy7_flat_continues_with_unresolved_pending_trade(tmp_pa
     assert pending[1].tracks_recovery_loss is False
 
 
-def test_run_paper_trading_waits_for_pending_settlement_before_next_round(tmp_path, monkeypatch):
+def test_run_paper_trading_continues_with_unresolved_pending_settlement(tmp_path, monkeypatch):
     stop_event = threading.Event()
 
     def fake_sleep(_seconds):
@@ -2647,9 +2645,10 @@ def test_run_paper_trading_waits_for_pending_settlement_before_next_round(tmp_pa
 
     state = load_session_state(state_path)
     assert result['status'] == 'stopped'
-    assert state.round_index == 1
-    assert len(state.pending_paper_trades) == 1
+    assert state.round_index == 2
+    assert len(state.pending_paper_trades) == 2
     assert state.pending_paper_trades[0].event_slug == 'btc-updown-5m-paper-prev'
+    assert state.pending_paper_trades[1].event_slug == 'btc-updown-5m-paper-now'
     assert not (tmp_path / 'paper.csv').exists()
 
 
@@ -2717,7 +2716,7 @@ def test_run_paper_trading_keeps_pending_when_settlement_errors(tmp_path, monkey
     )
 
     state = load_session_state(state_path)
-    assert result['status'] == 'pending_settlement'
+    assert result['status'] == 'stopped'
     assert len(state.pending_paper_trades) == 1
     assert state.pending_paper_trades[0].event_slug == 'btc-updown-5m-paper-prev'
     assert not (tmp_path / 'paper.csv').exists()
@@ -2759,7 +2758,6 @@ def test_live_and_paper_dry_runs_expose_matching_trade_plan_for_same_config(tmp_
         strategy_id=4,
         paper_strategy_ids=[4],
         live_strategy_ids=[4],
-        bet_sizing_mode="FIXED_BASE_COST",
         base_order_cost=1.25,
         max_stake=10.0,
     )
@@ -3100,7 +3098,7 @@ def test_place_live_order_strategy7_sets_market_order_price_cap(tmp_path, monkey
     )
 
     result = place_live_order(
-        cfg=cfg,
+        cfg=replace(cfg, max_entry_price=0.55),
         market_client=_Strategy7LiveClient(),
         clob_client=stub_clob,
         state_path=tmp_path / "state.json",
@@ -3112,7 +3110,7 @@ def test_place_live_order_strategy7_sets_market_order_price_cap(tmp_path, monkey
     assert stub_clob.created_orders[0].price == pytest.approx(0.55)
 
 
-def test_place_live_order_resets_state_after_repeated_max_stake_skips(tmp_path):
+def test_place_live_order_ignores_legacy_recovery_loss_for_max_stake_check(tmp_path):
     cfg = AppConfig(
         live_trading_enabled=True,
         max_stake=1.0,
@@ -3157,14 +3155,14 @@ def test_place_live_order_resets_state_after_repeated_max_stake_skips(tmp_path):
     )
 
     state = load_session_state(state_path)
-    assert result["status"] == "skipped"
-    assert result["skip_reason"] == "order_cost_above_max_stake"
-    assert stub_clob.created_orders == []
+    assert result["status"] == "submitted"
+    assert "skip_reason" not in result
+    assert len(stub_clob.created_orders) == 1
     assert state.round_index == 4
     assert state.recovery_loss == 0.0
-    assert state.consecutive_losses == 0
+    assert state.consecutive_losses == 2
     assert state.consecutive_max_stake_skips == 0
-    assert state.stop_loss_count == 1
+    assert state.stop_loss_count == 0
 
 
 def test_place_live_order_settles_previous_pending_trade_before_new_submission(tmp_path):
@@ -3217,10 +3215,10 @@ def test_place_live_order_settles_previous_pending_trade_before_new_submission(t
     )
 
     assert result["status"] == "submitted"
-    assert stub_clob.created_orders[0].amount > 1.0
+    assert stub_clob.created_orders[0].amount == pytest.approx(1.0)
 
     state = load_session_state(state_path)
-    assert state.recovery_loss == pytest.approx(1.0)
+    assert state.recovery_loss == 0.0
     assert state.consecutive_losses == 1
     assert state.round_index == 2
     rows = list(csv.DictReader((tmp_path / "live.csv").open(newline="", encoding="utf-8")))
@@ -3287,7 +3285,7 @@ def test_place_live_order_settles_previous_pending_trade_from_terminal_outcome_p
     assert result["status"] == "submitted"
 
     state = load_session_state(state_path)
-    assert state.recovery_loss == pytest.approx(1.0)
+    assert state.recovery_loss == 0.0
     assert state.consecutive_losses == 1
     assert state.round_index == 2
     assert state.pending_live_order_id == "oid-123"
@@ -3402,7 +3400,7 @@ def test_place_live_order_syncs_live_strategy_map_before_persisting(tmp_path):
     assert reloaded_payload["live_strategies"]["3"]["pending_live_slug"] == "btc-updown-5m-other"
 
 
-def test_place_live_order_waits_for_previous_pending_trade_settlement(tmp_path):
+def test_place_live_order_continues_when_previous_pending_trade_is_unresolved(tmp_path):
     cfg = AppConfig(live_trading_enabled=True, max_stake=25.0)
     stub_clob = _StubClobClient(
         order_payloads={"oid-prev": {"status": "filled"}},
@@ -3444,9 +3442,13 @@ def test_place_live_order_waits_for_previous_pending_trade_settlement(tmp_path):
         log_path=tmp_path / "live.csv",
     )
 
-    assert result["status"] == "pending_settlement"
-    assert result["skip_reason"] == "round_unresolved"
-    assert stub_clob.created_orders == []
+    state = load_session_state(state_path)
+    assert result["status"] == "submitted"
+    assert len(stub_clob.created_orders) == 1
+    assert [item.event_slug for item in state.pending_live_trades] == [
+        "btc-updown-5m-prev",
+        "btc-updown-5m-test",
+    ]
 
 
 def test_run_live_trading_submits_multiple_strategies_in_same_round_when_wallet_budget_allows(tmp_path, monkeypatch):
@@ -4291,7 +4293,7 @@ def test_settle_pending_live_trade_operates_on_single_strategy_state():
     }
     assert updated_strategy.round_index == 1
     assert updated_strategy.cash_pnl == pytest.approx(-1.0)
-    assert updated_strategy.recovery_loss == pytest.approx(1.0)
+    assert updated_strategy.recovery_loss == 0.0
     assert updated_strategy.consecutive_losses == 1
     assert updated_strategy.pending_live_slug is None
     assert updated_strategy.pending_live_order_id is None
@@ -4412,7 +4414,7 @@ def test_settle_pending_live_trade_ignores_string_false_redeemable_position():
     assert status["result"] == "PROVISIONAL_LOSS"
     assert status["trade_pnl"] == pytest.approx(-1.0)
     assert updated_strategy.cash_pnl == pytest.approx(-1.0)
-    assert updated_strategy.recovery_loss == pytest.approx(1.0)
+    assert updated_strategy.recovery_loss == 0.0
     assert updated_strategy.consecutive_losses == 1
     assert updated_strategy.pending_live_slug is None
 
@@ -4495,7 +4497,7 @@ def test_settle_pending_live_trade_uses_frozen_pending_plan_when_official_result
     assert status["trade_pnl"] == pytest.approx(-1.0)
     assert status["order_cost"] == pytest.approx(1.0)
     assert updated_strategy.cash_pnl == pytest.approx(-1.0)
-    assert updated_strategy.recovery_loss == pytest.approx(1.0)
+    assert updated_strategy.recovery_loss == 0.0
     assert updated_strategy.consecutive_losses == 1
     assert updated_strategy.pending_live_slug is None
     assert updated_strategy.pending_live_order_id is None
@@ -4585,7 +4587,7 @@ def test_settle_pending_live_trade_waits_for_final_price_when_price_to_beat_exis
     assert status["result"] == "PROVISIONAL_LOSS"
     assert status["trade_pnl"] == pytest.approx(-1.0)
     assert updated_strategy.cash_pnl == pytest.approx(-1.0)
-    assert updated_strategy.recovery_loss == pytest.approx(1.0)
+    assert updated_strategy.recovery_loss == 0.0
     assert updated_strategy.consecutive_losses == 1
     assert updated_strategy.pending_live_slug is None
 
@@ -6088,7 +6090,7 @@ def test_run_paper_trading_dry_run_allows_trade_after_day_rollover(tmp_path):
     assert result["should_trade"] is True
 
 
-def test_run_paper_trading_resets_state_after_repeated_max_stake_skips(tmp_path, monkeypatch):
+def test_run_paper_trading_ignores_legacy_recovery_loss_for_max_stake_check(tmp_path, monkeypatch):
     monkeypatch.setattr("trader._sleep_until_round_end", lambda cfg, window, stop_event=None: False)
     cfg = AppConfig(
         strategy_id=2,
@@ -6150,9 +6152,11 @@ def test_run_paper_trading_resets_state_after_repeated_max_stake_skips(tmp_path,
     assert result["status"] == "stopped"
     assert state.round_index == 4
     assert state.recovery_loss == 0.0
-    assert state.consecutive_losses == 0
+    assert state.consecutive_losses == 2
     assert state.consecutive_max_stake_skips == 0
-    assert state.stop_loss_count == 1
+    assert state.stop_loss_count == 0
+    assert len(state.pending_paper_trades) == 1
+    assert state.pending_paper_trades[0].event_slug == "btc-updown-5m-paper-reset"
 
 
 def test_run_paper_trading_stops_when_stop_event_is_set(tmp_path, monkeypatch):
@@ -6422,7 +6426,6 @@ def test_run_paper_trading_allows_market_buy_when_order_min_size_exceeds_plan_co
         AppConfig(
             trade_mode="paper",
             paper_strategy_ids=[2],
-            bet_sizing_mode="FLAT_BASE_COST",
             base_order_cost=1.2,
             min_stake=1.05,
             poll_interval_seconds=1,
@@ -6464,7 +6467,6 @@ def test_run_live_trading_allows_market_buy_when_order_min_size_exceeds_plan_cos
             live_private_key="pk",
             live_funder="0xfunder",
             live_strategy_ids=[2],
-            bet_sizing_mode="FLAT_BASE_COST",
             base_order_cost=1.2,
             min_stake=1.05,
             poll_interval_seconds=1,
@@ -6772,7 +6774,12 @@ def test_run_paper_trading_stop_event_during_settlement_wait_prevents_settlement
 
     monkeypatch.setattr("trader.time.sleep", fake_sleep)
     monkeypatch.setattr("trader._settle_paper_trade", fail_settle)
-    monkeypatch.setattr("trader._sleep_until_round_end", lambda cfg, window, stop_event=None: True)
+    def fake_sleep_until_round_end(cfg, window, stop_event=None):
+        if stop_event is not None:
+            stop_event.set()
+        return False
+
+    monkeypatch.setattr("trader._sleep_until_round_end", fake_sleep_until_round_end)
     monkeypatch.setattr(
         "trader._resolve_side_from_strategy",
         lambda **kwargs: SideDecision(side="UP"),
@@ -6895,7 +6902,7 @@ def test_run_paper_trading_near_entry_fast_poll_uses_shorter_sleep(tmp_path, mon
 
 
 
-def test_run_paper_trading_multi_strategy_pending_settlement_blocks_new_round(tmp_path, monkeypatch):
+def test_run_paper_trading_multi_strategy_pending_settlement_allows_new_round(tmp_path, monkeypatch):
     stop_event = threading.Event()
 
     def fake_sleep(_seconds):
@@ -7005,13 +7012,14 @@ def test_run_paper_trading_multi_strategy_pending_settlement_blocks_new_round(tm
 
     state = load_session_state(state_path, effective_paper_strategy_ids=[1, 6])
     assert result["status"] == "stopped"
-    assert len(state.paper_strategies[1].pending_paper_trades) == 1
+    assert len(state.paper_strategies[1].pending_paper_trades) == 2
+    assert state.paper_strategies[1].pending_paper_trades[1].event_slug == "btc-updown-5m-test"
     assert state.paper_strategies[6].pending_paper_trades == []
-    assert state.paper_strategies[6].last_processed_paper_event_slug is None
+    assert state.paper_strategies[6].last_processed_paper_event_slug == "btc-updown-5m-test"
     rows = log_path.read_text(encoding="utf-8").splitlines()
-    assert len(rows) == 2
+    assert len(rows) == 3
     assert "btc-updown-5m-paper-s6" in rows[1]
-    assert "btc-updown-5m-test" not in log_path.read_text(encoding="utf-8")
+    assert "btc-updown-5m-test" in log_path.read_text(encoding="utf-8")
 
 
 def test_run_paper_trading_does_not_use_ws_only_resolution_for_pending_settlement(tmp_path):
@@ -7092,7 +7100,7 @@ def test_run_paper_trading_does_not_use_ws_only_resolution_for_pending_settlemen
     )
 
     state = load_session_state(state_path)
-    assert result['status'] == 'pending_settlement'
+    assert result['status'] == 'stopped'
     assert len(state.pending_paper_trades) == 1
     assert state.pending_paper_trades[0].event_slug == 'btc-updown-5m-paper-prev'
     assert not (tmp_path / 'paper.csv').exists()
@@ -7116,7 +7124,7 @@ def test_run_paper_trading_persists_active_challenger_pending_state(tmp_path, mo
                         "candidate_id": "challenger-s2-a",
                         "base_strategy_id": 2,
                         "params": {
-                            "TARGET_PROFIT": 1.0,
+                            "BASE_ORDER_COST": 1.0,
                             "MAX_PRICE_THRESHOLD": 0.65,
                         },
                         "validation_score": 0.9,
@@ -7165,7 +7173,7 @@ def test_candidate_cfg_with_params_applies_strategy7_optimizer_values():
         base_cfg,
         7,
         {
-            "TARGET_PROFIT": 1.2,
+            "BASE_ORDER_COST": 1.2,
             "STRATEGY7_OFI_THRESHOLD": 0.75,
             "STRATEGY7_MOMENTUM_THRESHOLD": 0.03,
             "STRATEGY7_MAX_ENTRY_PRICE": 0.53,
@@ -7173,7 +7181,7 @@ def test_candidate_cfg_with_params_applies_strategy7_optimizer_values():
     )
 
     assert candidate_cfg.strategy_id == 7
-    assert candidate_cfg.target_profit == pytest.approx(1.2)
+    assert candidate_cfg.base_order_cost == pytest.approx(1.2)
     assert candidate_cfg.strategy7_ofi_threshold == pytest.approx(0.75)
     assert candidate_cfg.strategy7_momentum_threshold == pytest.approx(0.03)
     assert candidate_cfg.strategy7_max_entry_price == pytest.approx(0.53)

@@ -55,8 +55,6 @@ def _paper_strategy_profile_from_cfg(cfg: AppConfig, strategy_id: int) -> LiveSt
     existing = getattr(cfg, 'paper_strategy_profiles', {}).get(strategy_id)
     return LiveStrategyProfile(
         strategy_id=strategy_id,
-        target_profit=getattr(existing, 'target_profit', cfg.target_profit),
-        bet_sizing_mode=getattr(existing, 'bet_sizing_mode', cfg.bet_sizing_mode),
         base_order_cost=getattr(existing, 'base_order_cost', cfg.base_order_cost),
         max_consecutive_losses=getattr(existing, 'max_consecutive_losses', cfg.max_consecutive_losses),
         min_stake=getattr(existing, 'min_stake', cfg.min_stake),
@@ -92,48 +90,144 @@ def _paper_strategy_profile_from_cfg(cfg: AppConfig, strategy_id: int) -> LiveSt
             cfg.max_stake_skip_alert_threshold,
         ),
         ofi_threshold=getattr(existing, 'ofi_threshold', cfg.ofi_threshold),
-        min_entry_price=cfg.min_entry_price,
-        max_entry_price=cfg.max_entry_price,
-        binance_signal_stale_seconds=cfg.binance_signal_stale_seconds,
-        strategy7_ofi_threshold=cfg.strategy7_ofi_threshold,
-        strategy7_momentum_threshold=cfg.strategy7_momentum_threshold,
-        strategy7_max_momentum_delta=cfg.strategy7_max_momentum_delta,
-        strategy7_max_entry_price=cfg.strategy7_max_entry_price,
-        strategy7_min_signal_gap=cfg.strategy7_min_signal_gap,
-        strategy7_confirm_before_entry_seconds=cfg.strategy7_confirm_before_entry_seconds,
-        strategy7_late_confirm_strong_signal_gap=cfg.strategy7_late_confirm_strong_signal_gap,
-        strategy7_late_confirm_relax_seconds=cfg.strategy7_late_confirm_relax_seconds,
-        strategy7_dynamic_sizing_enabled=cfg.strategy7_dynamic_sizing_enabled,
-        strategy7_sizing_reference_price=cfg.strategy7_sizing_reference_price,
-        strategy7_sizing_price_step=cfg.strategy7_sizing_price_step,
-        strategy7_sizing_price_step_reduction=cfg.strategy7_sizing_price_step_reduction,
-        strategy7_sizing_min_multiplier=cfg.strategy7_sizing_min_multiplier,
-        strategy7_sizing_max_multiplier=cfg.strategy7_sizing_max_multiplier,
-        strategy7_sizing_strong_signal_gap=cfg.strategy7_sizing_strong_signal_gap,
-        strategy7_sizing_strong_signal_boost=cfg.strategy7_sizing_strong_signal_boost,
-        strategy9_dynamic_sizing_enabled=cfg.strategy9_dynamic_sizing_enabled,
-        strategy9_sizing_reference_price=cfg.strategy9_sizing_reference_price,
-        strategy9_sizing_price_step=cfg.strategy9_sizing_price_step,
-        strategy9_sizing_price_step_reduction=cfg.strategy9_sizing_price_step_reduction,
-        strategy9_sizing_min_multiplier=cfg.strategy9_sizing_min_multiplier,
-        strategy9_sizing_max_multiplier=cfg.strategy9_sizing_max_multiplier,
-        strategy9_sizing_strong_signal_gap=cfg.strategy9_sizing_strong_signal_gap,
-        strategy9_sizing_strong_signal_boost=cfg.strategy9_sizing_strong_signal_boost,
-        strategy9_stability_sample_count=cfg.strategy9_stability_sample_count,
-        strategy9_stability_required_count=cfg.strategy9_stability_required_count,
-        strategy9_stability_window_seconds=cfg.strategy9_stability_window_seconds,
-        strategy9_reversal_lookback_seconds=cfg.strategy9_reversal_lookback_seconds,
-        strategy9_max_signal_decay=cfg.strategy9_max_signal_decay,
-        strategy9_base_max_entry_price=cfg.strategy9_base_max_entry_price,
-        strategy9_strong_max_entry_price=cfg.strategy9_strong_max_entry_price,
-        strategy9_ultra_max_entry_price=cfg.strategy9_ultra_max_entry_price,
-        strategy9_strong_signal_gap=cfg.strategy9_strong_signal_gap,
-        strategy9_ultra_signal_gap=cfg.strategy9_ultra_signal_gap,
-        strategy10_min_edge=cfg.strategy10_min_edge,
-        strategy10_edge_buffer=cfg.strategy10_edge_buffer,
-        strategy10_ofi_weight=cfg.strategy10_ofi_weight,
-        strategy10_momentum_weight=cfg.strategy10_momentum_weight,
-        strategy10_max_fair_value=cfg.strategy10_max_fair_value,
+        min_entry_price=getattr(existing, 'min_entry_price', cfg.min_entry_price),
+        max_entry_price=getattr(existing, 'max_entry_price', cfg.max_entry_price),
+        binance_signal_stale_seconds=getattr(existing, 'binance_signal_stale_seconds', cfg.binance_signal_stale_seconds),
+        strategy7_ofi_threshold=getattr(existing, 'strategy7_ofi_threshold', cfg.strategy7_ofi_threshold),
+        strategy7_momentum_threshold=getattr(existing, 'strategy7_momentum_threshold', cfg.strategy7_momentum_threshold),
+        strategy7_max_momentum_delta=getattr(existing, 'strategy7_max_momentum_delta', cfg.strategy7_max_momentum_delta),
+        strategy7_max_entry_price=getattr(existing, 'strategy7_max_entry_price', cfg.strategy7_max_entry_price),
+        strategy7_min_signal_gap=getattr(existing, 'strategy7_min_signal_gap', cfg.strategy7_min_signal_gap),
+        strategy7_confirm_before_entry_seconds=getattr(
+            existing,
+            'strategy7_confirm_before_entry_seconds',
+            cfg.strategy7_confirm_before_entry_seconds,
+        ),
+        strategy7_late_confirm_strong_signal_gap=getattr(
+            existing,
+            'strategy7_late_confirm_strong_signal_gap',
+            cfg.strategy7_late_confirm_strong_signal_gap,
+        ),
+        strategy7_late_confirm_relax_seconds=getattr(
+            existing,
+            'strategy7_late_confirm_relax_seconds',
+            cfg.strategy7_late_confirm_relax_seconds,
+        ),
+        strategy7_dynamic_sizing_enabled=getattr(
+            existing,
+            'strategy7_dynamic_sizing_enabled',
+            cfg.strategy7_dynamic_sizing_enabled,
+        ),
+        strategy7_sizing_reference_price=getattr(
+            existing,
+            'strategy7_sizing_reference_price',
+            cfg.strategy7_sizing_reference_price,
+        ),
+        strategy7_sizing_price_step=getattr(existing, 'strategy7_sizing_price_step', cfg.strategy7_sizing_price_step),
+        strategy7_sizing_price_step_reduction=getattr(
+            existing,
+            'strategy7_sizing_price_step_reduction',
+            cfg.strategy7_sizing_price_step_reduction,
+        ),
+        strategy7_sizing_min_multiplier=getattr(
+            existing,
+            'strategy7_sizing_min_multiplier',
+            cfg.strategy7_sizing_min_multiplier,
+        ),
+        strategy7_sizing_max_multiplier=getattr(
+            existing,
+            'strategy7_sizing_max_multiplier',
+            cfg.strategy7_sizing_max_multiplier,
+        ),
+        strategy7_sizing_strong_signal_gap=getattr(
+            existing,
+            'strategy7_sizing_strong_signal_gap',
+            cfg.strategy7_sizing_strong_signal_gap,
+        ),
+        strategy7_sizing_strong_signal_boost=getattr(
+            existing,
+            'strategy7_sizing_strong_signal_boost',
+            cfg.strategy7_sizing_strong_signal_boost,
+        ),
+        strategy9_dynamic_sizing_enabled=getattr(
+            existing,
+            'strategy9_dynamic_sizing_enabled',
+            cfg.strategy9_dynamic_sizing_enabled,
+        ),
+        strategy9_sizing_reference_price=getattr(
+            existing,
+            'strategy9_sizing_reference_price',
+            cfg.strategy9_sizing_reference_price,
+        ),
+        strategy9_sizing_price_step=getattr(existing, 'strategy9_sizing_price_step', cfg.strategy9_sizing_price_step),
+        strategy9_sizing_price_step_reduction=getattr(
+            existing,
+            'strategy9_sizing_price_step_reduction',
+            cfg.strategy9_sizing_price_step_reduction,
+        ),
+        strategy9_sizing_min_multiplier=getattr(
+            existing,
+            'strategy9_sizing_min_multiplier',
+            cfg.strategy9_sizing_min_multiplier,
+        ),
+        strategy9_sizing_max_multiplier=getattr(
+            existing,
+            'strategy9_sizing_max_multiplier',
+            cfg.strategy9_sizing_max_multiplier,
+        ),
+        strategy9_sizing_strong_signal_gap=getattr(
+            existing,
+            'strategy9_sizing_strong_signal_gap',
+            cfg.strategy9_sizing_strong_signal_gap,
+        ),
+        strategy9_sizing_strong_signal_boost=getattr(
+            existing,
+            'strategy9_sizing_strong_signal_boost',
+            cfg.strategy9_sizing_strong_signal_boost,
+        ),
+        strategy9_stability_sample_count=getattr(
+            existing,
+            'strategy9_stability_sample_count',
+            cfg.strategy9_stability_sample_count,
+        ),
+        strategy9_stability_required_count=getattr(
+            existing,
+            'strategy9_stability_required_count',
+            cfg.strategy9_stability_required_count,
+        ),
+        strategy9_stability_window_seconds=getattr(
+            existing,
+            'strategy9_stability_window_seconds',
+            cfg.strategy9_stability_window_seconds,
+        ),
+        strategy9_reversal_lookback_seconds=getattr(
+            existing,
+            'strategy9_reversal_lookback_seconds',
+            cfg.strategy9_reversal_lookback_seconds,
+        ),
+        strategy9_max_signal_decay=getattr(existing, 'strategy9_max_signal_decay', cfg.strategy9_max_signal_decay),
+        strategy9_base_max_entry_price=getattr(
+            existing,
+            'strategy9_base_max_entry_price',
+            cfg.strategy9_base_max_entry_price,
+        ),
+        strategy9_strong_max_entry_price=getattr(
+            existing,
+            'strategy9_strong_max_entry_price',
+            cfg.strategy9_strong_max_entry_price,
+        ),
+        strategy9_ultra_max_entry_price=getattr(
+            existing,
+            'strategy9_ultra_max_entry_price',
+            cfg.strategy9_ultra_max_entry_price,
+        ),
+        strategy9_strong_signal_gap=getattr(existing, 'strategy9_strong_signal_gap', cfg.strategy9_strong_signal_gap),
+        strategy9_ultra_signal_gap=getattr(existing, 'strategy9_ultra_signal_gap', cfg.strategy9_ultra_signal_gap),
+        strategy10_min_edge=getattr(existing, 'strategy10_min_edge', cfg.strategy10_min_edge),
+        strategy10_edge_buffer=getattr(existing, 'strategy10_edge_buffer', cfg.strategy10_edge_buffer),
+        strategy10_ofi_weight=getattr(existing, 'strategy10_ofi_weight', cfg.strategy10_ofi_weight),
+        strategy10_momentum_weight=getattr(existing, 'strategy10_momentum_weight', cfg.strategy10_momentum_weight),
+        strategy10_max_fair_value=getattr(existing, 'strategy10_max_fair_value', cfg.strategy10_max_fair_value),
     )
 
 
@@ -141,13 +235,12 @@ def _paper_cfg_for_timeframe(cfg: AppConfig, timeframe: str) -> AppConfig:
     if not hasattr(cfg, '__dataclass_fields__') or not hasattr(cfg, 'paper_profiles'):
         return cfg
     profile = cfg.paper_profiles[timeframe]
+    strategy_profiles = dict(getattr(cfg, 'paper_strategy_profiles', {}) or {})
     timeframe_cfg = replace(
         cfg,
         market_timeframe=timeframe,
         strategy_id=profile.strategy_id,
         paper_strategy_ids=list(profile.paper_strategy_ids),
-        target_profit=profile.target_profit,
-        bet_sizing_mode=profile.bet_sizing_mode,
         base_order_cost=profile.base_order_cost,
         max_consecutive_losses=profile.max_consecutive_losses,
         min_stake=profile.min_stake,
@@ -198,6 +291,7 @@ def _paper_cfg_for_timeframe(cfg: AppConfig, timeframe: str) -> AppConfig:
         strategy10_momentum_weight=profile.strategy10_momentum_weight,
         strategy10_max_fair_value=profile.strategy10_max_fair_value,
     )
+    timeframe_cfg.paper_strategy_profiles = strategy_profiles
     timeframe_cfg.paper_strategy_profiles = {
         strategy_id: _paper_strategy_profile_from_cfg(timeframe_cfg, strategy_id)
         for strategy_id in timeframe_cfg.paper_strategy_ids

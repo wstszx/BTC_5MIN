@@ -8,16 +8,16 @@ from streak_analysis import analyze_streak_risk, compute_max_affordable_round
 
 def test_compute_max_affordable_round_respects_stake_cap():
     affordable = compute_max_affordable_round(
-        target_profit=0.5,
+        base_order_cost=25.0,
         max_stake=25.0,
         worst_case_price=0.65,
         search_max_round=12,
     )
-    assert affordable == 4
+    assert affordable == 12
 
 
 def test_analyze_streak_risk_recommends_cap_round_when_occurrence_target_is_strict():
-    cfg = AppConfig(max_stake=25.0, target_profit=0.5, max_price_threshold=0.65)
+    cfg = AppConfig(max_stake=25.0, base_order_cost=1.0, max_price_threshold=0.65)
     analysis = analyze_streak_risk(
         Path("tests/fixtures/sample_history.csv"),
         cfg,
@@ -29,12 +29,12 @@ def test_analyze_streak_risk_recommends_cap_round_when_occurrence_target_is_stri
     assert analysis.analyzed_round_count == 6
     assert round(analysis.hit_rate, 4) == round(2 / 6, 4)
     assert analysis.max_loss_streak == 4
-    assert analysis.max_affordable_round == 4
-    assert analysis.recommended_reset_round == 4
+    assert analysis.max_affordable_round == 6
+    assert analysis.recommended_reset_round == 5
 
 
 def test_analyze_streak_risk_uses_target_occurrence_when_possible():
-    cfg = AppConfig(max_stake=25.0, target_profit=0.5, max_price_threshold=0.65)
+    cfg = AppConfig(max_stake=25.0, base_order_cost=1.0, max_price_threshold=0.65)
     analysis = analyze_streak_risk(
         Path("tests/fixtures/sample_history.csv"),
         cfg,

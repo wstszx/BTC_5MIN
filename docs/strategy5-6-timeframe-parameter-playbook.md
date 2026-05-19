@@ -24,7 +24,7 @@ Strategy 5 is the most timeframe-sensitive momentum strategy in the current syst
 | `SIGNAL_FALLBACK_STRATEGY_ID` | `2` | `2` |
 | `OPEN_DELAY_SECONDS` | `12` | `25` |
 | `MAX_PRICE_THRESHOLD` | `0.60` | `0.65` |
-| `TARGET_PROFIT` | `0.8` | `1.0` |
+| `BASE_ORDER_COST` | `0.8` | `1.0` |
 
 ### Notes
 
@@ -54,7 +54,7 @@ Strategy 6 depends on Binance OFI strength and freshness.
 | `BINANCE_SIGNAL_STALE_SECONDS` | `1.0` | `2.0` |
 | `OPEN_DELAY_SECONDS` | `10` | `25` |
 | `MAX_ENTRY_PRICE` | `0.54` | `0.56` |
-| `TARGET_PROFIT` | `0.8` | `1.0` |
+| `BASE_ORDER_COST` | `0.8` | `1.0` |
 
 ### Notes
 

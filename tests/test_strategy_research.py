@@ -1,4 +1,4 @@
-from pathlib import Path
+﻿from pathlib import Path
 
 import pytest
 
@@ -13,7 +13,7 @@ def test_strategy_research_returns_all_candidate_combinations():
         cfg,
         strategy_ids=[1, 2],
         reset_rounds=[2, 3],
-        target_profits=[0.5],
+        base_order_costs=[0.5],
         segments=3,
         top_n=2,
     )
@@ -25,28 +25,27 @@ def test_strategy_research_returns_all_candidate_combinations():
     assert all(item.segment_count == 3 for item in report.all_candidates)
 
 
-def test_strategy_research_bankroll_scales_with_target_profit():
+def test_strategy_research_bankroll_scales_with_base_order_cost():
     cfg = AppConfig(max_stake=25.0, max_price_threshold=0.65)
     report = run_strategy_research(
         Path("tests/fixtures/sample_history.csv"),
         cfg,
         strategy_ids=[1],
         reset_rounds=[3],
-        target_profits=[0.5, 1.0],
+        base_order_costs=[0.5, 1.0],
         segments=2,
         top_n=2,
     )
 
-    by_profit = {item.target_profit: item for item in report.all_candidates}
-    assert by_profit[1.0].required_bankroll >= by_profit[0.5].required_bankroll
-    assert by_profit[1.0].recommended_bankroll >= by_profit[1.0].required_bankroll
+    by_cost = {item.base_order_cost: item for item in report.all_candidates}
+    assert by_cost[1.0].required_bankroll >= by_cost[0.5].required_bankroll
+    assert by_cost[1.0].recommended_bankroll >= by_cost[1.0].required_bankroll
 
 
-def test_strategy_research_fixed_base_cost_uses_base_order_cost_not_target_profit():
+def test_strategy_research_base_order_cost_controls_flat_stake():
     cfg = AppConfig(
         max_stake=25.0,
         max_price_threshold=0.65,
-        bet_sizing_mode="FIXED_BASE_COST",
         base_order_cost=1.0,
     )
     report = run_strategy_research(
@@ -54,14 +53,14 @@ def test_strategy_research_fixed_base_cost_uses_base_order_cost_not_target_profi
         cfg,
         strategy_ids=[1],
         reset_rounds=[3],
-        target_profits=[0.5, 2.0],
+        base_order_costs=[0.5, 2.0],
         segments=2,
         top_n=2,
     )
 
-    by_profit = {item.target_profit: item for item in report.all_candidates}
-    assert by_profit[2.0].required_bankroll == by_profit[0.5].required_bankroll
-    assert by_profit[2.0].total_pnl == by_profit[0.5].total_pnl
+    by_cost = {item.base_order_cost: item for item in report.all_candidates}
+    assert by_cost[2.0].required_bankroll > by_cost[0.5].required_bankroll
+    assert by_cost[2.0].total_pnl != by_cost[0.5].total_pnl
 
 
 def test_strategy_research_flat_base_cost_does_not_chase_losses(tmp_path):
@@ -79,7 +78,6 @@ def test_strategy_research_flat_base_cost_does_not_chase_losses(tmp_path):
     cfg = AppConfig(
         max_stake=25.0,
         max_price_threshold=0.65,
-        bet_sizing_mode="FLAT_BASE_COST",
         base_order_cost=1.0,
     )
 
@@ -88,7 +86,7 @@ def test_strategy_research_flat_base_cost_does_not_chase_losses(tmp_path):
         cfg,
         strategy_ids=[1],
         reset_rounds=[3],
-        target_profits=[0.5],
+        base_order_costs=[1.0],
         segments=1,
         top_n=1,
     )
@@ -126,7 +124,7 @@ def test_strategy_research_supports_strategy_7_candidates(tmp_path):
         cfg,
         strategy_ids=[7],
         reset_rounds=[2],
-        target_profits=[0.5],
+        base_order_costs=[0.5],
         entry_timing="PRE_CLOSE",
         segments=2,
         top_n=1,
@@ -147,7 +145,7 @@ def test_strategy_research_strategy_7_skips_rows_without_historical_ofi():
         cfg,
         strategy_ids=[7],
         reset_rounds=[2],
-        target_profits=[0.5],
+        base_order_costs=[0.5],
     )
 
     assert report.candidate_count == 1
@@ -184,7 +182,7 @@ def test_strategy_research_strategy_7_applies_optional_staleness_and_confirm_tim
         cfg,
         strategy_ids=[7],
         reset_rounds=[2],
-        target_profits=[0.5],
+        base_order_costs=[0.5],
         entry_timing="PRE_CLOSE",
         segments=2,
         top_n=1,
@@ -224,7 +222,7 @@ def test_strategy_research_strategy_7_zero_confirm_window_does_not_skip_after_en
         cfg,
         strategy_ids=[7],
         reset_rounds=[2],
-        target_profits=[0.5],
+        base_order_costs=[0.5],
         entry_timing="PRE_CLOSE",
         segments=1,
         top_n=1,
@@ -264,7 +262,7 @@ def test_strategy_research_strategy_7_late_confirm_relaxation_aligns_with_runtim
         cfg,
         strategy_ids=[7],
         reset_rounds=[2],
-        target_profits=[0.5],
+        base_order_costs=[0.5],
         entry_timing="PRE_CLOSE",
         segments=1,
         top_n=1,
@@ -301,7 +299,7 @@ def test_strategy_research_strategy_7_rejects_low_confidence_before_price_gate(t
         cfg,
         strategy_ids=[7],
         reset_rounds=[2],
-        target_profits=[0.5],
+        base_order_costs=[0.5],
         entry_timing="PRE_CLOSE",
         segments=1,
         top_n=1,
@@ -338,7 +336,7 @@ def test_strategy_research_strategy_7_applies_momentum_overheat_gate(tmp_path):
         cfg,
         strategy_ids=[7],
         reset_rounds=[2],
-        target_profits=[0.5],
+        base_order_costs=[0.5],
         entry_timing="PRE_CLOSE",
         segments=1,
         top_n=1,
@@ -361,7 +359,6 @@ def test_strategy_research_strategy_9_dynamic_sizing_scales_order_cost(tmp_path)
     )
     cfg = AppConfig(
         max_stake=25.0,
-        bet_sizing_mode="FLAT_BASE_COST",
         base_order_cost=10.0,
         strategy7_ofi_threshold=0.65,
         strategy7_momentum_threshold=0.02,
@@ -384,7 +381,7 @@ def test_strategy_research_strategy_9_dynamic_sizing_scales_order_cost(tmp_path)
         cfg,
         strategy_ids=[9],
         reset_rounds=[2],
-        target_profits=[0.5],
+        base_order_costs=[10.0],
         entry_timing="PRE_CLOSE",
         segments=1,
         top_n=1,
@@ -392,3 +389,4 @@ def test_strategy_research_strategy_9_dynamic_sizing_scales_order_cost(tmp_path)
 
     assert report.top_candidates[0].trades == 1
     assert report.top_candidates[0].max_single_order_cost == pytest.approx(8.0)
+

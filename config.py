@@ -19,6 +19,78 @@ _BOOL_FALSE_VALUES = {"0", "false", "no", "off"}
 _STRATEGY_ID_MIN = 1
 _STRATEGY_ID_MAX = 10
 
+_STRATEGY7_SHORT_PROFILE_KEYS: dict[str, str] = {
+    "OFI_THRESHOLD": "STRATEGY7_OFI_THRESHOLD",
+    "MOMENTUM_THRESHOLD": "STRATEGY7_MOMENTUM_THRESHOLD",
+    "MAX_MOMENTUM_DELTA": "STRATEGY7_MAX_MOMENTUM_DELTA",
+    "MIN_SIGNAL_GAP": "STRATEGY7_MIN_SIGNAL_GAP",
+    "CONFIRM_BEFORE_ENTRY_SECONDS": "STRATEGY7_CONFIRM_BEFORE_ENTRY_SECONDS",
+    "LATE_CONFIRM_STRONG_SIGNAL_GAP": "STRATEGY7_LATE_CONFIRM_STRONG_SIGNAL_GAP",
+    "LATE_CONFIRM_RELAX_SECONDS": "STRATEGY7_LATE_CONFIRM_RELAX_SECONDS",
+    "DYNAMIC_SIZING_ENABLED": "STRATEGY7_DYNAMIC_SIZING_ENABLED",
+    "SIZING_REFERENCE_PRICE": "STRATEGY7_SIZING_REFERENCE_PRICE",
+    "SIZING_PRICE_STEP": "STRATEGY7_SIZING_PRICE_STEP",
+    "SIZING_PRICE_STEP_REDUCTION": "STRATEGY7_SIZING_PRICE_STEP_REDUCTION",
+    "SIZING_MIN_MULTIPLIER": "STRATEGY7_SIZING_MIN_MULTIPLIER",
+    "SIZING_MAX_MULTIPLIER": "STRATEGY7_SIZING_MAX_MULTIPLIER",
+    "SIZING_STRONG_SIGNAL_GAP": "STRATEGY7_SIZING_STRONG_SIGNAL_GAP",
+    "SIZING_STRONG_SIGNAL_BOOST": "STRATEGY7_SIZING_STRONG_SIGNAL_BOOST",
+}
+_STRATEGY9_SHORT_PROFILE_KEYS: dict[str, str] = {
+    **{key: value for key, value in _STRATEGY7_SHORT_PROFILE_KEYS.items() if not key.startswith("SIZING_") and key != "DYNAMIC_SIZING_ENABLED"},
+    "DYNAMIC_SIZING_ENABLED": "STRATEGY9_DYNAMIC_SIZING_ENABLED",
+    "SIZING_REFERENCE_PRICE": "STRATEGY9_SIZING_REFERENCE_PRICE",
+    "SIZING_PRICE_STEP": "STRATEGY9_SIZING_PRICE_STEP",
+    "SIZING_PRICE_STEP_REDUCTION": "STRATEGY9_SIZING_PRICE_STEP_REDUCTION",
+    "SIZING_MIN_MULTIPLIER": "STRATEGY9_SIZING_MIN_MULTIPLIER",
+    "SIZING_MAX_MULTIPLIER": "STRATEGY9_SIZING_MAX_MULTIPLIER",
+    "SIZING_STRONG_SIGNAL_GAP": "STRATEGY9_SIZING_STRONG_SIGNAL_GAP",
+    "SIZING_STRONG_SIGNAL_BOOST": "STRATEGY9_SIZING_STRONG_SIGNAL_BOOST",
+    "STABILITY_SAMPLE_COUNT": "STRATEGY9_STABILITY_SAMPLE_COUNT",
+    "STABILITY_REQUIRED_COUNT": "STRATEGY9_STABILITY_REQUIRED_COUNT",
+    "STABILITY_WINDOW_SECONDS": "STRATEGY9_STABILITY_WINDOW_SECONDS",
+    "REVERSAL_LOOKBACK_SECONDS": "STRATEGY9_REVERSAL_LOOKBACK_SECONDS",
+    "MAX_SIGNAL_DECAY": "STRATEGY9_MAX_SIGNAL_DECAY",
+    "BASE_MAX_ENTRY_PRICE": "STRATEGY9_BASE_MAX_ENTRY_PRICE",
+    "STRONG_MAX_ENTRY_PRICE": "STRATEGY9_STRONG_MAX_ENTRY_PRICE",
+    "ULTRA_MAX_ENTRY_PRICE": "STRATEGY9_ULTRA_MAX_ENTRY_PRICE",
+    "STRONG_SIGNAL_GAP": "STRATEGY9_STRONG_SIGNAL_GAP",
+    "ULTRA_SIGNAL_GAP": "STRATEGY9_ULTRA_SIGNAL_GAP",
+}
+_STRATEGY10_SHORT_PROFILE_KEYS: dict[str, str] = {
+    "MIN_EDGE": "STRATEGY10_MIN_EDGE",
+    "EDGE_BUFFER": "STRATEGY10_EDGE_BUFFER",
+    "OFI_WEIGHT": "STRATEGY10_OFI_WEIGHT",
+    "MOMENTUM_WEIGHT": "STRATEGY10_MOMENTUM_WEIGHT",
+    "MAX_FAIR_VALUE": "STRATEGY10_MAX_FAIR_VALUE",
+}
+_STRATEGY_SHORT_PROFILE_KEYS: dict[int, dict[str, str]] = {
+    7: _STRATEGY7_SHORT_PROFILE_KEYS,
+    8: _STRATEGY7_SHORT_PROFILE_KEYS,
+    9: _STRATEGY9_SHORT_PROFILE_KEYS,
+    10: _STRATEGY10_SHORT_PROFILE_KEYS,
+}
+
+
+def canonical_strategy_profile_base_key(strategy_id: int | str, base_key: str) -> str:
+    try:
+        strategy_number = int(strategy_id)
+    except (TypeError, ValueError):
+        return str(base_key)
+    return _STRATEGY_SHORT_PROFILE_KEYS.get(strategy_number, {}).get(str(base_key), str(base_key))
+
+
+def display_strategy_profile_base_key(strategy_id: int | str, base_key: str) -> str:
+    canonical_base_key = str(base_key)
+    try:
+        strategy_number = int(strategy_id)
+    except (TypeError, ValueError):
+        return canonical_base_key
+    for short_key, mapped_key in _STRATEGY_SHORT_PROFILE_KEYS.get(strategy_number, {}).items():
+        if mapped_key == canonical_base_key:
+            return short_key
+    return canonical_base_key
+
 _INT_CONFIG_KEYS: frozenset[str] = frozenset(
     {
         "STRATEGY_ID",
@@ -46,7 +118,6 @@ _INT_CONFIG_KEYS: frozenset[str] = frozenset(
 _FLOAT_CONFIG_KEYS: frozenset[str] = frozenset(
     {
         "PAPER_SIMULATED_WALLET_BALANCE",
-        "TARGET_PROFIT",
         "BASE_ORDER_COST",
         "MIN_STAKE",
         "MAX_STAKE",
@@ -111,20 +182,82 @@ _BOOL_CONFIG_KEYS: frozenset[str] = frozenset(
 )
 _SELECT_CONFIG_OPTIONS: dict[str, tuple[str, ...]] = {
     "TRADE_MODE": ("paper", "live", "both"),
-    "BET_SIZING_MODE": ("FLAT_BASE_COST", "FIXED_BASE_COST", "TARGET_PROFIT"),
     "SIGNAL_WEAK_SIGNAL_MODE": ("SKIP", "FALLBACK", "FORCE"),
     "POLYMARKET_ORDER_TYPE": ("FOK", "FAK", "GTC", "GTD"),
 }
+_PAPER_TIMEFRAME_PROFILE_KEYS: frozenset[str] = frozenset({STRATEGY_ID, STRATEGY_IDS})
+_GLOBAL_STRATEGY_CONFIG_KEYS: frozenset[str] = frozenset(
+    {
+        "BASE_ORDER_COST",
+        "MIN_STAKE",
+        "MAX_STAKE",
+        "MIN_ENTRY_PRICE",
+        "MAX_ENTRY_PRICE",
+        "MAX_CONSECUTIVE_LOSSES",
+        "MAX_STAKE_SKIP_ALERT_THRESHOLD",
+        "OPEN_DELAY_SECONDS",
+        "SIGNAL_MOMENTUM_THRESHOLD",
+        "SIGNAL_WEAK_SIGNAL_MODE",
+        "SIGNAL_FALLBACK_STRATEGY_ID",
+        "SIGNAL_HISTORY_FIDELITY_SECONDS",
+        "SIGNAL_ANCHOR_MAX_OFFSET_SECONDS",
+        "SIGNAL_DYNAMIC_THRESHOLD_K",
+        "SIGNAL_DYNAMIC_THRESHOLD_MIN_POINTS",
+        "SIGNAL_LOCK_BEFORE_ENTRY_SECONDS",
+        "OFI_THRESHOLD",
+        "BINANCE_SIGNAL_STALE_SECONDS",
+        "MAX_PRICE_THRESHOLD",
+        "MIN_PRICE_THRESHOLD",
+        "STRATEGY7_OFI_THRESHOLD",
+        "STRATEGY7_MOMENTUM_THRESHOLD",
+        "STRATEGY7_MAX_MOMENTUM_DELTA",
+        "STRATEGY7_MAX_ENTRY_PRICE",
+        "STRATEGY7_MIN_SIGNAL_GAP",
+        "STRATEGY7_CONFIRM_BEFORE_ENTRY_SECONDS",
+        "STRATEGY7_LATE_CONFIRM_STRONG_SIGNAL_GAP",
+        "STRATEGY7_LATE_CONFIRM_RELAX_SECONDS",
+        "STRATEGY7_DYNAMIC_SIZING_ENABLED",
+        "STRATEGY7_SIZING_REFERENCE_PRICE",
+        "STRATEGY7_SIZING_PRICE_STEP",
+        "STRATEGY7_SIZING_PRICE_STEP_REDUCTION",
+        "STRATEGY7_SIZING_MIN_MULTIPLIER",
+        "STRATEGY7_SIZING_MAX_MULTIPLIER",
+        "STRATEGY7_SIZING_STRONG_SIGNAL_GAP",
+        "STRATEGY7_SIZING_STRONG_SIGNAL_BOOST",
+        "STRATEGY9_DYNAMIC_SIZING_ENABLED",
+        "STRATEGY9_SIZING_REFERENCE_PRICE",
+        "STRATEGY9_SIZING_PRICE_STEP",
+        "STRATEGY9_SIZING_PRICE_STEP_REDUCTION",
+        "STRATEGY9_SIZING_MIN_MULTIPLIER",
+        "STRATEGY9_SIZING_MAX_MULTIPLIER",
+        "STRATEGY9_SIZING_STRONG_SIGNAL_GAP",
+        "STRATEGY9_SIZING_STRONG_SIGNAL_BOOST",
+        "STRATEGY9_STABILITY_SAMPLE_COUNT",
+        "STRATEGY9_STABILITY_REQUIRED_COUNT",
+        "STRATEGY9_STABILITY_WINDOW_SECONDS",
+        "STRATEGY9_REVERSAL_LOOKBACK_SECONDS",
+        "STRATEGY9_MAX_SIGNAL_DECAY",
+        "STRATEGY9_BASE_MAX_ENTRY_PRICE",
+        "STRATEGY9_STRONG_MAX_ENTRY_PRICE",
+        "STRATEGY9_ULTRA_MAX_ENTRY_PRICE",
+        "STRATEGY9_STRONG_SIGNAL_GAP",
+        "STRATEGY9_ULTRA_SIGNAL_GAP",
+        "STRATEGY10_MIN_EDGE",
+        "STRATEGY10_EDGE_BUFFER",
+        "STRATEGY10_OFI_WEIGHT",
+        "STRATEGY10_MOMENTUM_WEIGHT",
+        "STRATEGY10_MAX_FAIR_VALUE",
+    }
+)
 
 
 def _base_config_key(key: str) -> str:
     parts = key.split("_")
     if len(parts) >= 3 and parts[0] == "PAPER" and parts[1] in {"5M", "15M"}:
-        return "_".join(parts[2:])
-    if len(parts) >= 4 and parts[0] in {"LIVE", "PAPER"} and parts[1] == "STRATEGY" and parts[2].isdigit():
-        return "_".join(parts[3:])
+        base_key = "_".join(parts[2:])
+        return base_key if base_key in _PAPER_TIMEFRAME_PROFILE_KEYS else key
     if len(parts) >= 3 and parts[0] == "STRATEGY" and parts[1].isdigit():
-        return "_".join(parts[2:])
+        return canonical_strategy_profile_base_key(parts[1], "_".join(parts[2:]))
     return key
 
 
@@ -233,6 +366,8 @@ def collect_config_warnings(values: dict[str, str]) -> dict[str, str]:
         if not key or raw == "":
             continue
         base_key = _base_config_key(key)
+        if key == base_key and base_key in _GLOBAL_STRATEGY_CONFIG_KEYS:
+            continue
 
         if base_key in {STRATEGY_ID, "SIGNAL_FALLBACK_STRATEGY_ID"}:
             try:
@@ -417,24 +552,60 @@ def _paper_profile_strategy_ids(prefix: str, fallback_ids: list[int], fallback_s
     return _parse_strategy_id_list(raw, fallback=fallback_strategy_id)
 
 
-def _live_profile_prefix(strategy_id: int) -> str:
-    return f"LIVE_STRATEGY_{strategy_id}"
-
-
-def _paper_strategy_profile_prefix(strategy_id: int) -> str:
-    return f"PAPER_STRATEGY_{strategy_id}"
-
-
 def _strategy_profile_prefix(strategy_id: int) -> str:
     return f"STRATEGY_{strategy_id}"
 
 
-def _strategy_mode_env(strategy_id: int, *, legacy_prefix: str, global_mode: str) -> str:
-    return (
-        os.getenv(f"{_strategy_profile_prefix(strategy_id)}_BET_SIZING_MODE")
-        or os.getenv(f"{legacy_prefix}_BET_SIZING_MODE")
-        or global_mode
-    ).upper()
+def _strategy_profile_keys(strategy_id: int, base_key: str) -> tuple[str, ...]:
+    keys: list[str] = []
+    display_base_key = display_strategy_profile_base_key(strategy_id, base_key)
+    for candidate in (
+        f"{_strategy_profile_prefix(strategy_id)}_{display_base_key}",
+        f"{_strategy_profile_prefix(strategy_id)}_{base_key}",
+    ):
+        if candidate not in keys:
+            keys.append(candidate)
+    return tuple(keys)
+
+
+def _first_env_key(keys: tuple[str, ...]) -> str | None:
+    for key in keys:
+        if os.getenv(key) is not None:
+            return key
+    return None
+
+
+def _strategy_env_int(strategy_id: int, base_key: str, default: int) -> int:
+    key = _first_env_key(_strategy_profile_keys(strategy_id, base_key))
+    return _env_int(key, default) if key is not None else default
+
+
+def _strategy_env_float(strategy_id: int, base_key: str, default: float) -> float:
+    key = _first_env_key(_strategy_profile_keys(strategy_id, base_key))
+    return _env_float(key, default) if key is not None else default
+
+
+def _strategy_env_bool(strategy_id: int, base_key: str, default: bool) -> bool:
+    key = _first_env_key(_strategy_profile_keys(strategy_id, base_key))
+    return _env_bool(key, default) if key is not None else default
+
+
+def _strategy_env_optional_float(
+    strategy_id: int,
+    base_key: str,
+    default: float | None,
+) -> float | None:
+    key = _first_env_key(_strategy_profile_keys(strategy_id, base_key))
+    return _env_optional_float(key) if key is not None else default
+
+
+def _strategy_env_select(strategy_id: int, base_key: str, default: str) -> str:
+    key = _first_env_key(_strategy_profile_keys(strategy_id, base_key))
+    value = (os.getenv(key) if key is not None else default or "").upper()
+    allowed = _SELECT_CONFIG_OPTIONS.get(base_key)
+    if allowed is not None and value not in allowed:
+        return allowed[0]
+    return value
 
 
 @dataclass(frozen=True, slots=True)
@@ -442,8 +613,6 @@ class PaperTimeframeProfile:
     timeframe: str
     strategy_id: int
     paper_strategy_ids: list[int]
-    target_profit: float
-    bet_sizing_mode: str
     base_order_cost: float
     max_consecutive_losses: int
     min_stake: float | None
@@ -498,8 +667,6 @@ class PaperTimeframeProfile:
 @dataclass(slots=True)
 class LiveStrategyProfile:
     strategy_id: int
-    target_profit: float
-    bet_sizing_mode: str
     base_order_cost: float
     max_consecutive_losses: int
     min_stake: float | None
@@ -562,8 +729,6 @@ class LiveStrategyProfile:
 def _base_live_profile_for_strategy(cfg: AppConfig, strategy_id: int) -> LiveStrategyProfile:
     return LiveStrategyProfile(
         strategy_id=strategy_id,
-        target_profit=cfg.target_profit,
-        bet_sizing_mode=cfg.bet_sizing_mode,
         base_order_cost=cfg.base_order_cost,
         max_consecutive_losses=cfg.max_consecutive_losses,
         min_stake=cfg.min_stake,
@@ -632,221 +797,265 @@ def _cap_profile_safety_limits(cfg: AppConfig, profile: LiveStrategyProfile) -> 
     return profile
 
 
-def _profile_for_strategy_prefix(cfg: AppConfig, strategy_id: int, prefix: str) -> LiveStrategyProfile:
-    min_stake_key = f"{prefix}_MIN_STAKE"
-    max_stake_key = f"{prefix}_MAX_STAKE"
-    legacy_strategy7_max_entry_key = f"{prefix}_STRATEGY7_MAX_ENTRY_PRICE"
+def _profile_for_strategy(cfg: AppConfig, strategy_id: int) -> LiveStrategyProfile:
+    strategy7_max_entry_fallback = (
+        _strategy_env_float(strategy_id, "STRATEGY7_MAX_ENTRY_PRICE", cfg.max_entry_price)
+        if strategy_id in {7, 8, 9, 10}
+        else cfg.max_entry_price
+    )
 
-    return _cap_profile_safety_limits(
-        cfg,
-        LiveStrategyProfile(
+    return LiveStrategyProfile(
             strategy_id=strategy_id,
-            target_profit=_env_float(f"{prefix}_TARGET_PROFIT", cfg.target_profit),
-            bet_sizing_mode=_strategy_mode_env(strategy_id, legacy_prefix=prefix, global_mode=cfg.bet_sizing_mode),
-            base_order_cost=_env_float(f"{prefix}_BASE_ORDER_COST", cfg.base_order_cost),
-            max_consecutive_losses=_env_int(f"{prefix}_MAX_CONSECUTIVE_LOSSES", cfg.max_consecutive_losses),
-            min_stake=_env_optional_float(min_stake_key) if os.getenv(min_stake_key) is not None else cfg.min_stake,
-            max_stake=_env_optional_float(max_stake_key) if os.getenv(max_stake_key) is not None else cfg.max_stake,
-            open_delay_seconds=_env_int(f"{prefix}_OPEN_DELAY_SECONDS", cfg.open_delay_seconds),
-            signal_momentum_threshold=_env_float(f"{prefix}_SIGNAL_MOMENTUM_THRESHOLD", cfg.signal_momentum_threshold),
-            signal_fallback_strategy_id=_env_int(
-                f"{prefix}_SIGNAL_FALLBACK_STRATEGY_ID",
+            base_order_cost=_strategy_env_float(strategy_id, "BASE_ORDER_COST", cfg.base_order_cost),
+            max_consecutive_losses=_strategy_env_int(
+                strategy_id,
+                "MAX_CONSECUTIVE_LOSSES",
+                cfg.max_consecutive_losses,
+            ),
+            min_stake=_strategy_env_optional_float(strategy_id, "MIN_STAKE", cfg.min_stake),
+            max_stake=_strategy_env_optional_float(strategy_id, "MAX_STAKE", cfg.max_stake),
+            open_delay_seconds=_strategy_env_int(strategy_id, "OPEN_DELAY_SECONDS", cfg.open_delay_seconds),
+            signal_momentum_threshold=_strategy_env_float(
+                strategy_id,
+                "SIGNAL_MOMENTUM_THRESHOLD",
+                cfg.signal_momentum_threshold,
+            ),
+            signal_fallback_strategy_id=_strategy_env_int(
+                strategy_id,
+                "SIGNAL_FALLBACK_STRATEGY_ID",
                 cfg.signal_fallback_strategy_id,
             ),
-            signal_weak_signal_mode=(os.getenv(f"{prefix}_SIGNAL_WEAK_SIGNAL_MODE") or cfg.signal_weak_signal_mode).upper(),
-            signal_history_fidelity_seconds=_env_int(
-                f"{prefix}_SIGNAL_HISTORY_FIDELITY_SECONDS",
+            signal_weak_signal_mode=_strategy_env_select(
+                strategy_id,
+                "SIGNAL_WEAK_SIGNAL_MODE",
+                cfg.signal_weak_signal_mode,
+            ),
+            signal_history_fidelity_seconds=_strategy_env_int(
+                strategy_id,
+                "SIGNAL_HISTORY_FIDELITY_SECONDS",
                 cfg.signal_history_fidelity_seconds,
             ),
-            signal_anchor_max_offset_seconds=_env_int(
-                f"{prefix}_SIGNAL_ANCHOR_MAX_OFFSET_SECONDS",
+            signal_anchor_max_offset_seconds=_strategy_env_int(
+                strategy_id,
+                "SIGNAL_ANCHOR_MAX_OFFSET_SECONDS",
                 cfg.signal_anchor_max_offset_seconds,
             ),
-            signal_dynamic_threshold_k=_env_float(
-                f"{prefix}_SIGNAL_DYNAMIC_THRESHOLD_K",
+            signal_dynamic_threshold_k=_strategy_env_float(
+                strategy_id,
+                "SIGNAL_DYNAMIC_THRESHOLD_K",
                 cfg.signal_dynamic_threshold_k,
             ),
-            signal_dynamic_threshold_min_points=_env_int(
-                f"{prefix}_SIGNAL_DYNAMIC_THRESHOLD_MIN_POINTS",
+            signal_dynamic_threshold_min_points=_strategy_env_int(
+                strategy_id,
+                "SIGNAL_DYNAMIC_THRESHOLD_MIN_POINTS",
                 cfg.signal_dynamic_threshold_min_points,
             ),
-            signal_lock_before_entry_seconds=_env_int(
-                f"{prefix}_SIGNAL_LOCK_BEFORE_ENTRY_SECONDS",
+            signal_lock_before_entry_seconds=_strategy_env_int(
+                strategy_id,
+                "SIGNAL_LOCK_BEFORE_ENTRY_SECONDS",
                 cfg.signal_lock_before_entry_seconds,
             ),
-            max_stake_skip_alert_threshold=_env_int(
-                f"{prefix}_MAX_STAKE_SKIP_ALERT_THRESHOLD",
+            max_stake_skip_alert_threshold=_strategy_env_int(
+                strategy_id,
+                "MAX_STAKE_SKIP_ALERT_THRESHOLD",
                 cfg.max_stake_skip_alert_threshold,
             ),
-            ofi_threshold=_env_float(f"{prefix}_OFI_THRESHOLD", cfg.ofi_threshold),
-            min_entry_price=_env_optional_float(f"{prefix}_MIN_ENTRY_PRICE")
-            if os.getenv(f"{prefix}_MIN_ENTRY_PRICE") is not None
-            else cfg.min_entry_price,
-            max_entry_price=_env_float(
-                f"{prefix}_MAX_ENTRY_PRICE",
-                _env_float(legacy_strategy7_max_entry_key, cfg.max_entry_price)
-                if strategy_id in {7, 8, 9, 10} and os.getenv(legacy_strategy7_max_entry_key) is not None
-                else cfg.max_entry_price,
-            ),
-            binance_signal_stale_seconds=_env_float(
-                f"{prefix}_BINANCE_SIGNAL_STALE_SECONDS",
+            ofi_threshold=_strategy_env_float(strategy_id, "OFI_THRESHOLD", cfg.ofi_threshold),
+            min_entry_price=_strategy_env_optional_float(strategy_id, "MIN_ENTRY_PRICE", cfg.min_entry_price),
+            max_entry_price=_strategy_env_float(strategy_id, "MAX_ENTRY_PRICE", strategy7_max_entry_fallback),
+            binance_signal_stale_seconds=_strategy_env_float(
+                strategy_id,
+                "BINANCE_SIGNAL_STALE_SECONDS",
                 cfg.binance_signal_stale_seconds,
             ),
-            strategy7_ofi_threshold=_env_float(f"{prefix}_STRATEGY7_OFI_THRESHOLD", cfg.strategy7_ofi_threshold),
-            strategy7_momentum_threshold=_env_float(
-                f"{prefix}_STRATEGY7_MOMENTUM_THRESHOLD",
+            strategy7_ofi_threshold=_strategy_env_float(strategy_id, "STRATEGY7_OFI_THRESHOLD", cfg.strategy7_ofi_threshold),
+            strategy7_momentum_threshold=_strategy_env_float(
+                strategy_id,
+                "STRATEGY7_MOMENTUM_THRESHOLD",
                 cfg.strategy7_momentum_threshold,
             ),
-            strategy7_max_momentum_delta=(
-                _env_optional_float(f"{prefix}_STRATEGY7_MAX_MOMENTUM_DELTA")
-                if os.getenv(f"{prefix}_STRATEGY7_MAX_MOMENTUM_DELTA") is not None
-                else cfg.strategy7_max_momentum_delta
+            strategy7_max_momentum_delta=_strategy_env_optional_float(
+                strategy_id,
+                "STRATEGY7_MAX_MOMENTUM_DELTA",
+                cfg.strategy7_max_momentum_delta,
             ),
-            strategy7_max_entry_price=_env_float(
-                f"{prefix}_STRATEGY7_MAX_ENTRY_PRICE",
+            strategy7_max_entry_price=_strategy_env_float(
+                strategy_id,
+                "STRATEGY7_MAX_ENTRY_PRICE",
                 cfg.strategy7_max_entry_price,
             ),
-            strategy7_min_signal_gap=_env_float(
-                f"{prefix}_STRATEGY7_MIN_SIGNAL_GAP",
+            strategy7_min_signal_gap=_strategy_env_float(
+                strategy_id,
+                "STRATEGY7_MIN_SIGNAL_GAP",
                 cfg.strategy7_min_signal_gap,
             ),
-            strategy7_confirm_before_entry_seconds=_env_int(
-                f"{prefix}_STRATEGY7_CONFIRM_BEFORE_ENTRY_SECONDS",
+            strategy7_confirm_before_entry_seconds=_strategy_env_int(
+                strategy_id,
+                "STRATEGY7_CONFIRM_BEFORE_ENTRY_SECONDS",
                 cfg.strategy7_confirm_before_entry_seconds,
             ),
-            strategy7_late_confirm_strong_signal_gap=_env_float(
-                f"{prefix}_STRATEGY7_LATE_CONFIRM_STRONG_SIGNAL_GAP",
+            strategy7_late_confirm_strong_signal_gap=_strategy_env_float(
+                strategy_id,
+                "STRATEGY7_LATE_CONFIRM_STRONG_SIGNAL_GAP",
                 cfg.strategy7_late_confirm_strong_signal_gap,
             ),
-            strategy7_late_confirm_relax_seconds=_env_float(
-                f"{prefix}_STRATEGY7_LATE_CONFIRM_RELAX_SECONDS",
+            strategy7_late_confirm_relax_seconds=_strategy_env_float(
+                strategy_id,
+                "STRATEGY7_LATE_CONFIRM_RELAX_SECONDS",
                 cfg.strategy7_late_confirm_relax_seconds,
             ),
-            strategy7_dynamic_sizing_enabled=_env_bool(
-                f"{prefix}_STRATEGY7_DYNAMIC_SIZING_ENABLED",
+            strategy7_dynamic_sizing_enabled=_strategy_env_bool(
+                strategy_id,
+                "STRATEGY7_DYNAMIC_SIZING_ENABLED",
                 cfg.strategy7_dynamic_sizing_enabled,
             ),
-            strategy7_sizing_reference_price=_env_float(
-                f"{prefix}_STRATEGY7_SIZING_REFERENCE_PRICE",
+            strategy7_sizing_reference_price=_strategy_env_float(
+                strategy_id,
+                "STRATEGY7_SIZING_REFERENCE_PRICE",
                 cfg.strategy7_sizing_reference_price,
             ),
-            strategy7_sizing_price_step=_env_float(
-                f"{prefix}_STRATEGY7_SIZING_PRICE_STEP",
+            strategy7_sizing_price_step=_strategy_env_float(
+                strategy_id,
+                "STRATEGY7_SIZING_PRICE_STEP",
                 cfg.strategy7_sizing_price_step,
             ),
-            strategy7_sizing_price_step_reduction=_env_float(
-                f"{prefix}_STRATEGY7_SIZING_PRICE_STEP_REDUCTION",
+            strategy7_sizing_price_step_reduction=_strategy_env_float(
+                strategy_id,
+                "STRATEGY7_SIZING_PRICE_STEP_REDUCTION",
                 cfg.strategy7_sizing_price_step_reduction,
             ),
-            strategy7_sizing_min_multiplier=_env_float(
-                f"{prefix}_STRATEGY7_SIZING_MIN_MULTIPLIER",
+            strategy7_sizing_min_multiplier=_strategy_env_float(
+                strategy_id,
+                "STRATEGY7_SIZING_MIN_MULTIPLIER",
                 cfg.strategy7_sizing_min_multiplier,
             ),
-            strategy7_sizing_max_multiplier=_env_float(
-                f"{prefix}_STRATEGY7_SIZING_MAX_MULTIPLIER",
+            strategy7_sizing_max_multiplier=_strategy_env_float(
+                strategy_id,
+                "STRATEGY7_SIZING_MAX_MULTIPLIER",
                 cfg.strategy7_sizing_max_multiplier,
             ),
-            strategy7_sizing_strong_signal_gap=_env_float(
-                f"{prefix}_STRATEGY7_SIZING_STRONG_SIGNAL_GAP",
+            strategy7_sizing_strong_signal_gap=_strategy_env_float(
+                strategy_id,
+                "STRATEGY7_SIZING_STRONG_SIGNAL_GAP",
                 cfg.strategy7_sizing_strong_signal_gap,
             ),
-            strategy7_sizing_strong_signal_boost=_env_float(
-                f"{prefix}_STRATEGY7_SIZING_STRONG_SIGNAL_BOOST",
+            strategy7_sizing_strong_signal_boost=_strategy_env_float(
+                strategy_id,
+                "STRATEGY7_SIZING_STRONG_SIGNAL_BOOST",
                 cfg.strategy7_sizing_strong_signal_boost,
             ),
-            strategy9_dynamic_sizing_enabled=_env_bool(
-                f"{prefix}_STRATEGY9_DYNAMIC_SIZING_ENABLED",
+            strategy9_dynamic_sizing_enabled=_strategy_env_bool(
+                strategy_id,
+                "STRATEGY9_DYNAMIC_SIZING_ENABLED",
                 cfg.strategy9_dynamic_sizing_enabled,
             ),
-            strategy9_sizing_reference_price=_env_float(
-                f"{prefix}_STRATEGY9_SIZING_REFERENCE_PRICE",
+            strategy9_sizing_reference_price=_strategy_env_float(
+                strategy_id,
+                "STRATEGY9_SIZING_REFERENCE_PRICE",
                 cfg.strategy9_sizing_reference_price,
             ),
-            strategy9_sizing_price_step=_env_float(
-                f"{prefix}_STRATEGY9_SIZING_PRICE_STEP",
+            strategy9_sizing_price_step=_strategy_env_float(
+                strategy_id,
+                "STRATEGY9_SIZING_PRICE_STEP",
                 cfg.strategy9_sizing_price_step,
             ),
-            strategy9_sizing_price_step_reduction=_env_float(
-                f"{prefix}_STRATEGY9_SIZING_PRICE_STEP_REDUCTION",
+            strategy9_sizing_price_step_reduction=_strategy_env_float(
+                strategy_id,
+                "STRATEGY9_SIZING_PRICE_STEP_REDUCTION",
                 cfg.strategy9_sizing_price_step_reduction,
             ),
-            strategy9_sizing_min_multiplier=_env_float(
-                f"{prefix}_STRATEGY9_SIZING_MIN_MULTIPLIER",
+            strategy9_sizing_min_multiplier=_strategy_env_float(
+                strategy_id,
+                "STRATEGY9_SIZING_MIN_MULTIPLIER",
                 cfg.strategy9_sizing_min_multiplier,
             ),
-            strategy9_sizing_max_multiplier=_env_float(
-                f"{prefix}_STRATEGY9_SIZING_MAX_MULTIPLIER",
+            strategy9_sizing_max_multiplier=_strategy_env_float(
+                strategy_id,
+                "STRATEGY9_SIZING_MAX_MULTIPLIER",
                 cfg.strategy9_sizing_max_multiplier,
             ),
-            strategy9_sizing_strong_signal_gap=_env_float(
-                f"{prefix}_STRATEGY9_SIZING_STRONG_SIGNAL_GAP",
+            strategy9_sizing_strong_signal_gap=_strategy_env_float(
+                strategy_id,
+                "STRATEGY9_SIZING_STRONG_SIGNAL_GAP",
                 cfg.strategy9_sizing_strong_signal_gap,
             ),
-            strategy9_sizing_strong_signal_boost=_env_float(
-                f"{prefix}_STRATEGY9_SIZING_STRONG_SIGNAL_BOOST",
+            strategy9_sizing_strong_signal_boost=_strategy_env_float(
+                strategy_id,
+                "STRATEGY9_SIZING_STRONG_SIGNAL_BOOST",
                 cfg.strategy9_sizing_strong_signal_boost,
             ),
-            strategy9_stability_sample_count=_env_int(
-                f"{prefix}_STRATEGY9_STABILITY_SAMPLE_COUNT",
+            strategy9_stability_sample_count=_strategy_env_int(
+                strategy_id,
+                "STRATEGY9_STABILITY_SAMPLE_COUNT",
                 cfg.strategy9_stability_sample_count,
             ),
-            strategy9_stability_required_count=_env_int(
-                f"{prefix}_STRATEGY9_STABILITY_REQUIRED_COUNT",
+            strategy9_stability_required_count=_strategy_env_int(
+                strategy_id,
+                "STRATEGY9_STABILITY_REQUIRED_COUNT",
                 cfg.strategy9_stability_required_count,
             ),
-            strategy9_stability_window_seconds=_env_float(
-                f"{prefix}_STRATEGY9_STABILITY_WINDOW_SECONDS",
+            strategy9_stability_window_seconds=_strategy_env_float(
+                strategy_id,
+                "STRATEGY9_STABILITY_WINDOW_SECONDS",
                 cfg.strategy9_stability_window_seconds,
             ),
-            strategy9_reversal_lookback_seconds=_env_float(
-                f"{prefix}_STRATEGY9_REVERSAL_LOOKBACK_SECONDS",
+            strategy9_reversal_lookback_seconds=_strategy_env_float(
+                strategy_id,
+                "STRATEGY9_REVERSAL_LOOKBACK_SECONDS",
                 cfg.strategy9_reversal_lookback_seconds,
             ),
-            strategy9_max_signal_decay=_env_float(
-                f"{prefix}_STRATEGY9_MAX_SIGNAL_DECAY",
+            strategy9_max_signal_decay=_strategy_env_float(
+                strategy_id,
+                "STRATEGY9_MAX_SIGNAL_DECAY",
                 cfg.strategy9_max_signal_decay,
             ),
-            strategy9_base_max_entry_price=_env_float(
-                f"{prefix}_STRATEGY9_BASE_MAX_ENTRY_PRICE",
+            strategy9_base_max_entry_price=_strategy_env_float(
+                strategy_id,
+                "STRATEGY9_BASE_MAX_ENTRY_PRICE",
                 cfg.strategy9_base_max_entry_price,
             ),
-            strategy9_strong_max_entry_price=_env_float(
-                f"{prefix}_STRATEGY9_STRONG_MAX_ENTRY_PRICE",
+            strategy9_strong_max_entry_price=_strategy_env_float(
+                strategy_id,
+                "STRATEGY9_STRONG_MAX_ENTRY_PRICE",
                 cfg.strategy9_strong_max_entry_price,
             ),
-            strategy9_ultra_max_entry_price=_env_float(
-                f"{prefix}_STRATEGY9_ULTRA_MAX_ENTRY_PRICE",
+            strategy9_ultra_max_entry_price=_strategy_env_float(
+                strategy_id,
+                "STRATEGY9_ULTRA_MAX_ENTRY_PRICE",
                 cfg.strategy9_ultra_max_entry_price,
             ),
-            strategy9_strong_signal_gap=_env_float(
-                f"{prefix}_STRATEGY9_STRONG_SIGNAL_GAP",
+            strategy9_strong_signal_gap=_strategy_env_float(
+                strategy_id,
+                "STRATEGY9_STRONG_SIGNAL_GAP",
                 cfg.strategy9_strong_signal_gap,
             ),
-            strategy9_ultra_signal_gap=_env_float(
-                f"{prefix}_STRATEGY9_ULTRA_SIGNAL_GAP",
+            strategy9_ultra_signal_gap=_strategy_env_float(
+                strategy_id,
+                "STRATEGY9_ULTRA_SIGNAL_GAP",
                 cfg.strategy9_ultra_signal_gap,
             ),
-            strategy10_min_edge=_env_float(f"{prefix}_STRATEGY10_MIN_EDGE", cfg.strategy10_min_edge),
-            strategy10_edge_buffer=_env_float(f"{prefix}_STRATEGY10_EDGE_BUFFER", cfg.strategy10_edge_buffer),
-            strategy10_ofi_weight=_env_float(f"{prefix}_STRATEGY10_OFI_WEIGHT", cfg.strategy10_ofi_weight),
-            strategy10_momentum_weight=_env_float(
-                f"{prefix}_STRATEGY10_MOMENTUM_WEIGHT",
+            strategy10_min_edge=_strategy_env_float(strategy_id, "STRATEGY10_MIN_EDGE", cfg.strategy10_min_edge),
+            strategy10_edge_buffer=_strategy_env_float(strategy_id, "STRATEGY10_EDGE_BUFFER", cfg.strategy10_edge_buffer),
+            strategy10_ofi_weight=_strategy_env_float(strategy_id, "STRATEGY10_OFI_WEIGHT", cfg.strategy10_ofi_weight),
+            strategy10_momentum_weight=_strategy_env_float(
+                strategy_id,
+                "STRATEGY10_MOMENTUM_WEIGHT",
                 cfg.strategy10_momentum_weight,
             ),
-            strategy10_max_fair_value=_env_float(
-                f"{prefix}_STRATEGY10_MAX_FAIR_VALUE",
+            strategy10_max_fair_value=_strategy_env_float(
+                strategy_id,
+                "STRATEGY10_MAX_FAIR_VALUE",
                 cfg.strategy10_max_fair_value,
             ),
-        ),
-    )
+        )
 
 
 def _live_profile_for_strategy(cfg: AppConfig, strategy_id: int) -> LiveStrategyProfile:
-    return _profile_for_strategy_prefix(cfg, strategy_id, _live_profile_prefix(strategy_id))
+    return _profile_for_strategy(cfg, strategy_id)
 
 
 def _paper_strategy_profile_for_strategy(cfg: AppConfig, strategy_id: int) -> LiveStrategyProfile:
-    return _profile_for_strategy_prefix(cfg, strategy_id, _paper_strategy_profile_prefix(strategy_id))
+    return _profile_for_strategy(cfg, strategy_id)
 
 
 @dataclass(slots=True)
@@ -862,78 +1071,66 @@ class AppConfig:
     trade_mode: str = field(default_factory=lambda: (os.getenv("TRADE_MODE") or "paper").strip().lower() or "paper")
     strategy_id: int = field(default_factory=lambda: _env_int("STRATEGY_ID", 2))
     live_strategy_ids: list[int] = field(default_factory=list)
-    target_profit: float = field(default_factory=lambda: _env_float("TARGET_PROFIT", 1.0))
-    bet_sizing_mode: str = field(default_factory=lambda: (os.getenv("BET_SIZING_MODE") or "FIXED_BASE_COST").upper())
-    base_order_cost: float = field(default_factory=lambda: _env_float("BASE_ORDER_COST", 1.0))
-    max_consecutive_losses: int = field(default_factory=lambda: _env_int("MAX_CONSECUTIVE_LOSSES", 6))
-    min_stake: float | None = field(default_factory=lambda: _env_optional_float("MIN_STAKE"))
-    max_stake: float | None = field(default_factory=lambda: _env_optional_float("MAX_STAKE"))
-    max_price_threshold: float = field(default_factory=lambda: _env_float("MAX_PRICE_THRESHOLD", 0.65))
-    signal_momentum_threshold: float = field(default_factory=lambda: _env_float("SIGNAL_MOMENTUM_THRESHOLD", 0.015))
-    signal_fallback_strategy_id: int = field(default_factory=lambda: _env_int("SIGNAL_FALLBACK_STRATEGY_ID", 2))
-    signal_weak_signal_mode: str = field(default_factory=lambda: (os.getenv("SIGNAL_WEAK_SIGNAL_MODE") or "SKIP").upper())
-    signal_history_fidelity_seconds: int = field(default_factory=lambda: _env_int("SIGNAL_HISTORY_FIDELITY_SECONDS", 5))
-    signal_anchor_max_offset_seconds: int = field(default_factory=lambda: _env_int("SIGNAL_ANCHOR_MAX_OFFSET_SECONDS", 20))
-    signal_dynamic_threshold_k: float = field(default_factory=lambda: _env_float("SIGNAL_DYNAMIC_THRESHOLD_K", 1.5))
-    signal_dynamic_threshold_min_points: int = field(default_factory=lambda: _env_int("SIGNAL_DYNAMIC_THRESHOLD_MIN_POINTS", 8))
-    signal_lock_before_entry_seconds: int = field(default_factory=lambda: _env_int("SIGNAL_LOCK_BEFORE_ENTRY_SECONDS", 20))
-    max_stake_skip_alert_threshold: int = field(default_factory=lambda: _env_int("MAX_STAKE_SKIP_ALERT_THRESHOLD", 5))
-    min_price_threshold: float | None = field(default_factory=lambda: _env_optional_float('MIN_PRICE_THRESHOLD'))
-    min_entry_price: float | None = field(
-        default_factory=lambda: _env_optional_float("MIN_ENTRY_PRICE")
-        if os.getenv("MIN_ENTRY_PRICE") is not None
-        else _env_optional_float("MIN_PRICE_THRESHOLD")
-    )
-    ofi_threshold: float = field(default_factory=lambda: _env_float('OFI_THRESHOLD', 0.65))
-    max_entry_price: float = field(
-        default_factory=lambda: _env_float("MAX_ENTRY_PRICE", _env_float("MAX_PRICE_THRESHOLD", 0.56))
-    )
-    strategy7_ofi_threshold: float = field(default_factory=lambda: _env_float("STRATEGY7_OFI_THRESHOLD", 0.7))
-    strategy7_momentum_threshold: float = field(default_factory=lambda: _env_float("STRATEGY7_MOMENTUM_THRESHOLD", 0.025))
-    strategy7_max_momentum_delta: float | None = field(default_factory=lambda: _env_optional_float("STRATEGY7_MAX_MOMENTUM_DELTA"))
-    strategy7_max_entry_price: float = field(default_factory=lambda: _env_float("STRATEGY7_MAX_ENTRY_PRICE", 0.54))
-    strategy7_min_signal_gap: float = field(default_factory=lambda: _env_float("STRATEGY7_MIN_SIGNAL_GAP", 0.03))
-    strategy7_confirm_before_entry_seconds: int = field(default_factory=lambda: _env_int("STRATEGY7_CONFIRM_BEFORE_ENTRY_SECONDS", 12))
-    strategy7_late_confirm_strong_signal_gap: float = field(
-        default_factory=lambda: _env_float("STRATEGY7_LATE_CONFIRM_STRONG_SIGNAL_GAP", 0.02)
-    )
-    strategy7_late_confirm_relax_seconds: float = field(
-        default_factory=lambda: _env_float("STRATEGY7_LATE_CONFIRM_RELAX_SECONDS", 0.0)
-    )
-    strategy7_dynamic_sizing_enabled: bool = field(default_factory=lambda: _env_bool("STRATEGY7_DYNAMIC_SIZING_ENABLED", False))
-    strategy7_sizing_reference_price: float = field(default_factory=lambda: _env_float("STRATEGY7_SIZING_REFERENCE_PRICE", 0.50))
-    strategy7_sizing_price_step: float = field(default_factory=lambda: _env_float("STRATEGY7_SIZING_PRICE_STEP", 0.01))
-    strategy7_sizing_price_step_reduction: float = field(default_factory=lambda: _env_float("STRATEGY7_SIZING_PRICE_STEP_REDUCTION", 0.10))
-    strategy7_sizing_min_multiplier: float = field(default_factory=lambda: _env_float("STRATEGY7_SIZING_MIN_MULTIPLIER", 0.50))
-    strategy7_sizing_max_multiplier: float = field(default_factory=lambda: _env_float("STRATEGY7_SIZING_MAX_MULTIPLIER", 1.00))
-    strategy7_sizing_strong_signal_gap: float = field(default_factory=lambda: _env_float("STRATEGY7_SIZING_STRONG_SIGNAL_GAP", 0.02))
-    strategy7_sizing_strong_signal_boost: float = field(default_factory=lambda: _env_float("STRATEGY7_SIZING_STRONG_SIGNAL_BOOST", 0.20))
-    strategy9_dynamic_sizing_enabled: bool = field(default_factory=lambda: _env_bool("STRATEGY9_DYNAMIC_SIZING_ENABLED", False))
-    strategy9_sizing_reference_price: float = field(default_factory=lambda: _env_float("STRATEGY9_SIZING_REFERENCE_PRICE", _env_float("STRATEGY7_SIZING_REFERENCE_PRICE", 0.50)))
-    strategy9_sizing_price_step: float = field(default_factory=lambda: _env_float("STRATEGY9_SIZING_PRICE_STEP", _env_float("STRATEGY7_SIZING_PRICE_STEP", 0.01)))
-    strategy9_sizing_price_step_reduction: float = field(default_factory=lambda: _env_float("STRATEGY9_SIZING_PRICE_STEP_REDUCTION", _env_float("STRATEGY7_SIZING_PRICE_STEP_REDUCTION", 0.10)))
-    strategy9_sizing_min_multiplier: float = field(default_factory=lambda: _env_float("STRATEGY9_SIZING_MIN_MULTIPLIER", _env_float("STRATEGY7_SIZING_MIN_MULTIPLIER", 0.50)))
-    strategy9_sizing_max_multiplier: float = field(default_factory=lambda: _env_float("STRATEGY9_SIZING_MAX_MULTIPLIER", _env_float("STRATEGY7_SIZING_MAX_MULTIPLIER", 1.00)))
-    strategy9_sizing_strong_signal_gap: float = field(default_factory=lambda: _env_float("STRATEGY9_SIZING_STRONG_SIGNAL_GAP", _env_float("STRATEGY7_SIZING_STRONG_SIGNAL_GAP", 0.02)))
-    strategy9_sizing_strong_signal_boost: float = field(default_factory=lambda: _env_float("STRATEGY9_SIZING_STRONG_SIGNAL_BOOST", _env_float("STRATEGY7_SIZING_STRONG_SIGNAL_BOOST", 0.20)))
-    strategy9_stability_sample_count: int = field(default_factory=lambda: _env_int("STRATEGY9_STABILITY_SAMPLE_COUNT", 3))
-    strategy9_stability_required_count: int = field(default_factory=lambda: _env_int("STRATEGY9_STABILITY_REQUIRED_COUNT", 2))
-    strategy9_stability_window_seconds: float = field(default_factory=lambda: _env_float("STRATEGY9_STABILITY_WINDOW_SECONDS", 6.0))
-    strategy9_reversal_lookback_seconds: float = field(default_factory=lambda: _env_float("STRATEGY9_REVERSAL_LOOKBACK_SECONDS", 6.0))
-    strategy9_max_signal_decay: float = field(default_factory=lambda: _env_float("STRATEGY9_MAX_SIGNAL_DECAY", 0.35))
-    strategy9_base_max_entry_price: float = field(default_factory=lambda: _env_float("STRATEGY9_BASE_MAX_ENTRY_PRICE", 0.52))
-    strategy9_strong_max_entry_price: float = field(default_factory=lambda: _env_float("STRATEGY9_STRONG_MAX_ENTRY_PRICE", 0.53))
-    strategy9_ultra_max_entry_price: float = field(default_factory=lambda: _env_float("STRATEGY9_ULTRA_MAX_ENTRY_PRICE", 0.54))
-    strategy9_strong_signal_gap: float = field(default_factory=lambda: _env_float("STRATEGY9_STRONG_SIGNAL_GAP", 0.02))
-    strategy9_ultra_signal_gap: float = field(default_factory=lambda: _env_float("STRATEGY9_ULTRA_SIGNAL_GAP", 0.04))
-    strategy10_min_edge: float = field(default_factory=lambda: _env_float("STRATEGY10_MIN_EDGE", 0.04))
-    strategy10_edge_buffer: float = field(default_factory=lambda: _env_float("STRATEGY10_EDGE_BUFFER", 0.005))
-    strategy10_ofi_weight: float = field(default_factory=lambda: _env_float("STRATEGY10_OFI_WEIGHT", 0.08))
-    strategy10_momentum_weight: float = field(default_factory=lambda: _env_float("STRATEGY10_MOMENTUM_WEIGHT", 1.0))
-    strategy10_max_fair_value: float = field(default_factory=lambda: _env_float("STRATEGY10_MAX_FAIR_VALUE", 0.85))
+    base_order_cost: float = 1.0
+    max_consecutive_losses: int = 6
+    min_stake: float | None = None
+    max_stake: float | None = None
+    max_price_threshold: float = 0.65
+    signal_momentum_threshold: float = 0.015
+    signal_fallback_strategy_id: int = 2
+    signal_weak_signal_mode: str = "SKIP"
+    signal_history_fidelity_seconds: int = 5
+    signal_anchor_max_offset_seconds: int = 20
+    signal_dynamic_threshold_k: float = 1.5
+    signal_dynamic_threshold_min_points: int = 8
+    signal_lock_before_entry_seconds: int = 20
+    max_stake_skip_alert_threshold: int = 5
+    min_price_threshold: float | None = None
+    min_entry_price: float | None = None
+    ofi_threshold: float = 0.65
+    max_entry_price: float = 0.56
+    strategy7_ofi_threshold: float = 0.7
+    strategy7_momentum_threshold: float = 0.025
+    strategy7_max_momentum_delta: float | None = None
+    strategy7_max_entry_price: float = 0.54
+    strategy7_min_signal_gap: float = 0.03
+    strategy7_confirm_before_entry_seconds: int = 12
+    strategy7_late_confirm_strong_signal_gap: float = 0.02
+    strategy7_late_confirm_relax_seconds: float = 0.0
+    strategy7_dynamic_sizing_enabled: bool = False
+    strategy7_sizing_reference_price: float = 0.50
+    strategy7_sizing_price_step: float = 0.01
+    strategy7_sizing_price_step_reduction: float = 0.10
+    strategy7_sizing_min_multiplier: float = 0.50
+    strategy7_sizing_max_multiplier: float = 1.00
+    strategy7_sizing_strong_signal_gap: float = 0.02
+    strategy7_sizing_strong_signal_boost: float = 0.20
+    strategy9_dynamic_sizing_enabled: bool = False
+    strategy9_sizing_reference_price: float = 0.50
+    strategy9_sizing_price_step: float = 0.01
+    strategy9_sizing_price_step_reduction: float = 0.10
+    strategy9_sizing_min_multiplier: float = 0.50
+    strategy9_sizing_max_multiplier: float = 1.00
+    strategy9_sizing_strong_signal_gap: float = 0.02
+    strategy9_sizing_strong_signal_boost: float = 0.20
+    strategy9_stability_sample_count: int = 3
+    strategy9_stability_required_count: int = 2
+    strategy9_stability_window_seconds: float = 6.0
+    strategy9_reversal_lookback_seconds: float = 6.0
+    strategy9_max_signal_decay: float = 0.35
+    strategy9_base_max_entry_price: float = 0.52
+    strategy9_strong_max_entry_price: float = 0.53
+    strategy9_ultra_max_entry_price: float = 0.54
+    strategy9_strong_signal_gap: float = 0.02
+    strategy9_ultra_signal_gap: float = 0.04
+    strategy10_min_edge: float = 0.04
+    strategy10_edge_buffer: float = 0.005
+    strategy10_ofi_weight: float = 0.08
+    strategy10_momentum_weight: float = 1.0
+    strategy10_max_fair_value: float = 0.85
     binance_ws_url: str = field(default_factory=lambda: os.getenv('BINANCE_WS_URL') or 'wss://stream.binance.com:9443/ws')
     binance_depth_stream: str = field(default_factory=lambda: os.getenv('BINANCE_DEPTH_STREAM') or 'btcusdt@depth5')
-    binance_signal_stale_seconds: float = field(default_factory=lambda: _env_float('BINANCE_SIGNAL_STALE_SECONDS', 2.0))
+    binance_signal_stale_seconds: float = 2.0
     poll_interval_seconds: int = field(default_factory=lambda: _env_int("POLL_INTERVAL_SECONDS", 5))
     near_entry_poll_window_seconds: float = field(
         default_factory=lambda: _env_float("NEAR_ENTRY_POLL_WINDOW_SECONDS", 10.0)
@@ -960,7 +1157,7 @@ class AppConfig:
     api_retry_base_delay_seconds: float = 1.0
     api_retry_max_delay_seconds: float = 8.0
     entry_timing: str = "OPEN"
-    open_delay_seconds: int = field(default_factory=lambda: _env_int("OPEN_DELAY_SECONDS", 5))
+    open_delay_seconds: int = 5
     entry_grace_seconds: int = field(default_factory=lambda: _env_int("ENTRY_GRACE_SECONDS", 5))
     preclose_seconds: int = 30
     history_lookback_seconds: int = 900
@@ -982,8 +1179,6 @@ class AppConfig:
     live_profiles: dict[int, LiveStrategyProfile] = field(init=False)
 
     def __post_init__(self) -> None:
-        if os.getenv("MAX_ENTRY_PRICE") is None and self.strategy7_max_entry_price != 0.54:
-            self.max_entry_price = self.strategy7_max_entry_price
         if not self.paper_timeframes:
             self.paper_timeframes = _env_paper_timeframes(self.market_timeframe)
         raw_strategy_ids = os.getenv(STRATEGY_IDS)
@@ -1006,188 +1201,64 @@ class AppConfig:
                 timeframe=timeframe,
                 strategy_id=strategy_id,
                 paper_strategy_ids=_paper_profile_strategy_ids(prefix, self.paper_strategy_ids, strategy_id),
-                target_profit=_env_float(f"{prefix}_TARGET_PROFIT", self.target_profit),
-                bet_sizing_mode=_strategy_mode_env(strategy_id, legacy_prefix=prefix, global_mode=self.bet_sizing_mode),
-                base_order_cost=_env_float(f"{prefix}_BASE_ORDER_COST", self.base_order_cost),
-                max_consecutive_losses=_env_int(f"{prefix}_MAX_CONSECUTIVE_LOSSES", self.max_consecutive_losses),
-                min_stake=(
-                    _env_optional_float(f"{prefix}_MIN_STAKE")
-                    if os.getenv(f"{prefix}_MIN_STAKE") is not None
-                    else self.min_stake
-                ),
-                max_stake=(
-                    _env_optional_float(f"{prefix}_MAX_STAKE")
-                    if os.getenv(f"{prefix}_MAX_STAKE") is not None
-                    else self.max_stake
-                ),
-                open_delay_seconds=_env_int(f"{prefix}_OPEN_DELAY_SECONDS", self.open_delay_seconds),
-                signal_momentum_threshold=_env_float(
-                    f"{prefix}_SIGNAL_MOMENTUM_THRESHOLD",
-                    self.signal_momentum_threshold,
-                ),
-                ofi_threshold=_env_float(f"{prefix}_OFI_THRESHOLD", self.ofi_threshold),
-                binance_signal_stale_seconds=_env_float(
-                    f"{prefix}_BINANCE_SIGNAL_STALE_SECONDS",
-                    self.binance_signal_stale_seconds,
-                ),
-                strategy7_ofi_threshold=_env_float(
-                    f"{prefix}_STRATEGY7_OFI_THRESHOLD",
-                    self.strategy7_ofi_threshold,
-                ),
-                strategy7_momentum_threshold=_env_float(
-                    f"{prefix}_STRATEGY7_MOMENTUM_THRESHOLD",
-                    self.strategy7_momentum_threshold,
-                ),
-                strategy7_max_momentum_delta=(
-                    _env_optional_float(f"{prefix}_STRATEGY7_MAX_MOMENTUM_DELTA")
-                    if os.getenv(f"{prefix}_STRATEGY7_MAX_MOMENTUM_DELTA") is not None
-                    else self.strategy7_max_momentum_delta
-                ),
-                strategy7_min_signal_gap=_env_float(
-                    f"{prefix}_STRATEGY7_MIN_SIGNAL_GAP",
-                    self.strategy7_min_signal_gap,
-                ),
-                strategy7_confirm_before_entry_seconds=_env_int(
-                    f"{prefix}_STRATEGY7_CONFIRM_BEFORE_ENTRY_SECONDS",
-                    self.strategy7_confirm_before_entry_seconds,
-                ),
-                strategy7_late_confirm_strong_signal_gap=_env_float(
-                    f"{prefix}_STRATEGY7_LATE_CONFIRM_STRONG_SIGNAL_GAP",
-                    self.strategy7_late_confirm_strong_signal_gap,
-                ),
-                strategy7_late_confirm_relax_seconds=_env_float(
-                    f"{prefix}_STRATEGY7_LATE_CONFIRM_RELAX_SECONDS",
-                    self.strategy7_late_confirm_relax_seconds,
-                ),
-                strategy7_dynamic_sizing_enabled=_env_bool(
-                    f"{prefix}_STRATEGY7_DYNAMIC_SIZING_ENABLED",
-                    self.strategy7_dynamic_sizing_enabled,
-                ),
-                strategy7_sizing_reference_price=_env_float(
-                    f"{prefix}_STRATEGY7_SIZING_REFERENCE_PRICE",
-                    self.strategy7_sizing_reference_price,
-                ),
-                strategy7_sizing_price_step=_env_float(
-                    f"{prefix}_STRATEGY7_SIZING_PRICE_STEP",
-                    self.strategy7_sizing_price_step,
-                ),
-                strategy7_sizing_price_step_reduction=_env_float(
-                    f"{prefix}_STRATEGY7_SIZING_PRICE_STEP_REDUCTION",
-                    self.strategy7_sizing_price_step_reduction,
-                ),
-                strategy7_sizing_min_multiplier=_env_float(
-                    f"{prefix}_STRATEGY7_SIZING_MIN_MULTIPLIER",
-                    self.strategy7_sizing_min_multiplier,
-                ),
-                strategy7_sizing_max_multiplier=_env_float(
-                    f"{prefix}_STRATEGY7_SIZING_MAX_MULTIPLIER",
-                    self.strategy7_sizing_max_multiplier,
-                ),
-                strategy7_sizing_strong_signal_gap=_env_float(
-                    f"{prefix}_STRATEGY7_SIZING_STRONG_SIGNAL_GAP",
-                    self.strategy7_sizing_strong_signal_gap,
-                ),
-                strategy7_sizing_strong_signal_boost=_env_float(
-                    f"{prefix}_STRATEGY7_SIZING_STRONG_SIGNAL_BOOST",
-                    self.strategy7_sizing_strong_signal_boost,
-                ),
-                strategy9_dynamic_sizing_enabled=_env_bool(
-                    f"{prefix}_STRATEGY9_DYNAMIC_SIZING_ENABLED",
-                    self.strategy9_dynamic_sizing_enabled,
-                ),
-                strategy9_sizing_reference_price=_env_float(
-                    f"{prefix}_STRATEGY9_SIZING_REFERENCE_PRICE",
-                    self.strategy9_sizing_reference_price,
-                ),
-                strategy9_sizing_price_step=_env_float(
-                    f"{prefix}_STRATEGY9_SIZING_PRICE_STEP",
-                    self.strategy9_sizing_price_step,
-                ),
-                strategy9_sizing_price_step_reduction=_env_float(
-                    f"{prefix}_STRATEGY9_SIZING_PRICE_STEP_REDUCTION",
-                    self.strategy9_sizing_price_step_reduction,
-                ),
-                strategy9_sizing_min_multiplier=_env_float(
-                    f"{prefix}_STRATEGY9_SIZING_MIN_MULTIPLIER",
-                    self.strategy9_sizing_min_multiplier,
-                ),
-                strategy9_sizing_max_multiplier=_env_float(
-                    f"{prefix}_STRATEGY9_SIZING_MAX_MULTIPLIER",
-                    self.strategy9_sizing_max_multiplier,
-                ),
-                strategy9_sizing_strong_signal_gap=_env_float(
-                    f"{prefix}_STRATEGY9_SIZING_STRONG_SIGNAL_GAP",
-                    self.strategy9_sizing_strong_signal_gap,
-                ),
-                strategy9_sizing_strong_signal_boost=_env_float(
-                    f"{prefix}_STRATEGY9_SIZING_STRONG_SIGNAL_BOOST",
-                    self.strategy9_sizing_strong_signal_boost,
-                ),
-                strategy9_stability_sample_count=_env_int(
-                    f"{prefix}_STRATEGY9_STABILITY_SAMPLE_COUNT",
-                    self.strategy9_stability_sample_count,
-                ),
-                strategy9_stability_required_count=_env_int(
-                    f"{prefix}_STRATEGY9_STABILITY_REQUIRED_COUNT",
-                    self.strategy9_stability_required_count,
-                ),
-                strategy9_stability_window_seconds=_env_float(
-                    f"{prefix}_STRATEGY9_STABILITY_WINDOW_SECONDS",
-                    self.strategy9_stability_window_seconds,
-                ),
-                strategy9_reversal_lookback_seconds=_env_float(
-                    f"{prefix}_STRATEGY9_REVERSAL_LOOKBACK_SECONDS",
-                    self.strategy9_reversal_lookback_seconds,
-                ),
-                strategy9_max_signal_decay=_env_float(
-                    f"{prefix}_STRATEGY9_MAX_SIGNAL_DECAY",
-                    self.strategy9_max_signal_decay,
-                ),
-                strategy9_base_max_entry_price=_env_float(
-                    f"{prefix}_STRATEGY9_BASE_MAX_ENTRY_PRICE",
-                    self.strategy9_base_max_entry_price,
-                ),
-                strategy9_strong_max_entry_price=_env_float(
-                    f"{prefix}_STRATEGY9_STRONG_MAX_ENTRY_PRICE",
-                    self.strategy9_strong_max_entry_price,
-                ),
-                strategy9_ultra_max_entry_price=_env_float(
-                    f"{prefix}_STRATEGY9_ULTRA_MAX_ENTRY_PRICE",
-                    self.strategy9_ultra_max_entry_price,
-                ),
-                strategy9_strong_signal_gap=_env_float(
-                    f"{prefix}_STRATEGY9_STRONG_SIGNAL_GAP",
-                    self.strategy9_strong_signal_gap,
-                ),
-                strategy9_ultra_signal_gap=_env_float(
-                    f"{prefix}_STRATEGY9_ULTRA_SIGNAL_GAP",
-                    self.strategy9_ultra_signal_gap,
-                ),
-                strategy10_min_edge=_env_float(f"{prefix}_STRATEGY10_MIN_EDGE", self.strategy10_min_edge),
-                strategy10_edge_buffer=_env_float(f"{prefix}_STRATEGY10_EDGE_BUFFER", self.strategy10_edge_buffer),
-                strategy10_ofi_weight=_env_float(f"{prefix}_STRATEGY10_OFI_WEIGHT", self.strategy10_ofi_weight),
-                strategy10_momentum_weight=_env_float(
-                    f"{prefix}_STRATEGY10_MOMENTUM_WEIGHT",
-                    self.strategy10_momentum_weight,
-                ),
-                strategy10_max_fair_value=_env_float(
-                    f"{prefix}_STRATEGY10_MAX_FAIR_VALUE",
-                    self.strategy10_max_fair_value,
-                ),
-                min_entry_price=(
-                    _env_optional_float(f"{prefix}_MIN_ENTRY_PRICE")
-                    if os.getenv(f"{prefix}_MIN_ENTRY_PRICE") is not None
-                    else self.min_entry_price
-                ),
-                max_entry_price=_env_float(f"{prefix}_MAX_ENTRY_PRICE", self.max_entry_price),
-                strategy7_max_entry_price=_env_float(
-                    f"{prefix}_STRATEGY7_MAX_ENTRY_PRICE",
-                    self.strategy7_max_entry_price,
-                ),
+                base_order_cost=self.base_order_cost,
+                max_consecutive_losses=self.max_consecutive_losses,
+                min_stake=self.min_stake,
+                max_stake=self.max_stake,
+                open_delay_seconds=self.open_delay_seconds,
+                signal_momentum_threshold=self.signal_momentum_threshold,
+                ofi_threshold=self.ofi_threshold,
+                binance_signal_stale_seconds=self.binance_signal_stale_seconds,
+                strategy7_ofi_threshold=self.strategy7_ofi_threshold,
+                strategy7_momentum_threshold=self.strategy7_momentum_threshold,
+                strategy7_max_momentum_delta=self.strategy7_max_momentum_delta,
+                strategy7_min_signal_gap=self.strategy7_min_signal_gap,
+                strategy7_confirm_before_entry_seconds=self.strategy7_confirm_before_entry_seconds,
+                strategy7_late_confirm_strong_signal_gap=self.strategy7_late_confirm_strong_signal_gap,
+                strategy7_late_confirm_relax_seconds=self.strategy7_late_confirm_relax_seconds,
+                strategy7_dynamic_sizing_enabled=self.strategy7_dynamic_sizing_enabled,
+                strategy7_sizing_reference_price=self.strategy7_sizing_reference_price,
+                strategy7_sizing_price_step=self.strategy7_sizing_price_step,
+                strategy7_sizing_price_step_reduction=self.strategy7_sizing_price_step_reduction,
+                strategy7_sizing_min_multiplier=self.strategy7_sizing_min_multiplier,
+                strategy7_sizing_max_multiplier=self.strategy7_sizing_max_multiplier,
+                strategy7_sizing_strong_signal_gap=self.strategy7_sizing_strong_signal_gap,
+                strategy7_sizing_strong_signal_boost=self.strategy7_sizing_strong_signal_boost,
+                strategy9_dynamic_sizing_enabled=self.strategy9_dynamic_sizing_enabled,
+                strategy9_sizing_reference_price=self.strategy9_sizing_reference_price,
+                strategy9_sizing_price_step=self.strategy9_sizing_price_step,
+                strategy9_sizing_price_step_reduction=self.strategy9_sizing_price_step_reduction,
+                strategy9_sizing_min_multiplier=self.strategy9_sizing_min_multiplier,
+                strategy9_sizing_max_multiplier=self.strategy9_sizing_max_multiplier,
+                strategy9_sizing_strong_signal_gap=self.strategy9_sizing_strong_signal_gap,
+                strategy9_sizing_strong_signal_boost=self.strategy9_sizing_strong_signal_boost,
+                strategy9_stability_sample_count=self.strategy9_stability_sample_count,
+                strategy9_stability_required_count=self.strategy9_stability_required_count,
+                strategy9_stability_window_seconds=self.strategy9_stability_window_seconds,
+                strategy9_reversal_lookback_seconds=self.strategy9_reversal_lookback_seconds,
+                strategy9_max_signal_decay=self.strategy9_max_signal_decay,
+                strategy9_base_max_entry_price=self.strategy9_base_max_entry_price,
+                strategy9_strong_max_entry_price=self.strategy9_strong_max_entry_price,
+                strategy9_ultra_max_entry_price=self.strategy9_ultra_max_entry_price,
+                strategy9_strong_signal_gap=self.strategy9_strong_signal_gap,
+                strategy9_ultra_signal_gap=self.strategy9_ultra_signal_gap,
+                strategy10_min_edge=self.strategy10_min_edge,
+                strategy10_edge_buffer=self.strategy10_edge_buffer,
+                strategy10_ofi_weight=self.strategy10_ofi_weight,
+                strategy10_momentum_weight=self.strategy10_momentum_weight,
+                strategy10_max_fair_value=self.strategy10_max_fair_value,
+                min_entry_price=self.min_entry_price,
+                max_entry_price=self.max_entry_price,
+                strategy7_max_entry_price=self.strategy7_max_entry_price,
             )
+        paper_profile_strategy_ids: list[int] = list(self.paper_strategy_ids)
+        for profile in self.paper_profiles.values():
+            for strategy_id in [profile.strategy_id, *profile.paper_strategy_ids]:
+                if strategy_id not in paper_profile_strategy_ids:
+                    paper_profile_strategy_ids.append(strategy_id)
         self.paper_strategy_profiles = {
             strategy_id: _paper_strategy_profile_for_strategy(self, strategy_id)
-            for strategy_id in self.paper_strategy_ids
+            for strategy_id in paper_profile_strategy_ids
         }
         self.live_profiles = {
             strategy_id: _live_profile_for_strategy(self, strategy_id)

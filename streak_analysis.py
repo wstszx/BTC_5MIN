@@ -6,7 +6,6 @@ from pathlib import Path
 from typing import Any
 
 from config import AppConfig
-from risk_and_sizing import compute_order_cost, compute_order_size
 from strategy import get_side_for_round
 
 
@@ -65,7 +64,7 @@ def _load_ordered_results(csv_path: Path) -> list[str]:
 
 def compute_max_affordable_round(
     *,
-    target_profit: float,
+    base_order_cost: float,
     max_stake: float,
     worst_case_price: float,
     search_max_round: int = 30,
@@ -75,16 +74,9 @@ def compute_max_affordable_round(
     if worst_case_price <= 0 or worst_case_price >= 1:
         return 0
 
-    recovery_loss = 0.0
-    affordable = 0
-    for round_index in range(1, search_max_round + 1):
-        order_size = compute_order_size(recovery_loss, target_profit, worst_case_price)
-        order_cost = compute_order_cost(order_size, worst_case_price)
-        if order_cost > max_stake:
-            break
-        affordable = round_index
-        recovery_loss += order_cost
-    return affordable
+    if base_order_cost <= 0 or max_stake <= 0 or base_order_cost > max_stake:
+        return 0
+    return search_max_round
 
 
 def analyze_streak_risk(
@@ -141,7 +133,7 @@ def analyze_streak_risk(
 
     price_for_cap = worst_case_price if worst_case_price is not None else cfg.max_price_threshold
     max_affordable_round = compute_max_affordable_round(
-        target_profit=cfg.target_profit,
+        base_order_cost=cfg.base_order_cost,
         max_stake=cfg.max_stake,
         worst_case_price=price_for_cap,
         search_max_round=max(max_round, min_round),

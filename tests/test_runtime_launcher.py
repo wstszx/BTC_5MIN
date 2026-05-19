@@ -73,14 +73,16 @@ def test_build_config_from_env_values_applies_dashboard_values():
         {
             "STRATEGY_ID": "5",
             "MAX_STAKE": "9.5",
-            "TARGET_PROFIT": "0.8",
+            "STRATEGY_5_MAX_STAKE": "9.5",
+            "STRATEGY_5_BASE_ORDER_COST": "1.2",
         }
     )
 
     assert isinstance(cfg, AppConfig)
     assert cfg.strategy_id == 5
-    assert cfg.max_stake == 9.5
-    assert cfg.target_profit == 0.8
+    assert cfg.max_stake is None
+    assert cfg.paper_strategy_profiles[5].max_stake == pytest.approx(9.5)
+    assert cfg.paper_strategy_profiles[5].base_order_cost == pytest.approx(1.2)
 
 
 def test_build_config_from_env_values_reads_trade_mode_and_live_switches():
@@ -846,6 +848,13 @@ def test_paper_timeframe_worker_config_preserves_strategy7_runtime_gates():
             'PAPER_5M_STRATEGY7_CONFIRM_BEFORE_ENTRY_SECONDS': '2',
             'PAPER_5M_STRATEGY7_LATE_CONFIRM_STRONG_SIGNAL_GAP': '0.035',
             'PAPER_5M_STRATEGY7_LATE_CONFIRM_RELAX_SECONDS': '0',
+            'STRATEGY_7_MIN_ENTRY_PRICE': '0.48',
+            'STRATEGY_7_MAX_ENTRY_PRICE': '0.54',
+            'STRATEGY_7_MAX_MOMENTUM_DELTA': '0.12',
+            'STRATEGY_7_MIN_SIGNAL_GAP': '0.006',
+            'STRATEGY_7_CONFIRM_BEFORE_ENTRY_SECONDS': '2',
+            'STRATEGY_7_LATE_CONFIRM_STRONG_SIGNAL_GAP': '0.035',
+            'STRATEGY_7_LATE_CONFIRM_RELAX_SECONDS': '0',
         }
     )
 
@@ -859,6 +868,33 @@ def test_paper_timeframe_worker_config_preserves_strategy7_runtime_gates():
     assert strategy_cfg.strategy7_confirm_before_entry_seconds == 2
     assert strategy_cfg.strategy7_late_confirm_strong_signal_gap == pytest.approx(0.035)
     assert strategy_cfg.strategy7_late_confirm_relax_seconds == pytest.approx(0.0)
+
+
+def test_paper_timeframe_worker_preserves_shared_strategy_profile_overrides():
+    cfg = build_config_from_env_values(
+        {
+            'TRADE_MODE': 'paper',
+            'PAPER_TIMEFRAMES': '5m',
+            'PAPER_STRATEGY_IDS': '7',
+            'PAPER_5M_STRATEGY_ID': '7',
+            'PAPER_5M_STRATEGY_IDS': '7',
+            'PAPER_5M_MAX_ENTRY_PRICE': '0.53',
+            'STRATEGY_7_BASE_ORDER_COST': '1.2',
+            'STRATEGY_7_MAX_STAKE': '60',
+            'STRATEGY_7_MIN_ENTRY_PRICE': '0.50',
+            'STRATEGY_7_MAX_ENTRY_PRICE': '0.54',
+            'STRATEGY_7_MOMENTUM_THRESHOLD': '0.008',
+        }
+    )
+
+    timeframe_cfg = main._paper_cfg_for_timeframe(cfg, '5m')
+    strategy_cfg = cfg_for_paper_strategy(timeframe_cfg, 7)
+
+    assert strategy_cfg.base_order_cost == pytest.approx(1.2)
+    assert strategy_cfg.max_stake == pytest.approx(60.0)
+    assert strategy_cfg.min_entry_price == pytest.approx(0.50)
+    assert strategy_cfg.max_entry_price == pytest.approx(0.54)
+    assert strategy_cfg.strategy7_momentum_threshold == pytest.approx(0.008)
 
 
 def test_paper_timeframe_worker_config_preserves_strategy9_dynamic_sizing():
@@ -876,6 +912,14 @@ def test_paper_timeframe_worker_config_preserves_strategy9_dynamic_sizing():
             'PAPER_5M_STRATEGY9_SIZING_MAX_MULTIPLIER': '1.10',
             'PAPER_5M_STRATEGY9_SIZING_STRONG_SIGNAL_GAP': '0.03',
             'PAPER_5M_STRATEGY9_SIZING_STRONG_SIGNAL_BOOST': '0.25',
+            'STRATEGY_9_DYNAMIC_SIZING_ENABLED': 'true',
+            'STRATEGY_9_SIZING_REFERENCE_PRICE': '0.51',
+            'STRATEGY_9_SIZING_PRICE_STEP': '0.02',
+            'STRATEGY_9_SIZING_PRICE_STEP_REDUCTION': '0.15',
+            'STRATEGY_9_SIZING_MIN_MULTIPLIER': '0.45',
+            'STRATEGY_9_SIZING_MAX_MULTIPLIER': '1.10',
+            'STRATEGY_9_SIZING_STRONG_SIGNAL_GAP': '0.03',
+            'STRATEGY_9_SIZING_STRONG_SIGNAL_BOOST': '0.25',
         }
     )
 

@@ -21,7 +21,7 @@ Dashboard saves write back to `.env.dashboard`, and mode changes also update the
 - `STRATEGY_IDS`
 - `PAPER_STRATEGY_IDS`
 - `LIVE_STRATEGY_IDS`
-- `TARGET_PROFIT`
+- `BASE_ORDER_COST`
 - `PAPER_SIMULATED_WALLET_BALANCE`
 - `MAX_STAKE`
 - `MAX_CONSECUTIVE_LOSSES`
@@ -36,6 +36,7 @@ Dashboard saves write back to `.env.dashboard`, and mode changes also update the
 Trading mode safety rules:
 
 - Paper trading runs as the baseline runtime and uses `PAPER_SIMULATED_WALLET_BALANCE` as its dry-run wallet budget; it does not read the real wallet, but it does run through the same budget check node as live trading.
+- All strategies use fixed per-round stake sizing from `BASE_ORDER_COST`; loss-recovery, target-profit, and martingale sizing modes are no longer supported.
 - `LIVE_TRADING_ENABLED=false` keeps the runtime paper-only.
 - `LIVE_TRADING_ENABLED=true` allows the runtime to start live trading alongside paper trading after live credentials pass validation.
 - `TRADE_MODE` controls the active/saved runtime mode shown by the dashboard and the live config view, but it is not the only live safety gate.

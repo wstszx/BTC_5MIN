@@ -819,7 +819,6 @@ def settle_paper_trade(
         state=state,
         side=side,
         price=price,
-        target_profit=cfg.target_profit,
         min_entry_price=getattr(cfg, "min_entry_price", getattr(cfg, "min_price_threshold", None)),
         max_entry_price=getattr(cfg, "max_entry_price", cfg.max_price_threshold),
         min_price_threshold=getattr(cfg, "min_price_threshold", None),
@@ -827,7 +826,6 @@ def settle_paper_trade(
         min_stake=getattr(cfg, "min_stake", None),
         max_stake=cfg.max_stake,
         max_consecutive_losses=cfg.max_consecutive_losses,
-        bet_sizing_mode=cfg.bet_sizing_mode,
         base_order_cost=cfg.base_order_cost,
     )
     updated_state = apply_round_outcome(state, plan, won=(result == side))

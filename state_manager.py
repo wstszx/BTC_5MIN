@@ -39,17 +39,29 @@ _LIVE_STRATEGY_FIELD_NAMES = (
 
 
 def hydrate_pending_paper_trades(items: list[dict[str, Any]] | list[PendingPaperTrade] | None) -> list[PendingPaperTrade]:
-    return [
-        item if isinstance(item, PendingPaperTrade) else PendingPaperTrade(**item)
-        for item in (items or [])
-    ]
+    trades: list[PendingPaperTrade] = []
+    for item in items or []:
+        if isinstance(item, PendingPaperTrade):
+            item.tracks_recovery_loss = False
+            trades.append(item)
+            continue
+        payload = dict(item)
+        payload["tracks_recovery_loss"] = False
+        trades.append(PendingPaperTrade(**payload))
+    return trades
 
 
 def hydrate_pending_live_trades(items: list[dict[str, Any]] | list[PendingLiveTrade] | None) -> list[PendingLiveTrade]:
-    return [
-        item if isinstance(item, PendingLiveTrade) else PendingLiveTrade(**item)
-        for item in (items or [])
-    ]
+    trades: list[PendingLiveTrade] = []
+    for item in items or []:
+        if isinstance(item, PendingLiveTrade):
+            item.tracks_recovery_loss = False
+            trades.append(item)
+            continue
+        payload = dict(item)
+        payload["tracks_recovery_loss"] = False
+        trades.append(PendingLiveTrade(**payload))
+    return trades
 
 
 def hydrate_strategy9_signal_samples(items: list[dict[str, Any]] | list[Strategy9SignalSample] | None) -> list[Strategy9SignalSample]:
@@ -61,6 +73,7 @@ def hydrate_strategy9_signal_samples(items: list[dict[str, Any]] | list[Strategy
 
 def hydrate_paper_strategy_state(payload: dict[str, Any]) -> PaperStrategyState:
     strategy_payload = dict(payload)
+    strategy_payload["recovery_loss"] = 0.0
     pending_key = "pending_paper_trades"
     strategy_payload[pending_key] = hydrate_pending_paper_trades(strategy_payload.get(pending_key))
     strategy_payload["strategy9_signal_samples"] = hydrate_strategy9_signal_samples(
@@ -71,6 +84,8 @@ def hydrate_paper_strategy_state(payload: dict[str, Any]) -> PaperStrategyState:
 
 def hydrate_live_strategy_state(payload: dict[str, Any], *, strategy_id: int = 0) -> LiveStrategyState:
     strategy_payload = dict(payload)
+    strategy_payload["recovery_loss"] = 0.0
+    strategy_payload["pending_live_tracks_recovery_loss"] = False
     strategy_payload["pending_live_trades"] = hydrate_pending_live_trades(
         strategy_payload.get("pending_live_trades")
     )
@@ -91,7 +106,7 @@ def live_strategy_state_from_payload(payload: dict[str, Any]) -> LiveStrategySta
     return LiveStrategyState(
         round_index=payload.get("round_index", 0),
         cash_pnl=payload.get("cash_pnl", 0.0),
-        recovery_loss=payload.get("recovery_loss", 0.0),
+        recovery_loss=0.0,
         consecutive_losses=payload.get("consecutive_losses", 0),
         consecutive_max_stake_skips=payload.get("consecutive_max_stake_skips", 0),
         signal_round_slug=payload.get("signal_round_slug"),
@@ -110,7 +125,7 @@ def live_strategy_state_from_payload(payload: dict[str, Any]) -> LiveStrategySta
         pending_live_expected_profit=payload.get("pending_live_expected_profit"),
         pending_live_order_id=payload.get("pending_live_order_id"),
         pending_live_end_time=payload.get("pending_live_end_time"),
-        pending_live_tracks_recovery_loss=payload.get("pending_live_tracks_recovery_loss", True),
+        pending_live_tracks_recovery_loss=False,
         pending_live_trades=hydrate_pending_live_trades(payload.get("pending_live_trades")),
         last_processed_live_event_slug=payload.get("last_processed_live_event_slug"),
     )
@@ -183,6 +198,8 @@ def _load_session_state_legacy(path: Path) -> SessionState:
         }
     payload.pop("strategy_id", None)
     payload.pop("live_strategy_id", None)
+    payload["recovery_loss"] = 0.0
+    payload["pending_live_tracks_recovery_loss"] = False
     return SessionState(
         pending_paper_trades=pending_paper_trades,
         pending_live_trades=pending_live_trades,

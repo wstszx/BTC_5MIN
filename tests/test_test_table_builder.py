@@ -32,7 +32,7 @@ def test_build_augmented_test_table_fills_missing_prices_and_adds_summary(tmp_pa
     result = build_augmented_test_table(
         input_csv=input_csv,
         output_csv=output_csv,
-        cfg=AppConfig(strategy_id=1, target_profit=1.0, max_consecutive_losses=4, max_stake=25.0, max_price_threshold=0.65),
+        cfg=AppConfig(strategy_id=1, max_consecutive_losses=4, max_stake=25.0, max_price_threshold=0.65),
         seed=7,
         fill_min_price=0.45,
         fill_max_price=0.60,

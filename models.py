@@ -63,7 +63,7 @@ class TradePlan:
     order_cost_multiplier: float = 1.0
     skip_reason: str | None = None
     stop_loss_triggered: bool = False
-    tracks_recovery_loss: bool = True
+    tracks_recovery_loss: bool = False
 
 
 @dataclass(slots=True)
@@ -98,7 +98,7 @@ class TradeRecord:
     sizing_multiplier: float = 1.0
     experiment_id: str | None = None
     balance_error: str | None = None
-    tracks_recovery_loss: bool = True
+    tracks_recovery_loss: bool = False
 
 
 @dataclass(slots=True)
@@ -124,7 +124,7 @@ class PendingPaperTrade:
     sizing_multiplier: float = 1.0
     queued_at: str | None = None
     experiment_id: str | None = None
-    tracks_recovery_loss: bool = True
+    tracks_recovery_loss: bool = False
 
 
 @dataclass(slots=True)
@@ -142,7 +142,7 @@ class PendingLiveTrade:
     order_id: str | None = None
     start_time: str | None = None
     queued_at: str | None = None
-    tracks_recovery_loss: bool = True
+    tracks_recovery_loss: bool = False
 
 
 @dataclass(slots=True)
@@ -196,7 +196,7 @@ class LiveStrategyState:
     pending_live_expected_profit: float | None = None
     pending_live_order_id: str | None = None
     pending_live_end_time: str | None = None
-    pending_live_tracks_recovery_loss: bool = True
+    pending_live_tracks_recovery_loss: bool = False
     pending_live_trades: list[PendingLiveTrade] = field(default_factory=list)
     last_processed_live_event_slug: str | None = None
 
@@ -225,7 +225,7 @@ class SessionState:
     pending_live_expected_profit: float | None = None
     pending_live_order_id: str | None = None
     pending_live_end_time: str | None = None
-    pending_live_tracks_recovery_loss: bool = True
+    pending_live_tracks_recovery_loss: bool = False
     pending_live_trades: list[PendingLiveTrade] = field(default_factory=list)
     last_processed_live_event_slug: str | None = None
     pending_paper_trades: list[PendingPaperTrade] = field(default_factory=list)
