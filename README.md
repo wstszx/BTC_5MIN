@@ -21,7 +21,7 @@ Dashboard saves write back to `.env.dashboard`, and mode changes also update the
 - `STRATEGY_IDS`
 - `PAPER_STRATEGY_IDS`
 - `LIVE_STRATEGY_IDS`
-- `BASE_ORDER_COST`
+- `STRATEGY_<id>_BASE_ORDER_COST`
 - `PAPER_SIMULATED_WALLET_BALANCE`
 - `MAX_STAKE`
 - `MAX_CONSECUTIVE_LOSSES`
@@ -36,7 +36,7 @@ Dashboard saves write back to `.env.dashboard`, and mode changes also update the
 Trading mode safety rules:
 
 - Paper trading runs as the baseline runtime and uses `PAPER_SIMULATED_WALLET_BALANCE` as its dry-run wallet budget; it does not read the real wallet, but it does run through the same budget check node as live trading.
-- All strategies use fixed per-round stake sizing from `BASE_ORDER_COST`; loss-recovery, target-profit, and martingale sizing modes are no longer supported.
+- All strategies use fixed per-round stake sizing from each strategy's `STRATEGY_<id>_BASE_ORDER_COST`; loss-recovery, target-profit, and martingale sizing modes are no longer supported.
 - `LIVE_TRADING_ENABLED=false` keeps the runtime paper-only.
 - `LIVE_TRADING_ENABLED=true` allows the runtime to start live trading alongside paper trading after live credentials pass validation.
 - `TRADE_MODE` controls the active/saved runtime mode shown by the dashboard and the live config view, but it is not the only live safety gate.
@@ -60,6 +60,8 @@ The dashboard exposes one visible strategy panel, but it edits the strategy list
 - `STRATEGY_ID` tracks the primary strategy used for the current dashboard view.
 
 Strategy 8 is available as a state-switching strategy. It uses the same OFI and momentum inputs as strategy 7, follows trend agreement, uses strong OFI/momentum conflict as a reversal state, and skips unclear market states.
+
+Strategy 11 is available for both paper and live strategy lists. It anchors each round to the Binance BTC mid price, estimates the probability of finishing above or below that anchor from current distance, remaining time, and `STRATEGY_11_VOLATILITY_BPS_PER_SQRT_MINUTE`, then only buys when probability minus market ask and buffer clears `STRATEGY_11_MIN_EDGE`.
 
 Legacy paper timeframe/profile keys are still parsed for compatibility, but they are no longer the primary dashboard editing path. Use `MARKET_TIMEFRAME` for the active 5m/15m market and the strategy panel for mode-specific strategy changes.
 

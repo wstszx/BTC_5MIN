@@ -228,6 +228,20 @@ def _paper_strategy_profile_from_cfg(cfg: AppConfig, strategy_id: int) -> LiveSt
         strategy10_ofi_weight=getattr(existing, 'strategy10_ofi_weight', cfg.strategy10_ofi_weight),
         strategy10_momentum_weight=getattr(existing, 'strategy10_momentum_weight', cfg.strategy10_momentum_weight),
         strategy10_max_fair_value=getattr(existing, 'strategy10_max_fair_value', cfg.strategy10_max_fair_value),
+        strategy11_min_edge=getattr(existing, 'strategy11_min_edge', cfg.strategy11_min_edge),
+        strategy11_edge_buffer=getattr(existing, 'strategy11_edge_buffer', cfg.strategy11_edge_buffer),
+        strategy11_volatility_bps_per_sqrt_minute=getattr(
+            existing,
+            'strategy11_volatility_bps_per_sqrt_minute',
+            cfg.strategy11_volatility_bps_per_sqrt_minute,
+        ),
+        strategy11_min_probability=getattr(existing, 'strategy11_min_probability', cfg.strategy11_min_probability),
+        strategy11_max_probability=getattr(existing, 'strategy11_max_probability', cfg.strategy11_max_probability),
+        strategy11_confirm_before_entry_seconds=getattr(
+            existing,
+            'strategy11_confirm_before_entry_seconds',
+            cfg.strategy11_confirm_before_entry_seconds,
+        ),
     )
 
 
@@ -290,6 +304,12 @@ def _paper_cfg_for_timeframe(cfg: AppConfig, timeframe: str) -> AppConfig:
         strategy10_ofi_weight=profile.strategy10_ofi_weight,
         strategy10_momentum_weight=profile.strategy10_momentum_weight,
         strategy10_max_fair_value=profile.strategy10_max_fair_value,
+        strategy11_min_edge=profile.strategy11_min_edge,
+        strategy11_edge_buffer=profile.strategy11_edge_buffer,
+        strategy11_volatility_bps_per_sqrt_minute=profile.strategy11_volatility_bps_per_sqrt_minute,
+        strategy11_min_probability=profile.strategy11_min_probability,
+        strategy11_max_probability=profile.strategy11_max_probability,
+        strategy11_confirm_before_entry_seconds=profile.strategy11_confirm_before_entry_seconds,
     )
     timeframe_cfg.paper_strategy_profiles = strategy_profiles
     timeframe_cfg.paper_strategy_profiles = {

@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from math import erf, sqrt
 from statistics import pstdev
 from typing import Any
 
@@ -50,6 +51,17 @@ class Strategy9QualityCheck:
 class Strategy10FairValue:
     up_fair_value: float
     down_fair_value: float
+    up_edge: float | None
+    down_edge: float | None
+    best_side: str | None
+    best_price: float | None
+    best_edge: float | None
+
+
+@dataclass(slots=True)
+class Strategy11Probability:
+    up_probability: float
+    down_probability: float
     up_edge: float | None
     down_edge: float | None
     best_side: str | None
@@ -234,6 +246,67 @@ def estimate_strategy10_fair_value(
     )
 
 
+def _normal_cdf(value: float) -> float:
+    return 0.5 * (1.0 + erf(value / sqrt(2.0)))
+
+
+def estimate_strategy11_probability(
+    *,
+    cfg: AppConfig,
+    quote: MarketQuote,
+    window: MarketWindow,
+    now: datetime,
+    round_start_btc_price: float,
+) -> Strategy11Probability | None:
+    current_btc_price = getattr(quote, "binance_mid_price", None)
+    if current_btc_price is None or current_btc_price <= 0 or round_start_btc_price <= 0:
+        return None
+
+    remaining_seconds = max(1.0, (window.end_time - now).total_seconds())
+    remaining_minutes = max(remaining_seconds / 60.0, 1.0 / 60.0)
+    volatility_bps = max(0.1, float(getattr(cfg, "strategy11_volatility_bps_per_sqrt_minute", 18.0)))
+    sigma_price = round_start_btc_price * (volatility_bps / 10_000.0) * sqrt(remaining_minutes)
+    if sigma_price <= 0:
+        return None
+
+    distance = float(current_btc_price) - float(round_start_btc_price)
+    raw_up_probability = _normal_cdf(distance / sigma_price)
+    min_probability = max(0.5, min(0.99, float(getattr(cfg, "strategy11_min_probability", 0.55))))
+    max_probability = max(min_probability, min(0.99, float(getattr(cfg, "strategy11_max_probability", 0.95))))
+    up_probability = _clamp_probability(raw_up_probability, low=1.0 - max_probability, high=max_probability)
+    down_probability = 1.0 - up_probability
+
+    edge_buffer = max(0.0, float(getattr(cfg, "strategy11_edge_buffer", 0.0)))
+    up_price = resolve_quote_price("UP", quote)
+    down_price = resolve_quote_price("DOWN", quote)
+    up_edge = up_probability - up_price - edge_buffer if is_valid_signal_price(up_price) else None
+    down_edge = down_probability - down_price - edge_buffer if is_valid_signal_price(down_price) else None
+
+    best_side: str | None = None
+    best_price: float | None = None
+    best_edge: float | None = None
+    for side, price, edge in (("UP", up_price, up_edge), ("DOWN", down_price, down_edge)):
+        if edge is None:
+            continue
+        probability = up_probability if side == "UP" else down_probability
+        if probability < min_probability:
+            continue
+        if best_edge is None or edge > best_edge:
+            best_side = side
+            best_price = price
+            best_edge = edge
+
+    return Strategy11Probability(
+        up_probability=up_probability,
+        down_probability=down_probability,
+        up_edge=up_edge,
+        down_edge=down_edge,
+        best_side=best_side,
+        best_price=best_price,
+        best_edge=best_edge,
+    )
+
+
 def resolve_signal_round_open_up_price(
     *,
     cfg: AppConfig,
@@ -343,6 +416,13 @@ def is_strategy6_signal_stale(*, quote: MarketQuote, now: datetime, stale_second
     return (now - signal_at).total_seconds() > max(0.0, stale_seconds)
 
 
+def is_binance_price_signal_stale(*, quote: MarketQuote, now: datetime, stale_seconds: float) -> bool:
+    signal_at = getattr(quote, "binance_signal_at", None) or getattr(quote, "strategy6_signal_at", None) or quote.fetched_at
+    if signal_at is None:
+        return True
+    return (now - signal_at).total_seconds() > max(0.0, stale_seconds)
+
+
 def format_binance_signal_error(exc: Exception) -> str:
     message = f"{type(exc).__name__}: {exc}"
     response = getattr(exc, "response", None)
@@ -362,7 +442,7 @@ def apply_strategy6_signal_to_quote(
     now: datetime | None = None,
     diagnostic_log: Callable[[str], None] | None = None,
 ) -> None:
-    if cfg.strategy_id not in {6, 7, 8, 9, 10} or binance_signal_service is None:
+    if cfg.strategy_id not in {6, 7, 8, 9, 10, 11} or binance_signal_service is None:
         return
     now = now or datetime.now(timezone.utc)
     latest = binance_signal_service.latest()
@@ -379,6 +459,9 @@ def apply_strategy6_signal_to_quote(
         return
     quote.strategy6_ofi_score = latest.ofi_score
     quote.strategy6_signal_at = latest.signal_at
+    if latest.bid_price is not None and latest.ask_price is not None:
+        quote.binance_mid_price = (float(latest.bid_price) + float(latest.ask_price)) / 2.0
+        quote.binance_signal_at = latest.signal_at
 
 
 def effective_strategy7_confirm_before_entry_seconds(
@@ -717,6 +800,63 @@ def evaluate_strategy10_edge(
     )
 
 
+def evaluate_strategy11_probability_edge(
+    *,
+    cfg: AppConfig,
+    quote: MarketQuote,
+    now: datetime,
+    window: MarketWindow | None,
+    state: SessionState,
+) -> SideDecision:
+    if window is None:
+        return SideDecision(side=None, reason="strategy11_window_unavailable")
+    if is_binance_price_signal_stale(quote=quote, now=now, stale_seconds=cfg.binance_signal_stale_seconds):
+        return SideDecision(
+            side=None,
+            reason="strategy11_btc_price_stale",
+            signal_threshold=cfg.binance_signal_stale_seconds,
+        )
+    current_btc_price = getattr(quote, "binance_mid_price", None)
+    if current_btc_price is None or current_btc_price <= 0:
+        return SideDecision(side=None, reason="strategy11_btc_price_unavailable")
+    if state.signal_round_slug != window.slug or state.strategy11_round_start_btc_price is None:
+        state.strategy11_round_start_btc_price = float(current_btc_price)
+
+    probability = estimate_strategy11_probability(
+        cfg=cfg,
+        quote=quote,
+        window=window,
+        now=now,
+        round_start_btc_price=state.strategy11_round_start_btc_price,
+    )
+    if probability is None:
+        return SideDecision(side=None, reason="strategy11_probability_unavailable")
+
+    min_edge = max(0.0, float(getattr(cfg, "strategy11_min_edge", 0.0)))
+    distance = float(current_btc_price) - float(state.strategy11_round_start_btc_price)
+    if probability.best_side is None or probability.best_edge is None or probability.best_edge < min_edge:
+        return SideDecision(
+            side=None,
+            reason="strategy11_edge_too_low",
+            candidate_side=probability.best_side,
+            candidate_price=probability.best_price,
+            signal_open_up_price=state.strategy11_round_start_btc_price,
+            signal_current_up_price=float(current_btc_price),
+            signal_threshold=min_edge,
+            signal_delta=distance,
+        )
+
+    return SideDecision(
+        side=probability.best_side,
+        candidate_side=probability.best_side,
+        candidate_price=probability.best_price,
+        signal_open_up_price=state.strategy11_round_start_btc_price,
+        signal_current_up_price=float(current_btc_price),
+        signal_threshold=min_edge,
+        signal_delta=distance,
+    )
+
+
 def resolve_side_from_strategy(
     *,
     cfg: AppConfig,
@@ -743,7 +883,7 @@ def resolve_side_from_strategy(
             return SideDecision(side="DOWN", signal_threshold=cfg.ofi_threshold, signal_delta=ofi_score)
         return SideDecision(side=None, reason="ofi_too_weak", signal_threshold=cfg.ofi_threshold, signal_delta=ofi_score)
 
-    if cfg.strategy_id not in {5, 7, 8, 9, 10}:
+    if cfg.strategy_id not in {5, 7, 8, 9, 10, 11}:
         return SideDecision(side=fallback_side_resolver(cfg.strategy_id, state.round_index))
 
     fallback_strategy = cfg.signal_fallback_strategy_id
@@ -751,6 +891,7 @@ def resolve_side_from_strategy(
         state.signal_round_slug = slug
         state.signal_round_open_up_price = None
         state.signal_round_locked_side = None
+        state.strategy11_round_start_btc_price = None
         state.strategy9_signal_samples = []
 
     signal_current_up_price = resolve_signal_up_price(quote)
@@ -759,8 +900,60 @@ def resolve_side_from_strategy(
         locked_max_entry_price: float | None = None
         if is_valid_signal_price(state.signal_round_open_up_price) and is_valid_signal_price(signal_current_up_price):
             signal_delta = signal_current_up_price - state.signal_round_open_up_price
-        if cfg.strategy_id in {7, 9, 10}:
+        if cfg.strategy_id in {7, 9, 10, 11}:
             now = now or datetime.now(timezone.utc)
+            if cfg.strategy_id == 11:
+                edge_decision = evaluate_strategy11_probability_edge(
+                    cfg=cfg,
+                    quote=quote,
+                    now=now,
+                    window=window,
+                    state=state,
+                )
+                edge_decision.signal_locked = True
+                if edge_decision.side is None:
+                    return edge_decision
+                if edge_decision.side != state.signal_round_locked_side:
+                    return SideDecision(
+                        side=None,
+                        reason="strategy11_signal_conflict",
+                        candidate_side=edge_decision.side,
+                        candidate_price=edge_decision.candidate_price,
+                        signal_open_up_price=edge_decision.signal_open_up_price,
+                        signal_current_up_price=edge_decision.signal_current_up_price,
+                        signal_threshold=cfg.strategy11_min_edge,
+                        signal_delta=edge_decision.signal_delta,
+                        signal_locked=True,
+                    )
+                candidate_price = resolve_quote_price(state.signal_round_locked_side, quote)
+                price_skip_reason = entry_price_skip_reason(
+                    strategy_prefix="strategy11",
+                    price=candidate_price,
+                    min_entry_price=getattr(cfg, "min_entry_price", None),
+                    max_entry_price=getattr(cfg, "max_entry_price", None),
+                )
+                if price_skip_reason is not None:
+                    return SideDecision(
+                        side=None,
+                        reason=price_skip_reason,
+                        candidate_side=state.signal_round_locked_side,
+                        candidate_price=candidate_price,
+                        signal_open_up_price=edge_decision.signal_open_up_price,
+                        signal_current_up_price=edge_decision.signal_current_up_price,
+                        signal_threshold=cfg.strategy11_min_edge,
+                        signal_delta=edge_decision.signal_delta,
+                        signal_locked=True,
+                    )
+                return SideDecision(
+                    side=state.signal_round_locked_side,
+                    candidate_side=state.signal_round_locked_side,
+                    candidate_price=candidate_price,
+                    signal_open_up_price=edge_decision.signal_open_up_price,
+                    signal_current_up_price=edge_decision.signal_current_up_price,
+                    signal_threshold=cfg.strategy11_min_edge,
+                    signal_delta=edge_decision.signal_delta,
+                    signal_locked=True,
+                )
             if cfg.strategy_id == 10:
                 edge_decision = evaluate_strategy10_edge(
                     cfg=cfg,
@@ -861,14 +1054,18 @@ def resolve_side_from_strategy(
                         signal_locked=True,
                         max_entry_price=quality_check.max_entry_price,
                     )
-        if cfg.strategy_id in {7, 8, 9, 10}:
+        if cfg.strategy_id in {7, 8, 9, 10, 11}:
             strategy_prefix = (
                 "strategy7"
                 if cfg.strategy_id == 7
-                else ("strategy8" if cfg.strategy_id == 8 else ("strategy9" if cfg.strategy_id == 9 else "strategy10"))
+                else ("strategy8" if cfg.strategy_id == 8 else ("strategy9" if cfg.strategy_id == 9 else ("strategy10" if cfg.strategy_id == 10 else "strategy11")))
             )
             locked_signal_threshold = cfg.strategy10_min_edge if cfg.strategy_id == 10 else cfg.strategy7_momentum_threshold
-            locked_signal_delta = signal_check.decision.signal_delta if cfg.strategy_id == 10 else signal_delta
+            if cfg.strategy_id == 11:
+                locked_signal_threshold = cfg.strategy11_min_edge
+                locked_signal_delta = edge_decision.signal_delta
+            else:
+                locked_signal_delta = signal_check.decision.signal_delta if cfg.strategy_id == 10 else signal_delta
             candidate_price = resolve_quote_price(state.signal_round_locked_side, quote)
             price_skip_reason = entry_price_skip_reason(
                 strategy_prefix=strategy_prefix,
@@ -891,14 +1088,14 @@ def resolve_side_from_strategy(
                 )
         return SideDecision(
             side=state.signal_round_locked_side,
-            signal_open_up_price=state.signal_round_open_up_price,
-            signal_current_up_price=signal_current_up_price,
-            signal_threshold=cfg.strategy10_min_edge if cfg.strategy_id == 10 else None,
-            signal_delta=signal_check.decision.signal_delta if cfg.strategy_id == 10 else signal_delta,
+            signal_open_up_price=edge_decision.signal_open_up_price if cfg.strategy_id == 11 else state.signal_round_open_up_price,
+            signal_current_up_price=edge_decision.signal_current_up_price if cfg.strategy_id == 11 else signal_current_up_price,
+            signal_threshold=cfg.strategy11_min_edge if cfg.strategy_id == 11 else (cfg.strategy10_min_edge if cfg.strategy_id == 10 else None),
+            signal_delta=edge_decision.signal_delta if cfg.strategy_id == 11 else (signal_check.decision.signal_delta if cfg.strategy_id == 10 else signal_delta),
             signal_locked=True,
             max_entry_price=locked_max_entry_price,
-            candidate_side=state.signal_round_locked_side if cfg.strategy_id == 10 else None,
-            candidate_price=signal_check.decision.candidate_price if cfg.strategy_id == 10 else None,
+            candidate_side=state.signal_round_locked_side if cfg.strategy_id in {10, 11} else None,
+            candidate_price=edge_decision.candidate_price if cfg.strategy_id == 11 else (signal_check.decision.candidate_price if cfg.strategy_id == 10 else None),
             ofi_score=signal_check.ofi_score if cfg.strategy_id in {7, 9, 10} else None,
         )
 
@@ -989,6 +1186,71 @@ def resolve_side_from_strategy(
             signal_delta=momentum_delta,
             signal_locked=state.signal_round_locked_side in {"UP", "DOWN"},
             ofi_score=edge_decision.ofi_score,
+        )
+
+    if cfg.strategy_id == 11:
+        edge_decision = evaluate_strategy11_probability_edge(
+            cfg=cfg,
+            quote=quote,
+            now=now,
+            window=window,
+            state=state,
+        )
+        if edge_decision.side is None:
+            return edge_decision
+
+        effective_confirm_before_entry_seconds = max(
+            0,
+            int(getattr(cfg, "strategy11_confirm_before_entry_seconds", 0)),
+        )
+        if (
+            entry_time is not None
+            and effective_confirm_before_entry_seconds > 0
+            and (entry_time - now).total_seconds() < effective_confirm_before_entry_seconds
+        ):
+            return SideDecision(
+                side=None,
+                reason="strategy11_entry_too_late",
+                candidate_side=edge_decision.side,
+                candidate_price=edge_decision.candidate_price,
+                signal_open_up_price=edge_decision.signal_open_up_price,
+                signal_current_up_price=edge_decision.signal_current_up_price,
+                signal_threshold=cfg.strategy11_min_edge,
+                signal_delta=edge_decision.signal_delta,
+            )
+
+        candidate_price = resolve_quote_price(edge_decision.side, quote)
+        price_skip_reason = entry_price_skip_reason(
+            strategy_prefix="strategy11",
+            price=candidate_price,
+            min_entry_price=getattr(cfg, "min_entry_price", None),
+            max_entry_price=getattr(cfg, "max_entry_price", None),
+        )
+        if price_skip_reason is not None:
+            return SideDecision(
+                side=None,
+                reason=price_skip_reason,
+                candidate_side=edge_decision.side,
+                candidate_price=candidate_price,
+                signal_open_up_price=edge_decision.signal_open_up_price,
+                signal_current_up_price=edge_decision.signal_current_up_price,
+                signal_threshold=cfg.strategy11_min_edge,
+                signal_delta=edge_decision.signal_delta,
+            )
+
+        if entry_time is not None:
+            lock_at = entry_time - timedelta(seconds=max(0, cfg.signal_lock_before_entry_seconds))
+            if now >= lock_at:
+                state.signal_round_locked_side = edge_decision.side
+        return SideDecision(
+            side=edge_decision.side,
+            candidate_side=edge_decision.side,
+            candidate_price=candidate_price,
+            signal_open_up_price=edge_decision.signal_open_up_price,
+            signal_current_up_price=edge_decision.signal_current_up_price,
+            signal_threshold=cfg.strategy11_min_edge,
+            signal_delta=edge_decision.signal_delta,
+            signal_locked=state.signal_round_locked_side in {"UP", "DOWN"},
         )
 
     if cfg.strategy_id in {7, 8, 9}:

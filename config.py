@@ -17,7 +17,7 @@ _ENV_FILE_ENCODINGS: tuple[str, ...] = ("utf-8", "utf-8-sig", "gbk")
 _BOOL_TRUE_VALUES = {"1", "true", "yes", "on"}
 _BOOL_FALSE_VALUES = {"0", "false", "no", "off"}
 _STRATEGY_ID_MIN = 1
-_STRATEGY_ID_MAX = 10
+_STRATEGY_ID_MAX = 11
 
 _STRATEGY7_SHORT_PROFILE_KEYS: dict[str, str] = {
     "OFI_THRESHOLD": "STRATEGY7_OFI_THRESHOLD",
@@ -64,11 +64,20 @@ _STRATEGY10_SHORT_PROFILE_KEYS: dict[str, str] = {
     "MOMENTUM_WEIGHT": "STRATEGY10_MOMENTUM_WEIGHT",
     "MAX_FAIR_VALUE": "STRATEGY10_MAX_FAIR_VALUE",
 }
+_STRATEGY11_SHORT_PROFILE_KEYS: dict[str, str] = {
+    "MIN_EDGE": "STRATEGY11_MIN_EDGE",
+    "EDGE_BUFFER": "STRATEGY11_EDGE_BUFFER",
+    "VOLATILITY_BPS_PER_SQRT_MINUTE": "STRATEGY11_VOLATILITY_BPS_PER_SQRT_MINUTE",
+    "MIN_PROBABILITY": "STRATEGY11_MIN_PROBABILITY",
+    "MAX_PROBABILITY": "STRATEGY11_MAX_PROBABILITY",
+    "CONFIRM_BEFORE_ENTRY_SECONDS": "STRATEGY11_CONFIRM_BEFORE_ENTRY_SECONDS",
+}
 _STRATEGY_SHORT_PROFILE_KEYS: dict[int, dict[str, str]] = {
     7: _STRATEGY7_SHORT_PROFILE_KEYS,
     8: _STRATEGY7_SHORT_PROFILE_KEYS,
     9: _STRATEGY9_SHORT_PROFILE_KEYS,
     10: _STRATEGY10_SHORT_PROFILE_KEYS,
+    11: _STRATEGY11_SHORT_PROFILE_KEYS,
 }
 
 
@@ -104,6 +113,7 @@ _INT_CONFIG_KEYS: frozenset[str] = frozenset(
         "STRATEGY7_CONFIRM_BEFORE_ENTRY_SECONDS",
         "STRATEGY9_STABILITY_SAMPLE_COUNT",
         "STRATEGY9_STABILITY_REQUIRED_COUNT",
+        "STRATEGY11_CONFIRM_BEFORE_ENTRY_SECONDS",
         "WS_QUOTE_STALE_SECONDS",
         "WS_CONNECT_TIMEOUT_SECONDS",
         "WS_LOG_EVERY_UPDATES",
@@ -162,6 +172,11 @@ _FLOAT_CONFIG_KEYS: frozenset[str] = frozenset(
         "STRATEGY10_OFI_WEIGHT",
         "STRATEGY10_MOMENTUM_WEIGHT",
         "STRATEGY10_MAX_FAIR_VALUE",
+        "STRATEGY11_MIN_EDGE",
+        "STRATEGY11_EDGE_BUFFER",
+        "STRATEGY11_VOLATILITY_BPS_PER_SQRT_MINUTE",
+        "STRATEGY11_MIN_PROBABILITY",
+        "STRATEGY11_MAX_PROBABILITY",
         "BINANCE_SIGNAL_STALE_SECONDS",
         "NEAR_ENTRY_POLL_WINDOW_SECONDS",
         "POLL_INTERVAL_SECONDS",
@@ -247,6 +262,12 @@ _GLOBAL_STRATEGY_CONFIG_KEYS: frozenset[str] = frozenset(
         "STRATEGY10_OFI_WEIGHT",
         "STRATEGY10_MOMENTUM_WEIGHT",
         "STRATEGY10_MAX_FAIR_VALUE",
+        "STRATEGY11_MIN_EDGE",
+        "STRATEGY11_EDGE_BUFFER",
+        "STRATEGY11_VOLATILITY_BPS_PER_SQRT_MINUTE",
+        "STRATEGY11_MIN_PROBABILITY",
+        "STRATEGY11_MAX_PROBABILITY",
+        "STRATEGY11_CONFIRM_BEFORE_ENTRY_SECONDS",
     }
 )
 
@@ -659,6 +680,12 @@ class PaperTimeframeProfile:
     strategy10_ofi_weight: float
     strategy10_momentum_weight: float
     strategy10_max_fair_value: float
+    strategy11_min_edge: float
+    strategy11_edge_buffer: float
+    strategy11_volatility_bps_per_sqrt_minute: float
+    strategy11_min_probability: float
+    strategy11_max_probability: float
+    strategy11_confirm_before_entry_seconds: int
     min_entry_price: float | None
     max_entry_price: float
     strategy7_max_entry_price: float
@@ -724,6 +751,12 @@ class LiveStrategyProfile:
     strategy10_ofi_weight: float
     strategy10_momentum_weight: float
     strategy10_max_fair_value: float
+    strategy11_min_edge: float
+    strategy11_edge_buffer: float
+    strategy11_volatility_bps_per_sqrt_minute: float
+    strategy11_min_probability: float
+    strategy11_max_probability: float
+    strategy11_confirm_before_entry_seconds: int
 
 
 def _base_live_profile_for_strategy(cfg: AppConfig, strategy_id: int) -> LiveStrategyProfile:
@@ -786,6 +819,12 @@ def _base_live_profile_for_strategy(cfg: AppConfig, strategy_id: int) -> LiveStr
         strategy10_ofi_weight=cfg.strategy10_ofi_weight,
         strategy10_momentum_weight=cfg.strategy10_momentum_weight,
         strategy10_max_fair_value=cfg.strategy10_max_fair_value,
+        strategy11_min_edge=cfg.strategy11_min_edge,
+        strategy11_edge_buffer=cfg.strategy11_edge_buffer,
+        strategy11_volatility_bps_per_sqrt_minute=cfg.strategy11_volatility_bps_per_sqrt_minute,
+        strategy11_min_probability=cfg.strategy11_min_probability,
+        strategy11_max_probability=cfg.strategy11_max_probability,
+        strategy11_confirm_before_entry_seconds=cfg.strategy11_confirm_before_entry_seconds,
     )
 
 
@@ -800,7 +839,7 @@ def _cap_profile_safety_limits(cfg: AppConfig, profile: LiveStrategyProfile) -> 
 def _profile_for_strategy(cfg: AppConfig, strategy_id: int) -> LiveStrategyProfile:
     strategy7_max_entry_fallback = (
         _strategy_env_float(strategy_id, "STRATEGY7_MAX_ENTRY_PRICE", cfg.max_entry_price)
-        if strategy_id in {7, 8, 9, 10}
+        if strategy_id in {7, 8, 9, 10, 11}
         else cfg.max_entry_price
     )
 
@@ -1047,6 +1086,28 @@ def _profile_for_strategy(cfg: AppConfig, strategy_id: int) -> LiveStrategyProfi
                 "STRATEGY10_MAX_FAIR_VALUE",
                 cfg.strategy10_max_fair_value,
             ),
+            strategy11_min_edge=_strategy_env_float(strategy_id, "STRATEGY11_MIN_EDGE", cfg.strategy11_min_edge),
+            strategy11_edge_buffer=_strategy_env_float(strategy_id, "STRATEGY11_EDGE_BUFFER", cfg.strategy11_edge_buffer),
+            strategy11_volatility_bps_per_sqrt_minute=_strategy_env_float(
+                strategy_id,
+                "STRATEGY11_VOLATILITY_BPS_PER_SQRT_MINUTE",
+                cfg.strategy11_volatility_bps_per_sqrt_minute,
+            ),
+            strategy11_min_probability=_strategy_env_float(
+                strategy_id,
+                "STRATEGY11_MIN_PROBABILITY",
+                cfg.strategy11_min_probability,
+            ),
+            strategy11_max_probability=_strategy_env_float(
+                strategy_id,
+                "STRATEGY11_MAX_PROBABILITY",
+                cfg.strategy11_max_probability,
+            ),
+            strategy11_confirm_before_entry_seconds=_strategy_env_int(
+                strategy_id,
+                "STRATEGY11_CONFIRM_BEFORE_ENTRY_SECONDS",
+                cfg.strategy11_confirm_before_entry_seconds,
+            ),
         )
 
 
@@ -1128,6 +1189,12 @@ class AppConfig:
     strategy10_ofi_weight: float = 0.08
     strategy10_momentum_weight: float = 1.0
     strategy10_max_fair_value: float = 0.85
+    strategy11_min_edge: float = 0.04
+    strategy11_edge_buffer: float = 0.005
+    strategy11_volatility_bps_per_sqrt_minute: float = 18.0
+    strategy11_min_probability: float = 0.55
+    strategy11_max_probability: float = 0.95
+    strategy11_confirm_before_entry_seconds: int = 2
     binance_ws_url: str = field(default_factory=lambda: os.getenv('BINANCE_WS_URL') or 'wss://stream.binance.com:9443/ws')
     binance_depth_stream: str = field(default_factory=lambda: os.getenv('BINANCE_DEPTH_STREAM') or 'btcusdt@depth5')
     binance_signal_stale_seconds: float = 2.0
@@ -1247,6 +1314,12 @@ class AppConfig:
                 strategy10_ofi_weight=self.strategy10_ofi_weight,
                 strategy10_momentum_weight=self.strategy10_momentum_weight,
                 strategy10_max_fair_value=self.strategy10_max_fair_value,
+                strategy11_min_edge=self.strategy11_min_edge,
+                strategy11_edge_buffer=self.strategy11_edge_buffer,
+                strategy11_volatility_bps_per_sqrt_minute=self.strategy11_volatility_bps_per_sqrt_minute,
+                strategy11_min_probability=self.strategy11_min_probability,
+                strategy11_max_probability=self.strategy11_max_probability,
+                strategy11_confirm_before_entry_seconds=self.strategy11_confirm_before_entry_seconds,
                 min_entry_price=self.min_entry_price,
                 max_entry_price=self.max_entry_price,
                 strategy7_max_entry_price=self.strategy7_max_entry_price,

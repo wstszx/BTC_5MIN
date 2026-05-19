@@ -31,7 +31,7 @@ def test_collect_config_warnings_reports_invalid_scalar_values():
         {
             "STRATEGY_7_MAX_STAKE": "abc",
             "WS_ENABLED": "maybe",
-            "STRATEGY_ID": "11",
+            "STRATEGY_ID": "12",
             "MARKET_TIMEFRAME": "7m",
             "TARGET_PROFIT": "1.2",
         }
@@ -39,7 +39,7 @@ def test_collect_config_warnings_reports_invalid_scalar_values():
 
     assert warnings["STRATEGY_7_MAX_STAKE"] == "Invalid value for STRATEGY_7_MAX_STAKE: expected number, got 'abc'"
     assert warnings["WS_ENABLED"] == "Invalid value for WS_ENABLED: expected true/false, got 'maybe'"
-    assert warnings["STRATEGY_ID"] == "Invalid value for STRATEGY_ID: expected strategy id 1-10, got '11'"
+    assert warnings["STRATEGY_ID"] == "Invalid value for STRATEGY_ID: expected strategy id 1-11, got '12'"
     assert warnings["MARKET_TIMEFRAME"] == "Invalid value for MARKET_TIMEFRAME: expected one of 5m, 15m, got '7m'"
     assert "TARGET_PROFIT" not in warnings
 
@@ -312,6 +312,32 @@ def test_build_config_accepts_strategy10_and_reads_edge_values():
     assert cfg.paper_strategy_profiles[10].strategy10_ofi_weight == 0.12
     assert cfg.paper_strategy_profiles[10].strategy10_momentum_weight == 1.4
     assert cfg.paper_strategy_profiles[10].strategy10_edge_buffer == 0.01
+
+
+def test_build_config_accepts_strategy11_and_reads_probability_values():
+    cfg = build_config_from_env_values(
+        {
+            "STRATEGY_ID": "11",
+            "PAPER_STRATEGY_IDS": "11,10",
+            "LIVE_STRATEGY_IDS": "11",
+            "STRATEGY_11_MIN_EDGE": "0.06",
+            "STRATEGY_11_EDGE_BUFFER": "0.01",
+            "STRATEGY_11_VOLATILITY_BPS_PER_SQRT_MINUTE": "18",
+            "STRATEGY_11_MIN_PROBABILITY": "0.57",
+            "STRATEGY_11_MAX_PROBABILITY": "0.93",
+            "STRATEGY_11_CONFIRM_BEFORE_ENTRY_SECONDS": "2",
+        }
+    )
+
+    assert cfg.strategy_id == 11
+    assert cfg.paper_strategy_ids == [11, 10]
+    assert cfg.live_strategy_ids == [11]
+    assert cfg.paper_strategy_profiles[11].strategy11_min_edge == 0.06
+    assert cfg.paper_strategy_profiles[11].strategy11_edge_buffer == 0.01
+    assert cfg.paper_strategy_profiles[11].strategy11_volatility_bps_per_sqrt_minute == 18.0
+    assert cfg.paper_strategy_profiles[11].strategy11_min_probability == 0.57
+    assert cfg.paper_strategy_profiles[11].strategy11_max_probability == 0.93
+    assert cfg.paper_strategy_profiles[11].strategy11_confirm_before_entry_seconds == 2
 
 
 def test_build_config_reads_strategy7_dynamic_sizing_values_from_strategy_profile_only():

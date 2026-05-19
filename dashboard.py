@@ -90,8 +90,8 @@ def _write_env_file(path: Path, values: dict[str, str]) -> None:
     atomic_write_text(path, text, encoding="utf-8")
 
 
-SUPPORTED_STRATEGY_ID_TEXTS: set[str] = {"1", "2", "3", "4", "5", "6", "7", "8", "9", "10"}
-SUPPORTED_STRATEGY_SELECT_OPTIONS: list[str] = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10"]
+SUPPORTED_STRATEGY_ID_TEXTS: set[str] = {str(strategy_id) for strategy_id in range(1, 12)}
+SUPPORTED_STRATEGY_SELECT_OPTIONS: list[str] = [str(strategy_id) for strategy_id in range(1, 12)]
 
 
 def _normalize_strategy_id_list_for_key(value: str, key: str, attr_name: str) -> str:
@@ -101,10 +101,10 @@ def _normalize_strategy_id_list_for_key(value: str, key: str, attr_name: str) ->
     if raw and len(normalized_ids) == 1 and normalized_ids[0] == cfg.strategy_id:
         has_valid = any(item in SUPPORTED_STRATEGY_ID_TEXTS for item in raw)
         if not has_valid:
-            raise ValueError(f"Invalid value for {key}: expected comma-separated strategy ids 1-10, got {value!r}")
+            raise ValueError(f"Invalid value for {key}: expected comma-separated strategy ids 1-11, got {value!r}")
     normalized = [str(item) for item in normalized_ids]
     if not normalized:
-        raise ValueError(f"Invalid value for {key}: expected comma-separated strategy ids 1-10, got {value!r}")
+        raise ValueError(f"Invalid value for {key}: expected comma-separated strategy ids 1-11, got {value!r}")
     return ",".join(normalized)
 
 
@@ -352,6 +352,12 @@ STRATEGY_PROFILE_EDITABLE_FIELDS: tuple[str, ...] = (
     "STRATEGY10_OFI_WEIGHT",
     "STRATEGY10_MOMENTUM_WEIGHT",
     "STRATEGY10_MAX_FAIR_VALUE",
+    "STRATEGY11_MIN_EDGE",
+    "STRATEGY11_EDGE_BUFFER",
+    "STRATEGY11_VOLATILITY_BPS_PER_SQRT_MINUTE",
+    "STRATEGY11_MIN_PROBABILITY",
+    "STRATEGY11_MAX_PROBABILITY",
+    "STRATEGY11_CONFIRM_BEFORE_ENTRY_SECONDS",
 )
 
 STRATEGY_PROFILE_COMMON_FIELDS: tuple[str, ...] = (
@@ -396,7 +402,7 @@ def _shared_strategy_profile_key(strategy_id: int | str, base_key: str) -> str:
 
 
 def _split_strategy_profile_key(key: str) -> tuple[str, str, str] | None:
-    match = re.match(r"^STRATEGY_(10|[1-9])_(.+)$", str(key or ""))
+    match = re.match(r"^STRATEGY_(11|10|[1-9])_(.+)$", str(key or ""))
     if not match:
         return None
     mode = "shared"
@@ -426,7 +432,7 @@ def _strategy_profile_field_names(strategy_id: int | str) -> list[str]:
         )
     if strategy_text == "6":
         fields.extend(["OFI_THRESHOLD", "BINANCE_SIGNAL_STALE_SECONDS"])
-    if strategy_text in {"7", "8", "9", "10"}:
+    if strategy_text in {"7", "8", "9", "10", "11"}:
         fields.extend(
             [
                 "OFI_THRESHOLD",
@@ -479,6 +485,17 @@ def _strategy_profile_field_names(strategy_id: int | str) -> list[str]:
                 "STRATEGY10_OFI_WEIGHT",
                 "STRATEGY10_MOMENTUM_WEIGHT",
                 "STRATEGY10_MAX_FAIR_VALUE",
+            ]
+        )
+    if strategy_text == "11":
+        fields.extend(
+            [
+                "STRATEGY11_MIN_EDGE",
+                "STRATEGY11_EDGE_BUFFER",
+                "STRATEGY11_VOLATILITY_BPS_PER_SQRT_MINUTE",
+                "STRATEGY11_MIN_PROBABILITY",
+                "STRATEGY11_MAX_PROBABILITY",
+                "STRATEGY11_CONFIRM_BEFORE_ENTRY_SECONDS",
             ]
         )
     return fields
@@ -554,6 +571,12 @@ def _cfg_for_paper_timeframe(cfg: AppConfig, timeframe: str) -> AppConfig:
         strategy10_ofi_weight=profile.strategy10_ofi_weight,
         strategy10_momentum_weight=profile.strategy10_momentum_weight,
         strategy10_max_fair_value=profile.strategy10_max_fair_value,
+        strategy11_min_edge=profile.strategy11_min_edge,
+        strategy11_edge_buffer=profile.strategy11_edge_buffer,
+        strategy11_volatility_bps_per_sqrt_minute=profile.strategy11_volatility_bps_per_sqrt_minute,
+        strategy11_min_probability=profile.strategy11_min_probability,
+        strategy11_max_probability=profile.strategy11_max_probability,
+        strategy11_confirm_before_entry_seconds=profile.strategy11_confirm_before_entry_seconds,
     )
 
 
@@ -1437,6 +1460,12 @@ def _strategy_catalog() -> dict[str, dict[str, Any]]:
             "preview": ["FAIR VALUE", "EDGE", "BUFFER", "SKIP"],
             "detail": "只有估算胜率减去当前买入价和成本缓冲后仍超过阈值时才给出方向。",
         },
+        "11": {
+            "label": "BTC 概率定价",
+            "summary": "用 Binance BTC 本轮起点、当前中间价和剩余时间估算到期概率，只买概率明显高于买入价的一边。",
+            "preview": ["BTC MID", "PROBABILITY", "EDGE", "SKIP"],
+            "detail": "它不追亏、不靠固定节奏，而是把真实 BTC 距离和时间波动换成概率优势再决定是否入场。",
+        },
     }
 
 
@@ -1580,6 +1609,12 @@ class DashboardState:
         "STRATEGY10_OFI_WEIGHT": "策略10 OFI 权重",
         "STRATEGY10_MOMENTUM_WEIGHT": "策略10 动量权重",
         "STRATEGY10_MAX_FAIR_VALUE": "策略10 估值上限",
+        "STRATEGY11_MIN_EDGE": "策略11 最小概率优势",
+        "STRATEGY11_EDGE_BUFFER": "策略11 成本缓冲",
+        "STRATEGY11_VOLATILITY_BPS_PER_SQRT_MINUTE": "策略11 波动率估计",
+        "STRATEGY11_MIN_PROBABILITY": "策略11 最低方向概率",
+        "STRATEGY11_MAX_PROBABILITY": "策略11 概率上限",
+        "STRATEGY11_CONFIRM_BEFORE_ENTRY_SECONDS": "策略11 最晚确认秒数",
         "SIGNAL_MOMENTUM_THRESHOLD": "动量阈值",
         "SIGNAL_WEAK_SIGNAL_MODE": "弱信号处理",
         "SIGNAL_FALLBACK_STRATEGY_ID": "弱信号回退基础策略",
@@ -1675,6 +1710,12 @@ class DashboardState:
         "STRATEGY10_OFI_WEIGHT": "strategy10_ofi_weight",
         "STRATEGY10_MOMENTUM_WEIGHT": "strategy10_momentum_weight",
         "STRATEGY10_MAX_FAIR_VALUE": "strategy10_max_fair_value",
+        "STRATEGY11_MIN_EDGE": "strategy11_min_edge",
+        "STRATEGY11_EDGE_BUFFER": "strategy11_edge_buffer",
+        "STRATEGY11_VOLATILITY_BPS_PER_SQRT_MINUTE": "strategy11_volatility_bps_per_sqrt_minute",
+        "STRATEGY11_MIN_PROBABILITY": "strategy11_min_probability",
+        "STRATEGY11_MAX_PROBABILITY": "strategy11_max_probability",
+        "STRATEGY11_CONFIRM_BEFORE_ENTRY_SECONDS": "strategy11_confirm_before_entry_seconds",
         "SIGNAL_MOMENTUM_THRESHOLD": "signal_momentum_threshold",
         "SIGNAL_WEAK_SIGNAL_MODE": "signal_weak_signal_mode",
         "SIGNAL_FALLBACK_STRATEGY_ID": "signal_fallback_strategy_id",
@@ -1706,6 +1747,7 @@ class DashboardState:
         "MAX_STAKE_SKIP_ALERT_THRESHOLD",
         "STRATEGY9_STABILITY_SAMPLE_COUNT",
         "STRATEGY9_STABILITY_REQUIRED_COUNT",
+        "STRATEGY11_CONFIRM_BEFORE_ENTRY_SECONDS",
         "WS_QUOTE_STALE_SECONDS",
         "WS_CONNECT_TIMEOUT_SECONDS",
     )
@@ -1753,6 +1795,11 @@ class DashboardState:
         "STRATEGY10_OFI_WEIGHT",
         "STRATEGY10_MOMENTUM_WEIGHT",
         "STRATEGY10_MAX_FAIR_VALUE",
+        "STRATEGY11_MIN_EDGE",
+        "STRATEGY11_EDGE_BUFFER",
+        "STRATEGY11_VOLATILITY_BPS_PER_SQRT_MINUTE",
+        "STRATEGY11_MIN_PROBABILITY",
+        "STRATEGY11_MAX_PROBABILITY",
         "SIGNAL_MOMENTUM_THRESHOLD",
         "SIGNAL_DYNAMIC_THRESHOLD_K",
         "WS_TRADE_GUARD_STALE_SECONDS",
@@ -1831,9 +1878,15 @@ class DashboardState:
         "STRATEGY10_OFI_WEIGHT": "strategy_10_only",
         "STRATEGY10_MOMENTUM_WEIGHT": "strategy_10_only",
         "STRATEGY10_MAX_FAIR_VALUE": "strategy_10_only",
+        "STRATEGY11_MIN_EDGE": "strategy_11_only",
+        "STRATEGY11_EDGE_BUFFER": "strategy_11_only",
+        "STRATEGY11_VOLATILITY_BPS_PER_SQRT_MINUTE": "strategy_11_only",
+        "STRATEGY11_MIN_PROBABILITY": "strategy_11_only",
+        "STRATEGY11_MAX_PROBABILITY": "strategy_11_only",
+        "STRATEGY11_CONFIRM_BEFORE_ENTRY_SECONDS": "strategy_11_only",
     }
     FIELD_HELP: dict[str, str] = {
-        "STRATEGY_ID": "策略 1-4 是固定节奏策略，策略 5 是动量策略，策略 6 是 Binance OFI，策略 7/8/9 是组合信号策略，策略 10 是估值优势策略。",
+        "STRATEGY_ID": "策略 1-4 是固定节奏策略，策略 5 是动量策略，策略 6 是 Binance OFI，策略 7/8/9 是组合信号策略，策略 10 是估值优势策略，策略 11 是 BTC 概率定价策略。",
         "STRATEGY_IDS": "统一策略组合。设置后纸面和实盘都使用同一组策略和同一套参数，切换模式只改变执行环境。",
         "LIVE_STRATEGY_IDS": "实盘运行时可轮询的策略列表，按输入顺序去重，例如 2,6。未填写时会回退到 STRATEGY_ID。",
         "PAPER_STRATEGY_IDS": "纸面测试可同时运行多个策略，按输入顺序去重，例如 1,2,6。",
@@ -1842,6 +1895,12 @@ class DashboardState:
         "STRATEGY10_OFI_WEIGHT": "策略10 将 Binance 盘口失衡映射到估值概率的权重。",
         "STRATEGY10_MOMENTUM_WEIGHT": "策略10 将本轮 Polymarket 动量映射到估值概率的权重。",
         "STRATEGY10_MAX_FAIR_VALUE": "策略10 对估算概率做截断，避免单一信号把估值推到极端。",
+        "STRATEGY11_MIN_EDGE": "策略11 的估算方向概率减去当前买入价和成本缓冲后的最小优势。",
+        "STRATEGY11_EDGE_BUFFER": "策略11 对手续费、价差和延迟预留的额外安全边际。",
+        "STRATEGY11_VOLATILITY_BPS_PER_SQRT_MINUTE": "策略11 估算本轮剩余时间概率时使用的 BTC 每平方根分钟波动率，单位为基点。",
+        "STRATEGY11_MIN_PROBABILITY": "策略11 只有方向概率达到该下限时才考虑入场。",
+        "STRATEGY11_MAX_PROBABILITY": "策略11 对估算概率做截断，避免短时价格跳动把概率推到极端。",
+        "STRATEGY11_CONFIRM_BEFORE_ENTRY_SECONDS": "策略11 需要在计划入场前至少提前这么多秒完成概率确认。",
         "ENABLE_LIVE_TRADING": "运行模式选择实盘或纸面+实盘时会自动开启；关闭后只能安全运行纸面测试。",
         "MARKET_TIMEFRAME": "选择当前要玩的 Polymarket BTC 预测频次，仅支持 5 分钟和 15 分钟。",
         "OPEN_DELAY_SECONDS": "OPEN 模式下，从每轮开始后延迟多少秒再尝试入场。",
@@ -2067,7 +2126,7 @@ class DashboardState:
             strategy_ids = []
             strategy_ids.extend(getattr(cfg, "paper_strategy_ids", []) or [])
             strategy_ids.extend(getattr(cfg, "live_strategy_ids", []) or [])
-        ofi_strategy_ids = {6, 7, 8, 9, 10}
+        ofi_strategy_ids = {6, 7, 8, 9, 10, 11}
         if cfg.strategy_id not in ofi_strategy_ids and not any(strategy_id in ofi_strategy_ids for strategy_id in strategy_ids):
             return None
         service = BinanceDepth5SignalService(ws_url=cfg.binance_ws_url, stream=cfg.binance_depth_stream)
@@ -2339,6 +2398,12 @@ class DashboardState:
                     "strategy10_ofi_weight": _fmt_env(profile.strategy10_ofi_weight),
                     "strategy10_momentum_weight": _fmt_env(profile.strategy10_momentum_weight),
                     "strategy10_max_fair_value": _fmt_env(profile.strategy10_max_fair_value),
+                    "strategy11_min_edge": _fmt_env(profile.strategy11_min_edge),
+                    "strategy11_edge_buffer": _fmt_env(profile.strategy11_edge_buffer),
+                    "strategy11_volatility_bps_per_sqrt_minute": _fmt_env(profile.strategy11_volatility_bps_per_sqrt_minute),
+                    "strategy11_min_probability": _fmt_env(profile.strategy11_min_probability),
+                    "strategy11_max_probability": _fmt_env(profile.strategy11_max_probability),
+                    "strategy11_confirm_before_entry_seconds": _fmt_env(profile.strategy11_confirm_before_entry_seconds),
                 }
                 for timeframe, profile in getattr(self._cfg, "paper_profiles", {}).items()
             }
@@ -5256,6 +5321,15 @@ const REASON_LABELS = {
   strategy10_entry_too_late: '策略10 确认出现过晚',
   strategy10_price_too_low: '策略10 入场价格过低',
   strategy10_price_too_high: '策略10 入场价格过高',
+  strategy11_window_unavailable: '策略11 当前轮次不可用',
+  strategy11_btc_price_stale: '策略11 BTC 价格信号已过期',
+  strategy11_btc_price_unavailable: '策略11 BTC 价格不可用',
+  strategy11_probability_unavailable: '策略11 概率估算不可用',
+  strategy11_edge_too_low: '策略11 概率优势不足',
+  strategy11_signal_conflict: '策略11 锁边后信号反向',
+  strategy11_entry_too_late: '策略11 确认出现过晚',
+  strategy11_price_too_low: '策略11 入场价格过低',
+  strategy11_price_too_high: '策略11 入场价格过高',
   live_fok_not_filled: '策略7 实时 FOK 订单未成交',
   awaiting_fill_confirmation: '等待成交确认',
   round_in_progress: '轮次仍在进行中',
@@ -5315,6 +5389,17 @@ const CONFIG_KEY_NAMES = {
   STRATEGY9_ULTRA_MAX_ENTRY_PRICE: '策略9 超强信号价帽',
   STRATEGY9_STRONG_SIGNAL_GAP: '策略9 强信号优势',
   STRATEGY9_ULTRA_SIGNAL_GAP: '策略9 超强信号优势',
+  STRATEGY10_MIN_EDGE: '策略10 最小期望优势',
+  STRATEGY10_EDGE_BUFFER: '策略10 成本缓冲',
+  STRATEGY10_OFI_WEIGHT: '策略10 OFI 权重',
+  STRATEGY10_MOMENTUM_WEIGHT: '策略10 动量权重',
+  STRATEGY10_MAX_FAIR_VALUE: '策略10 估值上限',
+  STRATEGY11_MIN_EDGE: '策略11 最小概率优势',
+  STRATEGY11_EDGE_BUFFER: '策略11 成本缓冲',
+  STRATEGY11_VOLATILITY_BPS_PER_SQRT_MINUTE: '策略11 波动率估计',
+  STRATEGY11_MIN_PROBABILITY: '策略11 最低方向概率',
+  STRATEGY11_MAX_PROBABILITY: '策略11 概率上限',
+  STRATEGY11_CONFIRM_BEFORE_ENTRY_SECONDS: '策略11 最晚确认秒数',
   SIGNAL_MOMENTUM_THRESHOLD: '动量阈值',
   SIGNAL_WEAK_SIGNAL_MODE: '弱信号处理',
   SIGNAL_FALLBACK_STRATEGY_ID: '弱信号回退基础策略',
@@ -6812,7 +6897,8 @@ function isCompactConfigField(key) {
     'MAX_STAKE_SKIP_ALERT_THRESHOLD',
     'WS_QUOTE_STALE_SECONDS',
     'WS_TRADE_GUARD_STALE_SECONDS',
-    'WS_CONNECT_TIMEOUT_SECONDS'
+    'WS_CONNECT_TIMEOUT_SECONDS',
+    'STRATEGY11_CONFIRM_BEFORE_ENTRY_SECONDS'
   ].indexOf(String(key || '')) >= 0;
 }
 

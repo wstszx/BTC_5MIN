@@ -18,8 +18,10 @@ All supported runtime knobs are surfaced through `.env.dashboard`. Edit that fil
 Key fields to review:
 
 - `STRATEGY_ID`
-- `BASE_ORDER_COST`
-- `MAX_STAKE`
+- `PAPER_STRATEGY_IDS`
+- `LIVE_STRATEGY_IDS`
+- `STRATEGY_<id>_BASE_ORDER_COST`
+- `STRATEGY_<id>_MAX_STAKE`
 - `MAX_CONSECUTIVE_LOSSES`
 - `SIGNAL_MOMENTUM_THRESHOLD`
 - `SIGNAL_WEAK_SIGNAL_MODE`
@@ -39,7 +41,7 @@ Credential note:
 Trading mode rules:
 
 - Use `TRADE_MODE=paper` for paper trading.
-- All strategies use fixed per-round stake sizing from `BASE_ORDER_COST`; loss-recovery, target-profit, and martingale sizing modes are no longer supported.
+- All strategies use fixed per-round stake sizing from each strategy's `STRATEGY_<id>_BASE_ORDER_COST`; loss-recovery, target-profit, and martingale sizing modes are no longer supported.
 - Use `TRADE_MODE=live` only when live credentials are present and `LIVE_TRADING_ENABLED=true` is also set.
 - Set `POLYMARKET_FUNDER` to the wallet address (`0x...`) corresponding to `POLYMARKET_PRIVATE_KEY`.
 - A dashboard save updates `.env.dashboard` and the runtime manager target mode.

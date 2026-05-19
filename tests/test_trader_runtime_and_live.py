@@ -7002,12 +7002,27 @@ def test_run_paper_trading_multi_strategy_pending_settlement_allows_new_round(tm
                 return {"eventMetadata": {"priceToBeat": 100.0, "finalPrice": 80.0}}
             raise AssertionError(slug)
 
+    cfg = AppConfig(strategy_id=2, paper_strategy_ids=[1, 6], poll_interval_seconds=1)
+
+    class _NoopBinanceSignalService:
+        ws_url = cfg.binance_ws_url.rstrip("/") + "/" + cfg.binance_depth_stream.lstrip("/")
+
+        def latest(self):
+            return None
+
+        def refresh_from_rest(self, *, now):
+            return None
+
+        def close(self):
+            return None
+
     result = run_paper_trading(
-        AppConfig(strategy_id=2, paper_strategy_ids=[1, 6], poll_interval_seconds=1),
+        cfg,
         client=_MultiStrategySettlementClient(),
         state_path=state_path,
         log_path=log_path,
         stop_event=stop_event,
+        binance_signal_service=_NoopBinanceSignalService(),
     )
 
     state = load_session_state(state_path, effective_paper_strategy_ids=[1, 6])

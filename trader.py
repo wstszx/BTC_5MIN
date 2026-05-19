@@ -143,7 +143,7 @@ def _sync_paper_binance_signal_service(
     strategy_ids: list[int],
     service: BinanceDepth5SignalService | None,
 ) -> BinanceDepth5SignalService | None:
-    needs_service = any(strategy_id in {6, 7, 8, 9, 10} for strategy_id in strategy_ids)
+    needs_service = any(strategy_id in {6, 7, 8, 9, 10, 11} for strategy_id in strategy_ids)
     expected_url = _binance_signal_service_url(cfg)
 
     if not needs_service:
