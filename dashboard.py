@@ -352,6 +352,7 @@ STRATEGY_PROFILE_EDITABLE_FIELDS: tuple[str, ...] = (
     "STRATEGY10_OFI_WEIGHT",
     "STRATEGY10_MOMENTUM_WEIGHT",
     "STRATEGY10_MAX_FAIR_VALUE",
+    "STRATEGY10_CONFIRM_BEFORE_ENTRY_SECONDS",
     "STRATEGY11_MIN_EDGE",
     "STRATEGY11_EDGE_BUFFER",
     "STRATEGY11_VOLATILITY_BPS_PER_SQRT_MINUTE",
@@ -485,6 +486,7 @@ def _strategy_profile_field_names(strategy_id: int | str) -> list[str]:
                 "STRATEGY10_OFI_WEIGHT",
                 "STRATEGY10_MOMENTUM_WEIGHT",
                 "STRATEGY10_MAX_FAIR_VALUE",
+                "STRATEGY10_CONFIRM_BEFORE_ENTRY_SECONDS",
             ]
         )
     if strategy_text == "11":
@@ -571,6 +573,7 @@ def _cfg_for_paper_timeframe(cfg: AppConfig, timeframe: str) -> AppConfig:
         strategy10_ofi_weight=profile.strategy10_ofi_weight,
         strategy10_momentum_weight=profile.strategy10_momentum_weight,
         strategy10_max_fair_value=profile.strategy10_max_fair_value,
+        strategy10_confirm_before_entry_seconds=profile.strategy10_confirm_before_entry_seconds,
         strategy11_min_edge=profile.strategy11_min_edge,
         strategy11_edge_buffer=profile.strategy11_edge_buffer,
         strategy11_volatility_bps_per_sqrt_minute=profile.strategy11_volatility_bps_per_sqrt_minute,
@@ -1710,6 +1713,7 @@ class DashboardState:
         "STRATEGY10_OFI_WEIGHT": "strategy10_ofi_weight",
         "STRATEGY10_MOMENTUM_WEIGHT": "strategy10_momentum_weight",
         "STRATEGY10_MAX_FAIR_VALUE": "strategy10_max_fair_value",
+        "STRATEGY10_CONFIRM_BEFORE_ENTRY_SECONDS": "strategy10_confirm_before_entry_seconds",
         "STRATEGY11_MIN_EDGE": "strategy11_min_edge",
         "STRATEGY11_EDGE_BUFFER": "strategy11_edge_buffer",
         "STRATEGY11_VOLATILITY_BPS_PER_SQRT_MINUTE": "strategy11_volatility_bps_per_sqrt_minute",
@@ -2398,6 +2402,7 @@ class DashboardState:
                     "strategy10_ofi_weight": _fmt_env(profile.strategy10_ofi_weight),
                     "strategy10_momentum_weight": _fmt_env(profile.strategy10_momentum_weight),
                     "strategy10_max_fair_value": _fmt_env(profile.strategy10_max_fair_value),
+                    "strategy10_confirm_before_entry_seconds": _fmt_env(profile.strategy10_confirm_before_entry_seconds),
                     "strategy11_min_edge": _fmt_env(profile.strategy11_min_edge),
                     "strategy11_edge_buffer": _fmt_env(profile.strategy11_edge_buffer),
                     "strategy11_volatility_bps_per_sqrt_minute": _fmt_env(profile.strategy11_volatility_bps_per_sqrt_minute),

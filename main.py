@@ -228,6 +228,11 @@ def _paper_strategy_profile_from_cfg(cfg: AppConfig, strategy_id: int) -> LiveSt
         strategy10_ofi_weight=getattr(existing, 'strategy10_ofi_weight', cfg.strategy10_ofi_weight),
         strategy10_momentum_weight=getattr(existing, 'strategy10_momentum_weight', cfg.strategy10_momentum_weight),
         strategy10_max_fair_value=getattr(existing, 'strategy10_max_fair_value', cfg.strategy10_max_fair_value),
+        strategy10_confirm_before_entry_seconds=getattr(
+            existing,
+            'strategy10_confirm_before_entry_seconds',
+            cfg.strategy10_confirm_before_entry_seconds,
+        ),
         strategy11_min_edge=getattr(existing, 'strategy11_min_edge', cfg.strategy11_min_edge),
         strategy11_edge_buffer=getattr(existing, 'strategy11_edge_buffer', cfg.strategy11_edge_buffer),
         strategy11_volatility_bps_per_sqrt_minute=getattr(
@@ -304,6 +309,7 @@ def _paper_cfg_for_timeframe(cfg: AppConfig, timeframe: str) -> AppConfig:
         strategy10_ofi_weight=profile.strategy10_ofi_weight,
         strategy10_momentum_weight=profile.strategy10_momentum_weight,
         strategy10_max_fair_value=profile.strategy10_max_fair_value,
+        strategy10_confirm_before_entry_seconds=profile.strategy10_confirm_before_entry_seconds,
         strategy11_min_edge=profile.strategy11_min_edge,
         strategy11_edge_buffer=profile.strategy11_edge_buffer,
         strategy11_volatility_bps_per_sqrt_minute=profile.strategy11_volatility_bps_per_sqrt_minute,

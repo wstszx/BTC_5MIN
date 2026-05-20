@@ -197,5 +197,7 @@ def test_trade_log_migrates_existing_rows_when_new_columns_are_inserted(tmp_path
         "btc-updown-5m-current",
     ]
     assert rows[0]["experiment_id"] == "strategy-7"
+    assert rows[0]["signal_probability"] == ""
+    assert rows[0]["signal_edge"] == ""
     assert rows[0]["signal_max_entry_price"] == ""
     assert rows[0]["sizing_multiplier"] == ""

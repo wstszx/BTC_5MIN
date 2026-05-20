@@ -733,6 +733,50 @@ def test_strategy10_can_choose_underpriced_down_from_fair_value():
     assert decision.signal_delta == pytest.approx(-0.03)
 
 
+def test_strategy10_uses_own_confirmation_window_instead_of_strategy7_window():
+    now = datetime(2026, 4, 30, 1, 4, 59, tzinfo=timezone.utc)
+    window = MarketWindow(
+        event_id="e1",
+        market_id="m1",
+        slug="s1",
+        title="BTC",
+        start_time=datetime(2026, 4, 30, 1, 0, 0, tzinfo=timezone.utc),
+        end_time=datetime(2026, 4, 30, 1, 5, 0, tzinfo=timezone.utc),
+    )
+    cfg = AppConfig(
+        strategy_id=10,
+        strategy7_confirm_before_entry_seconds=12,
+        strategy10_confirm_before_entry_seconds=0,
+        binance_signal_stale_seconds=10.0,
+        strategy10_min_edge=0.04,
+        strategy10_ofi_weight=0.10,
+        strategy10_momentum_weight=1.0,
+    )
+    state = SessionState(signal_round_slug="s1", signal_round_open_up_price=0.50)
+    quote = MarketQuote(
+        slug="s1",
+        up_price=0.52,
+        up_best_ask=0.52,
+        down_price=0.48,
+        down_best_ask=0.48,
+        strategy6_ofi_score=0.8,
+        strategy6_signal_at=now,
+    )
+
+    decision = resolve_side_from_strategy(
+        cfg=cfg,
+        state=state,
+        slug="s1",
+        quote=quote,
+        window=window,
+        entry_time=window.end_time,
+        now=now,
+    )
+
+    assert decision.side == "UP"
+    assert decision.reason is None
+
+
 def test_strategy11_buys_underpriced_up_from_btc_distance_probability():
     now = datetime(2026, 4, 30, 1, 2, 0, tzinfo=timezone.utc)
     window = MarketWindow(
@@ -821,6 +865,8 @@ def test_strategy11_skips_when_probability_edge_is_too_low():
     assert decision.candidate_side == "UP"
     assert decision.candidate_price == pytest.approx(0.54)
     assert decision.signal_threshold == pytest.approx(0.08)
+    assert decision.signal_probability == pytest.approx(0.5612, abs=0.001)
+    assert decision.signal_edge == pytest.approx(0.0212, abs=0.001)
 
 
 def test_strategy10_skips_stale_ofi_before_edge_model():

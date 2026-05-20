@@ -37,6 +37,8 @@ def build_pending_paper_trade(
         signal_current_up_price=side_decision.signal_current_up_price,
         signal_threshold=side_decision.signal_threshold,
         signal_delta=side_decision.signal_delta,
+        signal_probability=side_decision.signal_probability,
+        signal_edge=side_decision.signal_edge,
         signal_locked=side_decision.signal_locked,
         signal_reason=side_decision.reason,
         signal_max_entry_price=side_decision.max_entry_price,

@@ -94,6 +94,8 @@ class TradeRecord:
     signal_current_up_price: float | None = None
     signal_threshold: float | None = None
     signal_delta: float | None = None
+    signal_probability: float | None = None
+    signal_edge: float | None = None
     signal_locked: bool = False
     signal_reason: str | None = None
     signal_max_entry_price: float | None = None
@@ -120,6 +122,8 @@ class PendingPaperTrade:
     signal_current_up_price: float | None = None
     signal_threshold: float | None = None
     signal_delta: float | None = None
+    signal_probability: float | None = None
+    signal_edge: float | None = None
     signal_locked: bool = False
     signal_reason: str | None = None
     signal_max_entry_price: float | None = None

@@ -28,6 +28,8 @@ class SideDecision:
     signal_current_up_price: float | None = None
     signal_threshold: float | None = None
     signal_delta: float | None = None
+    signal_probability: float | None = None
+    signal_edge: float | None = None
     signal_locked: bool = False
     max_entry_price: float | None = None
     ofi_score: float | None = None
@@ -75,6 +77,14 @@ def resolve_quote_price(side: str, quote: MarketQuote) -> float | None:
     if side == "DOWN":
         return quote.down_best_ask if quote.down_best_ask is not None else quote.down_price
     raise ValueError(f"Unsupported side: {side}")
+
+
+def strategy11_best_probability(probability: Strategy11Probability) -> float | None:
+    if probability.best_side == "UP":
+        return probability.up_probability
+    if probability.best_side == "DOWN":
+        return probability.down_probability
+    return None
 
 
 def entry_price_skip_reason(
@@ -477,6 +487,19 @@ def effective_strategy7_confirm_before_entry_seconds(
     return min(configured, available)
 
 
+def effective_strategy10_confirm_before_entry_seconds(
+    *,
+    cfg: AppConfig,
+    window: MarketWindow | None,
+    entry_time: datetime | None,
+) -> float:
+    configured = max(0.0, float(getattr(cfg, "strategy10_confirm_before_entry_seconds", 0)))
+    if window is None or entry_time is None:
+        return configured
+    available = max(0.0, (entry_time - window.start_time).total_seconds())
+    return min(configured, available)
+
+
 def evaluate_strategy7_consensus_signal(
     *,
     cfg: AppConfig,
@@ -834,6 +857,7 @@ def evaluate_strategy11_probability_edge(
 
     min_edge = max(0.0, float(getattr(cfg, "strategy11_min_edge", 0.0)))
     distance = float(current_btc_price) - float(state.strategy11_round_start_btc_price)
+    best_probability = strategy11_best_probability(probability)
     if probability.best_side is None or probability.best_edge is None or probability.best_edge < min_edge:
         return SideDecision(
             side=None,
@@ -844,6 +868,8 @@ def evaluate_strategy11_probability_edge(
             signal_current_up_price=float(current_btc_price),
             signal_threshold=min_edge,
             signal_delta=distance,
+            signal_probability=best_probability,
+            signal_edge=probability.best_edge,
         )
 
     return SideDecision(
@@ -854,6 +880,8 @@ def evaluate_strategy11_probability_edge(
         signal_current_up_price=float(current_btc_price),
         signal_threshold=min_edge,
         signal_delta=distance,
+        signal_probability=best_probability,
+        signal_edge=probability.best_edge,
     )
 
 
@@ -1130,7 +1158,7 @@ def resolve_side_from_strategy(
 
         resolved_side = edge_decision.side
         momentum_delta = edge_decision.signal_delta
-        effective_confirm_before_entry_seconds = effective_strategy7_confirm_before_entry_seconds(
+        effective_confirm_before_entry_seconds = effective_strategy10_confirm_before_entry_seconds(
             cfg=cfg,
             window=window,
             entry_time=entry_time,

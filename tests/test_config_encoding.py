@@ -298,6 +298,7 @@ def test_build_config_accepts_strategy10_and_reads_edge_values():
             "STRATEGY_10_OFI_WEIGHT": "0.12",
             "STRATEGY_10_MOMENTUM_WEIGHT": "1.4",
             "STRATEGY_10_EDGE_BUFFER": "0.01",
+            "STRATEGY_10_CONFIRM_BEFORE_ENTRY_SECONDS": "1",
         }
     )
 
@@ -312,6 +313,7 @@ def test_build_config_accepts_strategy10_and_reads_edge_values():
     assert cfg.paper_strategy_profiles[10].strategy10_ofi_weight == 0.12
     assert cfg.paper_strategy_profiles[10].strategy10_momentum_weight == 1.4
     assert cfg.paper_strategy_profiles[10].strategy10_edge_buffer == 0.01
+    assert cfg.paper_strategy_profiles[10].strategy10_confirm_before_entry_seconds == 1
 
 
 def test_build_config_accepts_strategy11_and_reads_probability_values():

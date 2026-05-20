@@ -23,6 +23,8 @@ _OBSERVED_PLACEHOLDER_FIELDS = {
     "signal_current_up_price",
     "signal_threshold",
     "signal_delta",
+    "signal_probability",
+    "signal_edge",
     "signal_locked",
     "signal_reason",
 }
@@ -103,7 +105,7 @@ def _can_migrate_header(existing_header: list[str], fieldnames: list[str]) -> bo
         return False
     if len(existing_header) > len(fieldnames):
         return False
-    if len(fieldnames) - len(existing_header) > 3:
+    if len(fieldnames) - len(existing_header) > 5:
         return False
     field_index = 0
     for existing_field in existing_header:

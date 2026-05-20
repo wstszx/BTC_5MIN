@@ -782,8 +782,12 @@ def settle_pending_paper_trades(
                 signal_current_up_price=item.signal_current_up_price,
                 signal_threshold=item.signal_threshold,
                 signal_delta=item.signal_delta,
+                signal_probability=item.signal_probability,
+                signal_edge=item.signal_edge,
                 signal_locked=item.signal_locked,
                 signal_reason=item.signal_reason,
+                signal_max_entry_price=item.signal_max_entry_price,
+                sizing_multiplier=item.sizing_multiplier,
                 tracks_recovery_loss=item.tracks_recovery_loss,
             ),
         )

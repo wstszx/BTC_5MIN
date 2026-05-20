@@ -63,6 +63,7 @@ _STRATEGY10_SHORT_PROFILE_KEYS: dict[str, str] = {
     "OFI_WEIGHT": "STRATEGY10_OFI_WEIGHT",
     "MOMENTUM_WEIGHT": "STRATEGY10_MOMENTUM_WEIGHT",
     "MAX_FAIR_VALUE": "STRATEGY10_MAX_FAIR_VALUE",
+    "CONFIRM_BEFORE_ENTRY_SECONDS": "STRATEGY10_CONFIRM_BEFORE_ENTRY_SECONDS",
 }
 _STRATEGY11_SHORT_PROFILE_KEYS: dict[str, str] = {
     "MIN_EDGE": "STRATEGY11_MIN_EDGE",
@@ -111,6 +112,7 @@ _INT_CONFIG_KEYS: frozenset[str] = frozenset(
         "SIGNAL_LOCK_BEFORE_ENTRY_SECONDS",
         "MAX_STAKE_SKIP_ALERT_THRESHOLD",
         "STRATEGY7_CONFIRM_BEFORE_ENTRY_SECONDS",
+        "STRATEGY10_CONFIRM_BEFORE_ENTRY_SECONDS",
         "STRATEGY9_STABILITY_SAMPLE_COUNT",
         "STRATEGY9_STABILITY_REQUIRED_COUNT",
         "STRATEGY11_CONFIRM_BEFORE_ENTRY_SECONDS",
@@ -680,6 +682,7 @@ class PaperTimeframeProfile:
     strategy10_ofi_weight: float
     strategy10_momentum_weight: float
     strategy10_max_fair_value: float
+    strategy10_confirm_before_entry_seconds: int
     strategy11_min_edge: float
     strategy11_edge_buffer: float
     strategy11_volatility_bps_per_sqrt_minute: float
@@ -751,6 +754,7 @@ class LiveStrategyProfile:
     strategy10_ofi_weight: float
     strategy10_momentum_weight: float
     strategy10_max_fair_value: float
+    strategy10_confirm_before_entry_seconds: int
     strategy11_min_edge: float
     strategy11_edge_buffer: float
     strategy11_volatility_bps_per_sqrt_minute: float
@@ -819,6 +823,7 @@ def _base_live_profile_for_strategy(cfg: AppConfig, strategy_id: int) -> LiveStr
         strategy10_ofi_weight=cfg.strategy10_ofi_weight,
         strategy10_momentum_weight=cfg.strategy10_momentum_weight,
         strategy10_max_fair_value=cfg.strategy10_max_fair_value,
+        strategy10_confirm_before_entry_seconds=cfg.strategy10_confirm_before_entry_seconds,
         strategy11_min_edge=cfg.strategy11_min_edge,
         strategy11_edge_buffer=cfg.strategy11_edge_buffer,
         strategy11_volatility_bps_per_sqrt_minute=cfg.strategy11_volatility_bps_per_sqrt_minute,
@@ -1086,6 +1091,11 @@ def _profile_for_strategy(cfg: AppConfig, strategy_id: int) -> LiveStrategyProfi
                 "STRATEGY10_MAX_FAIR_VALUE",
                 cfg.strategy10_max_fair_value,
             ),
+            strategy10_confirm_before_entry_seconds=_strategy_env_int(
+                strategy_id,
+                "STRATEGY10_CONFIRM_BEFORE_ENTRY_SECONDS",
+                cfg.strategy10_confirm_before_entry_seconds,
+            ),
             strategy11_min_edge=_strategy_env_float(strategy_id, "STRATEGY11_MIN_EDGE", cfg.strategy11_min_edge),
             strategy11_edge_buffer=_strategy_env_float(strategy_id, "STRATEGY11_EDGE_BUFFER", cfg.strategy11_edge_buffer),
             strategy11_volatility_bps_per_sqrt_minute=_strategy_env_float(
@@ -1189,6 +1199,7 @@ class AppConfig:
     strategy10_ofi_weight: float = 0.08
     strategy10_momentum_weight: float = 1.0
     strategy10_max_fair_value: float = 0.85
+    strategy10_confirm_before_entry_seconds: int = 0
     strategy11_min_edge: float = 0.04
     strategy11_edge_buffer: float = 0.005
     strategy11_volatility_bps_per_sqrt_minute: float = 18.0
@@ -1314,6 +1325,7 @@ class AppConfig:
                 strategy10_ofi_weight=self.strategy10_ofi_weight,
                 strategy10_momentum_weight=self.strategy10_momentum_weight,
                 strategy10_max_fair_value=self.strategy10_max_fair_value,
+                strategy10_confirm_before_entry_seconds=self.strategy10_confirm_before_entry_seconds,
                 strategy11_min_edge=self.strategy11_min_edge,
                 strategy11_edge_buffer=self.strategy11_edge_buffer,
                 strategy11_volatility_bps_per_sqrt_minute=self.strategy11_volatility_bps_per_sqrt_minute,

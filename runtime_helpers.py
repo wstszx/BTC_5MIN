@@ -113,6 +113,8 @@ def signal_record_kwargs(side_decision: SideDecision) -> dict[str, Any]:
         "signal_current_up_price": side_decision.signal_current_up_price,
         "signal_threshold": side_decision.signal_threshold,
         "signal_delta": side_decision.signal_delta,
+        "signal_probability": side_decision.signal_probability,
+        "signal_edge": side_decision.signal_edge,
         "signal_locked": side_decision.signal_locked,
         "signal_reason": side_decision.reason,
         "signal_max_entry_price": side_decision.max_entry_price,
@@ -170,6 +172,10 @@ def describe_side_decision(side_decision: SideDecision) -> str:
         signal_bits.append("threshold=" + fmt_price(side_decision.signal_threshold))
     if side_decision.signal_delta is not None:
         signal_bits.append("delta=" + fmt_price(side_decision.signal_delta))
+    if side_decision.signal_probability is not None:
+        signal_bits.append("probability=" + fmt_price(side_decision.signal_probability))
+    if side_decision.signal_edge is not None:
+        signal_bits.append("edge=" + fmt_price(side_decision.signal_edge))
     signal_bits.append("locked=" + str(side_decision.signal_locked))
     if side_decision.reason:
         signal_bits.append("reason=" + side_decision.reason)
