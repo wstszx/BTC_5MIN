@@ -47,5 +47,9 @@ def validate_live_runtime_config(cfg: AppConfig) -> None:
         raise RuntimeError("Missing private key for live trading.")
     if not cfg.live_funder:
         raise RuntimeError("Missing POLYMARKET_FUNDER for live trading.")
-    if (cfg.live_order_type or "FOK").upper() != "FOK":
-        resolve_live_order_type(cfg.live_order_type)
+    live_order_type = (cfg.live_order_type or "FOK").upper()
+    if live_order_type not in {"FOK", "FAK"}:
+        raise RuntimeError(
+            "POLYMARKET_ORDER_TYPE must be FOK or FAK for live market orders."
+        )
+    resolve_live_order_type(live_order_type)

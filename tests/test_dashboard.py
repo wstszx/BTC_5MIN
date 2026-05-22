@@ -961,7 +961,9 @@ def test_dashboard_assets_mode_selector_propagates_into_save_payload_path():
     assert "const editableKeySet = new Set(['ENABLE_LIVE_TRADING', 'TRADE_MODE'," in js
     assert "const hiddenKeys = new Set(['STRATEGY_IDS', 'PAPER_STRATEGY_IDS', 'LIVE_STRATEGY_IDS', 'PAPER_TIMEFRAMES', 'MARKET_TIMEFRAME', 'ENABLE_LIVE_TRADING']);" in js
     assert "const unifiedStrategyKeys = ['STRATEGY_ID', 'STRATEGY_IDS', 'PAPER_STRATEGY_IDS', 'LIVE_STRATEGY_IDS'];" in js
-    assert "payload[multiKey] = unifiedValues[multiKey];" in js
+    assert "function strategyListKeysForMode(mode)" in js
+    assert "return ['PAPER_STRATEGY_IDS', 'LIVE_STRATEGY_IDS'];" in js
+    assert "Object.entries(unifiedValues).forEach(([key, value]) => {" in js
 
 
 def test_dashboard_strategy_profile_editor_saves_strategy_fields_as_dedicated_config():
@@ -4278,6 +4280,27 @@ def test_dashboard_config_payload_includes_strategy10_fields(tmp_path: Path):
         state.close()
 
 
+def test_dashboard_update_config_accepts_strategy10_confirm_window(tmp_path: Path):
+    env_file = tmp_path / '.env.dashboard'
+    state = DashboardState(env_file=env_file)
+    try:
+        payload = state.update_config({
+            'STRATEGY_ID': '10',
+            'PAPER_STRATEGY_IDS': '10',
+            'LIVE_STRATEGY_IDS': '10',
+            'STRATEGY_10_MIN_EDGE': '0.05',
+            'STRATEGY_10_EDGE_BUFFER': '0.005',
+            'STRATEGY_10_CONFIRM_BEFORE_ENTRY_SECONDS': '0',
+        })
+
+        assert payload['env_values']['STRATEGY_ID'] == '10'
+        assert payload['env_values']['PAPER_STRATEGY_IDS'] == '10'
+        assert payload['env_values']['LIVE_STRATEGY_IDS'] == '10'
+        assert payload['env_values']['STRATEGY_10_CONFIRM_BEFORE_ENTRY_SECONDS'] == '0'
+    finally:
+        state.close()
+
+
 def test_dashboard_config_payload_includes_strategy11_fields(tmp_path: Path):
     state = DashboardState(env_file=tmp_path / '.env.dashboard')
     try:
@@ -4338,6 +4361,33 @@ def test_dashboard_update_config_accepts_strategy11_values(tmp_path: Path):
         assert payload['env_values']['LIVE_STRATEGY_IDS'] == '11'
         assert payload['env_values']['STRATEGY_11_MIN_EDGE'] == '0.06'
         assert payload['env_values']['STRATEGY_11_CONFIRM_BEFORE_ENTRY_SECONDS'] == '2'
+    finally:
+        state.close()
+
+
+def test_dashboard_update_config_syncs_paper_and_live_strategy_ids_in_both_mode(tmp_path: Path):
+    env_file = tmp_path / '.env.dashboard'
+    env_file.write_text(
+        'TRADE_MODE=both\n'
+        'LIVE_TRADING_ENABLED=true\n'
+        'STRATEGY_ID=7\n'
+        'PAPER_STRATEGY_IDS=5,7,9,10,11\n'
+        'LIVE_STRATEGY_IDS=5,7,9,10,11\n',
+        encoding='utf-8',
+    )
+    state = DashboardState(env_file=env_file)
+    try:
+        payload = state.update_config({
+            'TRADE_MODE': 'both',
+            'STRATEGY_ID': '7',
+            'PAPER_STRATEGY_IDS': '7,9,10,11',
+        })
+
+        assert payload['env_values']['PAPER_STRATEGY_IDS'] == '7,9,10,11'
+        assert payload['env_values']['LIVE_STRATEGY_IDS'] == '7,9,10,11'
+        text = env_file.read_text(encoding='utf-8')
+        assert 'PAPER_STRATEGY_IDS=7,9,10,11' in text
+        assert 'LIVE_STRATEGY_IDS=7,9,10,11' in text
     finally:
         state.close()
 

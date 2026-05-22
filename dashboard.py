@@ -1612,6 +1612,7 @@ class DashboardState:
         "STRATEGY10_OFI_WEIGHT": "策略10 OFI 权重",
         "STRATEGY10_MOMENTUM_WEIGHT": "策略10 动量权重",
         "STRATEGY10_MAX_FAIR_VALUE": "策略10 估值上限",
+        "STRATEGY10_CONFIRM_BEFORE_ENTRY_SECONDS": "策略10 最晚确认秒数",
         "STRATEGY11_MIN_EDGE": "策略11 最小概率优势",
         "STRATEGY11_EDGE_BUFFER": "策略11 成本缓冲",
         "STRATEGY11_VOLATILITY_BPS_PER_SQRT_MINUTE": "策略11 波动率估计",
@@ -1742,6 +1743,7 @@ class DashboardState:
         "STRATEGY_ID",
         "MAX_CONSECUTIVE_LOSSES",
         "STRATEGY7_CONFIRM_BEFORE_ENTRY_SECONDS",
+        "STRATEGY10_CONFIRM_BEFORE_ENTRY_SECONDS",
         "OPEN_DELAY_SECONDS",
         "SIGNAL_FALLBACK_STRATEGY_ID",
         "SIGNAL_HISTORY_FIDELITY_SECONDS",
@@ -1882,6 +1884,7 @@ class DashboardState:
         "STRATEGY10_OFI_WEIGHT": "strategy_10_only",
         "STRATEGY10_MOMENTUM_WEIGHT": "strategy_10_only",
         "STRATEGY10_MAX_FAIR_VALUE": "strategy_10_only",
+        "STRATEGY10_CONFIRM_BEFORE_ENTRY_SECONDS": "strategy_10_only",
         "STRATEGY11_MIN_EDGE": "strategy_11_only",
         "STRATEGY11_EDGE_BUFFER": "strategy_11_only",
         "STRATEGY11_VOLATILITY_BPS_PER_SQRT_MINUTE": "strategy_11_only",
@@ -1899,6 +1902,7 @@ class DashboardState:
         "STRATEGY10_OFI_WEIGHT": "策略10 将 Binance 盘口失衡映射到估值概率的权重。",
         "STRATEGY10_MOMENTUM_WEIGHT": "策略10 将本轮 Polymarket 动量映射到估值概率的权重。",
         "STRATEGY10_MAX_FAIR_VALUE": "策略10 对估算概率做截断，避免单一信号把估值推到极端。",
+        "STRATEGY10_CONFIRM_BEFORE_ENTRY_SECONDS": "策略10 需要在计划入场前至少提前这么多秒完成估值优势确认。",
         "STRATEGY11_MIN_EDGE": "策略11 的估算方向概率减去当前买入价和成本缓冲后的最小优势。",
         "STRATEGY11_EDGE_BUFFER": "策略11 对手续费、价差和延迟预留的额外安全边际。",
         "STRATEGY11_VOLATILITY_BPS_PER_SQRT_MINUTE": "策略11 估算本轮剩余时间概率时使用的 BTC 每平方根分钟波动率，单位为基点。",
@@ -2470,6 +2474,18 @@ class DashboardState:
                 field_errors[key] = str(exc)
         if field_errors:
             raise ConfigValidationError(field_errors)
+
+        next_trade_mode = str(
+            normalized_updates.get("TRADE_MODE")
+            or self._env_values.get("TRADE_MODE")
+            or self._cfg.trade_mode
+            or "paper"
+        ).strip().lower() or "paper"
+        if next_trade_mode == "both":
+            if "PAPER_STRATEGY_IDS" in normalized_updates and "LIVE_STRATEGY_IDS" not in normalized_updates:
+                normalized_updates["LIVE_STRATEGY_IDS"] = normalized_updates["PAPER_STRATEGY_IDS"]
+            elif "LIVE_STRATEGY_IDS" in normalized_updates and "PAPER_STRATEGY_IDS" not in normalized_updates:
+                normalized_updates["PAPER_STRATEGY_IDS"] = normalized_updates["LIVE_STRATEGY_IDS"]
 
         with self._lock:
             for key, normalized in normalized_updates.items():
@@ -5399,6 +5415,7 @@ const CONFIG_KEY_NAMES = {
   STRATEGY10_OFI_WEIGHT: '策略10 OFI 权重',
   STRATEGY10_MOMENTUM_WEIGHT: '策略10 动量权重',
   STRATEGY10_MAX_FAIR_VALUE: '策略10 估值上限',
+  STRATEGY10_CONFIRM_BEFORE_ENTRY_SECONDS: '策略10 最晚确认秒数',
   STRATEGY11_MIN_EDGE: '策略11 最小概率优势',
   STRATEGY11_EDGE_BUFFER: '策略11 成本缓冲',
   STRATEGY11_VOLATILITY_BPS_PER_SQRT_MINUTE: '策略11 波动率估计',
@@ -5790,6 +5807,17 @@ function strategyListKeyForMode(mode) {
   return normalized === 'live' ? 'LIVE_STRATEGY_IDS' : 'PAPER_STRATEGY_IDS';
 }
 
+function strategyListKeysForMode(mode) {
+  const normalized = normalizeTradeMode(mode);
+  if (normalized === 'live') {
+    return ['LIVE_STRATEGY_IDS'];
+  }
+  if (normalized === 'both') {
+    return ['PAPER_STRATEGY_IDS', 'LIVE_STRATEGY_IDS'];
+  }
+  return ['PAPER_STRATEGY_IDS'];
+}
+
 function activeStrategyListKey(payload, values) {
   const mode = activeConfigModeFromValues(payload, values);
   return strategyListKeyForMode(mode);
@@ -5822,10 +5850,22 @@ function resolveUnifiedStrategySelection(payload, values) {
 
 function collectUnifiedStrategyValues(payload, currentValues) {
   const unified = resolveUnifiedStrategySelection(payload || state.config || {}, currentValues || {});
-  return {
-    STRATEGY_ID: unified.focus,
-    [unified.multiKey]: unified.selected.join(','),
+  const envValues = (payload && payload.env_values) || {};
+  const mergedValues = {
+    ...envValues,
+    ...(currentValues || {}),
   };
+  const selectedCsv = unified.selected.join(',');
+  const values = {
+    STRATEGY_ID: unified.focus,
+    [unified.multiKey]: selectedCsv,
+  };
+  if (normalizeTradeMode(mergedValues.TRADE_MODE) === 'both') {
+    strategyListKeysForMode('both').forEach((key) => {
+      values[key] = selectedCsv;
+    });
+  }
+  return values;
 }
 
 function currentUnifiedStrategyDraftValues() {
@@ -5885,7 +5925,10 @@ function renderStrategyPanel(payload, values) {
 
   const summary = document.createElement('div');
   summary.className = 'strategy-panel-summary';
-  summary.textContent = '\u6b63\u5728\u7f16\u8f91' + formatModeLabel(activeConfigModeFromValues(payload, values)) + '\u7b56\u7565\u7ec4\u5408\uff08' + unified.multiKey + '\uff09\uff0c\u7eb8\u9762\u548c\u5b9e\u76d8\u4e92\u4e0d\u5171\u4eab\u3002';
+  const activeMode = normalizeTradeMode(((values || {}).TRADE_MODE) || (((payload || {}).env_values || {}).TRADE_MODE) || 'paper');
+  summary.textContent = activeMode === 'both'
+    ? '\u6b63\u5728\u540c\u6b65\u7f16\u8f91\u7eb8\u9762+\u5b9e\u76d8\u7b56\u7565\u7ec4\u5408\uff08PAPER_STRATEGY_IDS / LIVE_STRATEGY_IDS\uff09\u3002'
+    : '\u6b63\u5728\u7f16\u8f91' + formatModeLabel(activeConfigModeFromValues(payload, values)) + '\u7b56\u7565\u7ec4\u5408\uff08' + unified.multiKey + '\uff09\u3002';
   panelNode.appendChild(summary);
 
   const list = document.createElement('div');
@@ -7429,8 +7472,9 @@ function collectConfigValues(options) {
     [multiKey]: selectedStrategyList,
   };
   const unifiedValues = collectUnifiedStrategyValues(state.config || {}, rawValues);
-  payload.STRATEGY_ID = unifiedValues.STRATEGY_ID;
-  payload[multiKey] = unifiedValues[multiKey];
+  Object.entries(unifiedValues).forEach(([key, value]) => {
+    payload[key] = value;
+  });
   return payload;
 }
 function areConfigValuesEqual(left, right) {

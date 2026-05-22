@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+from dataclasses import fields
+
 import pytest
 
 from config import AppConfig
 from runtime_config import (
     cfg_for_live_strategy,
+    cfg_for_paper_strategy,
     live_strategy_ids_for_runtime,
     paper_strategy_ids_for_runtime,
     validate_live_runtime_config,
@@ -37,8 +40,66 @@ def test_runtime_config_uses_split_strategy_ids_even_when_legacy_strategy_ids_ex
     assert live_strategy_ids_for_runtime(cfg) == [6]
 
 
+def test_runtime_config_keeps_paper_and_live_strategy_profiles_identical_for_strategy_logic():
+    cfg = AppConfig(
+        strategy_id=7,
+        paper_strategy_ids=[5, 7, 9, 10, 11],
+        live_strategy_ids=[5, 7, 9, 10, 11],
+    )
+    ignored_fields = {
+        "trade_mode",
+        "live_trading_enabled",
+        "live_private_key",
+        "live_funder",
+        "live_api_key",
+        "live_api_secret",
+        "live_api_passphrase",
+        "paper_simulated_wallet_balance",
+        "strategy_ids",
+        "paper_strategy_ids",
+        "live_strategy_ids",
+        "paper_timeframes",
+        "market_timeframe",
+        "paper_profiles",
+        "paper_strategy_profiles",
+        "live_profiles",
+        "logs_dir",
+        "data_dir",
+        "db_path",
+        "paper_trades_csv",
+        "live_trades_csv",
+    }
+    compared_fields = [
+        field.name
+        for field in fields(AppConfig)
+        if field.init and field.name not in ignored_fields
+    ]
+
+    for strategy_id in range(1, 12):
+        paper_cfg = cfg_for_paper_strategy(cfg, strategy_id)
+        live_cfg = cfg_for_live_strategy(cfg, strategy_id)
+        assert {
+            name: (getattr(paper_cfg, name), getattr(live_cfg, name))
+            for name in compared_fields
+            if getattr(paper_cfg, name) != getattr(live_cfg, name)
+        } == {}
+
+
 def test_runtime_config_validates_live_runtime_credentials():
     cfg = AppConfig(trade_mode="live", live_trading_enabled=True)
 
     with pytest.raises(RuntimeError, match="private key"):
+        validate_live_runtime_config(cfg)
+
+
+def test_runtime_config_rejects_limit_order_types_for_live_market_orders():
+    cfg = AppConfig(
+        trade_mode="live",
+        live_trading_enabled=True,
+        live_private_key="pk",
+        live_funder="0xfunder",
+        live_order_type="GTC",
+    )
+
+    with pytest.raises(RuntimeError, match="FOK or FAK"):
         validate_live_runtime_config(cfg)
