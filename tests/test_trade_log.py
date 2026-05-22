@@ -201,3 +201,63 @@ def test_trade_log_migrates_existing_rows_when_new_columns_are_inserted(tmp_path
     assert rows[0]["signal_edge"] == ""
     assert rows[0]["signal_max_entry_price"] == ""
     assert rows[0]["sizing_multiplier"] == ""
+
+
+def test_live_trade_log_keeps_order_id_and_replaces_plan_with_confirmed_fill(tmp_path):
+    log_path = tmp_path / "live_orders.csv"
+    start = datetime(2026, 5, 22, 2, 35, tzinfo=timezone.utc)
+
+    append_trade_log(
+        log_path,
+        TradeRecord(
+            timestamp=start + timedelta(seconds=3),
+            mode="live",
+            round_index=8,
+            strategy=10,
+            entry_timing="OPEN",
+            event_slug="btc-updown-5m-1779417300",
+            start_time=start,
+            end_time=start + timedelta(minutes=5),
+            side="UP",
+            price=0.52,
+            order_size=1.923075,
+            order_cost=0.999999,
+            expected_profit=0.923076,
+            order_id="oid-live",
+            fill_source="submitted_plan",
+        ),
+    )
+
+    append_trade_log(
+        log_path,
+        TradeRecord(
+            timestamp=start + timedelta(minutes=5, seconds=2),
+            mode="live",
+            round_index=8,
+            strategy=10,
+            entry_timing="OPEN",
+            event_slug="btc-updown-5m-1779417300",
+            start_time=start,
+            end_time=start + timedelta(minutes=5),
+            side="UP",
+            price=0.54,
+            order_size=1.8518518518518516,
+            order_cost=1.0,
+            expected_profit=0.8518518518518516,
+            result="DOWN",
+            trade_pnl=-1.0,
+            cash_pnl=-1.0,
+            order_id="oid-live",
+            fill_source="official_confirmed_trade",
+        ),
+    )
+
+    rows = list(csv.DictReader(log_path.open(encoding="utf-8", newline="")))
+
+    assert len(rows) == 1
+    assert rows[0]["price"] == "0.54"
+    assert rows[0]["order_size"] == "1.8518518518518516"
+    assert rows[0]["order_cost"] == "1.0"
+    assert rows[0]["result"] == "DOWN"
+    assert rows[0]["order_id"] == "oid-live"
+    assert rows[0]["fill_source"] == "official_confirmed_trade"

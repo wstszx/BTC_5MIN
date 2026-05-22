@@ -3981,6 +3981,26 @@ def test_dashboard_assets_include_recent_result_prices_and_status_styles():
     assert '.trade-down { color: var(--red); font-weight: 700; }' in css
     assert '.trade-skip { color: var(--amber); font-weight: 700; }' in css
 
+
+def test_dashboard_assets_localize_provisional_loss_result():
+    js = _dashboard_js()
+
+    assert "function tradeResultText(" in js
+    assert "if (resultValue === 'PROVISIONAL_LOSS') return '暂记亏损';" in js
+    assert "const resultText = isPending ? '待结算' : tradeResultText(row.result);" in js
+    assert "'官方结果: ' + tradeResultText(row.resolved_expected_result)" in js
+
+
+def test_dashboard_field_help_uses_chinese_for_provisional_loss(tmp_path: Path):
+    state = DashboardState(env_file=tmp_path / '.env.dashboard')
+    try:
+        help_text = state.get_config_payload()['field_help']['FINAL_PRICE_WAIT_SECONDS']
+        assert '暂记亏损' in help_text
+        assert 'PROVISIONAL_LOSS' not in help_text
+    finally:
+        state.close()
+
+
 def test_dashboard_assets_include_chinese_summary_table_headers():
     html = _dashboard_html()
 

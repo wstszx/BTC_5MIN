@@ -33,6 +33,9 @@ _LIVE_STRATEGY_FIELD_NAMES = (
     "pending_live_expected_profit",
     "pending_live_order_id",
     "pending_live_end_time",
+    "pending_live_raw_price",
+    "pending_live_raw_order_cost",
+    "pending_live_fee",
     "pending_live_tracks_recovery_loss",
     "pending_live_trades",
     "last_processed_live_event_slug",
@@ -127,6 +130,9 @@ def live_strategy_state_from_payload(payload: dict[str, Any]) -> LiveStrategySta
         pending_live_expected_profit=payload.get("pending_live_expected_profit"),
         pending_live_order_id=payload.get("pending_live_order_id"),
         pending_live_end_time=payload.get("pending_live_end_time"),
+        pending_live_raw_price=payload.get("pending_live_raw_price"),
+        pending_live_raw_order_cost=payload.get("pending_live_raw_order_cost"),
+        pending_live_fee=payload.get("pending_live_fee", 0.0),
         pending_live_tracks_recovery_loss=False,
         pending_live_trades=hydrate_pending_live_trades(payload.get("pending_live_trades")),
         last_processed_live_event_slug=payload.get("last_processed_live_event_slug"),
@@ -202,6 +208,7 @@ def _load_session_state_legacy(path: Path) -> SessionState:
     payload.pop("live_strategy_id", None)
     payload["recovery_loss"] = 0.0
     payload["pending_live_tracks_recovery_loss"] = False
+    payload.setdefault("pending_live_fee", 0.0)
     return SessionState(
         pending_paper_trades=pending_paper_trades,
         pending_live_trades=pending_live_trades,

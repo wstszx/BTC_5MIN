@@ -63,6 +63,9 @@ class TradePlan:
     expected_profit: float = 0.0
     max_entry_price: float | None = None
     order_cost_multiplier: float = 1.0
+    raw_price: float | None = None
+    raw_order_cost: float | None = None
+    fee: float = 0.0
     skip_reason: str | None = None
     stop_loss_triggered: bool = False
     tracks_recovery_loss: bool = False
@@ -101,6 +104,11 @@ class TradeRecord:
     signal_max_entry_price: float | None = None
     sizing_multiplier: float = 1.0
     experiment_id: str | None = None
+    order_id: str | None = None
+    fill_source: str | None = None
+    raw_price: float | None = None
+    raw_order_cost: float | None = None
+    fee: float = 0.0
     balance_error: str | None = None
     tracks_recovery_loss: bool = False
 
@@ -148,6 +156,9 @@ class PendingLiveTrade:
     order_id: str | None = None
     start_time: str | None = None
     queued_at: str | None = None
+    raw_price: float | None = None
+    raw_order_cost: float | None = None
+    fee: float = 0.0
     tracks_recovery_loss: bool = False
 
 
@@ -204,6 +215,9 @@ class LiveStrategyState:
     pending_live_expected_profit: float | None = None
     pending_live_order_id: str | None = None
     pending_live_end_time: str | None = None
+    pending_live_raw_price: float | None = None
+    pending_live_raw_order_cost: float | None = None
+    pending_live_fee: float = 0.0
     pending_live_tracks_recovery_loss: bool = False
     pending_live_trades: list[PendingLiveTrade] = field(default_factory=list)
     last_processed_live_event_slug: str | None = None
@@ -234,6 +248,9 @@ class SessionState:
     pending_live_expected_profit: float | None = None
     pending_live_order_id: str | None = None
     pending_live_end_time: str | None = None
+    pending_live_raw_price: float | None = None
+    pending_live_raw_order_cost: float | None = None
+    pending_live_fee: float = 0.0
     pending_live_tracks_recovery_loss: bool = False
     pending_live_trades: list[PendingLiveTrade] = field(default_factory=list)
     last_processed_live_event_slug: str | None = None

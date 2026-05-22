@@ -1178,7 +1178,8 @@ def _refresh_live_row_trade_pnl_from_result(row: dict[str, str]) -> dict[str, st
     if result and side in {"UP", "DOWN"}:
         order_cost = _live_float_value(refreshed, "order_cost")
         expected_profit = _live_float_value(refreshed, "expected_profit")
-        refreshed["trade_pnl"] = str(expected_profit if result == side else -order_cost)
+        existing_pnl = _live_float_value(refreshed, "trade_pnl")
+        refreshed["trade_pnl"] = str(expected_profit if result == side else (existing_pnl if existing_pnl < 0 else -order_cost))
     return refreshed
 
 
@@ -1257,7 +1258,8 @@ def _recompute_live_ledger_rows(
                 if tracks_loss_streak:
                     state["consecutive_losses"] = 0
             else:
-                trade_pnl = -order_cost
+                existing_pnl = _live_float_value(row, "trade_pnl")
+                trade_pnl = existing_pnl if existing_pnl < 0 else -order_cost
                 state["cash_pnl"] = float(state["cash_pnl"]) + trade_pnl
                 if tracks_recovery_loss:
                     state["recovery_loss"] = float(state["recovery_loss"]) + order_cost
@@ -2008,7 +2010,7 @@ class DashboardState:
         "POLYMARKET_API_KEY": "CLOB 实盘下单凭证，仅用于实盘下单私有接口。",
         "POLYMARKET_API_SECRET": "CLOB 实盘下单签名密钥，仅用于实盘下单私有接口。",
         "POLYMARKET_API_PASSPHRASE": "CLOB 实盘下单通行口令，仅用于实盘下单私有接口。",
-        "FINAL_PRICE_WAIT_SECONDS": "实盘轮次结束后，最多等待官方 priceToBeat + finalPrice 的秒数；过期仍未取得时，先按 PROVISIONAL_LOSS 进入下一轮 sizing。",
+        "FINAL_PRICE_WAIT_SECONDS": "实盘轮次结束后，最多等待官方 priceToBeat + finalPrice 的秒数；过期仍未取得时，先按暂记亏损进入下一轮 sizing。",
         "FINAL_PRICE_POLL_INTERVAL_SECONDS": "等待官方 finalPrice 期间的快速重试间隔；建议小于 OPEN_DELAY_SECONDS，避免错过下一轮 sizing。",
         "BASE_ORDER_COST": "每轮固定下注金额；不会根据上一轮亏损自动放大。",
         "MIN_STAKE": "单笔订单允许投入的最小 USDC；低于它时会跳过本轮。",
@@ -6061,6 +6063,15 @@ function sideText(side) {
   return '待定';
 }
 
+function tradeResultText(result) {
+  const resultValue = String(result || '').trim().toUpperCase();
+  if (!resultValue) return '--';
+  if (resultValue === 'UP') return '看涨';
+  if (resultValue === 'DOWN') return '看跌';
+  if (resultValue === 'PROVISIONAL_LOSS') return '暂记亏损';
+  return String(result || '');
+}
+
 function resultCheckText(status) {
   if (status === 'match') return '已对官方';
   if (status === 'mismatch') return '与官方不符';
@@ -8284,10 +8295,10 @@ function renderRecent(payload) {
     const cashCls = classifyPnl(row.cash_pnl);
     const isPending = row.pending_status === 'pending_settlement';
     const isMissedEntry = row.skip_reason === 'entry_window_missed';
-    const resultText = isPending ? '待结算' : (row.result || '--');
+    const resultText = isPending ? '待结算' : tradeResultText(row.result);
     const checkText = resultCheckText(row.result_check_status);
     const checkCls = row.result_check_status === 'match' ? 'trade-up' : ((row.result_check_status === 'mismatch') ? 'trade-down' : 'trade-skip');
-    const checkTitle = '官方结果: ' + (row.resolved_expected_result || '--') + (row.result_check_error ? (' · 错误: ' + row.result_check_error) : '');
+    const checkTitle = '官方结果: ' + tradeResultText(row.resolved_expected_result) + (row.result_check_error ? (' · 错误: ' + row.result_check_error) : '');
     const rowClass = isPending ? 'recent-pending' : (isMissedEntry ? 'recent-missed-entry' : '');
     const balanceError = String(row.balance_error || '').trim();
     const reasonTitle = balanceError ? (reasonText(row.skip_reason) + ' / ' + balanceError) : reasonText(row.skip_reason);

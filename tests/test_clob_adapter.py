@@ -111,6 +111,26 @@ class _SdkTradeLookupClient:
         ]
 
 
+class _SdkTakerOrderTradeLookupClient:
+    def __init__(self) -> None:
+        self.calls = []
+
+    def get_order(self, order_id):
+        assert order_id == "oid-sdk-taker"
+        return {"status": "matched", "price": "0.60"}
+
+    def get_trades(self, params=None, only_first_page=False):
+        self.calls.append((params, only_first_page))
+        if isinstance(params, dict):
+            raise AttributeError("'dict' object has no attribute 'market'")
+        if params is not None:
+            return []
+        assert only_first_page is True
+        return [
+            {"taker_order_id": "oid-sdk-taker", "size": "1.923075", "price": "0.52", "status": "CONFIRMED"}
+        ]
+
+
 class _OfficialTakerTradeLookupClient:
     def get_order(self, order_id):
         assert order_id == "oid-official-taker"
@@ -389,6 +409,40 @@ def test_clob_adapter_falls_back_to_sdk_trade_lookup_when_dict_params_are_not_su
     assert plan.price == pytest.approx(1.6 / 3.0)
     assert client.calls[0][0] == {"order_id": "oid-sdk-fill"}
     assert client.calls[-1] == (None, True)
+
+
+def test_clob_adapter_fallback_matches_sdk_taker_order_id_trade_fills():
+    client = _SdkTakerOrderTradeLookupClient()
+    state = LiveStrategyState(
+        pending_live_side="UP",
+        pending_live_order_id="oid-sdk-taker",
+    )
+
+    plan = build_verified_pending_live_trade_plan(state, clob_client=client)
+
+    assert plan is not None
+    assert plan.order_size == pytest.approx(1.923075)
+    assert plan.order_cost == pytest.approx(0.999999)
+    assert plan.price == pytest.approx(0.52)
+
+
+def test_clob_adapter_accounts_for_crypto_taker_fee_on_official_fills():
+    client = _SdkTakerOrderTradeLookupClient()
+    state = LiveStrategyState(
+        pending_live_side="UP",
+        pending_live_order_id="oid-sdk-taker",
+    )
+
+    plan = build_verified_pending_live_trade_plan(state, clob_client=client, fee_rate=0.07)
+
+    assert plan is not None
+    assert plan.raw_price == pytest.approx(0.52)
+    assert plan.price == pytest.approx(0.537472)
+    assert plan.order_size == pytest.approx(1.923075)
+    assert plan.raw_order_cost == pytest.approx(0.999999)
+    assert plan.fee == pytest.approx(0.0335999664)
+    assert plan.order_cost == pytest.approx(1.0335989664)
+    assert plan.expected_profit == pytest.approx(0.8894760336)
 
 
 def test_clob_adapter_matches_official_taker_order_id_trade_fills():

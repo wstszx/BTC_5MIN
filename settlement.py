@@ -5,7 +5,7 @@ from pathlib import Path
 import re
 from typing import Any
 
-from clob_adapter import build_verified_pending_live_trade_plan
+from clob_adapter import POLYMARKET_CRYPTO_TAKER_FEE_RATE, build_verified_pending_live_trade_plan
 from config import AppConfig
 from live_pending import (
     apply_pending_live_trade_to_legacy,
@@ -45,6 +45,10 @@ def append_settled_live_trade_log(
     if not settlement_status or settlement_status.get("status") != "settled":
         return
 
+    fill_source = (
+        str(settlement_status.get("fill_source") or "").strip()
+        or ("official_confirmed_trade" if prior_state.pending_live_order_id else "submitted_plan")
+    )
     end_time = parse_iso_datetime(prior_state.pending_live_end_time) or datetime.now(timezone.utc)
     start_time = end_time - timedelta(seconds=timeframe_duration_seconds(getattr(cfg, "market_timeframe", None)))
     append_trade_log(
@@ -80,6 +84,19 @@ def append_settled_live_trade_log(
             cash_pnl=updated_state.cash_pnl,
             recovery_loss=updated_state.recovery_loss,
             consecutive_losses=updated_state.consecutive_losses,
+            order_id=str(settlement_status.get("order_id") or prior_state.pending_live_order_id or "") or None,
+            fill_source=fill_source,
+            raw_price=settlement_status.get("raw_price") if settlement_status.get("raw_price") is not None else prior_state.pending_live_raw_price,
+            raw_order_cost=(
+                settlement_status.get("raw_order_cost")
+                if settlement_status.get("raw_order_cost") is not None
+                else prior_state.pending_live_raw_order_cost
+            ),
+            fee=float(
+                settlement_status.get("fee")
+                if settlement_status.get("fee") is not None
+                else (prior_state.pending_live_fee or 0.0)
+            ),
             tracks_recovery_loss=prior_state.pending_live_tracks_recovery_loss,
         ),
     )
@@ -97,6 +114,10 @@ def append_provisional_live_loss_trade_log(
     if not settlement_status or settlement_status.get("status") != "provisional_loss":
         return
 
+    fill_source = (
+        str(settlement_status.get("fill_source") or "").strip()
+        or ("official_confirmed_trade" if prior_state.pending_live_order_id else "submitted_plan")
+    )
     end_time = parse_iso_datetime(prior_state.pending_live_end_time) or datetime.now(timezone.utc)
     start_time = end_time - timedelta(seconds=timeframe_duration_seconds(getattr(cfg, "market_timeframe", None)))
     append_trade_log(
@@ -132,6 +153,19 @@ def append_provisional_live_loss_trade_log(
             cash_pnl=updated_state.cash_pnl,
             recovery_loss=updated_state.recovery_loss,
             consecutive_losses=updated_state.consecutive_losses,
+            order_id=str(settlement_status.get("order_id") or prior_state.pending_live_order_id or "") or None,
+            fill_source=fill_source,
+            raw_price=settlement_status.get("raw_price") if settlement_status.get("raw_price") is not None else prior_state.pending_live_raw_price,
+            raw_order_cost=(
+                settlement_status.get("raw_order_cost")
+                if settlement_status.get("raw_order_cost") is not None
+                else prior_state.pending_live_raw_order_cost
+            ),
+            fee=float(
+                settlement_status.get("fee")
+                if settlement_status.get("fee") is not None
+                else (prior_state.pending_live_fee or 0.0)
+            ),
             tracks_recovery_loss=prior_state.pending_live_tracks_recovery_loss,
         ),
     )
@@ -156,6 +190,9 @@ def build_pending_live_trade_plan(state: SessionState) -> TradePlan:
         order_size=state.pending_live_order_size,
         order_cost=state.pending_live_order_cost,
         expected_profit=state.pending_live_expected_profit,
+        raw_price=state.pending_live_raw_price,
+        raw_order_cost=state.pending_live_raw_order_cost,
+        fee=state.pending_live_fee,
         tracks_recovery_loss=state.pending_live_tracks_recovery_loss,
     )
 
@@ -481,6 +518,9 @@ def build_frozen_pending_live_plan(strategy_state: LiveStrategyState) -> TradePl
         order_size=strategy_state.pending_live_order_size,
         order_cost=strategy_state.pending_live_order_cost,
         expected_profit=strategy_state.pending_live_expected_profit,
+        raw_price=strategy_state.pending_live_raw_price,
+        raw_order_cost=strategy_state.pending_live_raw_order_cost,
+        fee=strategy_state.pending_live_fee,
         tracks_recovery_loss=strategy_state.pending_live_tracks_recovery_loss,
     )
 
@@ -526,6 +566,7 @@ def settle_pending_live_trade_if_needed(
             strategy_state,
             clob_client=clob_client,
             require_confirmed_trades=True,
+            fee_rate=POLYMARKET_CRYPTO_TAKER_FEE_RATE,
         )
     except TypeError:
         plan = pending_plan_resolver(strategy_state, clob_client=clob_client)
@@ -583,6 +624,9 @@ def settle_pending_live_trade_if_needed(
                 "result": PROVISIONAL_LOSS_RESULT,
                 "trade_pnl": trade_pnl,
                 "pending_end_time": strategy_state.pending_live_end_time,
+                "raw_price": plan.raw_price,
+                "raw_order_cost": plan.raw_order_cost,
+                "fee": plan.fee,
             },
             True,
         )
@@ -595,6 +639,7 @@ def settle_pending_live_trade_if_needed(
                 "side": strategy_state.pending_live_side,
                 "skip_reason": "round_unresolved",
                 "pending_end_time": strategy_state.pending_live_end_time,
+                "order_id": strategy_state.pending_live_order_id,
             },
             False,
         )
@@ -613,6 +658,9 @@ def settle_pending_live_trade_if_needed(
             "expected_profit": plan.expected_profit,
             "result": result,
             "trade_pnl": trade_pnl,
+            "raw_price": plan.raw_price,
+            "raw_order_cost": plan.raw_order_cost,
+            "fee": plan.fee,
         },
         True,
     )

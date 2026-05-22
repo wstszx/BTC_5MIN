@@ -25,6 +25,9 @@ def clear_legacy_pending_live_trade(state: LivePendingState) -> None:
     state.pending_live_expected_profit = None
     state.pending_live_order_id = None
     state.pending_live_end_time = None
+    state.pending_live_raw_price = None
+    state.pending_live_raw_order_cost = None
+    state.pending_live_fee = 0.0
     state.pending_live_tracks_recovery_loss = False
 
 
@@ -52,6 +55,9 @@ def pending_live_trade_from_legacy(
         entry_timing=entry_timing,
         order_id=state.pending_live_order_id,
         queued_at=None,
+        raw_price=state.pending_live_raw_price,
+        raw_order_cost=state.pending_live_raw_order_cost,
+        fee=_to_float(state.pending_live_fee),
         tracks_recovery_loss=False,
     )
 
@@ -65,6 +71,9 @@ def apply_pending_live_trade_to_legacy(state: LivePendingState, item: PendingLiv
     state.pending_live_expected_profit = item.expected_profit
     state.pending_live_order_id = item.order_id
     state.pending_live_end_time = item.end_time
+    state.pending_live_raw_price = item.raw_price
+    state.pending_live_raw_order_cost = item.raw_order_cost
+    state.pending_live_fee = item.fee
     state.pending_live_tracks_recovery_loss = False
 
 
@@ -154,6 +163,9 @@ def queue_pending_live_trade(
         entry_timing=entry_timing,
         order_id=order_id,
         queued_at=datetime.now(timezone.utc).isoformat(),
+        raw_price=plan.raw_price,
+        raw_order_cost=plan.raw_order_cost,
+        fee=float(plan.fee),
         tracks_recovery_loss=False,
     )
     state.pending_live_trades.append(item)

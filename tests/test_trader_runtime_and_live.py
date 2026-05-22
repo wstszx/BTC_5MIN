@@ -1088,11 +1088,11 @@ def test_run_live_trading_books_provisional_loss_when_final_price_is_missing_eve
     rows = list(csv.DictReader((tmp_path / "live_orders.csv").open(newline="", encoding="utf-8")))
     assert result["status"] == "stopped"
     assert reloaded.live_strategies[7].pending_live_slug is None
-    assert reloaded.live_strategies[7].cash_pnl == pytest.approx(-1.0)
+    assert reloaded.live_strategies[7].cash_pnl == pytest.approx(-1.035)
     assert reloaded.live_strategies[7].recovery_loss == 0.0
     assert reloaded.live_strategies[7].consecutive_losses == 1
     assert rows[0]["result"] == "PROVISIONAL_LOSS"
-    assert rows[0]["trade_pnl"] == "-1.0"
+    assert rows[0]["trade_pnl"] == "-1.035"
 
 
 def test_run_live_trading_books_provisional_loss_when_final_price_is_missing(tmp_path, monkeypatch):
@@ -1174,12 +1174,12 @@ def test_run_live_trading_books_provisional_loss_when_final_price_is_missing(tmp
     assert result["status"] == "stopped"
     assert captured == {"recovery_loss": 0.0, "consecutive_losses": 1}
     assert reloaded.live_strategies[7].pending_live_slug is None
-    assert reloaded.live_strategies[7].cash_pnl == pytest.approx(-1.0)
+    assert reloaded.live_strategies[7].cash_pnl == pytest.approx(-1.035)
     assert reloaded.live_strategies[7].recovery_loss == 0.0
     assert reloaded.live_strategies[7].consecutive_losses == 1
     assert rows[0]["event_slug"] == "btc-updown-5m-prev"
     assert rows[0]["result"] == "PROVISIONAL_LOSS"
-    assert rows[0]["trade_pnl"] == "-1.0"
+    assert rows[0]["trade_pnl"] == "-1.035"
     assert rows[1]["event_slug"] == "btc-updown-5m-test"
     assert rows[1]["skip_reason"] == "captured"
 
@@ -2940,15 +2940,57 @@ def test_place_live_order_logs_official_fill_price_after_submission(tmp_path):
     rows = list(csv.DictReader(log_path.open(newline="", encoding="utf-8")))
 
     assert result["status"] == "submitted"
-    assert result["price"] == pytest.approx(0.53)
+    assert result["price"] == pytest.approx(0.547437)
     assert result["order_size"] == pytest.approx(2.0)
-    assert result["order_cost"] == pytest.approx(1.06)
-    assert state.pending_live_price == pytest.approx(0.53)
+    assert result["order_cost"] == pytest.approx(1.094874)
+    assert state.pending_live_price == pytest.approx(0.547437)
     assert state.pending_live_order_size == pytest.approx(2.0)
-    assert state.pending_live_order_cost == pytest.approx(1.06)
-    assert rows[-1]["price"] == "0.53"
+    assert state.pending_live_order_cost == pytest.approx(1.094874)
+    assert rows[-1]["price"] == "0.547437"
     assert rows[-1]["order_size"] == "2.0"
-    assert rows[-1]["order_cost"] == "1.06"
+    assert rows[-1]["order_cost"] == "1.094874"
+
+
+def test_place_live_order_logs_fee_adjusted_effective_fill_after_submission(tmp_path):
+    cfg = AppConfig(live_trading_enabled=True)
+    stub_clob = _StubClobClient(
+        order_payloads={"oid-123": {"status": "filled"}},
+        trade_payloads={
+            "oid-123": [
+                _confirmed_trade("oid-123", size=1.923075, price=0.52),
+            ],
+        },
+    )
+    state_path = tmp_path / "state.json"
+    log_path = tmp_path / "live.csv"
+
+    result = place_live_order(
+        cfg=cfg,
+        market_client=_LiveMarketClient(),
+        clob_client=stub_clob,
+        state_path=state_path,
+        log_path=log_path,
+    )
+
+    state = load_session_state(state_path)
+    rows = list(csv.DictReader(log_path.open(newline="", encoding="utf-8")))
+
+    assert result["status"] == "submitted"
+    assert result["price"] == pytest.approx(0.537472)
+    assert result["raw_price"] == pytest.approx(0.52)
+    assert result["fee"] == pytest.approx(0.0335999664)
+    assert result["raw_order_cost"] == pytest.approx(0.999999)
+    assert result["order_cost"] == pytest.approx(1.0335989664)
+    assert result["expected_profit"] == pytest.approx(0.8894760336)
+    assert state.pending_live_price == pytest.approx(0.537472)
+    assert state.pending_live_order_cost == pytest.approx(1.0335989664)
+    assert state.pending_live_raw_price == pytest.approx(0.52)
+    assert state.pending_live_fee == pytest.approx(0.0335999664)
+    assert rows[-1]["price"] == "0.537472"
+    assert rows[-1]["raw_price"] == "0.52"
+    assert rows[-1]["fee"] == "0.0335999664"
+    assert rows[-1]["raw_order_cost"] == "0.999999"
+    assert rows[-1]["order_cost"] == "1.0335989664"
 
 
 def test_place_live_order_audits_official_fill_above_max_entry_price(tmp_path, monkeypatch):
@@ -2989,8 +3031,8 @@ def test_place_live_order_audits_official_fill_above_max_entry_price(tmp_path, m
     rows = list(csv.DictReader(log_path.open(newline="", encoding="utf-8")))
 
     assert result["status"] == "submitted"
-    assert result["price"] == pytest.approx(0.56)
-    assert rows[-1]["price"] == "0.56"
+    assert result["price"] == pytest.approx(0.577248)
+    assert rows[-1]["price"] == "0.577248"
     assert any("official_fill_price_above_max_entry_price" in message for message in messages)
     assert any("max_entry_price=0.54" in message for message in messages)
 
@@ -3225,12 +3267,12 @@ def test_place_live_order_settles_previous_pending_trade_before_new_submission(t
     settled_rows = [row for row in rows if row["event_slug"] == "btc-updown-5m-prev" and row["result"]]
     assert len(settled_rows) == 1
     assert settled_rows[0]["result"] == "DOWN"
-    assert float(settled_rows[0]["trade_pnl"]) == pytest.approx(-1.0)
-    assert float(settled_rows[0]["cash_pnl"]) == pytest.approx(-1.0)
+    assert float(settled_rows[0]["trade_pnl"]) == pytest.approx(-1.035)
+    assert float(settled_rows[0]["cash_pnl"]) == pytest.approx(-1.035)
     summary = summarize_paper_trades(tmp_path / "live.csv", tz_offset="+00:00")[-1]
     assert summary.trade_rows == 1
     assert summary.hit_rate == 0.0
-    assert summary.total_pnl == pytest.approx(-1.0)
+    assert summary.total_pnl == pytest.approx(-1.035)
 
 
 def test_place_live_order_settles_previous_pending_trade_from_terminal_outcome_prices_when_metadata_missing(tmp_path):
@@ -3558,6 +3600,148 @@ def test_run_live_trading_executes_inside_paper_entry_threshold(tmp_path, monkey
     assert result["status"] == "stopped"
     assert len(stub_clob.created_orders) == 1
     assert state.live_strategies[1].pending_live_slug == "btc-updown-5m-test"
+
+
+def test_run_live_trading_mirrors_same_decision_to_paper_state_and_log(tmp_path, monkeypatch):
+    stop_event = threading.Event()
+    stub_clob = _StubClobClient(balance_payload={"available": 3.0})
+
+    def fake_sleep(_seconds):
+        stop_event.set()
+
+    monkeypatch.setattr("trader.time.sleep", fake_sleep)
+    monkeypatch.setattr(
+        "trader._resolve_side_from_strategy",
+        lambda **kwargs: SideDecision(
+            side="UP",
+            signal_open_up_price=0.50,
+            signal_current_up_price=0.55,
+            signal_delta=0.05,
+            signal_edge=0.08,
+            signal_probability=0.62,
+            max_entry_price=0.56,
+        ),
+    )
+    monkeypatch.setattr(
+        "trader.build_trade_plan",
+        lambda *args, **kwargs: TradePlan(
+            True,
+            "UP",
+            price=0.55,
+            order_size=2.0,
+            order_cost=1.0,
+            expected_profit=0.8181818181818181,
+        ),
+    )
+
+    result = run_live_trading(
+        AppConfig(
+            trade_mode="live",
+            live_trading_enabled=True,
+            live_private_key="pk",
+            live_funder="0xfunder",
+            strategy_id=10,
+            live_strategy_ids=[10],
+            paper_strategy_ids=[10],
+            base_order_cost=1.0,
+            poll_interval_seconds=1,
+        ),
+        market_client=_LiveMarketClient(),
+        clob_client=stub_clob,
+        state_path=tmp_path / "live_state.json",
+        log_path=tmp_path / "live_orders.csv",
+        mirror_paper_state_path=tmp_path / "paper_state.json",
+        mirror_paper_log_path=tmp_path / "paper_trades.csv",
+        stop_event=stop_event,
+    )
+
+    paper_state = load_session_state(tmp_path / "paper_state.json", effective_paper_strategy_ids=[10])
+    live_rows = list(csv.DictReader((tmp_path / "live_orders.csv").open(newline="", encoding="utf-8")))
+
+    assert result["status"] == "stopped"
+    assert len(stub_clob.created_orders) == 1
+    assert paper_state.paper_strategies[10].last_processed_paper_event_slug == "btc-updown-5m-test"
+    assert len(paper_state.paper_strategies[10].pending_paper_trades) == 1
+    pending = paper_state.paper_strategies[10].pending_paper_trades[0]
+    assert pending.event_slug == "btc-updown-5m-test"
+    assert pending.side == "UP"
+    assert pending.price == pytest.approx(0.55)
+    assert pending.order_cost == pytest.approx(1.0)
+    assert live_rows[-1]["event_slug"] == "btc-updown-5m-test"
+    assert live_rows[-1]["side"] == "UP"
+    assert not (tmp_path / "paper_trades.csv").exists()
+
+
+def test_run_live_trading_settles_mirrored_pending_paper_trade(tmp_path, monkeypatch):
+    stop_event = threading.Event()
+
+    def fake_sleep(_seconds):
+        stop_event.set()
+
+    monkeypatch.setattr("trader.time.sleep", fake_sleep)
+
+    paper_state_path = tmp_path / "paper_state.json"
+    paper_log_path = tmp_path / "paper_trades.csv"
+    paper_state = SessionState(
+        paper_strategies={
+            10: PaperStrategyState(
+                round_index=1,
+                pending_paper_trades=[
+                    PendingPaperTrade(
+                        round_index=0,
+                        event_slug="btc-updown-5m-test",
+                        start_time="2026-05-22T02:35:00+00:00",
+                        end_time="2026-05-22T02:40:00+00:00",
+                        side="UP",
+                        price=0.55,
+                        order_size=2.0,
+                        order_cost=1.0,
+                        expected_profit=0.8181818181818181,
+                        strategy=10,
+                        entry_timing="OPEN",
+                    )
+                ],
+                last_processed_paper_event_slug="btc-updown-5m-test",
+            )
+        }
+    )
+    save_session_state(paper_state_path, paper_state)
+
+    class _ResolvedMirrorClient(_LiveMarketClient):
+        def get_event_by_slug(self, slug: str):
+            if slug != "btc-updown-5m-test":
+                raise AssertionError(f"Unexpected slug {slug}")
+            return {"eventMetadata": {"priceToBeat": 100.0, "finalPrice": 101.0}}
+
+    result = run_live_trading(
+        AppConfig(
+            trade_mode="live",
+            live_trading_enabled=True,
+            live_private_key="pk",
+            live_funder="0xfunder",
+            strategy_id=10,
+            live_strategy_ids=[10],
+            paper_strategy_ids=[10],
+            poll_interval_seconds=1,
+        ),
+        market_client=_ResolvedMirrorClient(),
+        clob_client=_StubClobClient(),
+        state_path=tmp_path / "live_state.json",
+        log_path=tmp_path / "live_orders.csv",
+        mirror_paper_state_path=paper_state_path,
+        mirror_paper_log_path=paper_log_path,
+        stop_event=stop_event,
+    )
+
+    reloaded = load_session_state(paper_state_path, effective_paper_strategy_ids=[10])
+    rows = list(csv.DictReader(paper_log_path.open(newline="", encoding="utf-8")))
+
+    assert result["status"] == "stopped"
+    assert reloaded.paper_strategies[10].pending_paper_trades == []
+    assert rows[-1]["mode"] == "paper"
+    assert rows[-1]["event_slug"] == "btc-updown-5m-test"
+    assert rows[-1]["result"] == "UP"
+    assert float(rows[-1]["trade_pnl"]) == pytest.approx(0.9)
 
 
 def test_run_live_trading_skips_fok_not_filled_without_runtime_error(tmp_path, monkeypatch):
@@ -4280,19 +4464,21 @@ def test_settle_pending_live_trade_operates_on_single_strategy_state():
     )
 
     assert settled is True
-    assert status == {
-        "status": "settled",
-        "slug": "btc-updown-5m-prev",
-        "side": "UP",
-        "price": 0.5,
-        "order_size": 2.0,
-        "order_cost": 1.0,
-        "expected_profit": 1.0,
-        "result": "DOWN",
-        "trade_pnl": -1.0,
-    }
+    assert status is not None
+    assert status["status"] == "settled"
+    assert status["slug"] == "btc-updown-5m-prev"
+    assert status["side"] == "UP"
+    assert status["price"] == pytest.approx(0.5175)
+    assert status["order_size"] == pytest.approx(2.0)
+    assert status["order_cost"] == pytest.approx(1.035)
+    assert status["expected_profit"] == pytest.approx(0.965)
+    assert status["result"] == "DOWN"
+    assert status["trade_pnl"] == pytest.approx(-1.035)
+    assert status["raw_price"] == pytest.approx(0.5)
+    assert status["raw_order_cost"] == pytest.approx(1.0)
+    assert status["fee"] == pytest.approx(0.035)
     assert updated_strategy.round_index == 1
-    assert updated_strategy.cash_pnl == pytest.approx(-1.0)
+    assert updated_strategy.cash_pnl == pytest.approx(-1.035)
     assert updated_strategy.recovery_loss == 0.0
     assert updated_strategy.consecutive_losses == 1
     assert updated_strategy.pending_live_slug is None
@@ -4339,8 +4525,8 @@ def test_settle_pending_live_trade_uses_official_redeemable_position_without_wai
     assert settled is True
     assert status["status"] == "settled"
     assert status["result"] == "UP"
-    assert status["trade_pnl"] == pytest.approx(1.0)
-    assert updated_strategy.cash_pnl == pytest.approx(1.0)
+    assert status["trade_pnl"] == pytest.approx(0.965)
+    assert updated_strategy.cash_pnl == pytest.approx(0.965)
     assert updated_strategy.pending_live_slug is None
     assert updated_strategy.pending_live_order_id is None
 
@@ -4412,8 +4598,8 @@ def test_settle_pending_live_trade_ignores_string_false_redeemable_position():
     assert settled is True
     assert status["status"] == "provisional_loss"
     assert status["result"] == "PROVISIONAL_LOSS"
-    assert status["trade_pnl"] == pytest.approx(-1.0)
-    assert updated_strategy.cash_pnl == pytest.approx(-1.0)
+    assert status["trade_pnl"] == pytest.approx(-1.035)
+    assert updated_strategy.cash_pnl == pytest.approx(-1.035)
     assert updated_strategy.recovery_loss == 0.0
     assert updated_strategy.consecutive_losses == 1
     assert updated_strategy.pending_live_slug is None
@@ -4457,8 +4643,8 @@ def test_settle_pending_live_trade_uses_official_terminal_result_when_position_i
     assert settled is True
     assert status["status"] == "settled"
     assert status["result"] == "DOWN"
-    assert status["trade_pnl"] == pytest.approx(-1.0)
-    assert updated_strategy.cash_pnl == pytest.approx(-1.0)
+    assert status["trade_pnl"] == pytest.approx(-1.035)
+    assert updated_strategy.cash_pnl == pytest.approx(-1.035)
     assert updated_strategy.pending_live_slug is None
     assert updated_strategy.pending_live_order_id is None
 
@@ -4494,9 +4680,9 @@ def test_settle_pending_live_trade_uses_frozen_pending_plan_when_official_result
     assert settled is True
     assert status["status"] == "settled"
     assert status["result"] == "DOWN"
-    assert status["trade_pnl"] == pytest.approx(-1.0)
-    assert status["order_cost"] == pytest.approx(1.0)
-    assert updated_strategy.cash_pnl == pytest.approx(-1.0)
+    assert status["trade_pnl"] == pytest.approx(-1.0343)
+    assert status["order_cost"] == pytest.approx(1.0343)
+    assert updated_strategy.cash_pnl == pytest.approx(-1.0343)
     assert updated_strategy.recovery_loss == 0.0
     assert updated_strategy.consecutive_losses == 1
     assert updated_strategy.pending_live_slug is None
@@ -4541,8 +4727,8 @@ def test_settle_pending_live_trade_uses_official_market_endpoint_when_event_endp
     assert settled is True
     assert status["status"] == "settled"
     assert status["result"] == "DOWN"
-    assert status["trade_pnl"] == pytest.approx(-1.0)
-    assert updated_strategy.cash_pnl == pytest.approx(-1.0)
+    assert status["trade_pnl"] == pytest.approx(-1.035)
+    assert updated_strategy.cash_pnl == pytest.approx(-1.035)
     assert updated_strategy.pending_live_slug is None
     assert updated_strategy.pending_live_order_id is None
 
@@ -4585,8 +4771,8 @@ def test_settle_pending_live_trade_waits_for_final_price_when_price_to_beat_exis
     assert settled is True
     assert status["status"] == "provisional_loss"
     assert status["result"] == "PROVISIONAL_LOSS"
-    assert status["trade_pnl"] == pytest.approx(-1.0)
-    assert updated_strategy.cash_pnl == pytest.approx(-1.0)
+    assert status["trade_pnl"] == pytest.approx(-1.035)
+    assert updated_strategy.cash_pnl == pytest.approx(-1.035)
     assert updated_strategy.recovery_loss == 0.0
     assert updated_strategy.consecutive_losses == 1
     assert updated_strategy.pending_live_slug is None
@@ -4715,8 +4901,8 @@ def test_settle_pending_live_trade_prefers_official_market_result_over_position_
 
     assert settled is True
     assert status["result"] == "DOWN"
-    assert status["trade_pnl"] == pytest.approx(-1.0)
-    assert updated_strategy.cash_pnl == pytest.approx(-1.0)
+    assert status["trade_pnl"] == pytest.approx(-1.035)
+    assert updated_strategy.cash_pnl == pytest.approx(-1.035)
     assert updated_strategy.pending_live_slug is None
 
 
@@ -6481,6 +6667,233 @@ def test_run_live_trading_allows_market_buy_when_order_min_size_exceeds_plan_cos
     assert result["status"] == "stopped"
     assert len(stub_clob.created_orders) == 1
     assert stub_clob.created_orders[0].amount == pytest.approx(1.2)
+
+
+def test_run_live_trading_logs_order_id_and_submitted_plan_fill_source(tmp_path, monkeypatch):
+    stop_event = threading.Event()
+    stub_clob = _StubClobClient(balance_payload={"available": 10.0})
+
+    def fake_sleep(_seconds):
+        stop_event.set()
+
+    monkeypatch.setattr("trader.time.sleep", fake_sleep)
+    monkeypatch.setattr("trader._resolve_side_from_strategy", lambda **kwargs: SideDecision(side="UP"))
+    monkeypatch.setattr(
+        "trader.build_trade_plan",
+        lambda *args, **kwargs: TradePlan(
+            True,
+            "UP",
+            price=0.52,
+            order_size=1.923075,
+            order_cost=0.999999,
+            expected_profit=0.923076,
+            max_entry_price=0.54,
+        ),
+    )
+
+    result = run_live_trading(
+        AppConfig(
+            trade_mode="live",
+            live_trading_enabled=True,
+            live_private_key="pk",
+            live_funder="0xfunder",
+            live_strategy_ids=[10],
+            strategy_id=10,
+            min_stake=0.01,
+            max_stake=25.0,
+            poll_interval_seconds=1,
+        ),
+        market_client=_LiveMarketClient(),
+        clob_client=stub_clob,
+        state_path=tmp_path / "live_state.json",
+        log_path=tmp_path / "live_orders.csv",
+        stop_event=stop_event,
+    )
+
+    rows = list(csv.DictReader((tmp_path / "live_orders.csv").open(newline="", encoding="utf-8")))
+    submitted = next(row for row in rows if row["strategy"] == "10" and row["side"] == "UP")
+
+    assert result["status"] == "stopped"
+    assert submitted["order_id"] == "oid-123"
+    assert submitted["fill_source"] == "submitted_plan"
+
+
+def test_run_live_trading_settlement_uses_fee_adjusted_confirmed_fill_for_pnl(tmp_path, monkeypatch):
+    stop_event = threading.Event()
+    stub_clob = _StubClobClient(
+        order_payloads={"oid-prev": {"status": "filled"}},
+        trade_payloads={"oid-prev": [_confirmed_trade("oid-prev", size=1.923075, price=0.52)]},
+        balance_payload={"available": 10.0},
+    )
+    state_path = tmp_path / "live_state.json"
+    log_path = tmp_path / "live_orders.csv"
+    state_path.write_text(
+        json.dumps(
+            {
+                "live_strategies": {
+                    "10": {
+                        "round_index": 9,
+                        "cash_pnl": 0.0,
+                        "recovery_loss": 0.0,
+                        "consecutive_losses": 0,
+                        "consecutive_max_stake_skips": 0,
+                        "signal_round_slug": None,
+                        "signal_round_open_up_price": None,
+                        "signal_round_locked_side": None,
+                        "stop_loss_count": 0,
+                        "daily_realized_pnl": 0.0,
+                        "current_day": "2026-05-22",
+                        "pending_live_slug": "btc-updown-5m-prev",
+                        "pending_live_side": "UP",
+                        "pending_live_price": 0.52,
+                        "pending_live_order_size": 1.923075,
+                        "pending_live_order_cost": 0.999999,
+                        "pending_live_expected_profit": 0.923076,
+                        "pending_live_end_time": "2026-04-02T00:00:00+00:00",
+                        "pending_live_order_id": "oid-prev",
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    def fake_sleep(_seconds):
+        stop_event.set()
+
+    monkeypatch.setattr("trader.time.sleep", fake_sleep)
+    monkeypatch.setattr("trader._resolve_side_from_strategy", lambda **kwargs: SideDecision(side=None, reason="signal_unavailable"))
+
+    result = run_live_trading(
+        AppConfig(
+            trade_mode="live",
+            live_trading_enabled=True,
+            live_private_key="pk",
+            live_funder="0xfunder",
+            live_strategy_ids=[10],
+            strategy_id=10,
+            max_stake=25.0,
+            poll_interval_seconds=1,
+        ),
+        market_client=_SettlingLiveClient(),
+        clob_client=stub_clob,
+        state_path=state_path,
+        log_path=log_path,
+        stop_event=stop_event,
+    )
+
+    rows = list(csv.DictReader(log_path.open(newline="", encoding="utf-8")))
+    settled = next(row for row in rows if row["event_slug"] == "btc-updown-5m-prev")
+
+    assert result["status"] == "stopped"
+    assert settled["price"] == "0.537472"
+    assert settled["raw_price"] == "0.52"
+    assert settled["fee"] == "0.0335999664"
+    assert settled["raw_order_cost"] == "0.999999"
+    assert settled["order_cost"] == "1.0335989664"
+    assert settled["expected_profit"] == "0.8894760336"
+    assert settled["result"] == "DOWN"
+    assert settled["trade_pnl"] == "-1.0335989664"
+    assert settled["cash_pnl"] == "-1.0335989664"
+    assert settled["fill_source"] == "official_confirmed_trade"
+
+
+def test_run_live_trading_settlement_replaces_submitted_plan_with_confirmed_fill(tmp_path, monkeypatch):
+    stop_event = threading.Event()
+    stub_clob = _StubClobClient(
+        order_payloads={"oid-prev": {"status": "filled"}},
+        trade_payloads={"oid-prev": [_confirmed_trade("oid-prev", size=1.8518518518518516, price=0.54)]},
+        balance_payload={"available": 10.0},
+    )
+    state_path = tmp_path / "live_state.json"
+    log_path = tmp_path / "live_orders.csv"
+    state_path.write_text(
+        json.dumps(
+            {
+                "live_strategies": {
+                    "10": {
+                        "round_index": 9,
+                        "cash_pnl": 0.0,
+                        "recovery_loss": 0.0,
+                        "consecutive_losses": 0,
+                        "consecutive_max_stake_skips": 0,
+                        "signal_round_slug": None,
+                        "signal_round_open_up_price": None,
+                        "signal_round_locked_side": None,
+                        "stop_loss_count": 0,
+                        "daily_realized_pnl": 0.0,
+                        "current_day": "2026-05-22",
+                        "pending_live_slug": "btc-updown-5m-prev",
+                        "pending_live_side": "UP",
+                        "pending_live_price": 0.52,
+                        "pending_live_order_size": 1.923075,
+                        "pending_live_order_cost": 0.999999,
+                        "pending_live_expected_profit": 0.923076,
+                        "pending_live_end_time": "2026-04-02T00:00:00+00:00",
+                        "pending_live_order_id": "oid-prev",
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    start = datetime(2026, 4, 1, 23, 55, tzinfo=timezone.utc)
+    append_trade_log(
+        log_path,
+        TradeRecord(
+            timestamp=start,
+            mode="live",
+            round_index=8,
+            strategy=10,
+            entry_timing="OPEN",
+            event_slug="btc-updown-5m-prev",
+            start_time=start,
+            end_time=start + timedelta(minutes=5),
+            side="UP",
+            price=0.52,
+            order_size=1.923075,
+            order_cost=0.999999,
+            expected_profit=0.923076,
+            order_id="oid-prev",
+            fill_source="submitted_plan",
+        ),
+    )
+
+    def fake_sleep(_seconds):
+        stop_event.set()
+
+    monkeypatch.setattr("trader.time.sleep", fake_sleep)
+    monkeypatch.setattr("trader._resolve_side_from_strategy", lambda **kwargs: SideDecision(side=None, reason="signal_unavailable"))
+
+    result = run_live_trading(
+        AppConfig(
+            trade_mode="live",
+            live_trading_enabled=True,
+            live_private_key="pk",
+            live_funder="0xfunder",
+            live_strategy_ids=[10],
+            strategy_id=10,
+            max_stake=25.0,
+            poll_interval_seconds=1,
+        ),
+        market_client=_SettlingLiveClient(),
+        clob_client=stub_clob,
+        state_path=state_path,
+        log_path=log_path,
+        stop_event=stop_event,
+    )
+
+    rows = list(csv.DictReader(log_path.open(newline="", encoding="utf-8")))
+    settled = next(row for row in rows if row["event_slug"] == "btc-updown-5m-prev")
+
+    assert result["status"] == "stopped"
+    assert settled["price"] == "0.557388"
+    assert settled["order_size"] == "1.8518518518518516"
+    assert settled["order_cost"] == "1.0321999999999998"
+    assert settled["result"] == "DOWN"
+    assert settled["trade_pnl"] == "-1.0321999999999998"
+    assert settled["order_id"] == "oid-prev"
+    assert settled["fill_source"] == "official_confirmed_trade"
 
 
 def test_run_paper_trading_uses_simulated_budget_like_live_execution(tmp_path, monkeypatch):

@@ -103,6 +103,7 @@ from runtime_helpers import (
 )
 from clob_adapter import (
     OrderExecutionResult,
+    POLYMARKET_CRYPTO_TAKER_FEE_RATE,
     build_verified_pending_live_trade_plan as _build_verified_pending_live_trade_plan,
     create_live_clob_client as _create_live_clob_client,
     execute_order_plan as _adapter_execute_order_plan,
@@ -277,7 +278,8 @@ def _sync_live_state_ledger_from_trade_log(
                 if tracks_loss_streak:
                     ledger_state["consecutive_losses"] = 0
             else:
-                trade_pnl = -order_cost
+                existing_trade_pnl = _trade_log_float(row, "trade_pnl")
+                trade_pnl = existing_trade_pnl if existing_trade_pnl < 0 else -order_cost
                 ledger_state["cash_pnl"] += trade_pnl
                 if tracks_recovery_loss:
                     ledger_state["recovery_loss"] += order_cost
@@ -360,6 +362,127 @@ def _read_available_live_balance(*, cfg: AppConfig, clob_client: Any | None) -> 
     return _adapter_read_available_live_balance(cfg=cfg, clob_client=live_client)
 
 
+def _load_paper_mirror_state(state_path: Path, strategy_ids: list[int]) -> SessionState:
+    state = load_session_state(state_path, effective_paper_strategy_ids=strategy_ids)
+    _ensure_paper_strategy_state_map(state, strategy_ids)
+    _sync_legacy_paper_state_fields(state, strategy_ids)
+    return state
+
+
+def _mirror_live_decision_to_paper_skip(
+    *,
+    mirror_state_path: Path | None,
+    mirror_log_path: Path | None,
+    cfg: AppConfig,
+    strategy_id: int,
+    window: MarketWindow,
+    strategy_state: LiveStrategyState,
+    side: str,
+    price: float | None,
+    side_decision: SideDecision,
+    skip_reason: str | None,
+) -> None:
+    if mirror_state_path is None or mirror_log_path is None:
+        return
+    mirror_state = _load_paper_mirror_state(mirror_state_path, [strategy_id])
+    paper_state = mirror_state.paper_strategies.setdefault(strategy_id, PaperStrategyState())
+    if paper_state.last_processed_paper_event_slug == window.slug:
+        return
+    append_trade_log(
+        mirror_log_path,
+        TradeRecord(
+            timestamp=datetime.now(timezone.utc),
+            mode="paper",
+            round_index=paper_state.round_index,
+            strategy=strategy_id,
+            entry_timing=cfg.entry_timing,
+            event_slug=window.slug,
+            start_time=window.start_time,
+            end_time=window.end_time,
+            side=side,
+            price=price,
+            order_size=0.0,
+            order_cost=0.0,
+            expected_profit=0.0,
+            result=None,
+            trade_pnl=0.0,
+            cash_pnl=paper_state.cash_pnl,
+            recovery_loss=paper_state.recovery_loss,
+            consecutive_losses=paper_state.consecutive_losses,
+            skip_reason=skip_reason or "signal_unavailable",
+            **_signal_record_kwargs(side_decision),
+        ),
+    )
+    paper_state.last_processed_paper_event_slug = window.slug
+    paper_state.round_index += 1
+    mirror_state.paper_strategies[strategy_id] = paper_state
+    _sync_legacy_paper_state_fields(mirror_state, [strategy_id])
+    save_session_state(mirror_state_path, mirror_state)
+
+
+def _mirror_live_decision_to_pending_paper_trade(
+    *,
+    mirror_state_path: Path | None,
+    mirror_log_path: Path | None,
+    cfg: AppConfig,
+    strategy_id: int,
+    window: MarketWindow,
+    plan: TradePlan,
+    side: str,
+    side_decision: SideDecision,
+) -> None:
+    if mirror_state_path is None or mirror_log_path is None:
+        return
+    mirror_state = _load_paper_mirror_state(mirror_state_path, [strategy_id])
+    paper_state = mirror_state.paper_strategies.setdefault(strategy_id, PaperStrategyState())
+    if paper_state.last_processed_paper_event_slug == window.slug:
+        return
+    paper_session = _paper_strategy_state_to_session_state(paper_state, mirror_state)
+    strategy_cfg = replace(cfg, strategy_id=strategy_id)
+    experiment_id = _paper_experiment_id(strategy_id, paper_state)
+    queued = _queue_pending_paper_trade(
+        state=paper_session,
+        window=window,
+        plan=plan,
+        side=side,
+        cfg=strategy_cfg,
+        side_decision=side_decision,
+        experiment_id=experiment_id,
+    )
+    if queued:
+        paper_session.last_processed_paper_event_slug = window.slug
+        paper_session.round_index += 1
+    mirror_state.paper_strategies[strategy_id] = _session_state_to_paper_strategy_state(paper_session)
+    _sync_legacy_paper_state_fields(mirror_state, [strategy_id])
+    save_session_state(mirror_state_path, mirror_state)
+
+
+def _settle_mirrored_paper_trades_if_needed(
+    *,
+    mirror_state_path: Path | None,
+    mirror_log_path: Path | None,
+    market_client: PolymarketClient,
+    strategy_id: int,
+) -> None:
+    if mirror_state_path is None or mirror_log_path is None:
+        return
+    mirror_state = _load_paper_mirror_state(mirror_state_path, [strategy_id])
+    paper_state = mirror_state.paper_strategies.setdefault(strategy_id, PaperStrategyState())
+    if not paper_state.pending_paper_trades:
+        return
+    paper_session = _paper_strategy_state_to_session_state(paper_state, mirror_state)
+    paper_session, changed = _settle_pending_paper_trades(
+        client=market_client,
+        state=paper_session,
+        log_path=mirror_log_path,
+    )
+    if not changed:
+        return
+    mirror_state.paper_strategies[strategy_id] = _session_state_to_paper_strategy_state(paper_session)
+    _sync_legacy_paper_state_fields(mirror_state, [strategy_id])
+    save_session_state(mirror_state_path, mirror_state)
+
+
 def _submit_live_strategy_order(
     *,
     cfg: AppConfig,
@@ -413,9 +536,9 @@ def _plan_with_verified_live_fill(
     max_entry_price: float | None = None,
     strategy_id: int | None = None,
     slug: str | None = None,
-) -> TradePlan:
+) -> tuple[TradePlan, str]:
     if not order_id or clob_client is None:
-        return plan
+        return plan, "submitted_plan"
     try:
         verified_plan = _build_verified_pending_live_trade_plan(
             LiveStrategyState(
@@ -424,12 +547,13 @@ def _plan_with_verified_live_fill(
                 pending_live_tracks_recovery_loss=plan.tracks_recovery_loss,
             ),
             clob_client=clob_client,
+            fee_rate=POLYMARKET_CRYPTO_TAKER_FEE_RATE,
         )
     except Exception as exc:
         _runtime_log(f"live order fill lookup failed order_id={order_id}: {exc}")
-        return plan
+        return plan, "submitted_plan"
     if verified_plan is None:
-        return plan
+        return plan, "submitted_plan"
     if (
         max_entry_price is not None
         and verified_plan.price is not None
@@ -443,7 +567,7 @@ def _plan_with_verified_live_fill(
             + " fill_price=" + f"{verified_plan.price:.6f}"
             + " max_entry_price=" + str(max_entry_price)
         )
-    return verified_plan
+    return verified_plan, "official_fill"
 
 
 def _sleep_until_round_end(
@@ -995,7 +1119,7 @@ def place_live_order(
             "signal_locked": side_decision.signal_locked,
         }
 
-    executed_plan = _plan_with_verified_live_fill(
+    executed_plan, fill_source = _plan_with_verified_live_fill(
         plan=plan,
         side=side,
         order_id=order_id,
@@ -1025,6 +1149,11 @@ def place_live_order(
             cash_pnl=state.cash_pnl,
             recovery_loss=state.recovery_loss,
             consecutive_losses=state.consecutive_losses,
+            order_id=order_id,
+            fill_source=fill_source,
+            raw_price=executed_plan.raw_price,
+            raw_order_cost=executed_plan.raw_order_cost,
+            fee=executed_plan.fee,
             tracks_recovery_loss=executed_plan.tracks_recovery_loss,
             **_signal_record_kwargs(side_decision),
         ),
@@ -1049,7 +1178,10 @@ def place_live_order(
         "side": side,
         "token_id": token_id,
         "price": executed_plan.price,
+        "raw_price": executed_plan.raw_price,
         "order_size": executed_plan.order_size,
+        "raw_order_cost": executed_plan.raw_order_cost,
+        "fee": executed_plan.fee,
         "order_cost": executed_plan.order_cost,
         "expected_profit": executed_plan.expected_profit,
         "order_type": cfg.live_order_type.upper(),
@@ -1070,6 +1202,8 @@ def run_live_trading(
     clob_client: Any | None = None,
     state_path: Path | None = None,
     log_path: Path | None = None,
+    mirror_paper_state_path: Path | None = None,
+    mirror_paper_log_path: Path | None = None,
     stop_event: threading.Event | None = None,
     config_provider: Callable[[], AppConfig] | None = None,
     runtime_control: RuntimeControl | None = None,
@@ -1081,6 +1215,8 @@ def run_live_trading(
     client_provided = market_client is not None
     state_path_provided = state_path is not None
     log_path_provided = log_path is not None
+    mirror_paper_state_path_provided = mirror_paper_state_path is not None
+    mirror_paper_log_path_provided = mirror_paper_log_path is not None
     market_client = market_client or PolymarketClient(cfg)
     binance_signal_service = _sync_live_binance_signal_service(
         cfg=cfg,
@@ -1089,6 +1225,9 @@ def run_live_trading(
     )
     state_path = state_path or cfg.logs_dir / 'live_session_state.json'
     log_path = log_path or cfg.logs_dir / 'live_orders.csv'
+    if cfg.trade_mode == "both":
+        mirror_paper_state_path = mirror_paper_state_path or cfg.logs_dir / "paper" / cfg.market_timeframe / "session_state.json"
+        mirror_paper_log_path = mirror_paper_log_path or cfg.logs_dir / "paper" / cfg.market_timeframe / "paper_trades.csv"
     cached_live_client = clob_client
     cached_live_client_key = _live_clob_client_config_key(cfg) if clob_client is None else None
     initial_state = _load_session_state_for_live_runtime(state_path, configured_strategy_ids)
@@ -1151,6 +1290,10 @@ def run_live_trading(
                         state_path = cfg.logs_dir / 'live_session_state.json'
                     if not log_path_provided:
                         log_path = cfg.logs_dir / 'live_orders.csv'
+                    if not mirror_paper_state_path_provided and cfg.trade_mode == "both":
+                        mirror_paper_state_path = cfg.logs_dir / "paper" / cfg.market_timeframe / "session_state.json"
+                    if not mirror_paper_log_path_provided and cfg.trade_mode == "both":
+                        mirror_paper_log_path = cfg.logs_dir / "paper" / cfg.market_timeframe / "paper_trades.csv"
             now = datetime.now(timezone.utc)
             try:
                 if clob_client is not None:
@@ -1203,6 +1346,12 @@ def run_live_trading(
                 strategy_cfg = _cfg_for_live_strategy(cfg, strategy_id)
                 can_continue_with_pending = _strategy_can_continue_with_pending(strategy_cfg)
                 try:
+                    _settle_mirrored_paper_trades_if_needed(
+                        mirror_state_path=mirror_paper_state_path,
+                        mirror_log_path=mirror_paper_log_path,
+                        market_client=market_client,
+                        strategy_id=strategy_id,
+                    )
                     _refresh_daily_session_state(strategy_state, now)
                     strategy_state, pending_items, _ = _settle_pending_live_trades_if_needed(
                         market_client=market_client,
@@ -1530,6 +1679,18 @@ def run_live_trading(
                                 strategy_state.last_processed_live_event_slug = target_round.slug
                                 strategy_state.round_index += 1
                                 state.live_strategies[strategy_id] = strategy_state
+                                _mirror_live_decision_to_paper_skip(
+                                    mirror_state_path=mirror_paper_state_path,
+                                    mirror_log_path=mirror_paper_log_path,
+                                    cfg=strategy_cfg,
+                                    strategy_id=strategy_id,
+                                    window=target_round,
+                                    strategy_state=strategy_state,
+                                    side="SKIP",
+                                    price=_side_decision_log_price(side_decision),
+                                    side_decision=side_decision,
+                                    skip_reason=skip_reason,
+                                )
                             strategy_results.append(
                                 {
                                     "strategy_id": strategy_id,
@@ -1581,6 +1742,18 @@ def run_live_trading(
                                 strategy_state.last_processed_live_event_slug = target_round.slug
                                 strategy_state.round_index += 1
                                 state.live_strategies[strategy_id] = strategy_state
+                                _mirror_live_decision_to_paper_skip(
+                                    mirror_state_path=mirror_paper_state_path,
+                                    mirror_log_path=mirror_paper_log_path,
+                                    cfg=strategy_cfg,
+                                    strategy_id=strategy_id,
+                                    window=target_round,
+                                    strategy_state=strategy_state,
+                                    side=side,
+                                    price=price,
+                                    side_decision=side_decision,
+                                    skip_reason="ws_stale",
+                                )
                             strategy_results.append(
                                 {
                                     "strategy_id": strategy_id,
@@ -1628,6 +1801,18 @@ def run_live_trading(
                             strategy_state.round_index += 1
                             strategy_state.last_processed_live_event_slug = target_round.slug
                             state.live_strategies[strategy_id] = strategy_state
+                            _mirror_live_decision_to_paper_skip(
+                                mirror_state_path=mirror_paper_state_path,
+                                mirror_log_path=mirror_paper_log_path,
+                                cfg=strategy_cfg,
+                                strategy_id=strategy_id,
+                                window=target_round,
+                                strategy_state=strategy_state,
+                                side=side,
+                                price=price,
+                                side_decision=side_decision,
+                                skip_reason="entry_window_missed",
+                            )
                             strategy_results.append(
                                 {
                                     "strategy_id": strategy_id,
@@ -1717,6 +1902,18 @@ def run_live_trading(
                                         skip_streak=skip_streak,
                                     )
                                 state.live_strategies[strategy_id] = strategy_state
+                                _mirror_live_decision_to_paper_skip(
+                                    mirror_state_path=mirror_paper_state_path,
+                                    mirror_log_path=mirror_paper_log_path,
+                                    cfg=strategy_cfg,
+                                    strategy_id=strategy_id,
+                                    window=target_round,
+                                    strategy_state=strategy_state,
+                                    side=side,
+                                    price=price,
+                                    side_decision=side_decision,
+                                    skip_reason=plan.skip_reason,
+                                )
                             strategy_results.append(
                                 {
                                     "strategy_id": strategy_id,
@@ -1829,7 +2026,7 @@ def run_live_trading(
                                 }
                             )
                             continue
-                        executed_plan = _plan_with_verified_live_fill(
+                        executed_plan, fill_source = _plan_with_verified_live_fill(
                             plan=plan,
                             side=side,
                             order_id=execution.order_id,
@@ -1859,6 +2056,11 @@ def run_live_trading(
                                 cash_pnl=strategy_state.cash_pnl,
                                 recovery_loss=strategy_state.recovery_loss,
                                 consecutive_losses=strategy_state.consecutive_losses,
+                                order_id=execution.order_id,
+                                fill_source=fill_source,
+                                raw_price=executed_plan.raw_price,
+                                raw_order_cost=executed_plan.raw_order_cost,
+                                fee=executed_plan.fee,
                                 **_signal_record_kwargs(side_decision),
                             ),
                         )
@@ -1874,6 +2076,16 @@ def run_live_trading(
                         strategy_state.round_index += 1
                         strategy_state.last_processed_live_event_slug = target_round.slug
                         state.live_strategies[strategy_id] = strategy_state
+                        _mirror_live_decision_to_pending_paper_trade(
+                            mirror_state_path=mirror_paper_state_path,
+                            mirror_log_path=mirror_paper_log_path,
+                            cfg=strategy_cfg,
+                            strategy_id=strategy_id,
+                            window=target_round,
+                            plan=plan,
+                            side=side,
+                            side_decision=side_decision,
+                        )
                         strategy_results.append(
                             {
                                 "strategy_id": strategy_id,
@@ -1882,7 +2094,10 @@ def run_live_trading(
                                 "side": side,
                                 "token_id": token_id,
                                 "price": executed_plan.price,
+                                "raw_price": executed_plan.raw_price,
                                 "order_size": executed_plan.order_size,
+                                "raw_order_cost": executed_plan.raw_order_cost,
+                                "fee": executed_plan.fee,
                                 "order_cost": executed_plan.order_cost,
                                 "expected_profit": executed_plan.expected_profit,
                                 "order_type": strategy_cfg.live_order_type.upper(),

@@ -2,10 +2,14 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
+from decimal import Decimal
 from typing import Any, Callable
 
 from config import AppConfig
 from models import LiveStrategyState, TradePlan
+
+
+POLYMARKET_CRYPTO_TAKER_FEE_RATE = 0.07
 
 
 @dataclass(slots=True)
@@ -75,6 +79,43 @@ def coerce_positive_float(raw: Any) -> float | None:
     if value <= 0:
         return None
     return value
+
+
+def calculate_crypto_taker_fee(shares: float, price: float, fee_rate: float = POLYMARKET_CRYPTO_TAKER_FEE_RATE) -> float:
+    if shares <= 0 or not 0 < price < 1 or fee_rate <= 0:
+        return 0.0
+    d_shares = Decimal(str(shares))
+    d_price = Decimal(str(price))
+    d_fee_rate = Decimal(str(fee_rate))
+    return float(d_shares * d_fee_rate * d_price * (Decimal("1") - d_price))
+
+
+def apply_fee_to_trade_plan(plan: TradePlan, *, fee_rate: float = POLYMARKET_CRYPTO_TAKER_FEE_RATE) -> TradePlan:
+    if not plan.should_trade or plan.order_size <= 0 or plan.price is None or not 0 < plan.price < 1:
+        return plan
+    raw_price = plan.raw_price if plan.raw_price is not None else plan.price
+    raw_order_cost = plan.raw_order_cost if plan.raw_order_cost is not None else plan.order_size * raw_price
+    fee = calculate_crypto_taker_fee(plan.order_size, raw_price, fee_rate)
+    if fee <= 0:
+        return plan
+    effective_cost = float(Decimal(str(raw_order_cost)) + Decimal(str(fee)))
+    effective_price = float(Decimal(str(effective_cost)) / Decimal(str(plan.order_size)))
+    return TradePlan(
+        True,
+        side=plan.side,
+        price=effective_price,
+        order_size=plan.order_size,
+        order_cost=effective_cost,
+        expected_profit=plan.order_size - effective_cost,
+        max_entry_price=plan.max_entry_price,
+        order_cost_multiplier=plan.order_cost_multiplier,
+        raw_price=raw_price,
+        raw_order_cost=raw_order_cost,
+        fee=fee,
+        skip_reason=plan.skip_reason,
+        stop_loss_triggered=plan.stop_loss_triggered,
+        tracks_recovery_loss=plan.tracks_recovery_loss,
+    )
 
 
 def _payload_items(payload: Any) -> list[dict[str, Any]]:
@@ -236,6 +277,7 @@ def build_trade_plan_from_official_trades(
     clob_client: Any,
     order_payload: dict[str, Any] | None = None,
     require_confirmed_trades: bool = False,
+    fee_rate: float = 0.0,
 ) -> TradePlan | None:
     order_id = str(strategy_state.pending_live_order_id or "").strip()
     if not order_id:
@@ -249,23 +291,26 @@ def build_trade_plan_from_official_trades(
         size, price = _trade_size_and_price(trade)
         if size is None or price is None or not 0 < price < 1:
             continue
-        total_size += size
-        total_cost += size * price
+        total_size = float(Decimal(str(total_size)) + Decimal(str(size)))
+        total_cost = float(Decimal(str(total_cost)) + (Decimal(str(size)) * Decimal(str(price))))
 
     if total_size <= 0 or total_cost <= 0:
         return None
-    fill_price = total_cost / total_size
+    fill_price = float(Decimal(str(total_cost)) / Decimal(str(total_size)))
     if not 0 < fill_price < 1:
         return None
-    return TradePlan(
+    plan = TradePlan(
         True,
         side=strategy_state.pending_live_side,
         price=fill_price,
         order_size=total_size,
         order_cost=total_cost,
         expected_profit=total_size * (1 - fill_price),
+        raw_price=fill_price,
+        raw_order_cost=total_cost,
         tracks_recovery_loss=strategy_state.pending_live_tracks_recovery_loss,
     )
+    return apply_fee_to_trade_plan(plan, fee_rate=fee_rate) if fee_rate > 0 else plan
 
 
 def extract_live_order_id(response: Any) -> str | None:
@@ -429,6 +474,7 @@ def build_verified_pending_live_trade_plan(
     *,
     clob_client: Any | None,
     require_confirmed_trades: bool = False,
+    fee_rate: float = 0.0,
 ) -> TradePlan | None:
     if strategy_state.pending_live_side not in {"UP", "DOWN"}:
         raise RuntimeError("Pending live trade is missing a valid side.")
@@ -450,6 +496,7 @@ def build_verified_pending_live_trade_plan(
         clob_client=clob_client,
         order_payload=order_payload,
         require_confirmed_trades=require_confirmed_trades,
+        fee_rate=fee_rate,
     )
     if official_trade_plan is not None:
         return official_trade_plan
@@ -501,15 +548,18 @@ def build_verified_pending_live_trade_plan(
     if order_size is None or order_cost is None or fill_price is None or not 0 < fill_price < 1:
         return None
 
-    return TradePlan(
+    plan = TradePlan(
         True,
         side=strategy_state.pending_live_side,
         price=fill_price,
         order_size=order_size,
         order_cost=order_cost,
         expected_profit=order_size * (1 - fill_price),
+        raw_price=fill_price,
+        raw_order_cost=order_cost,
         tracks_recovery_loss=strategy_state.pending_live_tracks_recovery_loss,
     )
+    return apply_fee_to_trade_plan(plan, fee_rate=fee_rate) if fee_rate > 0 else plan
 
 
 def build_live_market_order_args(
