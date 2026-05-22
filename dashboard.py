@@ -8,7 +8,7 @@ import re
 import shutil
 import threading
 from collections import deque
-from dataclasses import asdict, dataclass, field, replace
+from dataclasses import asdict, dataclass, field, fields, replace
 from datetime import datetime, timezone
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -17,6 +17,10 @@ from typing import Any
 from urllib.parse import parse_qs, urlparse
 
 from atomic_io import atomic_write_text
+from clob_adapter import (
+    create_live_clob_client as _create_live_clob_client,
+    read_available_live_balance as _read_available_live_balance,
+)
 from config import (
     AppConfig,
     MARKET_TIMEFRAME_DEFINITIONS,
@@ -60,7 +64,13 @@ from trader import (
     _ws_is_stale_for_trade,
     resolve_quote_price,
 )
-from runtime_config import validate_live_runtime_config
+from runtime_config import (
+    cfg_for_live_strategy as _cfg_for_live_strategy,
+    cfg_for_paper_strategy as _runtime_cfg_for_paper_strategy,
+    live_strategy_ids_for_runtime as _live_strategy_ids_for_runtime,
+    paper_strategy_ids_for_runtime as _paper_strategy_ids_for_runtime,
+    validate_live_runtime_config,
+)
 
 
 _POLYMARKET_CLIENT_CLASS = PolymarketClient
@@ -718,6 +728,61 @@ def _optional_float(value: Any) -> float | None:
         return None
 
 
+def _optional_int(value: Any) -> int | None:
+    if value in (None, ""):
+        return None
+    try:
+        return int(float(value))
+    except (TypeError, ValueError):
+        return None
+
+
+def _market_first_value(payload: dict[str, Any], keys: tuple[str, ...]) -> Any:
+    for key in keys:
+        value = payload.get(key)
+        if value not in (None, ""):
+            return value
+    lowered = {str(key).lower(): value for key, value in payload.items()}
+    for key in keys:
+        value = lowered.get(key.lower())
+        if value not in (None, ""):
+            return value
+    return None
+
+
+def _optional_bool(value: Any) -> bool | None:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"true", "1", "yes", "on"}:
+            return True
+        if normalized in {"false", "0", "no", "off"}:
+            return False
+    return None
+
+
+def _health_check_payload(
+    check_id: str,
+    label: str,
+    *,
+    ok: bool,
+    detail: str,
+    value: Any | None = None,
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "id": check_id,
+        "label": label,
+        "ok": bool(ok),
+        "detail": detail,
+    }
+    if value is not None:
+        payload["value"] = value
+    return payload
+
+
 def _terminal_outcome_price(value: float | None, target: float) -> bool:
     return value is not None and abs(value - target) <= 1e-9
 
@@ -1346,6 +1411,32 @@ def _auto_reconcile_live_ledger(
         cfg=cfg,
     )
     return changed
+
+
+_LIVE_HEALTH_PROFILE_COMPARE_ATTRS: tuple[str, ...] = tuple(
+    field.name
+    for field in fields(AppConfig)
+    if field.init
+    and field.name
+    not in {
+        "trade_mode",
+        "strategy_id",
+        "strategy_ids",
+        "paper_strategy_ids",
+        "live_strategy_ids",
+        "paper_timeframes",
+        "live_trading_enabled",
+        "live_private_key",
+        "live_api_key",
+        "live_api_secret",
+        "live_api_passphrase",
+        "live_chain_id",
+        "live_signature_type",
+        "live_funder",
+        "live_order_type",
+        "paper_simulated_wallet_balance",
+    }
+)
 
 
 
@@ -2586,6 +2677,280 @@ class DashboardState:
         payload["reset"] = {"mode": target_mode, "strategy": str(strategy_id)}
         return payload
 
+    def _live_health_strategy_alignment(self, cfg: AppConfig) -> tuple[list[str], list[str], list[str]]:
+        paper_ids = [str(item) for item in _paper_strategy_ids_for_runtime(cfg)]
+        live_ids = [str(item) for item in _live_strategy_ids_for_runtime(cfg)]
+        diffs: list[str] = []
+        missing_paper_ids = [strategy_id for strategy_id in live_ids if strategy_id not in paper_ids]
+        if missing_paper_ids:
+            diffs.append(f"missing paper strategies for live: {','.join(missing_paper_ids)}")
+        for strategy_id_text in sorted(set(live_ids) - set(missing_paper_ids), key=lambda item: int(item)):
+            strategy_id = int(strategy_id_text)
+            paper_cfg = _runtime_cfg_for_paper_strategy(cfg, strategy_id)
+            live_cfg = _cfg_for_live_strategy(cfg, strategy_id)
+            for attr_name in _LIVE_HEALTH_PROFILE_COMPARE_ATTRS:
+                if getattr(paper_cfg, attr_name, None) != getattr(live_cfg, attr_name, None):
+                    diffs.append(f"S{strategy_id_text}.{attr_name}")
+                    break
+        return paper_ids, live_ids, diffs
+
+    def _live_health_market_constraints(
+        self,
+        *,
+        client: PolymarketClient | Any,
+        live_client: Any | None,
+        now: datetime,
+    ) -> tuple[dict[str, Any], str | None]:
+        current_round, next_round = client.find_current_and_next_rounds(now=now)
+        display_round = _select_display_round(current_round=current_round, next_round=next_round)
+        if display_round is None:
+            return {}, "当前没有可检查的 Polymarket 轮次。"
+
+        market = client.get_market_by_slug(display_round.slug)
+        if not isinstance(market, dict):
+            return {"round_slug": display_round.slug}, "当前轮次市场返回值不可识别。"
+
+        clob_info: dict[str, Any] = {}
+        condition_id = str(
+            _market_first_value(
+                market,
+                ("conditionId", "condition_id", "conditionID"),
+            )
+            or ""
+        ).strip()
+        if condition_id:
+            get_clob_market = getattr(client, "get_clob_market_by_condition_id", None)
+            if callable(get_clob_market):
+                try:
+                    maybe_clob_info = get_clob_market(condition_id)
+                    if isinstance(maybe_clob_info, dict):
+                        clob_info = maybe_clob_info
+                except Exception:
+                    clob_info = {}
+
+        token_ids = extract_token_ids(market.get("clobTokenIds"), market.get("outcomes"))
+        sample_token_id = str(token_ids.get("UP") or token_ids.get("DOWN") or "").strip()
+        tick_size = (
+            _market_first_value(clob_info, ("minimum_tick_size", "minimumTickSize", "tick_size", "tickSize", "mts"))
+            or _market_first_value(market, ("minimum_tick_size", "minimumTickSize", "tick_size", "tickSize", "mts"))
+        )
+        neg_risk = _optional_bool(
+            _market_first_value(clob_info, ("negRisk", "neg_risk", "nr"))
+            or _market_first_value(market, ("negRisk", "neg_risk", "nr"))
+        )
+        if live_client is not None and sample_token_id:
+            if tick_size in (None, ""):
+                get_tick_size = getattr(live_client, "get_tick_size", None)
+                if callable(get_tick_size):
+                    try:
+                        tick_size = get_tick_size(sample_token_id)
+                    except Exception:
+                        tick_size = None
+            if neg_risk is None:
+                get_neg_risk = getattr(live_client, "get_neg_risk", None)
+                if callable(get_neg_risk):
+                    try:
+                        neg_risk = _optional_bool(get_neg_risk(sample_token_id))
+                    except Exception:
+                        neg_risk = None
+
+        constraints = {
+            "round_slug": display_round.slug,
+            "round_title": display_round.title,
+            "round_start_time": _iso(display_round.start_time),
+            "round_end_time": _iso(display_round.end_time),
+            "condition_id": condition_id or None,
+            "sample_token_id": sample_token_id or None,
+            "order_min_size": _optional_float(
+                _market_first_value(
+                    market,
+                    ("orderMinSize", "minimum_order_size", "min_order_size", "minimumOrderSize", "minOrderSize"),
+                )
+            ),
+            "minimum_tick_size": str(tick_size) if tick_size not in (None, "") else None,
+            "neg_risk": neg_risk,
+            "fees_enabled": _optional_bool(_market_first_value(market, ("feesEnabled", "fees_enabled"))),
+            "maker_base_fee": _optional_int(
+                _market_first_value(clob_info, ("makerBaseFee", "maker_base_fee", "mbf"))
+                or _market_first_value(market, ("makerBaseFee", "maker_base_fee", "mbf"))
+            ),
+            "taker_base_fee": _optional_int(
+                _market_first_value(clob_info, ("takerBaseFee", "taker_base_fee", "tbf"))
+                or _market_first_value(market, ("takerBaseFee", "taker_base_fee", "tbf"))
+            ),
+        }
+        if constraints["order_min_size"] is None:
+            return constraints, "未读到当前市场最小下单金额。"
+        if constraints["minimum_tick_size"] in (None, ""):
+            return constraints, "未读到当前市场 tick size。"
+        return constraints, None
+
+    def get_live_health_payload(self) -> dict[str, Any]:
+        with self._lock:
+            validation_values = dict(self._env_values)
+            validation_values["TRADE_MODE"] = "both" if str(validation_values.get("TRADE_MODE") or "").lower() == "both" else "live"
+            cfg = self._build_config(validation_values)
+            client = self._client
+        now = datetime.now(timezone.utc)
+        checks: list[dict[str, Any]] = []
+        constraints: dict[str, Any] = {
+            "order_type": str(getattr(cfg, "live_order_type", "") or "FOK").upper(),
+            "signature_type": getattr(cfg, "live_signature_type", None),
+            "has_funder": bool(getattr(cfg, "live_funder", None)),
+        }
+
+        try:
+            validate_live_runtime_config(cfg)
+            checks.append(
+                _health_check_payload(
+                    "live_config",
+                    "实盘配置",
+                    ok=True,
+                    detail="实盘配置已通过运行前校验。",
+                )
+            )
+        except Exception as exc:
+            checks.append(
+                _health_check_payload(
+                    "live_config",
+                    "实盘配置",
+                    ok=False,
+                    detail=_localize_runtime_message(str(exc)) or str(exc),
+                )
+            )
+
+        paper_ids, live_ids, strategy_diffs = self._live_health_strategy_alignment(cfg)
+        constraints["paper_strategy_ids"] = paper_ids
+        constraints["live_strategy_ids"] = live_ids
+        constraints["strategy_profile_diff_count"] = len(strategy_diffs)
+        checks.append(
+            _health_check_payload(
+                "strategy_alignment",
+                "纸面/实盘策略一致",
+                ok=not strategy_diffs,
+                detail=(
+                    f"策略组合一致：{','.join(live_ids) or '--'}。"
+                    if not strategy_diffs
+                    else "存在差异：" + "; ".join(strategy_diffs[:5])
+                ),
+                value={"paper": paper_ids, "live": live_ids, "profile_diffs": len(strategy_diffs)},
+            )
+        )
+
+        live_client = None
+        try:
+            live_client = _create_live_clob_client(cfg)
+            checks.append(
+                _health_check_payload(
+                    "clob_client",
+                    "CLOB 客户端",
+                    ok=True,
+                    detail="CLOB 客户端和 API 凭证可用。",
+                )
+            )
+        except Exception as exc:
+            checks.append(
+                _health_check_payload(
+                    "clob_client",
+                    "CLOB 客户端",
+                    ok=False,
+                    detail=_localize_runtime_message(str(exc)) or str(exc),
+                )
+            )
+
+        if live_client is not None:
+            try:
+                available_balance = _read_available_live_balance(cfg=cfg, clob_client=live_client)
+                constraints["available_balance"] = available_balance
+                checks.append(
+                    _health_check_payload(
+                        "balance_allowance",
+                        "余额/授权",
+                        ok=available_balance > 0,
+                        detail=f"可用余额/授权约 {available_balance:.6f} USDC。",
+                        value=available_balance,
+                    )
+                )
+            except Exception as exc:
+                constraints["available_balance"] = None
+                checks.append(
+                    _health_check_payload(
+                        "balance_allowance",
+                        "余额/授权",
+                        ok=False,
+                        detail=str(exc),
+                    )
+                )
+        else:
+            constraints["available_balance"] = None
+            checks.append(
+                _health_check_payload(
+                    "balance_allowance",
+                    "余额/授权",
+                    ok=False,
+                    detail="CLOB 客户端不可用，未检查余额/授权。",
+                )
+            )
+
+        try:
+            market_constraints, market_error = self._live_health_market_constraints(
+                client=client,
+                live_client=live_client,
+                now=now,
+            )
+            constraints.update(market_constraints)
+            market_ok = market_error is None
+            checks.append(
+                _health_check_payload(
+                    "market_constraints",
+                    "当前市场约束",
+                    ok=market_ok,
+                    detail=(
+                        "已读取当前市场最小下单、tick size 和费用参数。"
+                        if market_ok
+                        else market_error or "当前市场约束不可用。"
+                    ),
+                    value={
+                        "order_min_size": constraints.get("order_min_size"),
+                        "minimum_tick_size": constraints.get("minimum_tick_size"),
+                        "fees_enabled": constraints.get("fees_enabled"),
+                    },
+                )
+            )
+        except Exception as exc:
+            checks.append(
+                _health_check_payload(
+                    "market_constraints",
+                    "当前市场约束",
+                    ok=False,
+                    detail=str(exc),
+                )
+            )
+
+        order_type_ok = constraints["order_type"] in {"FOK", "FAK"}
+        checks.append(
+            _health_check_payload(
+                "order_type",
+                "订单类型",
+                ok=order_type_ok,
+                detail=(
+                    f"实盘市价单将使用 {constraints['order_type']}。"
+                    if order_type_ok
+                    else f"当前订单类型 {constraints['order_type']} 不适合实盘市价单。"
+                ),
+                value=constraints["order_type"],
+            )
+        )
+
+        ok = all(item["ok"] for item in checks)
+        return {
+            "ok": ok,
+            "checked_at": _iso(now),
+            "summary": "实盘只读健康检查通过。" if ok else "实盘健康检查存在需要处理的项目。",
+            "checks": checks,
+            "constraints": constraints,
+        }
+
     def get_market_payload(self, *, strategy: int | str | None = None, timeframe: str | None = None) -> dict[str, Any]:
         with self._lock:
             cfg = self._cfg
@@ -3144,6 +3509,9 @@ class _DashboardRequestHandler(BaseHTTPRequestHandler):
                 strategy = (query.get("strategy") or [None])[0]
                 self._send_json(self.dashboard_state.get_live_summary_payload(strategy=strategy))
                 return
+            if parsed.path == "/api/live/health":
+                self._send_json(self.dashboard_state.get_live_health_payload())
+                return
             if parsed.path == "/api/paper/recent":
                 query = parse_qs(parsed.query)
                 limit = int((query.get("limit") or ["20"])[0])
@@ -3581,6 +3949,23 @@ def _dashboard_html() -> str:
         </div>
 
         <div id="diagnosticsPanel" hidden>
+          <div id="liveHealthPanel" class="box">
+            <div class="box-title">实盘健康检查</div>
+            <div class="actions">
+              <button id="btnLiveHealthCheck" class="btn btn-ghost" type="button">只读检查</button>
+              <div id="liveHealthStatus" class="chip">未检查</div>
+            </div>
+            <div class="kv-grid">
+              <div class="kv"><div class="k">可用余额</div><div id="liveHealthBalance" class="v">--</div></div>
+              <div class="kv"><div class="k">订单类型</div><div id="liveHealthOrderType" class="v">--</div></div>
+              <div class="kv"><div class="k">最小下单</div><div id="liveHealthMinOrder" class="v">--</div></div>
+              <div class="kv"><div class="k">Tick size</div><div id="liveHealthTickSize" class="v">--</div></div>
+              <div class="kv"><div class="k">手续费</div><div id="liveHealthFees" class="v">--</div></div>
+              <div class="kv"><div class="k">策略组合</div><div id="liveHealthStrategies" class="v">--</div></div>
+            </div>
+            <div id="liveHealthList" class="runtime-list"></div>
+          </div>
+
           <div id=strategy6Panel class=box>
             <div class=box-title>策略 6 OFI</div>
             <div class=row>
@@ -7061,6 +7446,45 @@ function renderRuntimeStatus(payload) {
   setHtml('runtimeOptimizerPromotableList', renderOptimizerCandidateList(payload.optimizer_promotable_candidates || []));
 }
 
+function renderLiveHealth(payload) {
+  payload = payload || {};
+  const constraints = payload.constraints || {};
+  setChip('liveHealthStatus', payload.ok ? '检查通过' : '需要处理', payload.ok ? 'ok' : 'warn');
+  setText('liveHealthBalance', constraints.available_balance === null || constraints.available_balance === undefined ? '--' : fmtNum(constraints.available_balance, 6));
+  setText('liveHealthOrderType', constraints.order_type || '--');
+  setText('liveHealthMinOrder', constraints.order_min_size === null || constraints.order_min_size === undefined ? '--' : fmtNum(constraints.order_min_size, 2));
+  setText('liveHealthTickSize', constraints.minimum_tick_size || '--');
+  const feesEnabled = constraints.fees_enabled;
+  const makerFee = constraints.maker_base_fee === null || constraints.maker_base_fee === undefined ? '--' : String(constraints.maker_base_fee);
+  const takerFee = constraints.taker_base_fee === null || constraints.taker_base_fee === undefined ? '--' : String(constraints.taker_base_fee);
+  setText('liveHealthFees', (feesEnabled === null || feesEnabled === undefined ? '--' : (feesEnabled ? '开启' : '关闭')) + ' / M ' + makerFee + ' / T ' + takerFee);
+  const paperStrategies = Array.isArray(constraints.paper_strategy_ids) ? constraints.paper_strategy_ids.join(',') : '--';
+  const liveStrategies = Array.isArray(constraints.live_strategy_ids) ? constraints.live_strategy_ids.join(',') : '--';
+  setText('liveHealthStrategies', '纸面 ' + paperStrategies + ' / 实盘 ' + liveStrategies);
+  const checks = Array.isArray(payload.checks) ? payload.checks : [];
+  setHtml('liveHealthList', checks.map((item) => {
+    const tone = item.ok ? 'ok' : 'err';
+    const stateText = item.ok ? '通过' : '异常';
+    return ''
+      + '<div class="runtime-item">'
+      +   '<span class="rk">' + esc(item.label || item.id || '--') + '</span>'
+      +   '<span class="rv"><span class="chip ' + tone + '">' + stateText + '</span> ' + esc(item.detail || '--') + '</span>'
+      + '</div>';
+  }).join('') || '<div class="runtime-item"><span class="rk">检查项</span><span class="rv">--</span></div>');
+}
+
+async function refreshLiveHealth() {
+  setChip('liveHealthStatus', '检查中', 'warn');
+  try {
+    const data = await apiGet('/api/live/health');
+    renderLiveHealth(data);
+  } catch (err) {
+    setChip('liveHealthStatus', '检查失败', 'err');
+    setHtml('liveHealthList', '<div class="runtime-item"><span class="rk">错误</span><span class="rv">' + esc(err && err.message ? err.message : '检查失败') + '</span></div>');
+    console.error(err);
+  }
+}
+
 function maybeShowRuntimeAlert(payload) {
   const message = payload && payload.runtime_alert_message;
   const code = payload && payload.runtime_alert_code;
@@ -7960,7 +8384,7 @@ async function refreshRecent() {
 async function refreshAll() {
   await refreshConfig();
   await refreshMarket();
-  await Promise.allSettled([refreshSummary(), refreshRecent()]);
+  await Promise.allSettled([refreshSummary(), refreshRecent(), refreshLiveHealth()]);
 }
 
 function tickClock() {
@@ -8004,6 +8428,12 @@ function bindActions() {
   el('btnRefreshNow').addEventListener('click', () => {
     refreshAll();
   });
+  const liveHealthButton = el('btnLiveHealthCheck');
+  if (liveHealthButton) {
+    liveHealthButton.addEventListener('click', () => {
+      refreshLiveHealth();
+    });
+  }
   el('btnSaveConfig').addEventListener('click', () => {
     saveConfig();
   });

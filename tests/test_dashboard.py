@@ -855,6 +855,116 @@ def test_market_payload_keeps_showing_current_round_when_current_entry_window_ha
         state.close()
 
 
+def test_live_health_payload_reports_read_only_constraints(tmp_path: Path, monkeypatch):
+    env_file = tmp_path / ".env.dashboard"
+    _write_env_file(
+        env_file,
+        {
+            "TRADE_MODE": "both",
+            "LIVE_TRADING_ENABLED": "true",
+            "PAPER_STRATEGY_IDS": "5,7,10",
+            "LIVE_STRATEGY_IDS": "7,10",
+            "POLYMARKET_PRIVATE_KEY": "0x" + "1" * 64,
+            "POLYMARKET_FUNDER": "0x" + "2" * 40,
+            "POLYMARKET_ORDER_TYPE": "FOK",
+            "POLYMARKET_SIGNATURE_TYPE": "2",
+            "STRATEGY_7_BASE_ORDER_COST": "1.2",
+            "STRATEGY_7_MIN_STAKE": "1.05",
+            "STRATEGY_10_BASE_ORDER_COST": "1.2",
+            "STRATEGY_10_MIN_STAKE": "1.05",
+        },
+    )
+
+    class StubMarketClient:
+        def __init__(self, cfg):
+            self.config = cfg
+
+        def close(self) -> None:
+            return
+
+        def find_current_and_next_rounds(self, *, now):
+            window = MarketWindow(
+                event_id="evt-live-health",
+                market_id="mkt-live-health",
+                slug="btc-updown-5m-live-health",
+                title="BTC 5m Live Health",
+                start_time=now,
+                end_time=now + timedelta(minutes=5),
+                up_token_id="up-token",
+                down_token_id="down-token",
+            )
+            return window, None
+
+        def get_market_by_slug(self, slug: str):
+            return {
+                "slug": slug,
+                "conditionId": "0xcondition",
+                "orderMinSize": "5",
+                "feesEnabled": True,
+                "makerBaseFee": "1000",
+                "takerBaseFee": "1000",
+                "outcomes": '["Up", "Down"]',
+                "clobTokenIds": '["up-token", "down-token"]',
+            }
+
+        def get_clob_market_by_condition_id(self, condition_id: str):
+            assert condition_id == "0xcondition"
+            return {"minimum_tick_size": "0.01", "negRisk": False}
+
+    class StubClobClient:
+        def get_balance_allowance(self, *args, **kwargs):
+            return {"balance": "34292807", "allowances": {"exchange": "34292807"}}
+
+        def get_tick_size(self, token_id: str):
+            assert token_id == "up-token"
+            return "0.01"
+
+        def get_neg_risk(self, token_id: str):
+            assert token_id == "up-token"
+            return False
+
+    monkeypatch.setattr(dashboard, "PolymarketClient", StubMarketClient)
+    monkeypatch.setattr(dashboard, "_create_live_clob_client", lambda cfg: StubClobClient())
+
+    state = DashboardState(env_file=env_file)
+    try:
+        payload = state.get_live_health_payload()
+
+        assert payload["ok"] is True
+        assert payload["constraints"]["round_slug"] == "btc-updown-5m-live-health"
+        assert payload["constraints"]["order_min_size"] == pytest.approx(5.0)
+        assert payload["constraints"]["minimum_tick_size"] == "0.01"
+        assert payload["constraints"]["fees_enabled"] is True
+        assert payload["constraints"]["maker_base_fee"] == 1000
+        assert payload["constraints"]["taker_base_fee"] == 1000
+        assert payload["constraints"]["order_type"] == "FOK"
+        assert payload["constraints"]["available_balance"] == pytest.approx(34.292807)
+        assert payload["constraints"]["paper_strategy_ids"] == ["5", "7", "10"]
+        assert payload["constraints"]["live_strategy_ids"] == ["7", "10"]
+        assert {item["id"] for item in payload["checks"]} >= {
+            "live_config",
+            "clob_client",
+            "balance_allowance",
+            "strategy_alignment",
+            "market_constraints",
+        }
+        assert all(item["ok"] for item in payload["checks"])
+    finally:
+        state.close()
+
+
+def test_dashboard_assets_include_live_health_check_controls():
+    html = _dashboard_html()
+    js = _dashboard_js()
+
+    assert 'id="btnLiveHealthCheck"' in html
+    assert 'id="liveHealthStatus"' in html
+    assert 'id="liveHealthList"' in html
+    assert "function refreshLiveHealth(" in js
+    assert "function renderLiveHealth(" in js
+    assert "apiGet('/api/live/health')" in js
+
+
 def test_dashboard_payload_includes_strategy_catalog_and_field_groups(tmp_path: Path):
     state = DashboardState(env_file=tmp_path / ".env.dashboard")
     try:
