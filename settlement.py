@@ -748,6 +748,9 @@ def build_frozen_pending_paper_plan(item: PendingPaperTrade) -> TradePlan:
         expected_profit=item.expected_profit,
         max_entry_price=item.signal_max_entry_price,
         order_cost_multiplier=item.sizing_multiplier,
+        raw_price=item.raw_price,
+        raw_order_cost=item.raw_order_cost,
+        fee=item.fee,
         tracks_recovery_loss=item.tracks_recovery_loss,
     )
 
@@ -836,6 +839,9 @@ def settle_pending_paper_trades(
                 signal_reason=item.signal_reason,
                 signal_max_entry_price=item.signal_max_entry_price,
                 sizing_multiplier=item.sizing_multiplier,
+                raw_price=item.raw_price,
+                raw_order_cost=item.raw_order_cost,
+                fee=item.fee,
                 tracks_recovery_loss=item.tracks_recovery_loss,
             ),
         )

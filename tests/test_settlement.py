@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
+import pytest
+
 from models import LiveStrategyState, PendingPaperTrade, SessionState
 from settlement import (
     build_frozen_pending_live_plan,
@@ -98,6 +100,51 @@ def test_settlement_flat_pending_paper_trade_does_not_accrue_recovery_loss():
     assert trade_pnl == -1.0
     assert updated_state.recovery_loss == 0.0
     assert updated_state.consecutive_losses == 3
+
+
+def test_settlement_uses_fee_adjusted_pending_paper_trade_for_pnl():
+    class _ResolvedClient:
+        def get_event_by_slug(self, slug: str):
+            return {
+                "slug": slug,
+                "eventMetadata": {},
+                "closed": True,
+                "markets": [
+                    {
+                        "outcomes": '["Up", "Down"]',
+                        "outcomePrices": '["1", "0"]',
+                        "closed": True,
+                    }
+                ],
+            }
+
+    state = SessionState()
+    item = PendingPaperTrade(
+        round_index=0,
+        event_slug="btc-updown-5m-fee-settled",
+        start_time="2026-04-30T01:00:00+00:00",
+        end_time="2026-04-30T01:05:00+00:00",
+        side="UP",
+        price=0.537472,
+        raw_price=0.52,
+        order_size=1.923075,
+        raw_order_cost=0.999999,
+        fee=0.0335999664,
+        order_cost=1.0335989664,
+        expected_profit=0.8894760336,
+        strategy=10,
+        entry_timing="OPEN",
+    )
+
+    updated_state, result, trade_pnl = settle_pending_paper_trade(
+        client=_ResolvedClient(),
+        state=state,
+        item=item,
+    )
+
+    assert result == "UP"
+    assert trade_pnl == pytest.approx(0.8894760336)
+    assert updated_state.cash_pnl == pytest.approx(0.8894760336)
 
 
 def test_frozen_pending_live_plan_preserves_flat_sizing_recovery_policy():

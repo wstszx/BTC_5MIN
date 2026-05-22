@@ -20,6 +20,7 @@ class OrderExecutionResult:
     response: Any | None = None
     skip_reason: str | None = None
     balance_error: str | None = None
+    live_price_cap: float | None = None
 
 
 def is_retryable_live_clob_error(exc: Exception) -> bool:
@@ -88,6 +89,35 @@ def calculate_crypto_taker_fee(shares: float, price: float, fee_rate: float = PO
     d_price = Decimal(str(price))
     d_fee_rate = Decimal(str(fee_rate))
     return float(d_shares * d_fee_rate * d_price * (Decimal("1") - d_price))
+
+
+def effective_price_after_fee(price: float, fee_rate: float = POLYMARKET_CRYPTO_TAKER_FEE_RATE) -> float:
+    if not 0 < price < 1 or fee_rate <= 0:
+        return price
+    return float(Decimal(str(price)) + Decimal(str(fee_rate)) * Decimal(str(price)) * (Decimal("1") - Decimal(str(price))))
+
+
+def effective_price_cap_to_raw_price_cap(
+    effective_price_cap: float | None,
+    *,
+    fee_rate: float = POLYMARKET_CRYPTO_TAKER_FEE_RATE,
+    price_decimals: int = 2,
+) -> float | None:
+    if effective_price_cap is None or not 0 < effective_price_cap < 1:
+        return effective_price_cap
+    if fee_rate <= 0:
+        return effective_price_cap
+    low = 0.0
+    high = min(effective_price_cap, 1.0)
+    for _ in range(48):
+        mid = (low + high) / 2
+        effective_mid = mid + fee_rate * mid * (1 - mid)
+        if effective_mid <= effective_price_cap:
+            low = mid
+        else:
+            high = mid
+    scale = 10**max(0, int(price_decimals))
+    return math.floor(low * scale) / scale
 
 
 def apply_fee_to_trade_plan(plan: TradePlan, *, fee_rate: float = POLYMARKET_CRYPTO_TAKER_FEE_RATE) -> TradePlan:
@@ -622,7 +652,8 @@ def submit_live_strategy_order(
         if use_sdk
         else (cfg.live_order_type or "FOK").upper()
     )
-    market_order_price = plan.max_entry_price if plan.max_entry_price is not None else getattr(cfg, "max_entry_price", None)
+    effective_market_order_price = plan.max_entry_price if plan.max_entry_price is not None else getattr(cfg, "max_entry_price", None)
+    market_order_price = effective_price_cap_to_raw_price_cap(effective_market_order_price)
     order_args = build_live_market_order_args(
         token_id=token_id,
         plan=plan,
@@ -700,6 +731,7 @@ def execute_order_plan(
         remaining_budget=max(0.0, remaining_budget - plan.order_cost),
         order_id=order_id,
         response=response,
+        live_price_cap=effective_price_cap_to_raw_price_cap(plan.max_entry_price if plan.max_entry_price is not None else getattr(cfg, "max_entry_price", None)),
     )
 
 

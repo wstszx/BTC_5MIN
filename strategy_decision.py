@@ -8,6 +8,7 @@ from statistics import pstdev
 from typing import Any
 
 from binance_signal import BinanceDepth5SignalService
+from clob_adapter import effective_price_after_fee
 from config import AppConfig
 from models import MarketQuote, MarketWindow, SessionState, Strategy9SignalSample
 from strategy import (
@@ -98,7 +99,8 @@ def entry_price_skip_reason(
         return None
     if min_entry_price is not None and price < min_entry_price:
         return f"{strategy_prefix}_price_too_low"
-    if max_entry_price is not None and price > max_entry_price:
+    effective_price = effective_price_after_fee(price)
+    if max_entry_price is not None and effective_price > max_entry_price:
         return f"{strategy_prefix}_price_too_high"
     return None
 

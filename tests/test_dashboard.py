@@ -1448,7 +1448,7 @@ def test_dashboard_live_recent_orders_filters_by_strategy(tmp_path: Path):
         os.chdir(old_cwd)
 
 
-def test_dashboard_live_recent_orders_all_returns_all_report_rows_even_with_live_strategy_scope(tmp_path: Path):
+def test_dashboard_live_recent_orders_all_scopes_to_live_strategy_ids(tmp_path: Path):
     old_cwd = Path.cwd()
     os.chdir(tmp_path)
     env_file = tmp_path / ".env.dashboard"
@@ -1467,8 +1467,9 @@ def test_dashboard_live_recent_orders_all_returns_all_report_rows_even_with_live
         payload = state.get_live_recent_orders_payload(limit=10, strategy="all")
 
         assert payload["strategy"] == "all"
-        assert payload["count"] == 2
-        assert {row["strategy"] for row in payload["rows"]} == {"4", "7"}
+        assert payload["count"] == 1
+        assert payload["rows"][0]["strategy"] == "7"
+        assert payload["rows"][0]["event_slug"] == "slug-seven"
     finally:
         state.close()
         os.chdir(old_cwd)
@@ -4380,7 +4381,7 @@ def test_dashboard_config_payload_includes_strategy9_fields(tmp_path: Path):
     try:
         payload = state.get_config_payload()
         assert payload['labels']['STRATEGY9_STABILITY_SAMPLE_COUNT'] == '策略9 稳定采样数'
-        assert payload['labels']['STRATEGY9_BASE_MAX_ENTRY_PRICE'] == '策略9 普通价帽'
+        assert payload['labels']['STRATEGY9_BASE_MAX_ENTRY_PRICE'] == '策略9 普通有效价帽'
         assert payload['labels']['STRATEGY9_ULTRA_SIGNAL_GAP'] == '策略9 超强信号优势'
         assert payload['labels']['STRATEGY9_DYNAMIC_SIZING_ENABLED'] == '策略9 动态下注'
         assert payload['field_scope']['STRATEGY9_STABILITY_SAMPLE_COUNT'] == 'strategy_9_only'

@@ -5,6 +5,7 @@ import pytest
 import trader
 from clob_adapter import (
     build_live_market_order_args,
+    effective_price_cap_to_raw_price_cap,
     build_verified_pending_live_trade_plan,
     create_live_clob_client,
     is_live_fok_not_filled_error,
@@ -296,8 +297,34 @@ def test_clob_adapter_submits_injected_market_order_with_strategy_price_cap():
     assert client.created_orders[0].token_id == "up-token"
     assert client.created_orders[0].amount == pytest.approx(1.08)
     assert client.created_orders[0].side == "BUY"
-    assert client.created_orders[0].price == pytest.approx(0.55)
+    assert client.created_orders[0].price == pytest.approx(0.53)
     assert client.posted_orders[0][1] == "FOK"
+
+
+def test_clob_adapter_converts_effective_price_cap_to_official_raw_limit():
+    assert effective_price_cap_to_raw_price_cap(0.54, fee_rate=0.07) == pytest.approx(0.52)
+
+
+def test_clob_adapter_submits_market_order_with_raw_price_cap_from_effective_limit():
+    client = _InjectedOrderClient()
+    plan = TradePlan(
+        True,
+        side="UP",
+        price=0.54,
+        order_size=2.0,
+        order_cost=1.08,
+        expected_profit=0.92,
+        max_entry_price=0.54,
+    )
+
+    submit_live_strategy_order(
+        cfg=AppConfig(strategy_id=10),
+        clob_client=client,
+        token_id="up-token",
+        plan=plan,
+    )
+
+    assert client.created_orders[0].price == pytest.approx(0.52)
 
 
 def test_clob_adapter_passes_user_balance_to_market_buy_for_fee_adjustment():
@@ -338,7 +365,7 @@ def test_clob_adapter_prefers_plan_dynamic_price_cap():
 
     assert order_id == "oid-adapter"
     assert response["success"] is True
-    assert client.created_orders[0].price == pytest.approx(0.53)
+    assert client.created_orders[0].price == pytest.approx(0.51)
 
 
 def test_clob_adapter_applies_price_cap_to_strategy4_live_market_order():
@@ -356,7 +383,7 @@ def test_clob_adapter_applies_price_cap_to_strategy4_live_market_order():
     assert response["success"] is True
     assert client.created_orders[0].token_id == "down-token"
     assert client.created_orders[0].amount == pytest.approx(2.44)
-    assert client.created_orders[0].price == pytest.approx(0.55)
+    assert client.created_orders[0].price == pytest.approx(0.53)
     assert client.posted_orders[0][1] == "FOK"
 
 

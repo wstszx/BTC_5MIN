@@ -73,6 +73,53 @@ def test_strategy7_uses_general_max_entry_price():
     assert decision.reason == "strategy7_price_too_high"
 
 
+def test_strategy7_max_entry_price_uses_fee_adjusted_effective_price():
+    now = datetime(2026, 4, 30, 1, 0, tzinfo=timezone.utc)
+    window = MarketWindow(
+        event_id="e1",
+        market_id="m1",
+        slug="s1",
+        title="BTC",
+        start_time=now - timedelta(seconds=30),
+        end_time=now + timedelta(minutes=15),
+    )
+    cfg = build_config_from_env_values(
+        {
+            "STRATEGY_ID": "7",
+            "PAPER_STRATEGY_IDS": "7",
+            "STRATEGY_7_MAX_ENTRY_PRICE": "0.54",
+            "STRATEGY_7_MAX_MOMENTUM_DELTA": "",
+            "STRATEGY_7_OFI_THRESHOLD": "0.5",
+            "STRATEGY_7_MOMENTUM_THRESHOLD": "0.01",
+            "STRATEGY_7_MIN_SIGNAL_GAP": "0.0",
+            "STRATEGY_7_CONFIRM_BEFORE_ENTRY_SECONDS": "0",
+            "STRATEGY_7_BINANCE_SIGNAL_STALE_SECONDS": "10.0",
+        }
+    )
+    cfg = cfg_for_paper_strategy(cfg, 7)
+    state = SessionState(signal_round_slug="s1", signal_round_open_up_price=0.50)
+    quote = MarketQuote(
+        slug="s1",
+        up_price=0.54,
+        up_best_ask=0.54,
+        strategy6_ofi_score=0.7,
+        strategy6_signal_at=now,
+    )
+
+    decision = resolve_side_from_strategy(
+        cfg=cfg,
+        state=state,
+        slug="s1",
+        quote=quote,
+        window=window,
+        entry_time=now,
+        now=now,
+    )
+
+    assert decision.side is None
+    assert decision.reason == "strategy7_price_too_high"
+
+
 def test_strategy7_order_cost_multiplier_reduces_high_price_weak_signal():
     cfg = AppConfig(
         strategy_id=7,
@@ -442,6 +489,7 @@ def test_strategy8_ignores_strategy7_momentum_overheat_gate():
         strategy7_ofi_threshold=0.5,
         strategy7_momentum_threshold=0.01,
         strategy7_min_signal_gap=0.0,
+        max_entry_price=0.58,
         strategy7_max_momentum_delta=0.02,
         strategy7_confirm_before_entry_seconds=0,
         binance_signal_stale_seconds=10.0,
@@ -473,6 +521,9 @@ def test_strategy9_requires_stable_consensus_samples_before_entry():
         strategy9_stability_sample_count=3,
         strategy9_stability_required_count=2,
         strategy9_stability_window_seconds=6,
+        strategy9_base_max_entry_price=0.55,
+        strategy9_strong_max_entry_price=0.55,
+        strategy9_ultra_max_entry_price=0.55,
         binance_signal_stale_seconds=10.0,
     )
     state = SessionState(signal_round_slug="s1", signal_round_open_up_price=0.50)
@@ -574,7 +625,7 @@ def test_strategy9_uses_dynamic_price_cap_by_signal_strength():
         strategy9_stability_required_count=2,
         strategy9_stability_window_seconds=6,
         strategy9_base_max_entry_price=0.52,
-        strategy9_strong_max_entry_price=0.53,
+        strategy9_strong_max_entry_price=0.55,
         strategy9_ultra_max_entry_price=0.54,
         strategy9_strong_signal_gap=0.015,
         strategy9_ultra_signal_gap=0.04,
@@ -632,7 +683,7 @@ def test_strategy9_uses_dynamic_price_cap_by_signal_strength():
         )
 
     assert strong_third.side == "UP"
-    assert strong_third.max_entry_price == pytest.approx(0.53)
+    assert strong_third.max_entry_price == pytest.approx(0.55)
 
 
 def test_strategy10_buys_underpriced_up_edge():

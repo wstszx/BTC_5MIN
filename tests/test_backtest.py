@@ -19,7 +19,8 @@ def test_backtest_returns_summary_metrics():
         max_consecutive_losses=2,
         base_order_cost=1.0,
         max_stake=25.0,
-        max_price_threshold=0.65,
+        max_entry_price=0.57,
+        max_price_threshold=0.57,
     )
     result = run_backtest(Path("tests/fixtures/sample_history.csv"), cfg)
     assert result.trade_count == 4
@@ -119,6 +120,9 @@ def test_backtest_strategy_9_dynamic_sizing_scales_high_price_trade(tmp_path):
         strategy7_confirm_before_entry_seconds=0,
         strategy9_stability_sample_count=1,
         strategy9_stability_required_count=1,
+        strategy9_base_max_entry_price=0.54,
+        strategy9_strong_max_entry_price=0.54,
+        strategy9_ultra_max_entry_price=0.54,
         strategy9_dynamic_sizing_enabled=True,
         strategy9_sizing_reference_price=0.50,
         strategy9_sizing_price_step=0.01,

@@ -2,6 +2,7 @@
 
 from dataclasses import replace
 
+from clob_adapter import effective_price_after_fee
 from models import SessionState, TradePlan
 
 
@@ -77,11 +78,13 @@ def build_trade_plan(
             skip_reason='price_below_threshold',
         )
 
-    if effective_max_entry_price is not None and price > effective_max_entry_price:
+    effective_price = effective_price_after_fee(price)
+    if effective_max_entry_price is not None and effective_price is not None and effective_price > effective_max_entry_price:
         return TradePlan(
             False,
             side=side,
-            price=price,
+            price=effective_price,
+            raw_price=price,
             max_entry_price=effective_max_entry_price,
             order_cost_multiplier=order_cost_multiplier,
             skip_reason="price_above_threshold",

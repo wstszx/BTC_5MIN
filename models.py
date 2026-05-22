@@ -109,6 +109,7 @@ class TradeRecord:
     raw_price: float | None = None
     raw_order_cost: float | None = None
     fee: float = 0.0
+    live_price_cap: float | None = None
     balance_error: str | None = None
     tracks_recovery_loss: bool = False
 
@@ -138,6 +139,9 @@ class PendingPaperTrade:
     sizing_multiplier: float = 1.0
     queued_at: str | None = None
     experiment_id: str | None = None
+    raw_price: float | None = None
+    raw_order_cost: float | None = None
+    fee: float = 0.0
     tracks_recovery_loss: bool = False
 
 

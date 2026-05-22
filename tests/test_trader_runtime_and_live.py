@@ -419,19 +419,19 @@ class _LiveMarketClient:
         return {
             "slug": slug,
             "outcomes": '["Up", "Down"]',
-            "outcomePrices": '["0.55", "0.45"]',
+            "outcomePrices": '["0.54", "0.46"]',
             "clobTokenIds": '["up-token", "down-token"]',
-            "bestBid": "0.54",
-            "bestAsk": "0.56",
+            "bestBid": "0.50",
+            "bestAsk": "0.52",
             "acceptingOrders": True,
         }
 
     def quote_from_market(self, _market):
         return MarketQuote(
             slug="btc-updown-5m-test",
-            up_price=0.55,
-            down_price=0.45,
-            up_best_ask=0.56,
+            up_price=0.54,
+            down_price=0.49,
+            up_best_ask=0.52,
             fetched_at=datetime.now(timezone.utc),
         )
 
@@ -2898,7 +2898,7 @@ def test_place_live_order_submits_market_order_with_injected_clob(tmp_path):
 
 
 def test_place_live_order_passes_available_balance_for_fee_adjustment(tmp_path):
-    cfg = AppConfig(live_trading_enabled=True)
+    cfg = AppConfig(live_trading_enabled=True, max_entry_price=0.58)
     stub_clob = _StubClobClient(balance_payload={"available": 5.5, "balance": 5.5})
 
     result = place_live_order(
@@ -3000,7 +3000,7 @@ def test_place_live_order_audits_official_fill_above_max_entry_price(tmp_path, m
                 slug="btc-updown-5m-test",
                 up_price=0.52,
                 down_price=0.48,
-                up_best_ask=0.53,
+                up_best_ask=0.52,
                 fetched_at=datetime.now(timezone.utc),
             )
 
@@ -3035,6 +3035,81 @@ def test_place_live_order_audits_official_fill_above_max_entry_price(tmp_path, m
     assert rows[-1]["price"] == "0.577248"
     assert any("official_fill_price_above_max_entry_price" in message for message in messages)
     assert any("max_entry_price=0.54" in message for message in messages)
+
+
+def test_place_live_order_logs_official_market_order_price_cap(tmp_path):
+    cfg = AppConfig(live_trading_enabled=True, strategy_id=10, max_entry_price=0.54)
+    stub_clob = _StubClobClient(
+        order_payloads={
+            "oid-123": {
+                "status": "filled",
+                "filled_order_size": "2.0",
+                "filled_order_cost": "1.04",
+                "avg_price": "0.52",
+            }
+        }
+    )
+    state_path = tmp_path / "state.json"
+    log_path = tmp_path / "live.csv"
+
+    plan = TradePlan(
+        True,
+        side="UP",
+        price=0.52,
+        order_size=2.0,
+        order_cost=1.04,
+        expected_profit=0.96,
+        max_entry_price=0.54,
+    )
+    execution = trader._execute_order_plan(
+        mode="live",
+        cfg=cfg,
+        clob_client=stub_clob,
+        strategy_id=10,
+        slug="btc-updown-5m-test",
+        token_id="up-token",
+        plan=plan,
+        remaining_budget=100.0,
+    )
+    executed_plan, fill_source = trader._plan_with_verified_live_fill(
+        plan=plan,
+        side="UP",
+        order_id=execution.order_id,
+        clob_client=stub_clob,
+        max_entry_price=plan.max_entry_price,
+        strategy_id=10,
+        slug="btc-updown-5m-test",
+    )
+    append_trade_log(
+        log_path,
+        TradeRecord(
+            timestamp=datetime.now(timezone.utc),
+            mode="live",
+            round_index=0,
+            strategy=10,
+            entry_timing=cfg.entry_timing,
+            event_slug="btc-updown-5m-test",
+            start_time=datetime.now(timezone.utc),
+            end_time=datetime.now(timezone.utc) + timedelta(minutes=5),
+            side="UP",
+            price=executed_plan.price,
+            order_size=executed_plan.order_size,
+            order_cost=executed_plan.order_cost,
+            expected_profit=executed_plan.expected_profit,
+            order_id=execution.order_id,
+            fill_source=fill_source,
+            raw_price=executed_plan.raw_price,
+            raw_order_cost=executed_plan.raw_order_cost,
+            fee=executed_plan.fee,
+            live_price_cap=execution.live_price_cap,
+        ),
+    )
+
+    rows = list(csv.DictReader(log_path.open(newline="", encoding="utf-8")))
+
+    assert execution.status == "submitted"
+    assert execution.live_price_cap == pytest.approx(0.52)
+    assert rows[-1]["live_price_cap"] == "0.52"
 
 
 def test_place_live_order_rejects_submission_response_without_acceptance(tmp_path):
@@ -3109,7 +3184,7 @@ def test_place_live_order_strategy7_sets_market_order_price_cap(tmp_path, monkey
         live_trading_enabled=True,
         strategy7_ofi_threshold=0.65,
         strategy7_momentum_threshold=0.02,
-        strategy7_max_entry_price=0.55,
+        strategy7_max_entry_price=0.56,
         strategy7_min_signal_gap=0.01,
         strategy7_confirm_before_entry_seconds=0,
     )
@@ -3140,7 +3215,7 @@ def test_place_live_order_strategy7_sets_market_order_price_cap(tmp_path, monkey
     )
 
     result = place_live_order(
-        cfg=replace(cfg, max_entry_price=0.55),
+        cfg=replace(cfg, max_entry_price=0.56),
         market_client=_Strategy7LiveClient(),
         clob_client=stub_clob,
         state_path=tmp_path / "state.json",
@@ -3149,7 +3224,7 @@ def test_place_live_order_strategy7_sets_market_order_price_cap(tmp_path, monkey
 
     assert result["status"] == "submitted"
     assert len(stub_clob.created_orders) == 1
-    assert stub_clob.created_orders[0].price == pytest.approx(0.55)
+    assert stub_clob.created_orders[0].price == pytest.approx(0.54)
 
 
 def test_place_live_order_ignores_legacy_recovery_loss_for_max_stake_check(tmp_path):
@@ -4319,7 +4394,7 @@ def test_run_live_trading_wallet_budget_skips_later_strategy_after_earlier_submi
     assert len(rows) == 3
     assert ",1,OPEN,btc-updown-5m-test," in rows[1]
     assert ",3,OPEN,btc-updown-5m-test," in rows[2]
-    assert ",UP,0.56,0.0,0.0,0.0," in rows[2]
+    assert ",UP,0.52,0.0,0.0,0.0," in rows[2]
     assert "insufficient_live_wallet_balance" in rows[2]
 
 
@@ -4914,6 +4989,7 @@ def test_place_live_order_requires_private_key_without_injected_client(tmp_path)
             cfg=cfg,
             market_client=_LiveMarketClient(),
             state_path=tmp_path / "state.json",
+            log_path=tmp_path / "live.csv",
             dry_run=False,
         )
 
@@ -6587,7 +6663,7 @@ def test_run_paper_trading_processes_all_selected_strategies(tmp_path, monkeypat
         assert len(pending) == 1
         assert pending[0].strategy == strategy_id
         assert pending[0].event_slug == "btc-updown-5m-all"
-    assert state.paper_strategies[5].pending_paper_trades[0].signal_delta == pytest.approx(0.05)
+    assert state.paper_strategies[5].pending_paper_trades[0].signal_delta == pytest.approx(0.04)
     assert state.paper_strategies[6].strategy6_last_ofi_score == pytest.approx(signal.ofi_score)
 
 
@@ -6626,7 +6702,7 @@ def test_run_paper_trading_allows_market_buy_when_order_min_size_exceeds_plan_co
     pending = state.paper_strategies[2].pending_paper_trades
     assert len(pending) == 1
     assert pending[0].order_cost == pytest.approx(1.2)
-    assert pending[0].order_size == pytest.approx(1.2 / 0.56)
+    assert pending[0].order_size == pytest.approx(1.2 / 0.52)
     assert not (tmp_path / "paper.csv").exists()
 
 

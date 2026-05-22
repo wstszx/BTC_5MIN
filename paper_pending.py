@@ -45,6 +45,9 @@ def build_pending_paper_trade(
         sizing_multiplier=plan.order_cost_multiplier,
         queued_at=datetime.now(timezone.utc).isoformat(),
         experiment_id=experiment_id,
+        raw_price=plan.raw_price,
+        raw_order_cost=plan.raw_order_cost,
+        fee=plan.fee,
         tracks_recovery_loss=plan.tracks_recovery_loss,
     )
 

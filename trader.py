@@ -114,6 +114,7 @@ from clob_adapter import (
     live_clob_client_config_key as _live_clob_client_config_key,
     read_available_live_balance as _adapter_read_available_live_balance,
     submit_live_strategy_order as _adapter_submit_live_strategy_order,
+    effective_price_cap_to_raw_price_cap as _effective_price_cap_to_raw_price_cap,
 )
 from state_manager import (
     apply_live_strategy_state_to_session_state as _apply_live_strategy_state_to_session_state,
@@ -499,6 +500,11 @@ def _submit_live_strategy_order(
         user_usdc_balance=user_usdc_balance,
         client_factory=_create_live_clob_client,
     )
+
+
+def _live_market_order_price_cap_for_plan(cfg: AppConfig, plan: TradePlan) -> float | None:
+    effective_cap = plan.max_entry_price if plan.max_entry_price is not None else getattr(cfg, "max_entry_price", None)
+    return _effective_price_cap_to_raw_price_cap(effective_cap)
 
 
 def _execute_order_plan(
@@ -1057,8 +1063,8 @@ def place_live_order(
             "signal_current_up_price": side_decision.signal_current_up_price,
             "signal_threshold": side_decision.signal_threshold,
             "signal_delta": side_decision.signal_delta,
-                "signal_locked": side_decision.signal_locked,
-            }
+            "signal_locked": side_decision.signal_locked,
+        }
 
     remaining_live_budget = _read_available_live_balance(cfg=cfg, clob_client=live_client)
     try:
@@ -1116,9 +1122,10 @@ def place_live_order(
             "signal_current_up_price": side_decision.signal_current_up_price,
             "signal_threshold": side_decision.signal_threshold,
             "signal_delta": side_decision.signal_delta,
-            "signal_locked": side_decision.signal_locked,
-        }
+                "signal_locked": side_decision.signal_locked,
+            }
 
+    live_price_cap = _live_market_order_price_cap_for_plan(cfg, plan)
     executed_plan, fill_source = _plan_with_verified_live_fill(
         plan=plan,
         side=side,
@@ -1154,6 +1161,7 @@ def place_live_order(
             raw_price=executed_plan.raw_price,
             raw_order_cost=executed_plan.raw_order_cost,
             fee=executed_plan.fee,
+            live_price_cap=live_price_cap,
             tracks_recovery_loss=executed_plan.tracks_recovery_loss,
             **_signal_record_kwargs(side_decision),
         ),
@@ -1182,6 +1190,7 @@ def place_live_order(
         "order_size": executed_plan.order_size,
         "raw_order_cost": executed_plan.raw_order_cost,
         "fee": executed_plan.fee,
+        "live_price_cap": live_price_cap,
         "order_cost": executed_plan.order_cost,
         "expected_profit": executed_plan.expected_profit,
         "order_type": cfg.live_order_type.upper(),
@@ -2061,6 +2070,7 @@ def run_live_trading(
                                 raw_price=executed_plan.raw_price,
                                 raw_order_cost=executed_plan.raw_order_cost,
                                 fee=executed_plan.fee,
+                                live_price_cap=execution.live_price_cap,
                                 **_signal_record_kwargs(side_decision),
                             ),
                         )

@@ -1664,7 +1664,7 @@ class DashboardState:
         "MAX_CONSECUTIVE_LOSSES": "连亏重置轮数",
         "MAX_STAKE": "单笔最大下注金额",
         "MIN_ENTRY_PRICE": "最低买入价格",
-        "MAX_ENTRY_PRICE": "最高买入价格",
+        "MAX_ENTRY_PRICE": "最高有效买入价(含费)",
         "MAX_PRICE_THRESHOLD": "最高买入价格阈值",
         "OFI_THRESHOLD": "盘口失衡阈值",
         "STRATEGY7_OFI_THRESHOLD": "策略7 盘口失衡阈值",
@@ -1695,9 +1695,9 @@ class DashboardState:
         "STRATEGY9_STABILITY_WINDOW_SECONDS": "策略9 稳定窗口秒",
         "STRATEGY9_REVERSAL_LOOKBACK_SECONDS": "策略9 衰减回看秒",
         "STRATEGY9_MAX_SIGNAL_DECAY": "策略9 最大信号衰减",
-        "STRATEGY9_BASE_MAX_ENTRY_PRICE": "策略9 普通价帽",
-        "STRATEGY9_STRONG_MAX_ENTRY_PRICE": "策略9 强信号价帽",
-        "STRATEGY9_ULTRA_MAX_ENTRY_PRICE": "策略9 超强信号价帽",
+        "STRATEGY9_BASE_MAX_ENTRY_PRICE": "策略9 普通有效价帽",
+        "STRATEGY9_STRONG_MAX_ENTRY_PRICE": "策略9 强信号有效价帽",
+        "STRATEGY9_ULTRA_MAX_ENTRY_PRICE": "策略9 超强信号有效价帽",
         "STRATEGY9_STRONG_SIGNAL_GAP": "策略9 强信号优势",
         "STRATEGY9_ULTRA_SIGNAL_GAP": "策略9 超强信号优势",
         "STRATEGY10_MIN_EDGE": "策略10 最小期望优势",
@@ -2018,7 +2018,7 @@ class DashboardState:
         "MAX_CONSECUTIVE_LOSSES": "连续亏损达到这个次数后，策略会执行一次止损重置。",
         "MAX_STAKE": "单笔订单允许投入的最大 USDC；超过后会直接跳过本轮。",
         "MIN_ENTRY_PRICE": "目标方向价格低于该值时不入场；留空则不设置下限。",
-        "MAX_ENTRY_PRICE": "目标方向价格高于该值时不入场。",
+        "MAX_ENTRY_PRICE": "目标方向含手续费后的有效买入价高于该值时不入场；实盘会反推官方 raw price 作为订单价格保护。",
         "MAX_PRICE_THRESHOLD": "目标方向价格高于该阈值时不入场。",
         "OFI_THRESHOLD": "策略 6 的 Binance OFI 最小强度要求，低于该阈值直接跳过。",
         "STRATEGY7_OFI_THRESHOLD": "策略 7 对 Binance OFI 的最小强度要求，低于该阈值直接跳过。",
@@ -2049,9 +2049,9 @@ class DashboardState:
         "STRATEGY9_STABILITY_WINDOW_SECONDS": "策略 9 判断稳定共振的回看秒数。",
         "STRATEGY9_REVERSAL_LOOKBACK_SECONDS": "策略 9 判断信号衰减风险的回看秒数。",
         "STRATEGY9_MAX_SIGNAL_DECAY": "策略 9 当前信号相对近期峰值允许衰减的最大比例。",
-        "STRATEGY9_BASE_MAX_ENTRY_PRICE": "策略 9 普通信号允许的最高买入价。",
-        "STRATEGY9_STRONG_MAX_ENTRY_PRICE": "策略 9 强信号允许的最高买入价。",
-        "STRATEGY9_ULTRA_MAX_ENTRY_PRICE": "策略 9 超强信号允许的最高买入价。",
+        "STRATEGY9_BASE_MAX_ENTRY_PRICE": "策略 9 普通信号允许的最高有效买入价，含手续费。",
+        "STRATEGY9_STRONG_MAX_ENTRY_PRICE": "策略 9 强信号允许的最高有效买入价，含手续费。",
+        "STRATEGY9_ULTRA_MAX_ENTRY_PRICE": "策略 9 超强信号允许的最高有效买入价，含手续费。",
         "STRATEGY9_STRONG_SIGNAL_GAP": "策略 9 判断强信号时，OFI 和动量需要额外超过阈值的幅度。",
         "STRATEGY9_ULTRA_SIGNAL_GAP": "策略 9 判断超强信号时，OFI 和动量需要额外超过阈值的幅度。",
         "SIGNAL_MOMENTUM_THRESHOLD": "策略 5 的基础动量阈值，比较 abs(current_up - open_up)。",
@@ -3353,9 +3353,8 @@ class DashboardState:
             explicit_live_strategy_scope = _has_explicit_live_strategy_scope(self._env_values)
         capped_limit = max(1, min(300, int(limit)))
         strategy_filter = _normalize_strategy_filter(strategy)
-        explicit_all_strategy_filter = _is_explicit_all_strategy_filter(strategy)
         rows = _all_csv_rows_newest_first(live_csv)
-        if strategy_filter is None and explicit_live_strategy_scope and not explicit_all_strategy_filter:
+        if strategy_filter is None and explicit_live_strategy_scope:
             rows = _filter_trade_rows_by_strategy_ids(rows, effective_live_strategy_ids)
         elif strategy_filter is not None:
             rows = _filter_trade_rows_by_strategy(rows, strategy_filter)
@@ -3394,7 +3393,7 @@ class DashboardState:
                 )
                 if corrected_count > 0:
                     rows = _all_csv_rows_newest_first(live_csv)
-                    if strategy_filter is None and explicit_live_strategy_scope and not explicit_all_strategy_filter:
+                    if strategy_filter is None and explicit_live_strategy_scope:
                         rows = _filter_trade_rows_by_strategy_ids(rows, effective_live_strategy_ids)
                     elif strategy_filter is not None:
                         rows = _filter_trade_rows_by_strategy(rows, strategy_filter)
@@ -5568,7 +5567,7 @@ const HELP_SECTIONS = {
           '纸面和实盘都会先经过同一套下注计划检查：价格、下注金额、连续亏损和止损重置都会先判断。',
           'MAX_CONSECUTIVE_LOSSES 控制连续亏损达到多少轮后触发止损重置，重置会清空连续亏损计数。',
           'MAX_STAKE 是单笔最大下注金额；计算出的 order_cost 超过它时，本轮会跳过并显示 order_cost_above_max_stake。',
-          'MAX_PRICE_THRESHOLD 限制目标方向最高买入价；MIN_PRICE_THRESHOLD 可选限制最低买入价。',
+          'MAX_ENTRY_PRICE / MAX_PRICE_THRESHOLD 按含手续费后的有效买入价限制；实盘会反推官方 raw price 作为订单价格保护。',
         ],
       },
       {
@@ -5576,13 +5575,13 @@ const HELP_SECTIONS = {
         bullets: [
           '纸面模式不会读取真实钱包，会使用 PAPER_SIMULATED_WALLET_BALANCE 作为 dry-run 钱包预算。',
           '并行实盘会读取真实钱包余额；余额不可用会显示“实盘钱包余额不可用”，余额不足会显示“实盘钱包余额不足”。',
-          '纸面和实盘的信号、风控和预算检查路径应保持一致，差异只在最终是否发送真实订单。',
+          '纸面和实盘的信号、风控和预算检查路径应保持一致；纸面记录有效买入价，实盘同时记录官方 raw_price 和 live_price_cap。',
         ],
       },
       {
         title: '常见跳过原因',
         bullets: [
-          'price_above_threshold 表示目标方向价格高于 MAX_PRICE_THRESHOLD；price_below_threshold 表示低于 MIN_PRICE_THRESHOLD。',
+          'price_above_threshold 表示目标方向含费有效价格高于上限；price_below_threshold 表示官方 raw 价格低于下限。',
           'order_cost_above_max_stake 表示本轮所需下注金额超过 MAX_STAKE。',
           'max_consecutive_losses_reached 表示连续亏损已达到 MAX_CONSECUTIVE_LOSSES，本轮触发止损重置。',
           'ws_stale 表示实时行情过旧，程序会阻止本轮交易，避免拿陈旧报价下单。',
@@ -5765,7 +5764,7 @@ const CONFIG_KEY_NAMES = {
   MAX_CONSECUTIVE_LOSSES: '连亏重置轮数',
   MAX_STAKE: '单笔最大下注金额',
   MIN_ENTRY_PRICE: '最低买入价格',
-  MAX_ENTRY_PRICE: '最高买入价格',
+  MAX_ENTRY_PRICE: '最高有效买入价(含费)',
   MAX_PRICE_THRESHOLD: '最高买入价格阈值',
   STRATEGY7_OFI_THRESHOLD: '策略7 盘口失衡阈值',
   STRATEGY7_MOMENTUM_THRESHOLD: '策略7 动量阈值',
@@ -5792,9 +5791,9 @@ const CONFIG_KEY_NAMES = {
   STRATEGY9_STABILITY_WINDOW_SECONDS: '策略9 稳定窗口秒',
   STRATEGY9_REVERSAL_LOOKBACK_SECONDS: '策略9 衰减回看秒',
   STRATEGY9_MAX_SIGNAL_DECAY: '策略9 最大信号衰减',
-  STRATEGY9_BASE_MAX_ENTRY_PRICE: '策略9 普通价帽',
-  STRATEGY9_STRONG_MAX_ENTRY_PRICE: '策略9 强信号价帽',
-  STRATEGY9_ULTRA_MAX_ENTRY_PRICE: '策略9 超强信号价帽',
+  STRATEGY9_BASE_MAX_ENTRY_PRICE: '策略9 普通有效价帽',
+  STRATEGY9_STRONG_MAX_ENTRY_PRICE: '策略9 强信号有效价帽',
+  STRATEGY9_ULTRA_MAX_ENTRY_PRICE: '策略9 超强信号有效价帽',
   STRATEGY9_STRONG_SIGNAL_GAP: '策略9 强信号优势',
   STRATEGY9_ULTRA_SIGNAL_GAP: '策略9 超强信号优势',
   STRATEGY10_MIN_EDGE: '策略10 最小期望优势',

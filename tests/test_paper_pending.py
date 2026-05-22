@@ -85,3 +85,45 @@ def test_paper_pending_preserves_flat_sizing_recovery_policy():
     )
 
     assert state.pending_paper_trades[0].tracks_recovery_loss is False
+
+
+def test_paper_pending_records_raw_price_fee_and_effective_price():
+    state = SessionState(round_index=3)
+    start = datetime(2026, 4, 30, 1, 0, tzinfo=timezone.utc)
+    window = MarketWindow(
+        event_id="evt",
+        market_id="mkt",
+        slug="btc-updown-5m-fee-pending",
+        title="BTC",
+        start_time=start,
+        end_time=start + timedelta(minutes=5),
+    )
+    plan = TradePlan(
+        True,
+        "UP",
+        price=0.537472,
+        raw_price=0.52,
+        order_size=1.923075,
+        raw_order_cost=0.999999,
+        fee=0.0335999664,
+        order_cost=1.0335989664,
+        expected_profit=0.8894760336,
+    )
+    decision = SideDecision(side="UP")
+    cfg = AppConfig(strategy_id=10, entry_timing="OPEN")
+
+    assert queue_pending_paper_trade(
+        state=state,
+        window=window,
+        plan=plan,
+        side="UP",
+        cfg=cfg,
+        side_decision=decision,
+        experiment_id="strategy-10",
+    )
+
+    pending = state.pending_paper_trades[0]
+    assert pending.price == 0.537472
+    assert pending.raw_price == 0.52
+    assert pending.raw_order_cost == 0.999999
+    assert pending.fee == 0.0335999664

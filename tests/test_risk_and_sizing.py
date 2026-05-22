@@ -124,6 +124,21 @@ def test_build_trade_plan_skips_when_price_above_threshold():
     assert plan.skip_reason == "price_above_threshold"
 
 
+def test_build_trade_plan_applies_crypto_fee_before_max_entry_price_check():
+    state = SessionState()
+    plan = build_trade_plan(
+        state=state,
+        side="UP",
+        price=0.54,
+        max_entry_price=0.54,
+        max_stake=10,
+        max_consecutive_losses=8,
+    )
+
+    assert plan.should_trade is False
+    assert plan.skip_reason == "price_above_threshold"
+
+
 def test_build_trade_plan_skips_when_order_cost_exceeds_max_stake():
     state = SessionState()
     plan = build_trade_plan(
