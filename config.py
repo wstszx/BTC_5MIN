@@ -192,6 +192,8 @@ _FLOAT_CONFIG_KEYS: frozenset[str] = frozenset(
 _BOOL_CONFIG_KEYS: frozenset[str] = frozenset(
     {
         "LIVE_TRADING_ENABLED",
+        "POLYMARKET_FOK_FALLBACK_TO_FAK",
+        "POLYMARKET_PRECHECK_ORDER_BOOK_DEPTH",
         "WS_ENABLED",
         "STRATEGY7_DYNAMIC_SIZING_ENABLED",
         "STRATEGY9_DYNAMIC_SIZING_ENABLED",
@@ -1252,6 +1254,8 @@ class AppConfig:
     live_signature_type: int = field(default_factory=lambda: _env_int("POLYMARKET_SIGNATURE_TYPE", 0))
     live_funder: str | None = field(default_factory=lambda: os.getenv("POLYMARKET_FUNDER"))
     live_order_type: str = field(default_factory=lambda: (os.getenv("POLYMARKET_ORDER_TYPE") or "FOK").upper())
+    live_fok_fallback_to_fak: bool = field(default_factory=lambda: _env_bool("POLYMARKET_FOK_FALLBACK_TO_FAK", True))
+    live_precheck_order_book_depth: bool = field(default_factory=lambda: _env_bool("POLYMARKET_PRECHECK_ORDER_BOOK_DEPTH", True))
     paper_profiles: dict[str, PaperTimeframeProfile] = field(init=False)
     paper_strategy_profiles: dict[int, LiveStrategyProfile] = field(init=False)
     live_profiles: dict[int, LiveStrategyProfile] = field(init=False)

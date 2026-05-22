@@ -1712,6 +1712,19 @@ class _FokNotFilledClobClient(_StubClobClient):
         )
 
 
+class _FokNotFilledThenFakFilledClobClient(_StubClobClient):
+    def post_order(self, order, order_type):
+        self.posted_orders.append((order, order_type))
+        if order_type == "FOK":
+            raise RuntimeError(
+                "[py_clob_client_v2] request error status=400 "
+                "url=https://clob.polymarket.com/order "
+                'body={"error":"order couldn\'t be fully filled. FOK orders are fully filled or killed.",'
+                '"orderID":"0xdeadbeef"}'
+            )
+        return {"success": True, "orderID": "oid-fak-456"}
+
+
 class _TransientSubmitClobClient(_StubClobClient):
     def post_order(self, order, order_type):
         self.posted_orders.append((order, order_type))
@@ -3152,14 +3165,50 @@ def test_place_live_order_skips_fok_not_filled_without_pending_state(tmp_path):
     assert result["skip_reason"] == "live_fok_not_filled"
     assert result["side"] == "UP"
     assert result["token_id"] == "up-token"
-    assert len(stub_clob.created_orders) == 1
-    assert len(stub_clob.posted_orders) == 1
+    assert len(stub_clob.created_orders) == 2
+    assert [posted[1] for posted in stub_clob.posted_orders] == ["FOK", "FAK"]
     assert state.pending_live_slug is None
     assert state.pending_live_order_id is None
     assert rows[-1]["skip_reason"] == "live_fok_not_filled"
     assert rows[-1]["order_size"] == "0.0"
     assert rows[-1]["order_cost"] == "0.0"
     assert rows[-1]["expected_profit"] == "0.0"
+
+
+def test_place_live_order_falls_back_to_fak_after_fok_not_filled(tmp_path):
+    cfg = AppConfig(live_trading_enabled=True)
+    stub_clob = _FokNotFilledThenFakFilledClobClient(
+        order_payloads={
+            "oid-fak-456": {
+                "status": "filled",
+                "filled_order_size": "2.0",
+                "filled_order_cost": "1.0",
+                "avg_price": "0.5",
+            }
+        }
+    )
+    state_path = tmp_path / "state.json"
+    log_path = tmp_path / "live.csv"
+
+    result = place_live_order(
+        cfg=cfg,
+        market_client=_LiveMarketClient(),
+        clob_client=stub_clob,
+        state_path=state_path,
+        log_path=log_path,
+    )
+
+    state = load_session_state(state_path)
+    rows = list(csv.DictReader(log_path.open(newline="", encoding="utf-8")))
+
+    assert result["status"] == "submitted"
+    assert result["order_id"] == "oid-fak-456"
+    assert [posted[1] for posted in stub_clob.posted_orders] == ["FOK", "FAK"]
+    assert len(stub_clob.created_orders) == 2
+    assert state.pending_live_slug == "btc-updown-5m-test"
+    assert state.pending_live_order_id == "oid-fak-456"
+    assert rows[-1]["order_id"] == "oid-fak-456"
+    assert rows[-1]["skip_reason"] == ""
 
 
 def test_place_live_order_with_injected_client_provides_full_market_order_args(tmp_path):
@@ -3865,7 +3914,8 @@ def test_run_live_trading_skips_fok_not_filled_without_runtime_error(tmp_path, m
     rows = list(csv.DictReader((tmp_path / "live_orders.csv").open(newline="", encoding="utf-8")))
 
     assert result["status"] == "stopped"
-    assert len(stub_clob.created_orders) == 1
+    assert len(stub_clob.created_orders) == 2
+    assert [posted[1] for posted in stub_clob.posted_orders] == ["FOK", "FAK"]
     assert state.live_strategies[1].pending_live_slug is None
     assert state.live_strategies[1].pending_live_order_id is None
     assert rows[-1]["strategy"] == "1"

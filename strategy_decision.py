@@ -233,8 +233,10 @@ def estimate_strategy10_fair_value(
     edge_buffer = max(0.0, float(getattr(cfg, "strategy10_edge_buffer", 0.0)))
     up_price = resolve_quote_price("UP", quote)
     down_price = resolve_quote_price("DOWN", quote)
-    up_edge = fair_up - up_price - edge_buffer if is_valid_signal_price(up_price) else None
-    down_edge = fair_down - down_price - edge_buffer if is_valid_signal_price(down_price) else None
+    up_effective_price = effective_price_after_fee(up_price) if is_valid_signal_price(up_price) else None
+    down_effective_price = effective_price_after_fee(down_price) if is_valid_signal_price(down_price) else None
+    up_edge = fair_up - up_effective_price - edge_buffer if up_effective_price is not None else None
+    down_edge = fair_down - down_effective_price - edge_buffer if down_effective_price is not None else None
 
     best_side: str | None = None
     best_price: float | None = None
@@ -291,8 +293,10 @@ def estimate_strategy11_probability(
     edge_buffer = max(0.0, float(getattr(cfg, "strategy11_edge_buffer", 0.0)))
     up_price = resolve_quote_price("UP", quote)
     down_price = resolve_quote_price("DOWN", quote)
-    up_edge = up_probability - up_price - edge_buffer if is_valid_signal_price(up_price) else None
-    down_edge = down_probability - down_price - edge_buffer if is_valid_signal_price(down_price) else None
+    up_effective_price = effective_price_after_fee(up_price) if is_valid_signal_price(up_price) else None
+    down_effective_price = effective_price_after_fee(down_price) if is_valid_signal_price(down_price) else None
+    up_edge = up_probability - up_effective_price - edge_buffer if up_effective_price is not None else None
+    down_edge = down_probability - down_effective_price - edge_buffer if down_effective_price is not None else None
 
     best_side: str | None = None
     best_price: float | None = None

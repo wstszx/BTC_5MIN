@@ -35,6 +35,28 @@ class _InjectedOrderClient:
         return {"success": True, "orderID": "oid-adapter"}
 
 
+class _ShallowOrderBookClient(_InjectedOrderClient):
+    def __init__(self, book):
+        super().__init__()
+        self.book = book
+
+    def get_order_book(self, token_id):
+        assert token_id == "up-token"
+        return self.book
+
+
+class _FokThenFakOrderClient(_InjectedOrderClient):
+    def post_order(self, signed_order, order_type):
+        self.posted_orders.append((signed_order, order_type))
+        if order_type == "FOK":
+            raise RuntimeError(
+                "[py_clob_client_v2] request error status=400 "
+                "url=https://clob.polymarket.com/order "
+                'body={"error":"order couldn\'t be fully filled. FOK orders are fully filled or killed."}'
+            )
+        return {"success": True, "orderID": "oid-fak-fallback"}
+
+
 def test_clob_adapter_identifies_fok_not_filled_error():
     exc = RuntimeError(
         "[py_clob_client_v2] request error status=400 "
@@ -325,6 +347,87 @@ def test_clob_adapter_submits_market_order_with_raw_price_cap_from_effective_lim
     )
 
     assert client.created_orders[0].price == pytest.approx(0.52)
+
+
+def test_clob_adapter_skips_when_order_book_depth_cannot_fill_fok_market_order():
+    client = _ShallowOrderBookClient({"asks": [{"price": "0.52", "size": "1.0"}]})
+    plan = TradePlan(
+        True,
+        side="UP",
+        price=0.52,
+        order_size=2.0,
+        order_cost=1.04,
+        expected_profit=0.96,
+        max_entry_price=0.54,
+    )
+
+    execution = trader._execute_order_plan(
+        mode="live",
+        cfg=AppConfig(strategy_id=10, live_order_type="FOK"),
+        clob_client=client,
+        strategy_id=10,
+        slug="btc-updown-5m-test",
+        token_id="up-token",
+        plan=plan,
+        remaining_budget=10.0,
+    )
+
+    assert execution.status == "skipped"
+    assert execution.skip_reason == "live_order_book_depth_insufficient"
+    assert client.created_orders == []
+    assert client.posted_orders == []
+
+
+def test_clob_adapter_falls_back_to_fak_when_fok_market_order_is_not_filled():
+    client = _FokThenFakOrderClient()
+    plan = TradePlan(
+        True,
+        side="UP",
+        price=0.54,
+        order_size=2.0,
+        order_cost=1.08,
+        expected_profit=0.92,
+        max_entry_price=0.54,
+    )
+
+    order_id, response = submit_live_strategy_order(
+        cfg=AppConfig(strategy_id=10, live_order_type="FOK"),
+        clob_client=client,
+        token_id="up-token",
+        plan=plan,
+    )
+
+    assert order_id == "oid-fak-fallback"
+    assert response["success"] is True
+    assert [posted[1] for posted in client.posted_orders] == ["FOK", "FAK"]
+    assert len(client.created_orders) == 2
+    assert client.created_orders[0].order_type == "FOK"
+    assert client.created_orders[1].order_type == "FAK"
+    assert client.created_orders[0].price == pytest.approx(0.52)
+    assert client.created_orders[1].price == pytest.approx(0.52)
+
+
+def test_clob_adapter_can_disable_fok_to_fak_fallback():
+    client = _FokThenFakOrderClient()
+    plan = TradePlan(
+        True,
+        side="UP",
+        price=0.54,
+        order_size=2.0,
+        order_cost=1.08,
+        expected_profit=0.92,
+        max_entry_price=0.54,
+    )
+
+    with pytest.raises(RuntimeError, match="fully filled"):
+        submit_live_strategy_order(
+            cfg=AppConfig(strategy_id=10, live_order_type="FOK", live_fok_fallback_to_fak=False),
+            clob_client=client,
+            token_id="up-token",
+            plan=plan,
+        )
+
+    assert [posted[1] for posted in client.posted_orders] == ["FOK"]
 
 
 def test_clob_adapter_passes_user_balance_to_market_buy_for_fee_adjustment():

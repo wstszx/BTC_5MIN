@@ -214,6 +214,22 @@ def test_build_config_prefers_shared_strategy_profile_values_for_paper_and_live(
         assert profile.strategy7_momentum_threshold == 0.008
 
 
+def test_build_config_supports_fok_fallback_to_fak_toggle():
+    default_cfg = build_config_from_env_values({})
+    disabled_cfg = build_config_from_env_values({"POLYMARKET_FOK_FALLBACK_TO_FAK": "false"})
+
+    assert default_cfg.live_fok_fallback_to_fak is True
+    assert disabled_cfg.live_fok_fallback_to_fak is False
+
+
+def test_build_config_supports_order_book_depth_precheck_toggle():
+    default_cfg = build_config_from_env_values({})
+    disabled_cfg = build_config_from_env_values({"POLYMARKET_PRECHECK_ORDER_BOOK_DEPTH": "false"})
+
+    assert default_cfg.live_precheck_order_book_depth is True
+    assert disabled_cfg.live_precheck_order_book_depth is False
+
+
 def test_build_config_applies_strategy_overrides_with_split_strategy_ids():
     cfg = build_config_from_env_values(
         {

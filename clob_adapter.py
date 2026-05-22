@@ -82,6 +82,76 @@ def coerce_positive_float(raw: Any) -> float | None:
     return value
 
 
+def _field_value(item: Any, *names: str) -> Any:
+    for name in names:
+        if isinstance(item, dict) and name in item:
+            return item.get(name)
+        if hasattr(item, name):
+            return getattr(item, name)
+    return None
+
+
+def _book_levels(book: Any, side: str) -> list[Any]:
+    candidates = [side]
+    if side == "asks":
+        candidates.extend(["asksList", "ask_levels", "sell"])
+    elif side == "bids":
+        candidates.extend(["bidsList", "bid_levels", "buy"])
+    for name in candidates:
+        levels = _field_value(book, name)
+        if isinstance(levels, list):
+            return levels
+    return []
+
+
+def _level_price(level: Any) -> float | None:
+    return coerce_positive_float(_field_value(level, "price", "p"))
+
+
+def _level_size(level: Any) -> float | None:
+    return coerce_positive_float(_field_value(level, "size", "quantity", "qty", "q"))
+
+
+def available_order_book_ask_size_at_or_below(book: Any, price_cap: float | None) -> float | None:
+    if book is None or price_cap is None or price_cap <= 0:
+        return None
+    total_size = 0.0
+    seen_level = False
+    for level in _book_levels(book, "asks"):
+        price = _level_price(level)
+        size = _level_size(level)
+        if price is None or size is None:
+            continue
+        seen_level = True
+        if price <= price_cap:
+            total_size += size
+    return total_size if seen_level else None
+
+
+def read_live_order_book(live_client: Any, token_id: str) -> Any | None:
+    get_order_book = getattr(live_client, "get_order_book", None)
+    if not callable(get_order_book):
+        return None
+    try:
+        from py_clob_client_v2 import BookParams
+
+        try:
+            return get_order_book(BookParams(token_id=token_id))
+        except (TypeError, AttributeError):
+            pass
+    except Exception:
+        pass
+    try:
+        return get_order_book(token_id)
+    except TypeError:
+        try:
+            return get_order_book(token_id=token_id)
+        except Exception:
+            return None
+    except Exception:
+        return None
+
+
 def calculate_crypto_taker_fee(shares: float, price: float, fee_rate: float = POLYMARKET_CRYPTO_TAKER_FEE_RATE) -> float:
     if shares <= 0 or not 0 < price < 1 or fee_rate <= 0:
         return 0.0
@@ -636,6 +706,40 @@ def post_live_market_order(live_client: Any, order_args: Any, order_type: Any) -
     return live_client.post_order(signed_order, order_type)
 
 
+def _order_type_text(order_type: Any) -> str:
+    return str(getattr(order_type, "name", order_type) or "").upper()
+
+
+def _fallback_fak_order_type(order_type: Any) -> Any:
+    if _order_type_text(order_type) != "FOK":
+        return None
+    try:
+        from py_clob_client_v2 import OrderType
+
+        return getattr(OrderType, "FAK", "FAK")
+    except Exception:
+        return "FAK"
+
+
+def _build_live_market_order_args_for_type(
+    *,
+    token_id: str,
+    plan: TradePlan,
+    order_type: Any,
+    market_order_price: float | None,
+    use_sdk_types: bool,
+    user_usdc_balance: float | None,
+) -> Any:
+    return build_live_market_order_args(
+        token_id=token_id,
+        plan=plan,
+        order_type=order_type,
+        market_order_price=market_order_price,
+        use_sdk_types=use_sdk_types,
+        user_usdc_balance=user_usdc_balance,
+    )
+
+
 def submit_live_strategy_order(
     *,
     cfg: AppConfig,
@@ -654,7 +758,7 @@ def submit_live_strategy_order(
     )
     effective_market_order_price = plan.max_entry_price if plan.max_entry_price is not None else getattr(cfg, "max_entry_price", None)
     market_order_price = effective_price_cap_to_raw_price_cap(effective_market_order_price)
-    order_args = build_live_market_order_args(
+    order_args = _build_live_market_order_args_for_type(
         token_id=token_id,
         plan=plan,
         order_type=order_type,
@@ -662,7 +766,25 @@ def submit_live_strategy_order(
         use_sdk_types=use_sdk,
         user_usdc_balance=user_usdc_balance,
     )
-    response = post_live_market_order(live_client, order_args, order_type)
+    try:
+        response = post_live_market_order(live_client, order_args, order_type)
+    except Exception as exc:
+        fallback_order_type = _fallback_fak_order_type(order_type)
+        if (
+            not getattr(cfg, "live_fok_fallback_to_fak", True)
+            or fallback_order_type is None
+            or not is_live_fok_not_filled_error(exc)
+        ):
+            raise
+        fallback_order_args = _build_live_market_order_args_for_type(
+            token_id=token_id,
+            plan=plan,
+            order_type=fallback_order_type,
+            market_order_price=market_order_price,
+            use_sdk_types=use_sdk,
+            user_usdc_balance=user_usdc_balance,
+        )
+        response = post_live_market_order(live_client, fallback_order_args, fallback_order_type)
     return validate_live_submission_response(response), response
 
 
@@ -702,6 +824,23 @@ def execute_order_plan(
             order_id=order_id,
             response={"success": True, "orderID": order_id, "simulated": True},
         )
+    effective_market_order_price = plan.max_entry_price if plan.max_entry_price is not None else getattr(cfg, "max_entry_price", None)
+    market_order_price = effective_price_cap_to_raw_price_cap(effective_market_order_price)
+    if (
+        getattr(cfg, "live_precheck_order_book_depth", True)
+        and _order_type_text(getattr(cfg, "live_order_type", "FOK")) == "FOK"
+        and market_order_price is not None
+    ):
+        live_client_for_depth = clob_client or (client_factory or create_live_clob_client)(cfg)
+        book = read_live_order_book(live_client_for_depth, token_id)
+        available_size = available_order_book_ask_size_at_or_below(book, market_order_price)
+        if available_size is not None and available_size + 1e-9 < plan.order_size:
+            return OrderExecutionResult(
+                status="skipped",
+                remaining_budget=remaining_budget,
+                skip_reason="live_order_book_depth_insufficient",
+            )
+        clob_client = live_client_for_depth
     try:
         order_id, response = submit_live_strategy_order(
             cfg=cfg,

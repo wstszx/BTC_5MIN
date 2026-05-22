@@ -4411,6 +4411,30 @@ def test_dashboard_config_payload_includes_strategy10_fields(tmp_path: Path):
         state.close()
 
 
+def test_dashboard_update_config_accepts_fok_fallback_toggle(tmp_path: Path):
+    env_file = tmp_path / '.env.dashboard'
+    state = DashboardState(env_file=env_file)
+    try:
+        payload = state.update_config({'POLYMARKET_FOK_FALLBACK_TO_FAK': 'false'})
+
+        assert payload['env_values']['POLYMARKET_FOK_FALLBACK_TO_FAK'] == 'false'
+        assert payload['select_options']['POLYMARKET_FOK_FALLBACK_TO_FAK'] == ['true', 'false']
+    finally:
+        state.close()
+
+
+def test_dashboard_update_config_accepts_order_book_depth_precheck_toggle(tmp_path: Path):
+    env_file = tmp_path / '.env.dashboard'
+    state = DashboardState(env_file=env_file)
+    try:
+        payload = state.update_config({'POLYMARKET_PRECHECK_ORDER_BOOK_DEPTH': 'false'})
+
+        assert payload['env_values']['POLYMARKET_PRECHECK_ORDER_BOOK_DEPTH'] == 'false'
+        assert payload['select_options']['POLYMARKET_PRECHECK_ORDER_BOOK_DEPTH'] == ['true', 'false']
+    finally:
+        state.close()
+
+
 def test_dashboard_update_config_accepts_strategy10_confirm_window(tmp_path: Path):
     env_file = tmp_path / '.env.dashboard'
     state = DashboardState(env_file=env_file)
