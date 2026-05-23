@@ -9,7 +9,7 @@ import pytest
 
 import main
 from config import AppConfig, build_config_from_env_values, load_env_file_values
-from runtime_config import cfg_for_paper_strategy
+from runtime_config import cfg_for_live_strategy, cfg_for_paper_strategy
 
 
 def _path_tail(value: str | Path, count: int) -> tuple[str, ...]:
@@ -896,6 +896,36 @@ def test_paper_timeframe_worker_preserves_shared_strategy_profile_overrides():
     assert strategy_cfg.max_entry_price == pytest.approx(0.54)
     assert strategy_cfg.live_max_price_improvement == pytest.approx(0.04)
     assert strategy_cfg.strategy7_momentum_threshold == pytest.approx(0.008)
+
+
+def test_active_mode_worker_config_preserves_strategy_profile_overrides():
+    cfg = build_config_from_env_values(
+        {
+            'TRADE_MODE': 'both',
+            'PAPER_STRATEGY_IDS': '7,10',
+            'LIVE_STRATEGY_IDS': '7,10',
+            'STRATEGY_10_BASE_ORDER_COST': '1.2',
+            'STRATEGY_10_MIN_ENTRY_PRICE': '0.50',
+            'STRATEGY_10_MAX_ENTRY_PRICE': '0.54',
+            'STRATEGY_10_LIVE_MAX_PRICE_IMPROVEMENT': '0.04',
+            'STRATEGY_10_MIN_EDGE': '0.05',
+        }
+    )
+
+    live_cfg = main._cfg_for_active_mode(cfg, 'live')
+    paper_cfg = main._cfg_for_active_mode(cfg, 'paper')
+    live_strategy_cfg = cfg_for_live_strategy(live_cfg, 10)
+    paper_strategy_cfg = cfg_for_paper_strategy(paper_cfg, 10)
+
+    assert live_strategy_cfg.base_order_cost == pytest.approx(1.2)
+    assert live_strategy_cfg.min_entry_price == pytest.approx(0.50)
+    assert live_strategy_cfg.max_entry_price == pytest.approx(0.54)
+    assert live_strategy_cfg.live_max_price_improvement == pytest.approx(0.04)
+    assert live_strategy_cfg.strategy10_min_edge == pytest.approx(0.05)
+    assert paper_strategy_cfg.base_order_cost == pytest.approx(1.2)
+    assert paper_strategy_cfg.min_entry_price == pytest.approx(0.50)
+    assert paper_strategy_cfg.max_entry_price == pytest.approx(0.54)
+    assert paper_strategy_cfg.strategy10_min_edge == pytest.approx(0.05)
 
 
 def test_paper_timeframe_worker_config_preserves_strategy9_dynamic_sizing():

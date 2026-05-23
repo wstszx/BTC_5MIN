@@ -4067,7 +4067,9 @@ def test_dashboard_assets_localize_live_price_improvement_guard():
     js = _dashboard_js()
 
     assert "live_order_book_depth_insufficient: '盘口深度不足'" in js
+    assert "live_order_book_price_below_min_entry: '盘口价格低于入场下限'" in js
     assert "live_order_book_price_improved_too_much: '盘口价格偏离过大'" in js
+    assert "official_fill_price_below_min_entry: '成交价低于入场下限'" in js
     assert "official_fill_price_below_decision_floor: '成交价偏离过大'" in js
     assert "LIVE_MAX_PRICE_IMPROVEMENT: '最大允许价格改善'" in js
 

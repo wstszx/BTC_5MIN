@@ -411,6 +411,40 @@ def test_clob_adapter_skips_when_best_ask_is_too_far_below_decision_price():
     assert client.posted_orders == []
 
 
+def test_clob_adapter_skips_when_best_ask_is_below_min_entry_price():
+    client = _ShallowOrderBookClient({"asks": [{"price": "0.49", "size": "10.0"}]})
+    plan = TradePlan(
+        True,
+        side="UP",
+        price=0.505,
+        order_size=2.0,
+        order_cost=1.01,
+        expected_profit=0.99,
+        max_entry_price=0.54,
+    )
+
+    execution = trader._execute_order_plan(
+        mode="live",
+        cfg=AppConfig(
+            strategy_id=10,
+            live_order_type="FOK",
+            min_entry_price=0.50,
+            live_max_price_improvement=0.05,
+        ),
+        clob_client=client,
+        strategy_id=10,
+        slug="btc-updown-5m-test",
+        token_id="up-token",
+        plan=plan,
+        remaining_budget=10.0,
+    )
+
+    assert execution.status == "skipped"
+    assert execution.skip_reason == "live_order_book_price_below_min_entry"
+    assert client.created_orders == []
+    assert client.posted_orders == []
+
+
 def test_clob_adapter_falls_back_to_fak_when_fok_market_order_is_not_filled():
     client = _FokThenFakOrderClient()
     plan = TradePlan(

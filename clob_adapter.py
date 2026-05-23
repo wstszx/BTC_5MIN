@@ -850,6 +850,17 @@ def execute_order_plan(
         live_client_for_depth = clob_client or (client_factory or create_live_clob_client)(cfg)
         book = read_live_order_book(live_client_for_depth, token_id)
         best_ask_price = best_order_book_ask_price(book)
+        min_entry_price = getattr(cfg, "min_entry_price", None)
+        if (
+            best_ask_price is not None
+            and min_entry_price is not None
+            and best_ask_price + 1e-9 < min_entry_price
+        ):
+            return OrderExecutionResult(
+                status="skipped",
+                remaining_budget=remaining_budget,
+                skip_reason="live_order_book_price_below_min_entry",
+            )
         improvement_floor = price_improvement_floor(
             plan.raw_price if plan.raw_price is not None else plan.price,
             getattr(cfg, "live_max_price_improvement", None),

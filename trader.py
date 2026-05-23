@@ -540,6 +540,7 @@ def _plan_with_verified_live_fill(
     side: str,
     order_id: str | None,
     clob_client: Any | None,
+    min_entry_price: float | None = None,
     max_entry_price: float | None = None,
     max_price_improvement: float | None = None,
     strategy_id: int | None = None,
@@ -578,6 +579,20 @@ def _plan_with_verified_live_fill(
     decision_price = plan.raw_price if plan.raw_price is not None else plan.price
     improvement_floor = _price_improvement_floor(decision_price, max_price_improvement)
     verified_raw_price = verified_plan.raw_price if verified_plan.raw_price is not None else verified_plan.price
+    if (
+        min_entry_price is not None
+        and verified_raw_price is not None
+        and verified_raw_price + 1e-9 < min_entry_price
+    ):
+        _runtime_log(
+            "official_fill_price_below_min_entry"
+            + " order_id=" + str(order_id)
+            + " strategy=" + str(strategy_id or "")
+            + " round=" + str(slug or "")
+            + " fill_price=" + f"{verified_raw_price:.6f}"
+            + " min_entry_price=" + str(min_entry_price)
+        )
+        return verified_plan, "official_fill_price_below_min_entry"
     if (
         improvement_floor is not None
         and verified_raw_price is not None
@@ -1151,6 +1166,7 @@ def place_live_order(
         side=side,
         order_id=order_id,
         clob_client=live_client,
+        min_entry_price=getattr(cfg, "min_entry_price", None),
         max_entry_price=plan.max_entry_price if plan.max_entry_price is not None else getattr(cfg, "max_entry_price", None),
         max_price_improvement=getattr(cfg, "live_max_price_improvement", None),
         strategy_id=cfg.strategy_id,
@@ -2061,6 +2077,7 @@ def run_live_trading(
                             side=side,
                             order_id=execution.order_id,
                             clob_client=live_client,
+                            min_entry_price=getattr(strategy_cfg, "min_entry_price", None),
                             max_entry_price=plan.max_entry_price if plan.max_entry_price is not None else getattr(strategy_cfg, "max_entry_price", None),
                             max_price_improvement=getattr(strategy_cfg, "live_max_price_improvement", None),
                             strategy_id=strategy_id,

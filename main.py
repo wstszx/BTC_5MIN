@@ -41,8 +41,10 @@ def _cfg_for_active_mode(cfg: AppConfig, mode: str) -> AppConfig:
         return cfg
     if getattr(cfg, 'trade_mode', None) == mode:
         return cfg
-    worker_cfg = replace(cfg)
-    worker_cfg.trade_mode = mode
+    worker_cfg = replace(cfg, trade_mode=mode)
+    worker_cfg.paper_profiles = getattr(cfg, 'paper_profiles', {})
+    worker_cfg.paper_strategy_profiles = getattr(cfg, 'paper_strategy_profiles', {})
+    worker_cfg.live_profiles = getattr(cfg, 'live_profiles', {})
     return worker_cfg
 
 
