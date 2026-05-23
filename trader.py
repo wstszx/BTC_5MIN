@@ -112,6 +112,7 @@ from clob_adapter import (
     is_retryable_live_clob_error as _is_retryable_live_clob_error,
     is_retryable_live_io_error as _is_retryable_live_io_error,
     live_clob_client_config_key as _live_clob_client_config_key,
+    price_improvement_floor as _price_improvement_floor,
     read_available_live_balance as _adapter_read_available_live_balance,
     submit_live_strategy_order as _adapter_submit_live_strategy_order,
     effective_price_cap_to_raw_price_cap as _effective_price_cap_to_raw_price_cap,
@@ -540,6 +541,7 @@ def _plan_with_verified_live_fill(
     order_id: str | None,
     clob_client: Any | None,
     max_entry_price: float | None = None,
+    max_price_improvement: float | None = None,
     strategy_id: int | None = None,
     slug: str | None = None,
 ) -> tuple[TradePlan, str]:
@@ -573,6 +575,24 @@ def _plan_with_verified_live_fill(
             + " fill_price=" + f"{verified_plan.price:.6f}"
             + " max_entry_price=" + str(max_entry_price)
         )
+    decision_price = plan.raw_price if plan.raw_price is not None else plan.price
+    improvement_floor = _price_improvement_floor(decision_price, max_price_improvement)
+    verified_raw_price = verified_plan.raw_price if verified_plan.raw_price is not None else verified_plan.price
+    if (
+        improvement_floor is not None
+        and verified_raw_price is not None
+        and verified_raw_price + 1e-9 < improvement_floor
+    ):
+        _runtime_log(
+            "official_fill_price_below_decision_floor"
+            + " order_id=" + str(order_id)
+            + " strategy=" + str(strategy_id or "")
+            + " round=" + str(slug or "")
+            + " fill_price=" + f"{verified_raw_price:.6f}"
+            + " decision_price=" + (f"{decision_price:.6f}" if decision_price is not None else "")
+            + " floor=" + f"{improvement_floor:.6f}"
+        )
+        return verified_plan, "official_fill_price_below_decision_floor"
     return verified_plan, "official_fill"
 
 
@@ -1132,6 +1152,7 @@ def place_live_order(
         order_id=order_id,
         clob_client=live_client,
         max_entry_price=plan.max_entry_price if plan.max_entry_price is not None else getattr(cfg, "max_entry_price", None),
+        max_price_improvement=getattr(cfg, "live_max_price_improvement", None),
         strategy_id=cfg.strategy_id,
         slug=target_round.slug,
     )
@@ -2041,6 +2062,7 @@ def run_live_trading(
                             order_id=execution.order_id,
                             clob_client=live_client,
                             max_entry_price=plan.max_entry_price if plan.max_entry_price is not None else getattr(strategy_cfg, "max_entry_price", None),
+                            max_price_improvement=getattr(strategy_cfg, "live_max_price_improvement", None),
                             strategy_id=strategy_id,
                             slug=target_round.slug,
                         )

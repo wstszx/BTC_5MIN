@@ -1423,6 +1423,75 @@ def test_dashboard_live_recent_orders_does_not_validate_skip_rows(tmp_path: Path
         os.chdir(old_cwd)
 
 
+def test_dashboard_live_recent_orders_marks_below_min_fill_as_price_improvement(tmp_path: Path):
+    old_cwd = Path.cwd()
+    os.chdir(tmp_path)
+    env_file = tmp_path / ".env.dashboard"
+    env_file.write_text(
+        "LIVE_STRATEGY_IDS=10\n"
+        "STRATEGY_10_MIN_ENTRY_PRICE=0.5\n"
+        "STRATEGY_10_MAX_ENTRY_PRICE=0.54\n",
+        encoding="utf-8",
+    )
+    state = DashboardState(env_file=env_file)
+    try:
+        live_csv = tmp_path / "logs" / "live_orders.csv"
+        live_csv.parent.mkdir(parents=True, exist_ok=True)
+        live_csv.write_text(
+            "timestamp,mode,round_index,strategy,entry_timing,event_slug,start_time,end_time,side,price,"
+            "order_size,order_cost,expected_profit,result,trade_pnl,cash_pnl,skip_reason,raw_price,fee,live_price_cap\n"
+            "2026-05-22T09:30:10+00:00,live,84,10,OPEN,btc-updown-5m-test,"
+            "2026-05-22T09:30:00+00:00,2026-05-22T09:35:00+00:00,DOWN,0.406653,"
+            "2.5424,1.0340,1.5084,DOWN,1.5084,1.5084,,0.39,0.042699973953,0.52\n",
+            encoding="utf-8",
+        )
+
+        payload = state.get_live_recent_orders_payload(limit=10, strategy=10)
+
+        row = payload["rows"][0]
+        assert row["skip_reason"] == ""
+        assert row["price_check_status"] == "improved"
+        assert row["price_check_label"] == "价格改善"
+        assert "低于最低入场价 0.5000" in row["price_check_detail"]
+    finally:
+        state.close()
+        os.chdir(old_cwd)
+
+
+def test_dashboard_live_recent_orders_marks_effective_fill_above_cap(tmp_path: Path):
+    old_cwd = Path.cwd()
+    os.chdir(tmp_path)
+    env_file = tmp_path / ".env.dashboard"
+    env_file.write_text(
+        "LIVE_STRATEGY_IDS=10\n"
+        "STRATEGY_10_MIN_ENTRY_PRICE=0.5\n"
+        "STRATEGY_10_MAX_ENTRY_PRICE=0.54\n",
+        encoding="utf-8",
+    )
+    state = DashboardState(env_file=env_file)
+    try:
+        live_csv = tmp_path / "logs" / "live_orders.csv"
+        live_csv.parent.mkdir(parents=True, exist_ok=True)
+        live_csv.write_text(
+            "timestamp,mode,round_index,strategy,entry_timing,event_slug,start_time,end_time,side,price,"
+            "order_size,order_cost,expected_profit,result,trade_pnl,cash_pnl,skip_reason,raw_price,fee,live_price_cap\n"
+            "2026-05-22T08:55:07+00:00,live,83,10,OPEN,btc-updown-5m-test,"
+            "2026-05-22T08:55:00+00:00,2026-05-22T09:00:00+00:00,UP,0.547437,"
+            "1.9417,1.0628,0.8789,DOWN,-1.0628,-1.0628,,0.53,0.032899974667,0.54\n",
+            encoding="utf-8",
+        )
+
+        payload = state.get_live_recent_orders_payload(limit=10, strategy=10)
+
+        row = payload["rows"][0]
+        assert row["price_check_status"] == "above_max"
+        assert row["price_check_label"] == "高于有效价帽"
+        assert "高于最高有效价 0.5400" in row["price_check_detail"]
+    finally:
+        state.close()
+        os.chdir(old_cwd)
+
+
 def test_dashboard_live_recent_orders_filters_by_strategy(tmp_path: Path):
     old_cwd = Path.cwd()
     os.chdir(tmp_path)
@@ -3981,6 +4050,26 @@ def test_dashboard_assets_include_recent_result_prices_and_status_styles():
     assert '.trade-up { color: var(--green); font-weight: 700; }' in css
     assert '.trade-down { color: var(--red); font-weight: 700; }' in css
     assert '.trade-skip { color: var(--amber); font-weight: 700; }' in css
+
+
+def test_dashboard_assets_show_recent_price_check_label():
+    js = _dashboard_js()
+    css = dashboard._dashboard_css()
+
+    assert "function priceCheckClass(" in js
+    assert "row.price_check_label" in js
+    assert "row.price_check_detail" in js
+    assert "recent-price-check" in js
+    assert ".recent-price-check" in css
+
+
+def test_dashboard_assets_localize_live_price_improvement_guard():
+    js = _dashboard_js()
+
+    assert "live_order_book_depth_insufficient: '盘口深度不足'" in js
+    assert "live_order_book_price_improved_too_much: '盘口价格偏离过大'" in js
+    assert "official_fill_price_below_decision_floor: '成交价偏离过大'" in js
+    assert "LIVE_MAX_PRICE_IMPROVEMENT: '最大允许价格改善'" in js
 
 
 def test_dashboard_assets_localize_provisional_loss_result():

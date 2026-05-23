@@ -282,6 +282,58 @@ def _backfill_recent_strategy_price_skip_prices(rows: list[dict[str, str]]) -> l
     return [_backfill_strategy_price_skip_price(row) for row in rows]
 
 
+def _fmt_price_check_value(value: float | None) -> str:
+    return "--" if value is None else f"{value:.4f}"
+
+
+def _live_recent_price_check(row: dict[str, str], cfg: AppConfig) -> dict[str, str]:
+    checked = dict(row)
+    checked.setdefault("price_check_status", "")
+    checked.setdefault("price_check_label", "")
+    checked.setdefault("price_check_detail", "")
+    side = str(checked.get("side") or "").strip().upper()
+    if side not in {"UP", "DOWN"} or str(checked.get("skip_reason") or "").strip():
+        return checked
+    order_cost = _optional_float(checked.get("order_cost")) or 0.0
+    order_size = _optional_float(checked.get("order_size")) or 0.0
+    if order_cost <= 0.0 or order_size <= 0.0:
+        return checked
+
+    effective_price = _optional_float(checked.get("price"))
+    if effective_price is None:
+        return checked
+    strategy_text = str(checked.get("strategy") or "").strip()
+    try:
+        strategy_cfg = _cfg_for_live_strategy(cfg, int(strategy_text))
+    except (TypeError, ValueError):
+        strategy_cfg = cfg
+    min_entry_price = getattr(strategy_cfg, "min_entry_price", None)
+    max_entry_price = getattr(strategy_cfg, "max_entry_price", None)
+    if max_entry_price is not None and effective_price > float(max_entry_price) + 1e-9:
+        checked["price_check_status"] = "above_max"
+        checked["price_check_label"] = "高于有效价帽"
+        checked["price_check_detail"] = (
+            f"成交有效价 {_fmt_price_check_value(effective_price)} "
+            f"高于最高有效价 {_fmt_price_check_value(float(max_entry_price))}"
+        )
+        return checked
+    if min_entry_price is not None and effective_price < float(min_entry_price) - 1e-9:
+        checked["price_check_status"] = "improved"
+        checked["price_check_label"] = "价格改善"
+        checked["price_check_detail"] = (
+            f"成交有效价 {_fmt_price_check_value(effective_price)} "
+            f"低于最低入场价 {_fmt_price_check_value(float(min_entry_price))}，按价格改善处理"
+        )
+        return checked
+    checked["price_check_status"] = "ok"
+    checked["price_check_detail"] = "成交有效价在策略入场区间内"
+    return checked
+
+
+def _with_live_recent_price_checks(rows: list[dict[str, str]], cfg: AppConfig) -> list[dict[str, str]]:
+    return [_live_recent_price_check(row, cfg) for row in rows]
+
+
 def _normalize_timeframe_filter(timeframe: str | None, *, fallback: str = "5m") -> str:
     raw = str(timeframe or fallback).strip().lower()
     return raw if raw in {"5m", "15m"} else fallback
@@ -311,6 +363,7 @@ STRATEGY_PROFILE_EDITABLE_FIELDS: tuple[str, ...] = (
     "MAX_STAKE",
     "MIN_ENTRY_PRICE",
     "MAX_ENTRY_PRICE",
+    "LIVE_MAX_PRICE_IMPROVEMENT",
     "MAX_CONSECUTIVE_LOSSES",
     "MAX_STAKE_SKIP_ALERT_THRESHOLD",
     "OPEN_DELAY_SECONDS",
@@ -1669,6 +1722,7 @@ class DashboardState:
         "MAX_STAKE": "单笔最大下注金额",
         "MIN_ENTRY_PRICE": "最低买入价格",
         "MAX_ENTRY_PRICE": "最高有效买入价(含费)",
+        "LIVE_MAX_PRICE_IMPROVEMENT": "最大允许价格改善",
         "MAX_PRICE_THRESHOLD": "最高买入价格阈值",
         "OFI_THRESHOLD": "盘口失衡阈值",
         "STRATEGY7_OFI_THRESHOLD": "策略7 盘口失衡阈值",
@@ -1775,6 +1829,7 @@ class DashboardState:
         "MAX_STAKE": "max_stake",
         "MIN_ENTRY_PRICE": "min_entry_price",
         "MAX_ENTRY_PRICE": "max_entry_price",
+        "LIVE_MAX_PRICE_IMPROVEMENT": "live_max_price_improvement",
         "MAX_PRICE_THRESHOLD": "max_price_threshold",
         "OFI_THRESHOLD": "ofi_threshold",
         "STRATEGY7_OFI_THRESHOLD": "strategy7_ofi_threshold",
@@ -1866,6 +1921,7 @@ class DashboardState:
         "MAX_STAKE",
         "MIN_ENTRY_PRICE",
         "MAX_ENTRY_PRICE",
+        "LIVE_MAX_PRICE_IMPROVEMENT",
         "MAX_PRICE_THRESHOLD",
         "BINANCE_SIGNAL_STALE_SECONDS",
         "OFI_THRESHOLD",
@@ -2029,6 +2085,7 @@ class DashboardState:
         "MAX_STAKE": "单笔订单允许投入的最大 USDC；超过后会直接跳过本轮。",
         "MIN_ENTRY_PRICE": "目标方向价格低于该值时不入场；留空则不设置下限。",
         "MAX_ENTRY_PRICE": "目标方向含手续费后的有效买入价高于该值时不入场；实盘会反推官方 raw price 作为订单价格保护。",
+        "LIVE_MAX_PRICE_IMPROVEMENT": "实盘成交价允许比决策价最多低多少；超过该幅度视为行情已变质。",
         "MAX_PRICE_THRESHOLD": "目标方向价格高于该阈值时不入场。",
         "OFI_THRESHOLD": "策略 6 的 Binance OFI 最小强度要求，低于该阈值直接跳过。",
         "STRATEGY7_OFI_THRESHOLD": "策略 7 对 Binance OFI 的最小强度要求，低于该阈值直接跳过。",
@@ -3425,6 +3482,7 @@ class DashboardState:
             if callable(close):
                 close()
         rows = _backfill_recent_strategy_price_skip_prices(rows)
+        rows = _with_live_recent_price_checks(rows, cfg)
         rows = [_with_recent_round_display_time(row, target_timeframe) for row in rows]
         return {
             "csv_path": str(live_csv),
@@ -5353,6 +5411,13 @@ tr:hover td { background: rgba(50, 88, 131, 0.1); }
 .trade-up { color: var(--green); font-weight: 700; }
 .trade-down { color: var(--red); font-weight: 700; }
 .trade-skip { color: var(--amber); font-weight: 700; }
+.recent-price-check {
+  display: inline-block;
+  margin-top: 2px;
+  font-size: 11px;
+  line-height: 1.2;
+  white-space: nowrap;
+}
 .pnl-plus { color: var(--green); font-family: var(--mono); }
 .pnl-minus { color: var(--red); font-family: var(--mono); }
 .skip-reason-badge {
@@ -5591,7 +5656,8 @@ const HELP_SECTIONS = {
       {
         title: '常见跳过原因',
         bullets: [
-          'price_above_threshold 表示目标方向含费有效价格高于上限；price_below_threshold 表示官方 raw 价格低于下限。',
+          'price_above_threshold 表示目标方向含费有效价格高于上限；price_below_threshold 表示入场候选价格低于下限。',
+          '实盘成交后的有效价低于最低入场价不是违规，会在最近明细中显示为价格改善。',
           'order_cost_above_max_stake 表示本轮所需下注金额超过 MAX_STAKE。',
           'max_consecutive_losses_reached 表示连续亏损已达到 MAX_CONSECUTIVE_LOSSES，本轮触发止损重置。',
           'ws_stale 表示实时行情过旧，程序会阻止本轮交易，避免拿陈旧报价下单。',
@@ -5738,6 +5804,9 @@ const REASON_LABELS = {
   strategy10_entry_too_late: '策略10 确认出现过晚',
   strategy10_price_too_low: '策略10 入场价格过低',
   strategy10_price_too_high: '策略10 入场价格过高',
+  live_order_book_depth_insufficient: '盘口深度不足',
+  live_order_book_price_improved_too_much: '盘口价格偏离过大',
+  official_fill_price_below_decision_floor: '成交价偏离过大',
   strategy11_window_unavailable: '策略11 当前轮次不可用',
   strategy11_btc_price_stale: '策略11 BTC 价格信号已过期',
   strategy11_btc_price_unavailable: '策略11 BTC 价格不可用',
@@ -5777,6 +5846,7 @@ const CONFIG_KEY_NAMES = {
   MAX_STAKE: '单笔最大下注金额',
   MIN_ENTRY_PRICE: '最低买入价格',
   MAX_ENTRY_PRICE: '最高有效买入价(含费)',
+  LIVE_MAX_PRICE_IMPROVEMENT: '最大允许价格改善',
   MAX_PRICE_THRESHOLD: '最高买入价格阈值',
   STRATEGY7_OFI_THRESHOLD: '策略7 盘口失衡阈值',
   STRATEGY7_MOMENTUM_THRESHOLD: '策略7 动量阈值',
@@ -6091,6 +6161,12 @@ function resultCheckText(status) {
   if (status === 'official_pending') return '待官方结算';
   if (status === 'error') return '校验异常';
   return '--';
+}
+
+function priceCheckClass(status) {
+  if (status === 'above_max') return 'trade-down';
+  if (status === 'improved') return 'trade-up';
+  return 'trade-skip';
 }
 
 function strategyCatalog(payload) {
@@ -8310,6 +8386,13 @@ function renderRecent(payload) {
     const checkText = resultCheckText(row.result_check_status);
     const checkCls = row.result_check_status === 'match' ? 'trade-up' : ((row.result_check_status === 'mismatch') ? 'trade-down' : 'trade-skip');
     const checkTitle = '官方结果: ' + tradeResultText(row.resolved_expected_result) + (row.result_check_error ? (' · 错误: ' + row.result_check_error) : '');
+    const priceCheckLabel = String(row.price_check_label || '').trim();
+    const priceCheckStatus = String(row.price_check_status || '').trim();
+    const priceCheckDetail = String(row.price_check_detail || '').trim();
+    const priceValue = esc(fmtNum(row.price, 4));
+    const priceHtml = priceCheckLabel
+      ? (priceValue + '<br><span class="recent-price-check ' + esc(priceCheckClass(priceCheckStatus)) + '" title="' + esc(priceCheckDetail) + '">' + esc(priceCheckLabel) + '</span>')
+      : priceValue;
     const rowClass = isPending ? 'recent-pending' : (isMissedEntry ? 'recent-missed-entry' : '');
     const balanceError = String(row.balance_error || '').trim();
     const reasonTitle = balanceError ? (reasonText(row.skip_reason) + ' / ' + balanceError) : reasonText(row.skip_reason);
@@ -8323,7 +8406,7 @@ function renderRecent(payload) {
       '<td title="' + esc(row.event_slug || '--') + '">' + esc(roundDisplay) + '</td>' +
       '<td>' + esc(row.strategy || '--') + '</td>' +
       '<td class="' + esc(sideCls) + '">' + esc(sideText(side)) + '</td>' +
-      '<td>' + esc(fmtNum(row.price, 4)) + '</td>' +
+      '<td>' + priceHtml + '</td>' +
       '<td>' + esc(fmtNum(row.order_cost, 4)) + '</td>' +
       '<td class="' + (isPending ? 'trade-skip' : '') + '">' + esc(resultText) + '</td>' +
       '<td class="' + esc(checkCls) + '" title="' + esc(checkTitle) + '">' + esc(checkText) + '</td>' +

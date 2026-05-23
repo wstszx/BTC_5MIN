@@ -194,6 +194,7 @@ def test_build_config_prefers_shared_strategy_profile_values_for_paper_and_live(
             "STRATEGY_7_MAX_STAKE": "60",
             "STRATEGY_7_MIN_ENTRY_PRICE": "0.50",
             "STRATEGY_7_MAX_ENTRY_PRICE": "0.54",
+            "STRATEGY_7_LIVE_MAX_PRICE_IMPROVEMENT": "0.04",
             "STRATEGY_7_MAX_CONSECUTIVE_LOSSES": "7",
             "STRATEGY_7_OFI_THRESHOLD": "0.58",
             "STRATEGY_7_MOMENTUM_THRESHOLD": "0.008",
@@ -209,6 +210,7 @@ def test_build_config_prefers_shared_strategy_profile_values_for_paper_and_live(
         assert profile.max_stake == 60.0
         assert profile.min_entry_price == 0.50
         assert profile.max_entry_price == 0.54
+        assert profile.live_max_price_improvement == 0.04
         assert profile.max_consecutive_losses == 7
         assert profile.strategy7_ofi_threshold == 0.58
         assert profile.strategy7_momentum_threshold == 0.008

@@ -3050,6 +3050,62 @@ def test_place_live_order_audits_official_fill_above_max_entry_price(tmp_path, m
     assert any("max_entry_price=0.54" in message for message in messages)
 
 
+def test_place_live_order_audits_official_fill_below_decision_floor(tmp_path, monkeypatch):
+    class _DecisionPriceLiveMarketClient(_LiveMarketClient):
+        def quote_from_market(self, _market):
+            return MarketQuote(
+                slug="btc-updown-5m-test",
+                up_price=0.505,
+                down_price=0.495,
+                up_best_ask=0.505,
+                down_best_ask=0.495,
+                strategy6_ofi_score=0.8,
+                strategy6_signal_at=datetime.now(timezone.utc),
+                fetched_at=datetime.now(timezone.utc),
+            )
+
+    messages: list[str] = []
+    monkeypatch.setattr("trader._runtime_log", messages.append)
+    cfg = AppConfig(
+        live_trading_enabled=True,
+        strategy_id=10,
+        live_max_price_improvement=0.05,
+        max_entry_price=0.54,
+        strategy10_min_edge=0.04,
+        strategy10_ofi_weight=0.10,
+        strategy10_momentum_weight=1.0,
+        strategy10_confirm_before_entry_seconds=0,
+        signal_lock_before_entry_seconds=0,
+    )
+    stub_clob = _StubClobClient(
+        order_payloads={"oid-123": {"status": "filled"}},
+        trade_payloads={
+            "oid-123": [
+                _confirmed_trade("oid-123", size=5.555554, price=0.18),
+            ],
+        },
+    )
+    state_path = tmp_path / "state.json"
+    log_path = tmp_path / "live.csv"
+
+    result = place_live_order(
+        cfg=cfg,
+        market_client=_DecisionPriceLiveMarketClient(),
+        clob_client=stub_clob,
+        state_path=state_path,
+        log_path=log_path,
+    )
+
+    rows = list(csv.DictReader(log_path.open(newline="", encoding="utf-8")))
+
+    assert result["status"] == "submitted"
+    assert result["raw_price"] == pytest.approx(0.18)
+    assert result["price"] == pytest.approx(0.190332)
+    assert rows[-1]["fill_source"] == "official_fill_price_below_decision_floor"
+    assert any("official_fill_price_below_decision_floor" in message for message in messages)
+    assert any("decision_price=0.505000" in message for message in messages)
+
+
 def test_place_live_order_logs_official_market_order_price_cap(tmp_path):
     cfg = AppConfig(live_trading_enabled=True, strategy_id=10, max_entry_price=0.54)
     stub_clob = _StubClobClient(

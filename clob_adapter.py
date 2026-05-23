@@ -128,6 +128,22 @@ def available_order_book_ask_size_at_or_below(book: Any, price_cap: float | None
     return total_size if seen_level else None
 
 
+def best_order_book_ask_price(book: Any) -> float | None:
+    best_price: float | None = None
+    for level in _book_levels(book, "asks"):
+        price = _level_price(level)
+        if price is None:
+            continue
+        best_price = price if best_price is None else min(best_price, price)
+    return best_price
+
+
+def price_improvement_floor(price: float | None, max_improvement: float | None) -> float | None:
+    if price is None or max_improvement is None or max_improvement <= 0:
+        return None
+    return max(0.0, float(price) - float(max_improvement))
+
+
 def read_live_order_book(live_client: Any, token_id: str) -> Any | None:
     get_order_book = getattr(live_client, "get_order_book", None)
     if not callable(get_order_book):
@@ -833,6 +849,21 @@ def execute_order_plan(
     ):
         live_client_for_depth = clob_client or (client_factory or create_live_clob_client)(cfg)
         book = read_live_order_book(live_client_for_depth, token_id)
+        best_ask_price = best_order_book_ask_price(book)
+        improvement_floor = price_improvement_floor(
+            plan.raw_price if plan.raw_price is not None else plan.price,
+            getattr(cfg, "live_max_price_improvement", None),
+        )
+        if (
+            best_ask_price is not None
+            and improvement_floor is not None
+            and best_ask_price + 1e-9 < improvement_floor
+        ):
+            return OrderExecutionResult(
+                status="skipped",
+                remaining_budget=remaining_budget,
+                skip_reason="live_order_book_price_improved_too_much",
+            )
         available_size = available_order_book_ask_size_at_or_below(book, market_order_price)
         if available_size is not None and available_size + 1e-9 < plan.order_size:
             return OrderExecutionResult(

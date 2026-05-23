@@ -882,6 +882,7 @@ def test_paper_timeframe_worker_preserves_shared_strategy_profile_overrides():
             'STRATEGY_7_MAX_STAKE': '60',
             'STRATEGY_7_MIN_ENTRY_PRICE': '0.50',
             'STRATEGY_7_MAX_ENTRY_PRICE': '0.54',
+            'STRATEGY_7_LIVE_MAX_PRICE_IMPROVEMENT': '0.04',
             'STRATEGY_7_MOMENTUM_THRESHOLD': '0.008',
         }
     )
@@ -893,6 +894,7 @@ def test_paper_timeframe_worker_preserves_shared_strategy_profile_overrides():
     assert strategy_cfg.max_stake == pytest.approx(60.0)
     assert strategy_cfg.min_entry_price == pytest.approx(0.50)
     assert strategy_cfg.max_entry_price == pytest.approx(0.54)
+    assert strategy_cfg.live_max_price_improvement == pytest.approx(0.04)
     assert strategy_cfg.strategy7_momentum_threshold == pytest.approx(0.008)
 
 

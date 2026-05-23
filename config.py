@@ -136,6 +136,7 @@ _FLOAT_CONFIG_KEYS: frozenset[str] = frozenset(
         "MAX_PRICE_THRESHOLD",
         "MIN_PRICE_THRESHOLD",
         "MIN_ENTRY_PRICE",
+        "LIVE_MAX_PRICE_IMPROVEMENT",
         "SIGNAL_MOMENTUM_THRESHOLD",
         "SIGNAL_DYNAMIC_THRESHOLD_K",
         "OFI_THRESHOLD",
@@ -212,6 +213,7 @@ _GLOBAL_STRATEGY_CONFIG_KEYS: frozenset[str] = frozenset(
         "MAX_STAKE",
         "MIN_ENTRY_PRICE",
         "MAX_ENTRY_PRICE",
+        "LIVE_MAX_PRICE_IMPROVEMENT",
         "MAX_CONSECUTIVE_LOSSES",
         "MAX_STAKE_SKIP_ALERT_THRESHOLD",
         "OPEN_DELAY_SECONDS",
@@ -716,6 +718,7 @@ class LiveStrategyProfile:
     ofi_threshold: float
     min_entry_price: float | None
     max_entry_price: float
+    live_max_price_improvement: float
     binance_signal_stale_seconds: float
     strategy7_ofi_threshold: float
     strategy7_momentum_threshold: float
@@ -785,6 +788,7 @@ def _base_live_profile_for_strategy(cfg: AppConfig, strategy_id: int) -> LiveStr
         ofi_threshold=cfg.ofi_threshold,
         min_entry_price=cfg.min_entry_price,
         max_entry_price=cfg.max_entry_price,
+        live_max_price_improvement=cfg.live_max_price_improvement,
         binance_signal_stale_seconds=cfg.binance_signal_stale_seconds,
         strategy7_ofi_threshold=cfg.strategy7_ofi_threshold,
         strategy7_momentum_threshold=cfg.strategy7_momentum_threshold,
@@ -909,6 +913,11 @@ def _profile_for_strategy(cfg: AppConfig, strategy_id: int) -> LiveStrategyProfi
             ofi_threshold=_strategy_env_float(strategy_id, "OFI_THRESHOLD", cfg.ofi_threshold),
             min_entry_price=_strategy_env_optional_float(strategy_id, "MIN_ENTRY_PRICE", cfg.min_entry_price),
             max_entry_price=_strategy_env_float(strategy_id, "MAX_ENTRY_PRICE", strategy7_max_entry_fallback),
+            live_max_price_improvement=_strategy_env_float(
+                strategy_id,
+                "LIVE_MAX_PRICE_IMPROVEMENT",
+                cfg.live_max_price_improvement,
+            ),
             binance_signal_stale_seconds=_strategy_env_float(
                 strategy_id,
                 "BINANCE_SIGNAL_STALE_SECONDS",
@@ -1160,6 +1169,7 @@ class AppConfig:
     max_stake_skip_alert_threshold: int = 5
     min_price_threshold: float | None = None
     min_entry_price: float | None = None
+    live_max_price_improvement: float = field(default_factory=lambda: _env_float("LIVE_MAX_PRICE_IMPROVEMENT", 0.05))
     ofi_threshold: float = 0.65
     max_entry_price: float = 0.56
     strategy7_ofi_threshold: float = 0.7

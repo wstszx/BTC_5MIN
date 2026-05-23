@@ -92,6 +92,11 @@ def _paper_strategy_profile_from_cfg(cfg: AppConfig, strategy_id: int) -> LiveSt
         ofi_threshold=getattr(existing, 'ofi_threshold', cfg.ofi_threshold),
         min_entry_price=getattr(existing, 'min_entry_price', cfg.min_entry_price),
         max_entry_price=getattr(existing, 'max_entry_price', cfg.max_entry_price),
+        live_max_price_improvement=getattr(
+            existing,
+            'live_max_price_improvement',
+            cfg.live_max_price_improvement,
+        ),
         binance_signal_stale_seconds=getattr(existing, 'binance_signal_stale_seconds', cfg.binance_signal_stale_seconds),
         strategy7_ofi_threshold=getattr(existing, 'strategy7_ofi_threshold', cfg.strategy7_ofi_threshold),
         strategy7_momentum_threshold=getattr(existing, 'strategy7_momentum_threshold', cfg.strategy7_momentum_threshold),
