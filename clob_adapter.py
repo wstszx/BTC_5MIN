@@ -842,11 +842,12 @@ def execute_order_plan(
         )
     effective_market_order_price = plan.max_entry_price if plan.max_entry_price is not None else getattr(cfg, "max_entry_price", None)
     market_order_price = effective_price_cap_to_raw_price_cap(effective_market_order_price)
-    if (
+    should_precheck_order_book_price = (
         getattr(cfg, "live_precheck_order_book_depth", True)
-        and _order_type_text(getattr(cfg, "live_order_type", "FOK")) == "FOK"
+        and _order_type_text(getattr(cfg, "live_order_type", "FOK")) in {"FOK", "FAK"}
         and market_order_price is not None
-    ):
+    )
+    if should_precheck_order_book_price:
         live_client_for_depth = clob_client or (client_factory or create_live_clob_client)(cfg)
         book = read_live_order_book(live_client_for_depth, token_id)
         best_ask_price = best_order_book_ask_price(book)
@@ -875,8 +876,9 @@ def execute_order_plan(
                 remaining_budget=remaining_budget,
                 skip_reason="live_order_book_price_improved_too_much",
             )
+        should_require_full_depth = _order_type_text(getattr(cfg, "live_order_type", "FOK")) == "FOK"
         available_size = available_order_book_ask_size_at_or_below(book, market_order_price)
-        if available_size is not None and available_size + 1e-9 < plan.order_size:
+        if should_require_full_depth and available_size is not None and available_size + 1e-9 < plan.order_size:
             return OrderExecutionResult(
                 status="skipped",
                 remaining_budget=remaining_budget,
