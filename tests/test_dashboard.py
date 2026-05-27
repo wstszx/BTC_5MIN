@@ -1017,10 +1017,11 @@ def test_dashboard_assets_include_left_panel_mode_selector_shell():
     assert "function renderConfigModeShell(payload)" in js
     assert "function renderTaskflowVisibility(mode)" in js
     assert "function activeStrategyListKey(payload, values)" in js
+    assert "function strategyEditModeForValues(values)" in js
     assert '<option value="both">纸面+实盘</option>' in html
     assert "function normalizeTradeMode(value)" in js
     assert "const envValues = (payload && payload.env_values) || {};" in js
-    assert "return configStrategyModeForTradeMode(mergedValues.TRADE_MODE);" in js
+    assert "return strategyEditModeForValues(mergedValues);" in js
 
 
 def test_dashboard_assets_distinguish_current_and_historical_ws_errors():
@@ -1092,11 +1093,12 @@ def test_dashboard_assets_use_unified_strategy_selection():
 
     assert "function strategyListKeyForMode(mode) {" in js
     assert "return normalized === 'live' ? 'LIVE_STRATEGY_IDS' : 'PAPER_STRATEGY_IDS';" in js
-    assert "return strategyListKeyForMode(mode);" in js
+    assert "return strategyEditModeForValues(mergedValues);" in js
     assert "const multiKey = activeStrategyListKey(payload, values);" in js
     assert "const legacySelectedRaw = parseStrategyIdList((values && values.STRATEGY_IDS) ?? envValues.STRATEGY_IDS ?? '');" in js
     assert "strategyOptionLabel(multiKey, opt, payload)" in js
     assert "const selectedStrategyList = domStrategyListKey === multiKey" in js
+    assert "unifiedValues[key] = String(baseValues[key] || '');" in js
 
 
 
@@ -2699,6 +2701,9 @@ def test_dashboard_assets_use_strategy_panel_for_unified_strategy_selection():
     assert 'cfgPaperStrategiesSelectAll' not in js
     assert '全选全部策略' not in js
     assert 'function renderStrategyPanel(' in js
+    assert 'strategy-mode-switch' in js
+    assert '编辑纸面' in js
+    assert '编辑实盘' in js
     assert 'function selectAllPaperStrategiesInPanel()' in js
     assert 'function clearPaperStrategies()' in js
     assert 'function togglePaperStrategySelection(' in js
@@ -2714,6 +2719,7 @@ def test_dashboard_assets_use_strategy_panel_for_unified_strategy_selection():
     assert 'field-wide' in js
     assert '.strategy-panel-row-main {' in css
     assert '.strategy-panel-summary {' in css
+    assert '.strategy-mode-active {' in css
     assert '.field.field-wide {' in css
     assert '.strategy-panel-primary input {' in css
     assert 'width: 14px;' in css
@@ -3073,19 +3079,20 @@ def test_dashboard_config_payload_exposes_and_saves_strategy_profile_overrides(t
 
         assert payload['strategy_profiles']['mode'] == 'live'
         strategy_seven = payload['strategy_profiles']['strategies']['7']
-        assert strategy_seven['fields']['BASE_ORDER_COST']['key'] == 'STRATEGY_7_BASE_ORDER_COST'
+        assert strategy_seven['fields']['BASE_ORDER_COST']['key'] == 'LIVE_STRATEGY_7_BASE_ORDER_COST'
         assert strategy_seven['fields']['BASE_ORDER_COST']['value'] == '5.5'
-        assert strategy_seven['fields']['BASE_ORDER_COST']['inherited'] is False
+        assert strategy_seven['fields']['BASE_ORDER_COST']['inherited'] is True
         assert payload['strategy_profiles']['strategies']['3']['fields']['BASE_ORDER_COST']['value'] == '1.0'
         assert payload['strategy_profiles']['strategies']['3']['fields']['BASE_ORDER_COST']['inherited'] is True
 
-        updated = state.update_config({'STRATEGY_3_BASE_ORDER_COST': '4.25'})
+        updated = state.update_config({'LIVE_STRATEGY_3_BASE_ORDER_COST': '4.25'})
 
         assert updated['strategy_profiles']['strategies']['3']['fields']['BASE_ORDER_COST']['value'] == '4.25'
-        assert updated['strategy_profiles']['strategies']['3']['fields']['BASE_ORDER_COST']['key'] == 'STRATEGY_3_BASE_ORDER_COST'
+        assert updated['strategy_profiles']['strategies']['3']['fields']['BASE_ORDER_COST']['key'] == 'LIVE_STRATEGY_3_BASE_ORDER_COST'
         text = env_file.read_text(encoding='utf-8')
-        assert 'STRATEGY_3_BASE_ORDER_COST=4.25' in text
-        assert 'LIVE_STRATEGY_3_BASE_ORDER_COST=4.25' not in text
+        lines = set(text.splitlines())
+        assert 'LIVE_STRATEGY_3_BASE_ORDER_COST=4.25' in text
+        assert 'STRATEGY_3_BASE_ORDER_COST=4.25' not in lines
     finally:
         state.close()
 
@@ -4611,14 +4618,14 @@ def test_dashboard_update_config_accepts_strategy11_values(tmp_path: Path):
         state.close()
 
 
-def test_dashboard_update_config_syncs_paper_and_live_strategy_ids_in_both_mode(tmp_path: Path):
+def test_dashboard_update_config_preserves_live_strategy_ids_in_both_mode_when_only_paper_updates(tmp_path: Path):
     env_file = tmp_path / '.env.dashboard'
     env_file.write_text(
         'TRADE_MODE=both\n'
         'LIVE_TRADING_ENABLED=true\n'
         'STRATEGY_ID=7\n'
         'PAPER_STRATEGY_IDS=5,7,9,10,11\n'
-        'LIVE_STRATEGY_IDS=5,7,9,10,11\n',
+        'LIVE_STRATEGY_IDS=7,10\n',
         encoding='utf-8',
     )
     state = DashboardState(env_file=env_file)
@@ -4630,10 +4637,61 @@ def test_dashboard_update_config_syncs_paper_and_live_strategy_ids_in_both_mode(
         })
 
         assert payload['env_values']['PAPER_STRATEGY_IDS'] == '7,9,10,11'
-        assert payload['env_values']['LIVE_STRATEGY_IDS'] == '7,9,10,11'
+        assert payload['env_values']['LIVE_STRATEGY_IDS'] == '7,10'
         text = env_file.read_text(encoding='utf-8')
         assert 'PAPER_STRATEGY_IDS=7,9,10,11' in text
-        assert 'LIVE_STRATEGY_IDS=7,9,10,11' in text
+        assert 'LIVE_STRATEGY_IDS=7,10' in text
+    finally:
+        state.close()
+
+
+def test_dashboard_update_config_accepts_mode_specific_strategy_profile_values(tmp_path: Path):
+    env_file = tmp_path / '.env.dashboard'
+    state = DashboardState(env_file=env_file)
+    try:
+        payload = state.update_config({
+            'TRADE_MODE': 'both',
+            'STRATEGY_ID': '10',
+            'PAPER_STRATEGY_IDS': '7,9,10,11',
+            'LIVE_STRATEGY_IDS': '7,10',
+            'PAPER_STRATEGY_10_MIN_ENTRY_PRICE': '0.45',
+            'LIVE_STRATEGY_10_MIN_ENTRY_PRICE': '0.50',
+            'PAPER_STRATEGY_10_STRATEGY10_MIN_EDGE': '0.04',
+            'LIVE_STRATEGY_10_STRATEGY10_MIN_EDGE': '0.05',
+        })
+
+        assert payload['env_values']['PAPER_STRATEGY_IDS'] == '7,9,10,11'
+        assert payload['env_values']['LIVE_STRATEGY_IDS'] == '7,10'
+        assert payload['env_values']['PAPER_STRATEGY_10_MIN_ENTRY_PRICE'] == '0.45'
+        assert payload['env_values']['LIVE_STRATEGY_10_MIN_ENTRY_PRICE'] == '0.5'
+        assert payload['env_values']['PAPER_STRATEGY_10_STRATEGY10_MIN_EDGE'] == '0.04'
+        assert payload['env_values']['LIVE_STRATEGY_10_STRATEGY10_MIN_EDGE'] == '0.05'
+    finally:
+        state.close()
+
+
+def test_dashboard_strategy_profile_payload_uses_mode_specific_keys(tmp_path: Path):
+    env_file = tmp_path / '.env.dashboard'
+    env_file.write_text(
+        'TRADE_MODE=both\n'
+        'LIVE_TRADING_ENABLED=true\n'
+        'STRATEGY_ID=10\n'
+        'PAPER_STRATEGY_IDS=10\n'
+        'LIVE_STRATEGY_IDS=7,10\n'
+        'STRATEGY_10_MIN_ENTRY_PRICE=0.49\n'
+        'PAPER_STRATEGY_10_MIN_ENTRY_PRICE=0.45\n'
+        'LIVE_STRATEGY_10_MIN_ENTRY_PRICE=0.50\n',
+        encoding='utf-8',
+    )
+    state = DashboardState(env_file=env_file)
+    try:
+        payload = state.get_config_payload()
+
+        strategy10_min_entry = payload['strategy_profiles']['strategies']['10']['fields']['MIN_ENTRY_PRICE']
+        assert payload['strategy_profiles']['mode'] == 'paper'
+        assert strategy10_min_entry['key'] == 'PAPER_STRATEGY_10_MIN_ENTRY_PRICE'
+        assert strategy10_min_entry['value'] == '0.45'
+        assert strategy10_min_entry['inherited'] is False
     finally:
         state.close()
 

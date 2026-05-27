@@ -928,6 +928,40 @@ def test_active_mode_worker_config_preserves_strategy_profile_overrides():
     assert paper_strategy_cfg.strategy10_min_edge == pytest.approx(0.05)
 
 
+def test_build_config_from_env_values_prefers_mode_specific_strategy_overrides():
+    cfg = build_config_from_env_values(
+        {
+            'TRADE_MODE': 'both',
+            'PAPER_STRATEGY_IDS': '7,9,10,11',
+            'LIVE_STRATEGY_IDS': '7,10',
+            'STRATEGY_10_BASE_ORDER_COST': '1.5',
+            'STRATEGY_10_MIN_ENTRY_PRICE': '0.49',
+            'STRATEGY_10_MAX_ENTRY_PRICE': '0.54',
+            'STRATEGY_10_MIN_EDGE': '0.045',
+            'PAPER_STRATEGY_10_BASE_ORDER_COST': '1.0',
+            'PAPER_STRATEGY_10_MIN_ENTRY_PRICE': '0.45',
+            'PAPER_STRATEGY_10_MIN_EDGE': '0.035',
+            'LIVE_STRATEGY_10_BASE_ORDER_COST': '2.0',
+            'LIVE_STRATEGY_10_MIN_ENTRY_PRICE': '0.50',
+            'LIVE_STRATEGY_10_MIN_EDGE': '0.05',
+        }
+    )
+
+    paper_strategy_cfg = cfg_for_paper_strategy(cfg, 10)
+    live_strategy_cfg = cfg_for_live_strategy(cfg, 10)
+
+    assert cfg.paper_strategy_ids == [7, 9, 10, 11]
+    assert cfg.live_strategy_ids == [7, 10]
+    assert paper_strategy_cfg.base_order_cost == pytest.approx(1.0)
+    assert paper_strategy_cfg.min_entry_price == pytest.approx(0.45)
+    assert paper_strategy_cfg.max_entry_price == pytest.approx(0.54)
+    assert paper_strategy_cfg.strategy10_min_edge == pytest.approx(0.035)
+    assert live_strategy_cfg.base_order_cost == pytest.approx(2.0)
+    assert live_strategy_cfg.min_entry_price == pytest.approx(0.50)
+    assert live_strategy_cfg.max_entry_price == pytest.approx(0.54)
+    assert live_strategy_cfg.strategy10_min_edge == pytest.approx(0.05)
+
+
 def test_paper_timeframe_worker_config_preserves_strategy9_dynamic_sizing():
     cfg = build_config_from_env_values(
         {

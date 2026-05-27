@@ -466,16 +466,24 @@ def _shared_strategy_profile_key(strategy_id: int | str, base_key: str) -> str:
 
 
 def _split_strategy_profile_key(key: str) -> tuple[str, str, str] | None:
-    match = re.match(r"^STRATEGY_(11|10|[1-9])_(.+)$", str(key or ""))
+    match = re.match(r"^(?:(PAPER|LIVE)_)?STRATEGY_(11|10|[1-9])_(.+)$", str(key or ""))
     if not match:
         return None
-    mode = "shared"
-    strategy_id = match.group(1)
-    base_key = match.group(2)
+    mode = (match.group(1) or "shared").lower()
+    strategy_id = match.group(2)
+    base_key = match.group(3)
     base_key = canonical_strategy_profile_base_key(strategy_id, base_key)
     if base_key not in STRATEGY_PROFILE_EDITABLE_FIELDS:
         return None
     return mode, strategy_id, base_key
+
+
+def _strategy_profile_key_for_mode(mode: str, strategy_id: int | str, base_key: str) -> str:
+    shared_key = _shared_strategy_profile_key(strategy_id, base_key)
+    normalized_mode = str(mode or "shared").strip().lower()
+    if normalized_mode in {"paper", "live"}:
+        return f"{normalized_mode.upper()}_{shared_key}"
+    return shared_key
 
 
 def _strategy_profile_field_names(strategy_id: int | str) -> list[str]:
@@ -2369,7 +2377,7 @@ class DashboardState:
             strategy_text = str(strategy_id)
             fields: dict[str, Any] = {}
             for base_key in _strategy_profile_field_names(strategy_id):
-                prefixed_key = _shared_strategy_profile_key(strategy_text, base_key)
+                prefixed_key = _strategy_profile_key_for_mode(mode, strategy_text, base_key)
                 inherited_value = self._effective_config_value(base_key)
                 explicit_value = self._env_values.get(prefixed_key)
                 value = explicit_value if explicit_value is not None else self._effective_config_value(prefixed_key)
@@ -2634,18 +2642,6 @@ class DashboardState:
                 field_errors[key] = str(exc)
         if field_errors:
             raise ConfigValidationError(field_errors)
-
-        next_trade_mode = str(
-            normalized_updates.get("TRADE_MODE")
-            or self._env_values.get("TRADE_MODE")
-            or self._cfg.trade_mode
-            or "paper"
-        ).strip().lower() or "paper"
-        if next_trade_mode == "both":
-            if "PAPER_STRATEGY_IDS" in normalized_updates and "LIVE_STRATEGY_IDS" not in normalized_updates:
-                normalized_updates["LIVE_STRATEGY_IDS"] = normalized_updates["PAPER_STRATEGY_IDS"]
-            elif "LIVE_STRATEGY_IDS" in normalized_updates and "PAPER_STRATEGY_IDS" not in normalized_updates:
-                normalized_updates["PAPER_STRATEGY_IDS"] = normalized_updates["LIVE_STRATEGY_IDS"]
 
         with self._lock:
             for key, normalized in normalized_updates.items():
@@ -5074,6 +5070,18 @@ input.input-compact {
   gap: 8px;
 }
 
+.strategy-mode-switch {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.strategy-mode-active {
+  border-color: rgba(63, 205, 255, 0.58);
+  color: #eff6ff;
+  background: rgba(63, 205, 255, 0.12);
+}
+
 .strategy-panel {
   display: grid;
   gap: 6px;
@@ -5510,6 +5518,7 @@ const state = {
   diagnosticsOpen: false,
   signalDetailsOpen: false,
   advancedConfigOpen: false,
+  strategyEditMode: 'paper',
   lastRuntimeAlertKey: null,
   helpOpen: false,
   helpTab: 'quickstart',
@@ -6273,6 +6282,20 @@ function configStrategyModeForTradeMode(value) {
   return normalizeTradeMode(value) === 'live' ? 'live' : 'paper';
 }
 
+function strategyEditModeForValues(values) {
+  const mode = normalizeTradeMode((values || {}).TRADE_MODE);
+  if (mode === 'live') {
+    state.strategyEditMode = 'live';
+    return 'live';
+  }
+  if (mode === 'both') {
+    state.strategyEditMode = state.strategyEditMode === 'live' ? 'live' : 'paper';
+    return state.strategyEditMode;
+  }
+  state.strategyEditMode = 'paper';
+  return 'paper';
+}
+
 function modeRunsLive(value) {
   const normalized = normalizeTradeMode(value);
   return normalized === 'live' || normalized === 'both';
@@ -6284,7 +6307,7 @@ function activeConfigModeFromValues(payload, values) {
     ...envValues,
     ...(values || {}),
   };
-  return configStrategyModeForTradeMode(mergedValues.TRADE_MODE);
+  return strategyEditModeForValues(mergedValues);
 }
 
 function strategyListKeyForMode(mode) {
@@ -6330,6 +6353,7 @@ function resolveUnifiedStrategySelection(payload, values) {
     selected: mergedSelected,
     options,
     multiKey,
+    mode: strategyListKeyForMode('live') === multiKey ? 'live' : 'paper',
   };
 }
 
@@ -6345,11 +6369,6 @@ function collectUnifiedStrategyValues(payload, currentValues) {
     STRATEGY_ID: unified.focus,
     [unified.multiKey]: selectedCsv,
   };
-  if (normalizeTradeMode(mergedValues.TRADE_MODE) === 'both') {
-    strategyListKeysForMode('both').forEach((key) => {
-      values[key] = selectedCsv;
-    });
-  }
   return values;
 }
 
@@ -6389,6 +6408,28 @@ function renderStrategyPanel(payload, values) {
   const unified = resolveUnifiedStrategySelection(payload, values);
   panelNode.innerHTML = '';
 
+  const activeMode = normalizeTradeMode(((values || {}).TRADE_MODE) || (((payload || {}).env_values || {}).TRADE_MODE) || 'paper');
+  if (activeMode === 'both') {
+    const modeSwitch = document.createElement('div');
+    modeSwitch.className = 'strategy-mode-switch';
+    [
+      ['paper', '编辑纸面'],
+      ['live', '编辑实盘'],
+    ].forEach(([mode, label]) => {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'btn btn-ghost' + (unified.mode === mode ? ' strategy-mode-active' : '');
+      button.textContent = label;
+      button.addEventListener('click', () => {
+        state.strategyEditMode = mode;
+        renderUnifiedStrategyToolbar(state.config || {}, currentUnifiedStrategyDraftValues());
+        refreshStrategyPanelDependentUi();
+      });
+      modeSwitch.appendChild(button);
+    });
+    panelNode.appendChild(modeSwitch);
+  }
+
   const actions = document.createElement('div');
   actions.className = 'strategy-panel-actions';
 
@@ -6410,9 +6451,8 @@ function renderStrategyPanel(payload, values) {
 
   const summary = document.createElement('div');
   summary.className = 'strategy-panel-summary';
-  const activeMode = normalizeTradeMode(((values || {}).TRADE_MODE) || (((payload || {}).env_values || {}).TRADE_MODE) || 'paper');
   summary.textContent = activeMode === 'both'
-    ? '\u6b63\u5728\u540c\u6b65\u7f16\u8f91\u7eb8\u9762+\u5b9e\u76d8\u7b56\u7565\u7ec4\u5408\uff08PAPER_STRATEGY_IDS / LIVE_STRATEGY_IDS\uff09\u3002'
+    ? '\u6b63\u5728\u7f16\u8f91' + formatModeLabel(unified.mode) + '\u7b56\u7565\u7ec4\u5408\uff08' + unified.multiKey + '\uff09\uff0c\u53e6\u4e00\u4fa7\u4fdd\u6301\u4e0d\u53d8\u3002'
     : '\u6b63\u5728\u7f16\u8f91' + formatModeLabel(activeConfigModeFromValues(payload, values)) + '\u7b56\u7565\u7ec4\u5408\uff08' + unified.multiKey + '\uff09\u3002';
   panelNode.appendChild(summary);
 
@@ -7996,6 +8036,13 @@ function collectConfigValues(options) {
     [multiKey]: selectedStrategyList,
   };
   const unifiedValues = collectUnifiedStrategyValues(state.config || {}, rawValues);
+  if (normalizeTradeMode(baseValues.TRADE_MODE) === 'both') {
+    ['PAPER_STRATEGY_IDS', 'LIVE_STRATEGY_IDS'].forEach((key) => {
+      if (key !== multiKey) {
+        unifiedValues[key] = String(baseValues[key] || '');
+      }
+    });
+  }
   Object.entries(unifiedValues).forEach(([key, value]) => {
     payload[key] = value;
   });

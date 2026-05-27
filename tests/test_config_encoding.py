@@ -44,7 +44,7 @@ def test_collect_config_warnings_reports_invalid_scalar_values():
     assert "TARGET_PROFIT" not in warnings
 
 
-def test_collect_config_warnings_ignores_old_profile_keys():
+def test_collect_config_warnings_validates_mode_specific_profile_keys():
     warnings = collect_config_warnings(
         {
             "STRATEGY_IDS": "2,x,9",
@@ -56,8 +56,8 @@ def test_collect_config_warnings_ignores_old_profile_keys():
 
     assert warnings["STRATEGY_IDS"] == "Invalid entries for STRATEGY_IDS ignored: x"
     assert warnings["STRATEGY_7_BASE_ORDER_COST"] == "Invalid value for STRATEGY_7_BASE_ORDER_COST: expected number, got 'bad'"
+    assert warnings["LIVE_STRATEGY_7_BASE_ORDER_COST"] == "Invalid value for LIVE_STRATEGY_7_BASE_ORDER_COST: expected number, got 'bad'"
     assert "PAPER_15M_TARGET_PROFIT" not in warnings
-    assert "LIVE_STRATEGY_7_BASE_ORDER_COST" not in warnings
 
 
 def test_build_config_uses_paper_strategy_ids_when_present():
@@ -176,7 +176,7 @@ def test_build_config_ignores_old_mode_specific_strategy_profile_keys():
     assert not hasattr(cfg.live_profiles[7], "bet_sizing_mode")
 
 
-def test_build_config_prefers_shared_strategy_profile_values_for_paper_and_live():
+def test_build_config_prefers_mode_specific_profile_values_over_shared_strategy_values():
     cfg = build_config_from_env_values(
         {
             "STRATEGY_ID": "7",
@@ -205,9 +205,11 @@ def test_build_config_prefers_shared_strategy_profile_values_for_paper_and_live(
     assert cfg.max_stake is None
     paper = cfg.paper_strategy_profiles[7]
     live = cfg.live_profiles[7]
+    assert paper.base_order_cost == 3.0
+    assert paper.max_stake == 30.0
+    assert live.base_order_cost == 4.0
+    assert live.max_stake == 40.0
     for profile in (paper, live):
-        assert profile.base_order_cost == 1.2
-        assert profile.max_stake == 60.0
         assert profile.min_entry_price == 0.50
         assert profile.max_entry_price == 0.54
         assert profile.live_max_price_improvement == 0.04
@@ -284,8 +286,8 @@ def test_build_config_supports_strategy7_max_momentum_delta_overrides():
     )
 
     assert cfg.strategy7_max_momentum_delta is None
-    assert cfg.paper_strategy_profiles[7].strategy7_max_momentum_delta == 0.02
-    assert cfg.live_profiles[7].strategy7_max_momentum_delta == 0.02
+    assert cfg.paper_strategy_profiles[7].strategy7_max_momentum_delta == 0.012
+    assert cfg.live_profiles[7].strategy7_max_momentum_delta == 0.018
 
 
 def test_build_config_ignores_invalid_paper_strategy_entries():
@@ -327,11 +329,12 @@ def test_build_config_accepts_strategy10_and_reads_edge_values():
     assert cfg.strategy10_ofi_weight == 0.08
     assert cfg.strategy10_momentum_weight == 1.0
     assert cfg.strategy10_edge_buffer == 0.005
-    assert cfg.paper_strategy_profiles[10].strategy10_min_edge == 0.07
+    assert cfg.paper_strategy_profiles[10].strategy10_min_edge == 0.06
     assert cfg.paper_strategy_profiles[10].strategy10_ofi_weight == 0.12
     assert cfg.paper_strategy_profiles[10].strategy10_momentum_weight == 1.4
     assert cfg.paper_strategy_profiles[10].strategy10_edge_buffer == 0.01
     assert cfg.paper_strategy_profiles[10].strategy10_confirm_before_entry_seconds == 1
+    assert cfg.live_profiles[10].strategy10_min_edge == 0.07
 
 
 def test_build_config_accepts_strategy11_and_reads_probability_values():
@@ -387,11 +390,11 @@ def test_build_config_reads_strategy7_dynamic_sizing_values_from_strategy_profil
 
     assert cfg.strategy7_dynamic_sizing_enabled is False
     assert cfg.strategy7_sizing_reference_price == 0.50
-    assert cfg.paper_strategy_profiles[7].strategy7_dynamic_sizing_enabled is True
+    assert cfg.paper_strategy_profiles[7].strategy7_dynamic_sizing_enabled is False
     assert cfg.paper_strategy_profiles[7].strategy7_sizing_reference_price == 0.51
     assert cfg.paper_strategy_profiles[7].strategy7_sizing_price_step == 0.02
     assert cfg.paper_strategy_profiles[7].strategy7_sizing_price_step_reduction == 0.15
-    assert cfg.paper_strategy_profiles[7].strategy7_sizing_min_multiplier == 0.45
+    assert cfg.paper_strategy_profiles[7].strategy7_sizing_min_multiplier == 0.60
     assert cfg.paper_strategy_profiles[7].strategy7_sizing_max_multiplier == 1.10
     assert cfg.paper_strategy_profiles[7].strategy7_sizing_strong_signal_gap == 0.03
     assert cfg.paper_strategy_profiles[7].strategy7_sizing_strong_signal_boost == 0.25
@@ -424,11 +427,11 @@ def test_build_config_reads_strategy9_dynamic_sizing_values_from_strategy_profil
 
     assert cfg.strategy9_dynamic_sizing_enabled is False
     assert cfg.strategy9_sizing_reference_price == 0.50
-    assert cfg.paper_strategy_profiles[9].strategy9_dynamic_sizing_enabled is True
+    assert cfg.paper_strategy_profiles[9].strategy9_dynamic_sizing_enabled is False
     assert cfg.paper_strategy_profiles[9].strategy9_sizing_reference_price == 0.51
     assert cfg.paper_strategy_profiles[9].strategy9_sizing_price_step == 0.02
     assert cfg.paper_strategy_profiles[9].strategy9_sizing_price_step_reduction == 0.15
-    assert cfg.paper_strategy_profiles[9].strategy9_sizing_min_multiplier == 0.45
+    assert cfg.paper_strategy_profiles[9].strategy9_sizing_min_multiplier == 0.60
     assert cfg.paper_strategy_profiles[9].strategy9_sizing_max_multiplier == 1.10
     assert cfg.paper_strategy_profiles[9].strategy9_sizing_strong_signal_gap == 0.03
     assert cfg.paper_strategy_profiles[9].strategy9_sizing_strong_signal_boost == 0.25

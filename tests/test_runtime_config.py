@@ -40,7 +40,7 @@ def test_runtime_config_uses_split_strategy_ids_even_when_legacy_strategy_ids_ex
     assert live_strategy_ids_for_runtime(cfg) == [6]
 
 
-def test_runtime_config_keeps_paper_and_live_strategy_profiles_identical_for_strategy_logic():
+def test_runtime_config_keeps_paper_and_live_strategy_profiles_identical_without_mode_overrides():
     cfg = AppConfig(
         strategy_id=7,
         paper_strategy_ids=[5, 7, 9, 10, 11],
@@ -83,6 +83,30 @@ def test_runtime_config_keeps_paper_and_live_strategy_profiles_identical_for_str
             for name in compared_fields
             if getattr(paper_cfg, name) != getattr(live_cfg, name)
         } == {}
+
+
+def test_runtime_config_uses_mode_specific_strategy_profile_overrides():
+    cfg = AppConfig(
+        strategy_id=10,
+        paper_strategy_ids=[10],
+        live_strategy_ids=[10],
+    )
+    cfg.paper_strategy_profiles[10].min_entry_price = 0.45
+    cfg.paper_strategy_profiles[10].base_order_cost = 1.0
+    cfg.paper_strategy_profiles[10].strategy10_min_edge = 0.035
+    cfg.live_profiles[10].min_entry_price = 0.50
+    cfg.live_profiles[10].base_order_cost = 2.0
+    cfg.live_profiles[10].strategy10_min_edge = 0.05
+
+    paper_cfg = cfg_for_paper_strategy(cfg, 10)
+    live_cfg = cfg_for_live_strategy(cfg, 10)
+
+    assert paper_cfg.min_entry_price == pytest.approx(0.45)
+    assert paper_cfg.base_order_cost == pytest.approx(1.0)
+    assert paper_cfg.strategy10_min_edge == pytest.approx(0.035)
+    assert live_cfg.min_entry_price == pytest.approx(0.50)
+    assert live_cfg.base_order_cost == pytest.approx(2.0)
+    assert live_cfg.strategy10_min_edge == pytest.approx(0.05)
 
 
 def test_runtime_config_validates_live_runtime_credentials():
