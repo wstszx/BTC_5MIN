@@ -860,3 +860,58 @@ def test_trader_reexports_clob_adapter_helpers(monkeypatch):
 
     monkeypatch.setattr("trader._create_live_clob_client", lambda _cfg: _BalanceClient())
     assert trader._read_available_live_balance(cfg=AppConfig(), clob_client=None) == pytest.approx(12.5)
+
+
+def test_create_live_clob_client_replaces_sdk_http2_client_with_http1(monkeypatch):
+    import sys
+    import types
+
+    captured: dict[str, object] = {}
+
+    class _FakeHttpClient:
+        def __init__(self, *, http2=True, trust_env=True, timeout=None):
+            captured["http2"] = http2
+            captured["trust_env"] = trust_env
+            captured["timeout"] = timeout
+
+    class _FakeClobClient:
+        def __init__(self, host, chain_id, key, signature_type, funder):
+            captured["client_created"] = True
+
+        def create_or_derive_api_key(self):
+            return {"api_key": "derived"}
+
+        def set_api_creds(self, creds):
+            captured["creds"] = creds
+
+    fake_pkg = types.ModuleType("py_clob_client_v2")
+    fake_pkg.__path__ = []
+    fake_pkg.ClobClient = _FakeClobClient
+    fake_pkg.ApiCreds = object
+
+    fake_http_helpers_pkg = types.ModuleType("py_clob_client_v2.http_helpers")
+    fake_http_helpers_pkg.__path__ = []
+    fake_helpers = types.ModuleType("py_clob_client_v2.http_helpers.helpers")
+    fake_helpers._http_client = object()
+
+    fake_httpx = types.SimpleNamespace(Client=_FakeHttpClient)
+
+    monkeypatch.setitem(sys.modules, "py_clob_client_v2", fake_pkg)
+    monkeypatch.setitem(sys.modules, "py_clob_client_v2.http_helpers", fake_http_helpers_pkg)
+    monkeypatch.setitem(sys.modules, "py_clob_client_v2.http_helpers.helpers", fake_helpers)
+    monkeypatch.setitem(sys.modules, "httpx", fake_httpx)
+
+    client = create_live_clob_client(
+        AppConfig(
+            trade_mode="live",
+            live_trading_enabled=True,
+            live_private_key="pk-live",
+            live_funder="0xfunder",
+        )
+    )
+
+    assert client is not None
+    assert captured["http2"] is False
+    assert captured["trust_env"] is True
+    assert captured["timeout"] == 20.0
+    assert fake_helpers._http_client is not None

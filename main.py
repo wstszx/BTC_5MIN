@@ -10,6 +10,7 @@ from typing import Sequence
 
 from config import AppConfig, LiveStrategyProfile, build_config_from_env_values, load_env_file_values
 from dashboard import create_dashboard_runtime
+from proxy_env import bootstrap_proxy_environment
 from runtime_control import RuntimeControl
 from trader import run_live_trading, run_paper_trading, validate_live_runtime_config
 
@@ -719,6 +720,7 @@ def run_single_command_runtime(
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    bootstrap_proxy_environment()
     args = list(sys.argv[1:] if argv is None else argv)
     if args:
         raise SystemExit(2)

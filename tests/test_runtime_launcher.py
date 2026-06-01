@@ -18,6 +18,7 @@ def _path_tail(value: str | Path, count: int) -> tuple[str, ...]:
 
 def test_main_without_args_starts_single_command_runtime(monkeypatch, tmp_path: Path):
     calls = {}
+    bootstrap_calls = []
 
     def fake_run(*, env_file, host, port):
         calls["env_file"] = env_file
@@ -25,11 +26,13 @@ def test_main_without_args_starts_single_command_runtime(monkeypatch, tmp_path: 
         calls["port"] = port
         return 0
 
+    monkeypatch.setattr(main, "bootstrap_proxy_environment", lambda: bootstrap_calls.append(True))
     monkeypatch.setattr(main, "run_single_command_runtime", fake_run)
 
     exit_code = main.main([])
 
     assert exit_code == 0
+    assert bootstrap_calls == [True]
     assert calls["env_file"] == Path(".env.dashboard")
     assert calls["host"] == "127.0.0.1"
     assert calls["port"] == 8787

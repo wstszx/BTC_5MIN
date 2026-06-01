@@ -72,6 +72,21 @@ def resolve_live_order_type(raw_order_type: str):
     return getattr(OrderType, normalized, OrderType.FOK)
 
 
+def configure_py_clob_client_transport() -> None:
+    try:
+        import httpx
+        import py_clob_client_v2.http_helpers.helpers as helpers
+    except Exception:
+        return
+    try:
+        close_client = getattr(getattr(helpers, "_http_client", None), "close", None)
+        if callable(close_client):
+            close_client()
+    except Exception:
+        pass
+    helpers._http_client = httpx.Client(http2=False, trust_env=True, timeout=20.0)
+
+
 def coerce_positive_float(raw: Any) -> float | None:
     try:
         value = float(raw)
@@ -947,6 +962,8 @@ def execute_order_plan(
 def create_live_clob_client(cfg: AppConfig):
     if not cfg.live_private_key:
         raise RuntimeError("Missing PRIVATE_KEY/POLYMARKET_PRIVATE_KEY for live trading.")
+
+    configure_py_clob_client_transport()
 
     from py_clob_client_v2 import ApiCreds, ClobClient
 
