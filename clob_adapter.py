@@ -138,6 +138,28 @@ def best_order_book_ask_price(book: Any) -> float | None:
     return best_price
 
 
+def best_order_book_bid_price(book: Any) -> float | None:
+    best_price: float | None = None
+    for level in _book_levels(book, "bids"):
+        price = _level_price(level)
+        if price is None:
+            continue
+        best_price = price if best_price is None else max(best_price, price)
+    return best_price
+
+
+def best_possible_binary_buy_price(book: Any, opposite_book: Any | None = None) -> float | None:
+    candidates: list[float] = []
+    ask_price = best_order_book_ask_price(book)
+    if ask_price is not None:
+        candidates.append(ask_price)
+    if opposite_book is not None:
+        opposite_bid_price = best_order_book_bid_price(opposite_book)
+        if opposite_bid_price is not None and 0 < opposite_bid_price < 1:
+            candidates.append(1.0 - opposite_bid_price)
+    return min(candidates) if candidates else None
+
+
 def price_improvement_floor(price: float | None, max_improvement: float | None) -> float | None:
     if price is None or max_improvement is None or max_improvement <= 0:
         return None
@@ -813,6 +835,7 @@ def execute_order_plan(
     token_id: str | None,
     plan: TradePlan,
     remaining_budget: float | None,
+    opposite_token_id: str | None = None,
     balance_error: str | None = None,
     client_factory: Callable[[AppConfig], Any] | None = None,
 ) -> OrderExecutionResult:
@@ -848,12 +871,17 @@ def execute_order_plan(
     if should_precheck_order_book_price:
         live_client_for_depth = clob_client or (client_factory or create_live_clob_client)(cfg)
         book = read_live_order_book(live_client_for_depth, token_id)
-        best_ask_price = best_order_book_ask_price(book)
+        opposite_book = (
+            read_live_order_book(live_client_for_depth, opposite_token_id)
+            if opposite_token_id and opposite_token_id != token_id
+            else None
+        )
+        best_buy_price = best_possible_binary_buy_price(book, opposite_book)
         min_entry_price = getattr(cfg, "min_entry_price", None)
         if (
-            best_ask_price is not None
+            best_buy_price is not None
             and min_entry_price is not None
-            and best_ask_price + 1e-9 < min_entry_price
+            and best_buy_price + 1e-9 < min_entry_price
         ):
             return OrderExecutionResult(
                 status="skipped",
@@ -865,9 +893,9 @@ def execute_order_plan(
             getattr(cfg, "live_max_price_improvement", None),
         )
         if (
-            best_ask_price is not None
+            best_buy_price is not None
             and improvement_floor is not None
-            and best_ask_price + 1e-9 < improvement_floor
+            and best_buy_price + 1e-9 < improvement_floor
         ):
             return OrderExecutionResult(
                 status="skipped",

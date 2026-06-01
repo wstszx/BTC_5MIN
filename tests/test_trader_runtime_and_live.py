@@ -1646,7 +1646,15 @@ class _RoundEndMarketClient(_LiveMarketClient):
 
 
 class _StubClobClient:
-    def __init__(self, *, post_response=None, order_payloads=None, balance_payload=None, trade_payloads=None):
+    def __init__(
+        self,
+        *,
+        post_response=None,
+        order_payloads=None,
+        balance_payload=None,
+        trade_payloads=None,
+        order_books=None,
+    ):
         self.created_orders = []
         self.posted_orders = []
         self.post_response = post_response if post_response is not None else {"success": True, "orderID": "oid-123"}
@@ -1655,6 +1663,8 @@ class _StubClobClient:
             balance_payload if balance_payload is not None else {"available": 100.0, "balance": 100.0}
         )
         self.trade_payloads = trade_payloads or {}
+        self.order_books = order_books or {}
+        self.order_book_calls = []
 
     def create_market_order(self, order_args):
         self.created_orders.append(order_args)
@@ -1678,6 +1688,11 @@ class _StubClobClient:
 
     def get_balance(self):
         return self.balance_payload
+
+    def get_order_book(self, token_id):
+        token_id = getattr(token_id, "token_id", token_id)
+        self.order_book_calls.append(token_id)
+        return self.order_books.get(token_id)
 
 
 class _StrictStubClobClient(_StubClobClient):
@@ -3048,6 +3063,57 @@ def test_place_live_order_audits_official_fill_above_max_entry_price(tmp_path, m
     assert rows[-1]["price"] == "0.577248"
     assert any("official_fill_price_above_max_entry_price" in message for message in messages)
     assert any("max_entry_price=0.54" in message for message in messages)
+
+
+def test_place_live_order_skips_when_opposite_bid_implies_price_below_min_entry(tmp_path, monkeypatch):
+    class _DownDecisionLiveMarketClient(_LiveMarketClient):
+        def quote_from_market(self, _market):
+            return MarketQuote(
+                slug="btc-updown-5m-test",
+                up_price=0.465,
+                down_price=0.535,
+                up_best_ask=0.465,
+                down_best_ask=0.535,
+                strategy6_ofi_score=-0.8,
+                strategy6_signal_at=datetime.now(timezone.utc),
+                fetched_at=datetime.now(timezone.utc),
+            )
+
+    monkeypatch.setattr("trader._resolve_side_from_strategy", lambda **kwargs: SideDecision(side="DOWN"))
+    cfg = AppConfig(
+        live_trading_enabled=True,
+        strategy_id=10,
+        live_order_type="FAK",
+        min_entry_price=0.52,
+        max_entry_price=0.54,
+        live_max_price_improvement=0.05,
+        strategy10_confirm_before_entry_seconds=0,
+        signal_lock_before_entry_seconds=0,
+    )
+    stub_clob = _StubClobClient(
+        order_books={
+            "down-token": {"asks": [{"price": "0.54", "size": "10.0"}]},
+            "up-token": {"bids": [{"price": "0.54", "size": "10.0"}]},
+        }
+    )
+    state_path = tmp_path / "state.json"
+    log_path = tmp_path / "live.csv"
+
+    result = place_live_order(
+        cfg=cfg,
+        market_client=_DownDecisionLiveMarketClient(),
+        clob_client=stub_clob,
+        state_path=state_path,
+        log_path=log_path,
+    )
+
+    rows = list(csv.DictReader(log_path.open(newline="", encoding="utf-8")))
+
+    assert result["status"] == "skipped"
+    assert result["skip_reason"] == "live_order_book_price_below_min_entry"
+    assert stub_clob.order_book_calls == ["down-token", "up-token"]
+    assert stub_clob.created_orders == []
+    assert rows[-1]["skip_reason"] == "live_order_book_price_below_min_entry"
 
 
 def test_place_live_order_audits_official_fill_below_decision_floor(tmp_path, monkeypatch):

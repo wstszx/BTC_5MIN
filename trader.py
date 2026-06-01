@@ -506,6 +506,20 @@ def _live_market_order_price_cap_for_plan(cfg: AppConfig, plan: TradePlan) -> fl
     return plan.max_entry_price if plan.max_entry_price is not None else getattr(cfg, "max_entry_price", None)
 
 
+def _opposite_binary_side(side: str | None) -> str | None:
+    normalized = str(side or "").strip().upper()
+    if normalized == "UP":
+        return "DOWN"
+    if normalized == "DOWN":
+        return "UP"
+    return None
+
+
+def _opposite_token_id_for_side(token_ids: dict[str, str], side: str | None) -> str | None:
+    opposite_side = _opposite_binary_side(side)
+    return token_ids.get(opposite_side) if opposite_side is not None else None
+
+
 def _execute_order_plan(
     *,
     mode: str,
@@ -516,6 +530,7 @@ def _execute_order_plan(
     token_id: str | None,
     plan: TradePlan,
     remaining_budget: float | None,
+    opposite_token_id: str | None = None,
     balance_error: str | None = None,
 ) -> OrderExecutionResult:
     return _adapter_execute_order_plan(
@@ -527,6 +542,7 @@ def _execute_order_plan(
         token_id=token_id,
         plan=plan,
         remaining_budget=remaining_budget,
+        opposite_token_id=opposite_token_id,
         balance_error=balance_error,
         client_factory=_create_live_clob_client,
     )
@@ -959,6 +975,7 @@ def place_live_order(
     )
     token_ids = extract_token_ids(market.get("clobTokenIds"), market.get("outcomes"))
     token_id = token_ids.get(side)
+    opposite_token_id = _opposite_token_id_for_side(token_ids, side)
 
     if dry_run:
         projected_streak = (
@@ -1100,17 +1117,18 @@ def place_live_order(
         }
 
     remaining_live_budget = _read_available_live_balance(cfg=cfg, clob_client=live_client)
-    try:
-        order_id, response = _submit_live_strategy_order(
-            cfg=cfg,
-            clob_client=live_client,
-            token_id=token_id,
-            plan=plan,
-            user_usdc_balance=remaining_live_budget,
-        )
-    except Exception as exc:
-        if not _is_live_fok_not_filled_error(exc):
-            raise
+    execution = _execute_order_plan(
+        mode="live",
+        cfg=cfg,
+        clob_client=live_client,
+        strategy_id=cfg.strategy_id,
+        slug=target_round.slug,
+        token_id=token_id,
+        plan=plan,
+        remaining_budget=remaining_live_budget,
+        opposite_token_id=opposite_token_id,
+    )
+    if execution.status == "skipped":
         append_trade_log(
             log_path,
             TradeRecord(
@@ -1132,7 +1150,8 @@ def place_live_order(
                 cash_pnl=state.cash_pnl,
                 recovery_loss=state.recovery_loss,
                 consecutive_losses=state.consecutive_losses,
-                skip_reason="live_fok_not_filled",
+                skip_reason=execution.skip_reason,
+                balance_error=execution.balance_error,
                 **_signal_record_kwargs(side_decision),
             ),
         )
@@ -1146,11 +1165,12 @@ def place_live_order(
             "token_id": token_id,
             "price": price,
             "should_trade": False,
-            "skip_reason": "live_fok_not_filled",
+            "skip_reason": execution.skip_reason,
             "order_size": plan.order_size,
             "order_cost": plan.order_cost,
             "expected_profit": plan.expected_profit,
             "order_type": cfg.live_order_type.upper(),
+            "balance_error": execution.balance_error,
             "signal_open_up_price": side_decision.signal_open_up_price,
             "signal_current_up_price": side_decision.signal_current_up_price,
             "signal_threshold": side_decision.signal_threshold,
@@ -1162,7 +1182,7 @@ def place_live_order(
     executed_plan, fill_source = _plan_with_verified_live_fill(
         plan=plan,
         side=side,
-        order_id=order_id,
+        order_id=execution.order_id,
         clob_client=live_client,
         min_entry_price=getattr(cfg, "min_entry_price", None),
         max_entry_price=plan.max_entry_price if plan.max_entry_price is not None else getattr(cfg, "max_entry_price", None),
@@ -1191,7 +1211,7 @@ def place_live_order(
             cash_pnl=state.cash_pnl,
             recovery_loss=state.recovery_loss,
             consecutive_losses=state.consecutive_losses,
-            order_id=order_id,
+            order_id=execution.order_id,
             fill_source=fill_source,
             raw_price=executed_plan.raw_price,
             raw_order_cost=executed_plan.raw_order_cost,
@@ -1208,7 +1228,7 @@ def place_live_order(
         side=side,
         strategy_id=cfg.strategy_id,
         entry_timing=cfg.entry_timing,
-        order_id=order_id,
+        order_id=execution.order_id,
     )
     state.round_index += 1
     if persist_state:
@@ -1229,8 +1249,8 @@ def place_live_order(
         "order_cost": executed_plan.order_cost,
         "expected_profit": executed_plan.expected_profit,
         "order_type": cfg.live_order_type.upper(),
-        "order_id": order_id,
-        "response": response,
+        "order_id": execution.order_id,
+        "response": execution.response,
         "signal_open_up_price": side_decision.signal_open_up_price,
         "signal_current_up_price": side_decision.signal_current_up_price,
         "signal_threshold": side_decision.signal_threshold,
@@ -1894,6 +1914,7 @@ def run_live_trading(
                         )
                         token_ids = extract_token_ids(market.get("clobTokenIds"), market.get("outcomes"))
                         token_id = token_ids.get(side)
+                        opposite_token_id = _opposite_token_id_for_side(token_ids, side)
                         if not plan.should_trade:
                             skip_stop_loss_triggered = _should_reset_after_risk_gate_skip(
                                 strategy_state,
@@ -2017,6 +2038,7 @@ def run_live_trading(
                             token_id=token_id,
                             plan=plan,
                             remaining_budget=remaining_live_budget,
+                            opposite_token_id=opposite_token_id,
                             balance_error=balance_read_error,
                         )
                         remaining_live_budget = execution.remaining_budget
@@ -2732,6 +2754,7 @@ def run_paper_trading(
                         token_id=token_id,
                         plan=plan,
                         remaining_budget=remaining_paper_budget,
+                        opposite_token_id=_opposite_token_id_for_side(token_ids, side),
                     )
                     remaining_paper_budget = execution.remaining_budget
                     if execution.status == "skipped":

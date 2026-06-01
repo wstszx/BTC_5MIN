@@ -41,8 +41,21 @@ class _ShallowOrderBookClient(_InjectedOrderClient):
         self.book = book
 
     def get_order_book(self, token_id):
+        token_id = getattr(token_id, "token_id", token_id)
         assert token_id == "up-token"
         return self.book
+
+
+class _MappedOrderBookClient(_InjectedOrderClient):
+    def __init__(self, books_by_token):
+        super().__init__()
+        self.books_by_token = books_by_token
+        self.order_book_calls = []
+
+    def get_order_book(self, token_id):
+        token_id = getattr(token_id, "token_id", token_id)
+        self.order_book_calls.append(token_id)
+        return self.books_by_token.get(token_id)
 
 
 class _FokThenFakOrderClient(_InjectedOrderClient):
@@ -477,6 +490,85 @@ def test_clob_adapter_skips_fak_when_best_ask_is_below_min_entry_price():
     assert execution.skip_reason == "live_order_book_price_below_min_entry"
     assert client.created_orders == []
     assert client.posted_orders == []
+
+
+def test_clob_adapter_skips_fak_when_complementary_bid_implies_price_below_min_entry():
+    client = _MappedOrderBookClient(
+        {
+            "down-token": {"asks": [{"price": "0.54", "size": "10.0"}]},
+            "up-token": {"bids": [{"price": "0.54", "size": "10.0"}]},
+        },
+    )
+    plan = TradePlan(
+        True,
+        side="DOWN",
+        price=0.535,
+        order_size=2.0,
+        order_cost=1.07,
+        expected_profit=0.93,
+        max_entry_price=0.54,
+    )
+
+    execution = trader._execute_order_plan(
+        mode="live",
+        cfg=AppConfig(
+            strategy_id=10,
+            live_order_type="FAK",
+            min_entry_price=0.52,
+            live_max_price_improvement=0.05,
+        ),
+        clob_client=client,
+        strategy_id=10,
+        slug="btc-updown-5m-test",
+        token_id="down-token",
+        opposite_token_id="up-token",
+        plan=plan,
+        remaining_budget=10.0,
+    )
+
+    assert execution.status == "skipped"
+    assert execution.skip_reason == "live_order_book_price_below_min_entry"
+    assert client.order_book_calls == ["down-token", "up-token"]
+    assert client.created_orders == []
+    assert client.posted_orders == []
+
+
+def test_clob_adapter_ignores_same_token_bid_when_opposite_token_is_unknown():
+    client = _ShallowOrderBookClient(
+        {
+            "asks": [{"price": "0.54", "size": "10.0"}],
+            "bids": [{"price": "0.54", "size": "10.0"}],
+        }
+    )
+    plan = TradePlan(
+        True,
+        side="UP",
+        price=0.535,
+        order_size=2.0,
+        order_cost=1.07,
+        expected_profit=0.93,
+        max_entry_price=0.54,
+    )
+
+    execution = trader._execute_order_plan(
+        mode="live",
+        cfg=AppConfig(
+            strategy_id=10,
+            live_order_type="FAK",
+            min_entry_price=0.52,
+            live_max_price_improvement=0.05,
+        ),
+        clob_client=client,
+        strategy_id=10,
+        slug="btc-updown-5m-test",
+        token_id="up-token",
+        plan=plan,
+        remaining_budget=10.0,
+    )
+
+    assert execution.status == "submitted"
+    assert len(client.created_orders) == 1
+    assert client.posted_orders
 
 
 def test_clob_adapter_falls_back_to_fak_when_fok_market_order_is_not_filled():
