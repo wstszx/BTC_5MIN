@@ -2719,7 +2719,15 @@ def test_dashboard_assets_refresh_shared_selector_still_updates_summary_and_rece
     assert "await Promise.allSettled([refreshSummary(), refreshRecent()]);" in js
     assert "const strategy = encodeURIComponent(effectivePaperSummaryStrategyFilter());" in js
     assert "const strategy = encodeURIComponent(effectivePaperRecentStrategyFilter());" in js
-    assert "const multiKey = strategyListKeyForMode(effectiveReportMode());" in js
+
+
+def test_dashboard_assets_use_fixed_report_strategy_options_by_mode():
+    js = _dashboard_js()
+
+    assert "paper: ['7', '9', '10', '11']" in js
+    assert "live: ['7', '10']" in js
+    assert "const configured = reportStrategyOptionsForMode(effectiveReportMode());" in js
+    assert "const multiKey = strategyListKeyForMode(effectiveReportMode());" not in js
 
 
 def test_dashboard_assets_use_strategy_panel_for_unified_strategy_selection():
@@ -5272,7 +5280,7 @@ def test_dashboard_report_strategy_selector_reflects_saved_paper_strategy_ids_br
             "return { options: Array.from(node.options).map((option) => option.value) };"
             "}"
         )
-        assert after_edit_add['options'] == ['all', '1', '2', '3', '4', '5', '6', '7']
+        assert after_edit_add['options'] == ['all', '7', '9', '10', '11']
 
         after_save = pw_eval(
             "async () => {"
@@ -5285,7 +5293,7 @@ def test_dashboard_report_strategy_selector_reflects_saved_paper_strategy_ids_br
 
         assert after_save['env'] == '1,2,3,4,5,6,7'
         assert current_env_values['PAPER_15M_STRATEGY_IDS'] == '4'
-        assert after_save['options'] == ['all', '1', '2', '3', '4', '5', '6', '7']
+        assert after_save['options'] == ['all', '7', '9', '10', '11']
 
         after_edit_remove = pw_eval(
             "() => {"
@@ -5301,7 +5309,7 @@ def test_dashboard_report_strategy_selector_reflects_saved_paper_strategy_ids_br
             "};"
             "}"
         )
-        assert after_edit_remove['options'] == ['all', '1', '2', '3', '5', '6', '7']
+        assert after_edit_remove['options'] == ['all', '7', '9', '10', '11']
         assert after_edit_remove['selected'] == 'all'
         assert after_edit_remove['filter'] == 'all'
 
@@ -5322,9 +5330,21 @@ def test_dashboard_report_strategy_selector_reflects_saved_paper_strategy_ids_br
 
         assert after_remove['env'] == '1,2,3,5,6,7'
         assert current_env_values['PAPER_15M_STRATEGY_IDS'] == '4'
-        assert after_remove['options'] == ['all', '1', '2', '3', '5', '6', '7']
+        assert after_remove['options'] == ['all', '7', '9', '10', '11']
         assert after_remove['selected'] == 'all'
         assert after_remove['filter'] == 'all'
+
+        after_live_mode = pw_eval(
+            "() => {"
+            "const mode = document.getElementById('reportModeSelect');"
+            "mode.value = 'live';"
+            "mode.dispatchEvent(new Event('change', { bubbles: true }));"
+            "const node = document.getElementById('paperReportStrategy');"
+            "return { options: Array.from(node.options).map((option) => option.value), selected: node.value };"
+            "}"
+        )
+        assert after_live_mode['options'] == ['all', '7', '10']
+        assert after_live_mode['selected'] == 'all'
     finally:
         try:
             subprocess.run(

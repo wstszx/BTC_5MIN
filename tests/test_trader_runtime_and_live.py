@@ -913,6 +913,82 @@ def test_run_live_trading_reuses_created_clob_client_across_poll_loops(tmp_path,
     assert attempts["create_client"] == 1
 
 
+def test_run_live_trading_recreates_cached_clob_client_after_retryable_settlement_error(tmp_path, monkeypatch):
+    state_path = tmp_path / "live_state.json"
+    state_path.write_text(
+        json.dumps(
+            {
+                "live_strategies": {
+                    "7": {
+                        "round_index": 4,
+                        "cash_pnl": 0.0,
+                        "recovery_loss": 0.0,
+                        "consecutive_losses": 0,
+                        "pending_live_slug": "btc-updown-5m-prev",
+                        "pending_live_side": "UP",
+                        "pending_live_price": 0.5,
+                        "pending_live_order_size": 2.0,
+                        "pending_live_order_cost": 1.0,
+                        "pending_live_expected_profit": 1.0,
+                        "pending_live_order_id": "oid-prev",
+                        "pending_live_end_time": "2026-04-02T00:00:00+00:00",
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    attempts = {"create_client": 0, "sleeps": 0}
+
+    class _SettlementSslErrorClobClient(_StubClobClient):
+        def get_trades(self, params=None):
+            raise RuntimeError(
+                "[py_clob_client_v2] request error: [SSL: UNEXPECTED_EOF_WHILE_READING] "
+                "EOF occurred in violation of protocol (_ssl.c:1081) "
+                "PolyApiException[status_code=None, error_message=Request exception!]"
+            )
+
+    class _SettlingNoTradeLiveClient(_SettlingLiveClient):
+        def find_current_and_next_rounds(self, *, now):
+            return None, None
+
+    def fake_create_client(_cfg):
+        attempts["create_client"] += 1
+        if attempts["create_client"] == 1:
+            return _SettlementSslErrorClobClient()
+        return _StubClobClient(trade_payloads={"oid-prev": [_confirmed_trade("oid-prev")]})
+
+    def fake_sleep_if_not_stopped(_stop_event, _seconds):
+        attempts["sleeps"] += 1
+        return attempts["sleeps"] == 1
+
+    monkeypatch.setattr("trader._create_live_clob_client", fake_create_client)
+    monkeypatch.setattr("trader._sleep_if_not_stopped", fake_sleep_if_not_stopped)
+
+    result = run_live_trading(
+        AppConfig(
+            trade_mode="live",
+            live_trading_enabled=True,
+            live_private_key="pk",
+            live_funder="0xfunder",
+            strategy_id=7,
+            live_strategy_ids=[7],
+            poll_interval_seconds=1,
+        ),
+        market_client=_SettlingNoTradeLiveClient(),
+        state_path=state_path,
+        log_path=tmp_path / "live_orders.csv",
+    )
+
+    state = load_session_state(state_path, effective_live_strategy_ids=[7])
+    rows = list(csv.DictReader((tmp_path / "live_orders.csv").open(newline="", encoding="utf-8")))
+
+    assert result["status"] == "stopped"
+    assert attempts["create_client"] == 2
+    assert state.live_strategies[7].pending_live_slug is None
+    assert [row["result"] for row in rows] == ["DOWN"]
+
+
 def test_run_live_trading_treats_transient_balance_ssl_error_as_unavailable_budget(tmp_path, monkeypatch):
     stop_event = threading.Event()
 

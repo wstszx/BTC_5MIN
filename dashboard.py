@@ -5566,6 +5566,15 @@ const state = {
   helpReturnFocusId: 'btnHelp',
 };
 
+const REPORT_STRATEGY_OPTIONS = {
+  paper: ['7', '9', '10', '11'],
+  live: ['7', '10'],
+};
+
+function reportStrategyOptionsForMode(mode) {
+  return (REPORT_STRATEGY_OPTIONS[String(mode || '').toLowerCase()] || REPORT_STRATEGY_OPTIONS.paper).slice();
+}
+
 const POLL_MS = {
   market: 3000,
   summary: 20000,
@@ -6720,66 +6729,18 @@ function syncReportModeWithRuntime(payload) {
   state.reportMode = runtimeMode === 'live' ? 'live' : 'paper';
 }
 
-function configuredPaperReportStrategyOptions() {
-  const payload = state.config || {};
-  const envValues = (payload && payload.env_values) || {};
-  const multiKey = strategyListKeyForMode(effectiveReportMode());
-  const selectOptions = ((payload || {}).select_options) || {};
-  const strategyOptions = ((selectOptions[multiKey] || selectOptions.STRATEGY_ID || selectOptions.PAPER_STRATEGY_IDS || [])).map((item) => String(item));
-  const draftValues = currentUnifiedStrategyDraftForReport();
-  const baseStrategyIds = String((draftValues && draftValues[multiKey]) || envValues[multiKey] || '').trim();
-  const baseStrategyId = (draftValues && draftValues.STRATEGY_ID) ?? envValues.STRATEGY_ID ?? '';
-  if (baseStrategyIds) {
-    return resolveUnifiedStrategySelection(payload, {
-      STRATEGY_ID: baseStrategyId,
-      [multiKey]: baseStrategyIds,
-    }).selected;
-  }
-  if (multiKey === 'LIVE_STRATEGY_IDS') {
-    const runtimeStrategyIds = (((payload || {}).runtime_status || {}).live_strategy_ids || []).map((item) => String(item));
-    if (runtimeStrategyIds.length > 0) {
-      return runtimeStrategyIds;
-    }
-    return baseStrategyId ? [String(baseStrategyId)] : [];
-  }
-  const timeframe = effectivePaperTimeframeFilter();
-  const profiles = (payload && payload.paper_profiles) || {};
-  const profile = profiles[timeframe] || {};
-  const profileStrategyIds = Array.isArray(profile.paper_strategy_ids)
-    ? profile.paper_strategy_ids.map((item) => String(item)).join(',')
-    : '';
-  const profileSelected = resolveUnifiedStrategySelection(payload, {
-    STRATEGY_ID: profile.strategy_id ?? envValues.STRATEGY_ID ?? '',
-    PAPER_STRATEGY_IDS: profileStrategyIds,
-  }).selected;
-  const selectedSet = new Set(profileSelected.map((item) => String(item)));
-  const ordered = strategyOptions.filter((item) => selectedSet.has(String(item)));
-  const extras = [...selectedSet].filter((item) => ordered.indexOf(item) < 0);
-  return [...ordered, ...extras];
-}
-
 function normalizePaperReportStrategyFilter(value, options) {
   const raw = String(value || 'all');
   return options.indexOf(raw) >= 0 ? raw : 'all';
 }
 
 function paperReportStrategyOptions() {
-  const payload = state.config || {};
-  const multiKey = strategyListKeyForMode(effectiveReportMode());
-  const selectOptions = ((payload || {}).select_options) || {};
-  const strategyOptions = ((selectOptions[multiKey] || selectOptions.STRATEGY_ID || selectOptions.PAPER_STRATEGY_IDS || [])).map((item) => String(item));
-  const strategyView = ((state.market || {}).strategy_view) || {};
-  const available = Array.isArray(strategyView.available) ? strategyView.available.map((item) => String(item)) : [];
-  const configured = configuredPaperReportStrategyOptions();
-  const merged = configured.length > 0 ? configured : available;
-  const selectedSet = new Set(merged.filter((item) => item && item !== 'all').map((item) => String(item)));
-  const ordered = strategyOptions.filter((item) => selectedSet.has(String(item)));
-  const extras = [...selectedSet].filter((item) => ordered.indexOf(item) < 0);
-  return ['all', ...ordered, ...extras];
+  const configured = reportStrategyOptionsForMode(effectiveReportMode());
+  return ['all', ...configured];
 }
 
 function defaultPaperReportStrategyFilter() {
-  const configured = configuredPaperReportStrategyOptions();
+  const configured = reportStrategyOptionsForMode(effectiveReportMode());
   return configured.length === 1 ? String(configured[0]) : 'all';
 }
 

@@ -1294,6 +1294,20 @@ def run_live_trading(
         mirror_paper_log_path = mirror_paper_log_path or cfg.logs_dir / "paper" / cfg.market_timeframe / "paper_trades.csv"
     cached_live_client = clob_client
     cached_live_client_key = _live_clob_client_config_key(cfg) if clob_client is None else None
+
+    def _discard_cached_live_client() -> None:
+        nonlocal cached_live_client, cached_live_client_key
+        if clob_client is not None or cached_live_client is None:
+            return
+        close_client = getattr(cached_live_client, "close", None)
+        if callable(close_client):
+            try:
+                close_client()
+            except Exception:
+                pass
+        cached_live_client = None
+        cached_live_client_key = None
+
     initial_state = _load_session_state_for_live_runtime(state_path, configured_strategy_ids)
     _ensure_live_strategy_state_map(initial_state, configured_strategy_ids)
     managed_strategy_ids = _managed_live_strategy_ids(configured_strategy_ids, initial_state)
@@ -1458,6 +1472,7 @@ def run_live_trading(
                     state.live_strategies[strategy_id] = strategy_state
                     handled_strategy_ids.add(strategy_id)
                     if _is_retryable_live_clob_error(exc):
+                        _discard_cached_live_client()
                         if not can_continue_with_pending:
                             pending_strategy_ids.append(strategy_id)
                         _sync_legacy_pending_live_from_queue(strategy_state)
@@ -1567,9 +1582,12 @@ def run_live_trading(
             except RuntimeError as exc:
                 remaining_live_budget = None
                 balance_read_error = str(exc)
+                if _is_retryable_live_clob_error(exc):
+                    _discard_cached_live_client()
             except Exception as exc:
                 if not _is_retryable_live_clob_error(exc):
                     raise
+                _discard_cached_live_client()
                 remaining_live_budget = None
                 balance_read_error = str(exc)
 
