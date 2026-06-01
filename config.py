@@ -63,6 +63,9 @@ _STRATEGY10_SHORT_PROFILE_KEYS: dict[str, str] = {
     "OFI_WEIGHT": "STRATEGY10_OFI_WEIGHT",
     "MOMENTUM_WEIGHT": "STRATEGY10_MOMENTUM_WEIGHT",
     "MAX_FAIR_VALUE": "STRATEGY10_MAX_FAIR_VALUE",
+    "MIN_MOMENTUM_DELTA": "STRATEGY10_MIN_MOMENTUM_DELTA",
+    "MAX_MOMENTUM_DELTA": "STRATEGY10_MAX_MOMENTUM_DELTA",
+    "DOWN_MIN_EDGE": "STRATEGY10_DOWN_MIN_EDGE",
     "CONFIRM_BEFORE_ENTRY_SECONDS": "STRATEGY10_CONFIRM_BEFORE_ENTRY_SECONDS",
 }
 _STRATEGY11_SHORT_PROFILE_KEYS: dict[str, str] = {
@@ -175,6 +178,9 @@ _FLOAT_CONFIG_KEYS: frozenset[str] = frozenset(
         "STRATEGY10_OFI_WEIGHT",
         "STRATEGY10_MOMENTUM_WEIGHT",
         "STRATEGY10_MAX_FAIR_VALUE",
+        "STRATEGY10_MIN_MOMENTUM_DELTA",
+        "STRATEGY10_MAX_MOMENTUM_DELTA",
+        "STRATEGY10_DOWN_MIN_EDGE",
         "STRATEGY11_MIN_EDGE",
         "STRATEGY11_EDGE_BUFFER",
         "STRATEGY11_VOLATILITY_BPS_PER_SQRT_MINUTE",
@@ -268,6 +274,9 @@ _GLOBAL_STRATEGY_CONFIG_KEYS: frozenset[str] = frozenset(
         "STRATEGY10_OFI_WEIGHT",
         "STRATEGY10_MOMENTUM_WEIGHT",
         "STRATEGY10_MAX_FAIR_VALUE",
+        "STRATEGY10_MIN_MOMENTUM_DELTA",
+        "STRATEGY10_MAX_MOMENTUM_DELTA",
+        "STRATEGY10_DOWN_MIN_EDGE",
         "STRATEGY11_MIN_EDGE",
         "STRATEGY11_EDGE_BUFFER",
         "STRATEGY11_VOLATILITY_BPS_PER_SQRT_MINUTE",
@@ -708,6 +717,9 @@ class PaperTimeframeProfile:
     strategy10_ofi_weight: float
     strategy10_momentum_weight: float
     strategy10_max_fair_value: float
+    strategy10_min_momentum_delta: float | None
+    strategy10_max_momentum_delta: float | None
+    strategy10_down_min_edge: float | None
     strategy10_confirm_before_entry_seconds: int
     strategy11_min_edge: float
     strategy11_edge_buffer: float
@@ -781,6 +793,9 @@ class LiveStrategyProfile:
     strategy10_ofi_weight: float
     strategy10_momentum_weight: float
     strategy10_max_fair_value: float
+    strategy10_min_momentum_delta: float | None
+    strategy10_max_momentum_delta: float | None
+    strategy10_down_min_edge: float | None
     strategy10_confirm_before_entry_seconds: int
     strategy11_min_edge: float
     strategy11_edge_buffer: float
@@ -851,6 +866,9 @@ def _base_live_profile_for_strategy(cfg: AppConfig, strategy_id: int) -> LiveStr
         strategy10_ofi_weight=cfg.strategy10_ofi_weight,
         strategy10_momentum_weight=cfg.strategy10_momentum_weight,
         strategy10_max_fair_value=cfg.strategy10_max_fair_value,
+        strategy10_min_momentum_delta=cfg.strategy10_min_momentum_delta,
+        strategy10_max_momentum_delta=cfg.strategy10_max_momentum_delta,
+        strategy10_down_min_edge=cfg.strategy10_down_min_edge,
         strategy10_confirm_before_entry_seconds=cfg.strategy10_confirm_before_entry_seconds,
         strategy11_min_edge=cfg.strategy11_min_edge,
         strategy11_edge_buffer=cfg.strategy11_edge_buffer,
@@ -915,6 +933,9 @@ _PROFILE_FIELD_BASE_KEYS.update(
         "strategy10_ofi_weight": "STRATEGY10_OFI_WEIGHT",
         "strategy10_momentum_weight": "STRATEGY10_MOMENTUM_WEIGHT",
         "strategy10_max_fair_value": "STRATEGY10_MAX_FAIR_VALUE",
+        "strategy10_min_momentum_delta": "STRATEGY10_MIN_MOMENTUM_DELTA",
+        "strategy10_max_momentum_delta": "STRATEGY10_MAX_MOMENTUM_DELTA",
+        "strategy10_down_min_edge": "STRATEGY10_DOWN_MIN_EDGE",
         "strategy10_confirm_before_entry_seconds": "STRATEGY10_CONFIRM_BEFORE_ENTRY_SECONDS",
         "strategy11_min_edge": "STRATEGY11_MIN_EDGE",
         "strategy11_edge_buffer": "STRATEGY11_EDGE_BUFFER",
@@ -1203,6 +1224,21 @@ def _profile_for_strategy(cfg: AppConfig, strategy_id: int) -> LiveStrategyProfi
                 "STRATEGY10_MAX_FAIR_VALUE",
                 cfg.strategy10_max_fair_value,
             ),
+            strategy10_min_momentum_delta=_strategy_env_optional_float(
+                strategy_id,
+                "STRATEGY10_MIN_MOMENTUM_DELTA",
+                cfg.strategy10_min_momentum_delta,
+            ),
+            strategy10_max_momentum_delta=_strategy_env_optional_float(
+                strategy_id,
+                "STRATEGY10_MAX_MOMENTUM_DELTA",
+                cfg.strategy10_max_momentum_delta,
+            ),
+            strategy10_down_min_edge=_strategy_env_optional_float(
+                strategy_id,
+                "STRATEGY10_DOWN_MIN_EDGE",
+                cfg.strategy10_down_min_edge,
+            ),
             strategy10_confirm_before_entry_seconds=_strategy_env_int(
                 strategy_id,
                 "STRATEGY10_CONFIRM_BEFORE_ENTRY_SECONDS",
@@ -1312,6 +1348,9 @@ class AppConfig:
     strategy10_ofi_weight: float = 0.08
     strategy10_momentum_weight: float = 1.0
     strategy10_max_fair_value: float = 0.85
+    strategy10_min_momentum_delta: float | None = None
+    strategy10_max_momentum_delta: float | None = None
+    strategy10_down_min_edge: float | None = None
     strategy10_confirm_before_entry_seconds: int = 0
     strategy11_min_edge: float = 0.04
     strategy11_edge_buffer: float = 0.005
@@ -1440,6 +1479,9 @@ class AppConfig:
                 strategy10_ofi_weight=self.strategy10_ofi_weight,
                 strategy10_momentum_weight=self.strategy10_momentum_weight,
                 strategy10_max_fair_value=self.strategy10_max_fair_value,
+                strategy10_min_momentum_delta=self.strategy10_min_momentum_delta,
+                strategy10_max_momentum_delta=self.strategy10_max_momentum_delta,
+                strategy10_down_min_edge=self.strategy10_down_min_edge,
                 strategy10_confirm_before_entry_seconds=self.strategy10_confirm_before_entry_seconds,
                 strategy11_min_edge=self.strategy11_min_edge,
                 strategy11_edge_buffer=self.strategy11_edge_buffer,

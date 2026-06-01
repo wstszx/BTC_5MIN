@@ -319,7 +319,7 @@ def test_clob_adapter_submits_injected_market_order_with_strategy_price_cap():
     assert client.created_orders[0].token_id == "up-token"
     assert client.created_orders[0].amount == pytest.approx(1.08)
     assert client.created_orders[0].side == "BUY"
-    assert client.created_orders[0].price == pytest.approx(0.53)
+    assert client.created_orders[0].price == pytest.approx(0.55)
     assert client.posted_orders[0][1] == "FOK"
 
 
@@ -327,7 +327,7 @@ def test_clob_adapter_converts_effective_price_cap_to_official_raw_limit():
     assert effective_price_cap_to_raw_price_cap(0.54, fee_rate=0.07) == pytest.approx(0.52)
 
 
-def test_clob_adapter_submits_market_order_with_raw_price_cap_from_effective_limit():
+def test_clob_adapter_submits_market_order_with_raw_price_cap_from_max_entry_price():
     client = _InjectedOrderClient()
     plan = TradePlan(
         True,
@@ -346,7 +346,7 @@ def test_clob_adapter_submits_market_order_with_raw_price_cap_from_effective_lim
         plan=plan,
     )
 
-    assert client.created_orders[0].price == pytest.approx(0.52)
+    assert client.created_orders[0].price == pytest.approx(0.54)
 
 
 def test_clob_adapter_skips_when_order_book_depth_cannot_fill_fok_market_order():
@@ -504,8 +504,8 @@ def test_clob_adapter_falls_back_to_fak_when_fok_market_order_is_not_filled():
     assert len(client.created_orders) == 2
     assert client.created_orders[0].order_type == "FOK"
     assert client.created_orders[1].order_type == "FAK"
-    assert client.created_orders[0].price == pytest.approx(0.52)
-    assert client.created_orders[1].price == pytest.approx(0.52)
+    assert client.created_orders[0].price == pytest.approx(0.54)
+    assert client.created_orders[1].price == pytest.approx(0.54)
 
 
 def test_clob_adapter_can_disable_fok_to_fak_fallback():
@@ -569,7 +569,7 @@ def test_clob_adapter_prefers_plan_dynamic_price_cap():
 
     assert order_id == "oid-adapter"
     assert response["success"] is True
-    assert client.created_orders[0].price == pytest.approx(0.51)
+    assert client.created_orders[0].price == pytest.approx(0.53)
 
 
 def test_clob_adapter_applies_price_cap_to_strategy4_live_market_order():
@@ -587,7 +587,7 @@ def test_clob_adapter_applies_price_cap_to_strategy4_live_market_order():
     assert response["success"] is True
     assert client.created_orders[0].token_id == "down-token"
     assert client.created_orders[0].amount == pytest.approx(2.44)
-    assert client.created_orders[0].price == pytest.approx(0.53)
+    assert client.created_orders[0].price == pytest.approx(0.55)
     assert client.posted_orders[0][1] == "FOK"
 
 

@@ -3233,8 +3233,8 @@ def test_place_live_order_logs_official_market_order_price_cap(tmp_path):
     rows = list(csv.DictReader(log_path.open(newline="", encoding="utf-8")))
 
     assert execution.status == "submitted"
-    assert execution.live_price_cap == pytest.approx(0.52)
-    assert rows[-1]["live_price_cap"] == "0.52"
+    assert execution.live_price_cap == pytest.approx(0.54)
+    assert rows[-1]["live_price_cap"] == "0.54"
 
 
 def test_place_live_order_rejects_submission_response_without_acceptance(tmp_path):
@@ -3385,7 +3385,7 @@ def test_place_live_order_strategy7_sets_market_order_price_cap(tmp_path, monkey
 
     assert result["status"] == "submitted"
     assert len(stub_clob.created_orders) == 1
-    assert stub_clob.created_orders[0].price == pytest.approx(0.54)
+    assert stub_clob.created_orders[0].price == pytest.approx(0.56)
 
 
 def test_place_live_order_ignores_legacy_recovery_loss_for_max_stake_check(tmp_path):

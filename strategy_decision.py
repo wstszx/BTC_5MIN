@@ -88,6 +88,14 @@ def strategy11_best_probability(probability: Strategy11Probability) -> float | N
     return None
 
 
+def strategy10_best_probability(fair_value: Strategy10FairValue) -> float | None:
+    if fair_value.best_side == "UP":
+        return fair_value.up_fair_value
+    if fair_value.best_side == "DOWN":
+        return fair_value.down_fair_value
+    return None
+
+
 def entry_price_skip_reason(
     *,
     strategy_prefix: str,
@@ -99,8 +107,7 @@ def entry_price_skip_reason(
         return None
     if min_entry_price is not None and price < min_entry_price:
         return f"{strategy_prefix}_price_too_low"
-    effective_price = effective_price_after_fee(price)
-    if max_entry_price is not None and effective_price > max_entry_price:
+    if max_entry_price is not None and price > max_entry_price:
         return f"{strategy_prefix}_price_too_high"
     return None
 
@@ -797,14 +804,43 @@ def evaluate_strategy10_edge(
         )
 
     momentum_delta = signal_current_up_price - signal_open_up_price
+    min_momentum_delta = getattr(cfg, "strategy10_min_momentum_delta", None)
+    if min_momentum_delta is not None and momentum_delta < min_momentum_delta:
+        return SideDecision(
+            side=None,
+            reason="strategy10_momentum_too_cold",
+            signal_open_up_price=signal_open_up_price,
+            signal_current_up_price=signal_current_up_price,
+            signal_threshold=min_momentum_delta,
+            signal_delta=momentum_delta,
+            ofi_score=ofi_score,
+        )
+    max_momentum_delta = getattr(cfg, "strategy10_max_momentum_delta", None)
+    if max_momentum_delta is not None and momentum_delta > max_momentum_delta:
+        return SideDecision(
+            side=None,
+            reason="strategy10_momentum_too_hot",
+            signal_open_up_price=signal_open_up_price,
+            signal_current_up_price=signal_current_up_price,
+            signal_threshold=max_momentum_delta,
+            signal_delta=momentum_delta,
+            ofi_score=ofi_score,
+        )
+
     fair_value = estimate_strategy10_fair_value(
         cfg=cfg,
         quote=quote,
         ofi_score=ofi_score,
         momentum_delta=momentum_delta,
     )
+    best_probability = strategy10_best_probability(fair_value)
     min_edge = max(0.0, float(getattr(cfg, "strategy10_min_edge", 0.0)))
-    if fair_value.best_side is None or fair_value.best_edge is None or fair_value.best_edge < min_edge:
+    side_min_edge = min_edge
+    if fair_value.best_side == "DOWN":
+        down_min_edge = getattr(cfg, "strategy10_down_min_edge", None)
+        if down_min_edge is not None:
+            side_min_edge = max(0.0, float(down_min_edge))
+    if fair_value.best_side is None or fair_value.best_edge is None or fair_value.best_edge < side_min_edge:
         return SideDecision(
             side=None,
             reason="strategy10_edge_too_low",
@@ -812,8 +848,10 @@ def evaluate_strategy10_edge(
             candidate_price=fair_value.best_price,
             signal_open_up_price=signal_open_up_price,
             signal_current_up_price=signal_current_up_price,
-            signal_threshold=min_edge,
+            signal_threshold=side_min_edge,
             signal_delta=momentum_delta,
+            signal_probability=best_probability,
+            signal_edge=fair_value.best_edge,
             ofi_score=ofi_score,
         )
 
@@ -823,8 +861,10 @@ def evaluate_strategy10_edge(
         candidate_price=fair_value.best_price,
         signal_open_up_price=signal_open_up_price,
         signal_current_up_price=signal_current_up_price,
-        signal_threshold=min_edge,
+        signal_threshold=side_min_edge,
         signal_delta=momentum_delta,
+        signal_probability=best_probability,
+        signal_edge=fair_value.best_edge,
         ofi_score=ofi_score,
     )
 
@@ -1010,6 +1050,8 @@ def resolve_side_from_strategy(
                         signal_current_up_price=signal_current_up_price,
                         signal_threshold=cfg.strategy10_min_edge,
                         signal_delta=edge_decision.signal_delta,
+                        signal_probability=edge_decision.signal_probability,
+                        signal_edge=edge_decision.signal_edge,
                         signal_locked=True,
                         ofi_score=edge_decision.ofi_score,
                     )
@@ -1117,6 +1159,8 @@ def resolve_side_from_strategy(
                     signal_current_up_price=signal_current_up_price,
                     signal_threshold=locked_signal_threshold,
                     signal_delta=locked_signal_delta,
+                    signal_probability=edge_decision.signal_probability if cfg.strategy_id in {10, 11} else None,
+                    signal_edge=edge_decision.signal_edge if cfg.strategy_id in {10, 11} else None,
                     signal_locked=True,
                     max_entry_price=locked_max_entry_price,
                 )
@@ -1126,6 +1170,8 @@ def resolve_side_from_strategy(
             signal_current_up_price=edge_decision.signal_current_up_price if cfg.strategy_id == 11 else signal_current_up_price,
             signal_threshold=cfg.strategy11_min_edge if cfg.strategy_id == 11 else (cfg.strategy10_min_edge if cfg.strategy_id == 10 else None),
             signal_delta=edge_decision.signal_delta if cfg.strategy_id == 11 else (signal_check.decision.signal_delta if cfg.strategy_id == 10 else signal_delta),
+            signal_probability=edge_decision.signal_probability if cfg.strategy_id in {10, 11} else None,
+            signal_edge=edge_decision.signal_edge if cfg.strategy_id in {10, 11} else None,
             signal_locked=True,
             max_entry_price=locked_max_entry_price,
             candidate_side=state.signal_round_locked_side if cfg.strategy_id in {10, 11} else None,
@@ -1183,6 +1229,8 @@ def resolve_side_from_strategy(
                 signal_current_up_price=signal_current_up_price,
                 signal_threshold=cfg.strategy10_min_edge,
                 signal_delta=momentum_delta,
+                signal_probability=edge_decision.signal_probability,
+                signal_edge=edge_decision.signal_edge,
                 ofi_score=edge_decision.ofi_score,
             )
 
@@ -1203,6 +1251,8 @@ def resolve_side_from_strategy(
                 signal_current_up_price=signal_current_up_price,
                 signal_threshold=cfg.strategy10_min_edge,
                 signal_delta=momentum_delta,
+                signal_probability=edge_decision.signal_probability,
+                signal_edge=edge_decision.signal_edge,
                 ofi_score=edge_decision.ofi_score,
             )
 
@@ -1218,6 +1268,8 @@ def resolve_side_from_strategy(
             signal_current_up_price=signal_current_up_price,
             signal_threshold=cfg.strategy10_min_edge,
             signal_delta=momentum_delta,
+            signal_probability=edge_decision.signal_probability,
+            signal_edge=edge_decision.signal_edge,
             signal_locked=state.signal_round_locked_side in {"UP", "DOWN"},
             ofi_score=edge_decision.ofi_score,
         )

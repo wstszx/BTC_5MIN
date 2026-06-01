@@ -941,6 +941,9 @@ def test_build_config_from_env_values_prefers_mode_specific_strategy_overrides()
             'PAPER_STRATEGY_10_BASE_ORDER_COST': '1.0',
             'PAPER_STRATEGY_10_MIN_ENTRY_PRICE': '0.45',
             'PAPER_STRATEGY_10_MIN_EDGE': '0.035',
+            'PAPER_STRATEGY_10_STRATEGY10_MIN_MOMENTUM_DELTA': '-0.02',
+            'PAPER_STRATEGY_10_STRATEGY10_MAX_MOMENTUM_DELTA': '0.02',
+            'PAPER_STRATEGY_10_STRATEGY10_DOWN_MIN_EDGE': '0.07',
             'LIVE_STRATEGY_10_BASE_ORDER_COST': '2.0',
             'LIVE_STRATEGY_10_MIN_ENTRY_PRICE': '0.50',
             'LIVE_STRATEGY_10_MIN_EDGE': '0.05',
@@ -956,10 +959,16 @@ def test_build_config_from_env_values_prefers_mode_specific_strategy_overrides()
     assert paper_strategy_cfg.min_entry_price == pytest.approx(0.45)
     assert paper_strategy_cfg.max_entry_price == pytest.approx(0.54)
     assert paper_strategy_cfg.strategy10_min_edge == pytest.approx(0.035)
+    assert paper_strategy_cfg.strategy10_min_momentum_delta == pytest.approx(-0.02)
+    assert paper_strategy_cfg.strategy10_max_momentum_delta == pytest.approx(0.02)
+    assert paper_strategy_cfg.strategy10_down_min_edge == pytest.approx(0.07)
     assert live_strategy_cfg.base_order_cost == pytest.approx(2.0)
     assert live_strategy_cfg.min_entry_price == pytest.approx(0.50)
     assert live_strategy_cfg.max_entry_price == pytest.approx(0.54)
     assert live_strategy_cfg.strategy10_min_edge == pytest.approx(0.05)
+    assert live_strategy_cfg.strategy10_min_momentum_delta is None
+    assert live_strategy_cfg.strategy10_max_momentum_delta is None
+    assert live_strategy_cfg.strategy10_down_min_edge is None
 
 
 def test_paper_timeframe_worker_config_preserves_strategy9_dynamic_sizing():

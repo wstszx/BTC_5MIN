@@ -94,6 +94,9 @@ def test_runtime_config_uses_mode_specific_strategy_profile_overrides():
     cfg.paper_strategy_profiles[10].min_entry_price = 0.45
     cfg.paper_strategy_profiles[10].base_order_cost = 1.0
     cfg.paper_strategy_profiles[10].strategy10_min_edge = 0.035
+    cfg.paper_strategy_profiles[10].strategy10_min_momentum_delta = -0.02
+    cfg.paper_strategy_profiles[10].strategy10_max_momentum_delta = 0.02
+    cfg.paper_strategy_profiles[10].strategy10_down_min_edge = 0.07
     cfg.live_profiles[10].min_entry_price = 0.50
     cfg.live_profiles[10].base_order_cost = 2.0
     cfg.live_profiles[10].strategy10_min_edge = 0.05
@@ -104,9 +107,15 @@ def test_runtime_config_uses_mode_specific_strategy_profile_overrides():
     assert paper_cfg.min_entry_price == pytest.approx(0.45)
     assert paper_cfg.base_order_cost == pytest.approx(1.0)
     assert paper_cfg.strategy10_min_edge == pytest.approx(0.035)
+    assert paper_cfg.strategy10_min_momentum_delta == pytest.approx(-0.02)
+    assert paper_cfg.strategy10_max_momentum_delta == pytest.approx(0.02)
+    assert paper_cfg.strategy10_down_min_edge == pytest.approx(0.07)
     assert live_cfg.min_entry_price == pytest.approx(0.50)
     assert live_cfg.base_order_cost == pytest.approx(2.0)
     assert live_cfg.strategy10_min_edge == pytest.approx(0.05)
+    assert live_cfg.strategy10_min_momentum_delta is None
+    assert live_cfg.strategy10_max_momentum_delta is None
+    assert live_cfg.strategy10_down_min_edge is None
 
 
 def test_runtime_config_validates_live_runtime_credentials():

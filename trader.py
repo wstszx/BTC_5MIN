@@ -115,7 +115,6 @@ from clob_adapter import (
     price_improvement_floor as _price_improvement_floor,
     read_available_live_balance as _adapter_read_available_live_balance,
     submit_live_strategy_order as _adapter_submit_live_strategy_order,
-    effective_price_cap_to_raw_price_cap as _effective_price_cap_to_raw_price_cap,
 )
 from state_manager import (
     apply_live_strategy_state_to_session_state as _apply_live_strategy_state_to_session_state,
@@ -504,8 +503,7 @@ def _submit_live_strategy_order(
 
 
 def _live_market_order_price_cap_for_plan(cfg: AppConfig, plan: TradePlan) -> float | None:
-    effective_cap = plan.max_entry_price if plan.max_entry_price is not None else getattr(cfg, "max_entry_price", None)
-    return _effective_price_cap_to_raw_price_cap(effective_cap)
+    return plan.max_entry_price if plan.max_entry_price is not None else getattr(cfg, "max_entry_price", None)
 
 
 def _execute_order_plan(
@@ -563,22 +561,22 @@ def _plan_with_verified_live_fill(
         return plan, "submitted_plan"
     if verified_plan is None:
         return plan, "submitted_plan"
+    verified_raw_price = verified_plan.raw_price if verified_plan.raw_price is not None else verified_plan.price
     if (
         max_entry_price is not None
-        and verified_plan.price is not None
-        and verified_plan.price > max_entry_price
+        and verified_raw_price is not None
+        and verified_raw_price > max_entry_price
     ):
         _runtime_log(
             "official_fill_price_above_max_entry_price"
             + " order_id=" + str(order_id)
             + " strategy=" + str(strategy_id or "")
             + " round=" + str(slug or "")
-            + " fill_price=" + f"{verified_plan.price:.6f}"
+            + " fill_price=" + f"{verified_raw_price:.6f}"
             + " max_entry_price=" + str(max_entry_price)
         )
     decision_price = plan.raw_price if plan.raw_price is not None else plan.price
     improvement_floor = _price_improvement_floor(decision_price, max_price_improvement)
-    verified_raw_price = verified_plan.raw_price if verified_plan.raw_price is not None else verified_plan.price
     if (
         min_entry_price is not None
         and verified_raw_price is not None

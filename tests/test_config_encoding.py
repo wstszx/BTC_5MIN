@@ -314,6 +314,9 @@ def test_build_config_accepts_strategy10_and_reads_edge_values():
             "STRATEGY10_MOMENTUM_WEIGHT": "1.4",
             "STRATEGY10_EDGE_BUFFER": "0.01",
             "PAPER_STRATEGY_10_STRATEGY10_MIN_EDGE": "0.06",
+            "PAPER_STRATEGY_10_STRATEGY10_MIN_MOMENTUM_DELTA": "-0.02",
+            "PAPER_STRATEGY_10_STRATEGY10_MAX_MOMENTUM_DELTA": "0.02",
+            "PAPER_STRATEGY_10_STRATEGY10_DOWN_MIN_EDGE": "0.07",
             "STRATEGY_10_MIN_EDGE": "0.07",
             "STRATEGY_10_OFI_WEIGHT": "0.12",
             "STRATEGY_10_MOMENTUM_WEIGHT": "1.4",
@@ -334,7 +337,12 @@ def test_build_config_accepts_strategy10_and_reads_edge_values():
     assert cfg.paper_strategy_profiles[10].strategy10_momentum_weight == 1.4
     assert cfg.paper_strategy_profiles[10].strategy10_edge_buffer == 0.01
     assert cfg.paper_strategy_profiles[10].strategy10_confirm_before_entry_seconds == 1
+    assert cfg.paper_strategy_profiles[10].strategy10_min_momentum_delta == -0.02
+    assert cfg.paper_strategy_profiles[10].strategy10_max_momentum_delta == 0.02
+    assert cfg.paper_strategy_profiles[10].strategy10_down_min_edge == 0.07
     assert cfg.live_profiles[10].strategy10_min_edge == 0.07
+    assert cfg.live_profiles[10].strategy10_min_momentum_delta is None
+    assert cfg.live_profiles[10].strategy10_max_momentum_delta is None
 
 
 def test_build_config_accepts_strategy11_and_reads_probability_values():

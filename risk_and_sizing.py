@@ -79,11 +79,11 @@ def build_trade_plan(
         )
 
     effective_price = effective_price_after_fee(price)
-    if effective_max_entry_price is not None and effective_price is not None and effective_price > effective_max_entry_price:
+    if effective_max_entry_price is not None and price > effective_max_entry_price:
         return TradePlan(
             False,
             side=side,
-            price=effective_price,
+            price=price,
             raw_price=price,
             max_entry_price=effective_max_entry_price,
             order_cost_multiplier=order_cost_multiplier,

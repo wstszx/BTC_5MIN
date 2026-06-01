@@ -299,8 +299,10 @@ def _live_recent_price_check(row: dict[str, str], cfg: AppConfig) -> dict[str, s
     if order_cost <= 0.0 or order_size <= 0.0:
         return checked
 
-    effective_price = _optional_float(checked.get("price"))
-    if effective_price is None:
+    raw_price = _optional_float(checked.get("raw_price"))
+    if raw_price is None:
+        raw_price = _optional_float(checked.get("price"))
+    if raw_price is None:
         return checked
     strategy_text = str(checked.get("strategy") or "").strip()
     try:
@@ -309,24 +311,24 @@ def _live_recent_price_check(row: dict[str, str], cfg: AppConfig) -> dict[str, s
         strategy_cfg = cfg
     min_entry_price = getattr(strategy_cfg, "min_entry_price", None)
     max_entry_price = getattr(strategy_cfg, "max_entry_price", None)
-    if max_entry_price is not None and effective_price > float(max_entry_price) + 1e-9:
+    if max_entry_price is not None and raw_price > float(max_entry_price) + 1e-9:
         checked["price_check_status"] = "above_max"
-        checked["price_check_label"] = "高于有效价帽"
+        checked["price_check_label"] = "高于价格上限"
         checked["price_check_detail"] = (
-            f"成交有效价 {_fmt_price_check_value(effective_price)} "
-            f"高于最高有效价 {_fmt_price_check_value(float(max_entry_price))}"
+            f"成交原始价 {_fmt_price_check_value(raw_price)} "
+            f"高于最高入场价 {_fmt_price_check_value(float(max_entry_price))}"
         )
         return checked
-    if min_entry_price is not None and effective_price < float(min_entry_price) - 1e-9:
+    if min_entry_price is not None and raw_price < float(min_entry_price) - 1e-9:
         checked["price_check_status"] = "improved"
         checked["price_check_label"] = "价格改善"
         checked["price_check_detail"] = (
-            f"成交有效价 {_fmt_price_check_value(effective_price)} "
+            f"成交原始价 {_fmt_price_check_value(raw_price)} "
             f"低于最低入场价 {_fmt_price_check_value(float(min_entry_price))}，按价格改善处理"
         )
         return checked
     checked["price_check_status"] = "ok"
-    checked["price_check_detail"] = "成交有效价在策略入场区间内"
+    checked["price_check_detail"] = "成交原始价在策略入场区间内"
     return checked
 
 
@@ -415,6 +417,9 @@ STRATEGY_PROFILE_EDITABLE_FIELDS: tuple[str, ...] = (
     "STRATEGY10_OFI_WEIGHT",
     "STRATEGY10_MOMENTUM_WEIGHT",
     "STRATEGY10_MAX_FAIR_VALUE",
+    "STRATEGY10_MIN_MOMENTUM_DELTA",
+    "STRATEGY10_MAX_MOMENTUM_DELTA",
+    "STRATEGY10_DOWN_MIN_EDGE",
     "STRATEGY10_CONFIRM_BEFORE_ENTRY_SECONDS",
     "STRATEGY11_MIN_EDGE",
     "STRATEGY11_EDGE_BUFFER",
@@ -557,6 +562,9 @@ def _strategy_profile_field_names(strategy_id: int | str) -> list[str]:
                 "STRATEGY10_OFI_WEIGHT",
                 "STRATEGY10_MOMENTUM_WEIGHT",
                 "STRATEGY10_MAX_FAIR_VALUE",
+                "STRATEGY10_MIN_MOMENTUM_DELTA",
+                "STRATEGY10_MAX_MOMENTUM_DELTA",
+                "STRATEGY10_DOWN_MIN_EDGE",
                 "STRATEGY10_CONFIRM_BEFORE_ENTRY_SECONDS",
             ]
         )
@@ -644,6 +652,9 @@ def _cfg_for_paper_timeframe(cfg: AppConfig, timeframe: str) -> AppConfig:
         strategy10_ofi_weight=profile.strategy10_ofi_weight,
         strategy10_momentum_weight=profile.strategy10_momentum_weight,
         strategy10_max_fair_value=profile.strategy10_max_fair_value,
+        strategy10_min_momentum_delta=profile.strategy10_min_momentum_delta,
+        strategy10_max_momentum_delta=profile.strategy10_max_momentum_delta,
+        strategy10_down_min_edge=profile.strategy10_down_min_edge,
         strategy10_confirm_before_entry_seconds=profile.strategy10_confirm_before_entry_seconds,
         strategy11_min_edge=profile.strategy11_min_edge,
         strategy11_edge_buffer=profile.strategy11_edge_buffer,
@@ -1761,9 +1772,9 @@ class DashboardState:
         "STRATEGY9_STABILITY_WINDOW_SECONDS": "策略9 稳定窗口秒",
         "STRATEGY9_REVERSAL_LOOKBACK_SECONDS": "策略9 衰减回看秒",
         "STRATEGY9_MAX_SIGNAL_DECAY": "策略9 最大信号衰减",
-        "STRATEGY9_BASE_MAX_ENTRY_PRICE": "策略9 普通有效价帽",
-        "STRATEGY9_STRONG_MAX_ENTRY_PRICE": "策略9 强信号有效价帽",
-        "STRATEGY9_ULTRA_MAX_ENTRY_PRICE": "策略9 超强信号有效价帽",
+        "STRATEGY9_BASE_MAX_ENTRY_PRICE": "策略9 普通价格上限",
+        "STRATEGY9_STRONG_MAX_ENTRY_PRICE": "策略9 强信号价格上限",
+        "STRATEGY9_ULTRA_MAX_ENTRY_PRICE": "策略9 超强信号价格上限",
         "STRATEGY9_STRONG_SIGNAL_GAP": "策略9 强信号优势",
         "STRATEGY9_ULTRA_SIGNAL_GAP": "策略9 超强信号优势",
         "STRATEGY10_MIN_EDGE": "策略10 最小期望优势",
@@ -1771,6 +1782,9 @@ class DashboardState:
         "STRATEGY10_OFI_WEIGHT": "策略10 OFI 权重",
         "STRATEGY10_MOMENTUM_WEIGHT": "策略10 动量权重",
         "STRATEGY10_MAX_FAIR_VALUE": "策略10 估值上限",
+        "STRATEGY10_MIN_MOMENTUM_DELTA": "策略10 最小动量",
+        "STRATEGY10_MAX_MOMENTUM_DELTA": "策略10 最大动量",
+        "STRATEGY10_DOWN_MIN_EDGE": "策略10 DOWN 最小优势",
         "STRATEGY10_CONFIRM_BEFORE_ENTRY_SECONDS": "策略10 最晚确认秒数",
         "STRATEGY11_MIN_EDGE": "策略11 最小概率优势",
         "STRATEGY11_EDGE_BUFFER": "策略11 成本缓冲",
@@ -1878,6 +1892,9 @@ class DashboardState:
         "STRATEGY10_OFI_WEIGHT": "strategy10_ofi_weight",
         "STRATEGY10_MOMENTUM_WEIGHT": "strategy10_momentum_weight",
         "STRATEGY10_MAX_FAIR_VALUE": "strategy10_max_fair_value",
+        "STRATEGY10_MIN_MOMENTUM_DELTA": "strategy10_min_momentum_delta",
+        "STRATEGY10_MAX_MOMENTUM_DELTA": "strategy10_max_momentum_delta",
+        "STRATEGY10_DOWN_MIN_EDGE": "strategy10_down_min_edge",
         "STRATEGY10_CONFIRM_BEFORE_ENTRY_SECONDS": "strategy10_confirm_before_entry_seconds",
         "STRATEGY11_MIN_EDGE": "strategy11_min_edge",
         "STRATEGY11_EDGE_BUFFER": "strategy11_edge_buffer",
@@ -1966,6 +1983,9 @@ class DashboardState:
         "STRATEGY10_OFI_WEIGHT",
         "STRATEGY10_MOMENTUM_WEIGHT",
         "STRATEGY10_MAX_FAIR_VALUE",
+        "STRATEGY10_MIN_MOMENTUM_DELTA",
+        "STRATEGY10_MAX_MOMENTUM_DELTA",
+        "STRATEGY10_DOWN_MIN_EDGE",
         "STRATEGY11_MIN_EDGE",
         "STRATEGY11_EDGE_BUFFER",
         "STRATEGY11_VOLATILITY_BPS_PER_SQRT_MINUTE",
@@ -2051,6 +2071,9 @@ class DashboardState:
         "STRATEGY10_OFI_WEIGHT": "strategy_10_only",
         "STRATEGY10_MOMENTUM_WEIGHT": "strategy_10_only",
         "STRATEGY10_MAX_FAIR_VALUE": "strategy_10_only",
+        "STRATEGY10_MIN_MOMENTUM_DELTA": "strategy_10_only",
+        "STRATEGY10_MAX_MOMENTUM_DELTA": "strategy_10_only",
+        "STRATEGY10_DOWN_MIN_EDGE": "strategy_10_only",
         "STRATEGY10_CONFIRM_BEFORE_ENTRY_SECONDS": "strategy_10_only",
         "STRATEGY11_MIN_EDGE": "strategy_11_only",
         "STRATEGY11_EDGE_BUFFER": "strategy_11_only",
@@ -2069,6 +2092,9 @@ class DashboardState:
         "STRATEGY10_OFI_WEIGHT": "策略10 将 Binance 盘口失衡映射到估值概率的权重。",
         "STRATEGY10_MOMENTUM_WEIGHT": "策略10 将本轮 Polymarket 动量映射到估值概率的权重。",
         "STRATEGY10_MAX_FAIR_VALUE": "策略10 对估算概率做截断，避免单一信号把估值推到极端。",
+        "STRATEGY10_MIN_MOMENTUM_DELTA": "策略10 只在轮内 UP 价格动量不低于该值时入场；留空则不限制下限。",
+        "STRATEGY10_MAX_MOMENTUM_DELTA": "策略10 只在轮内 UP 价格动量不高于该值时入场；留空则不限制上限。",
+        "STRATEGY10_DOWN_MIN_EDGE": "策略10 买 DOWN 时使用的最小优势；留空则沿用策略10最小期望优势。",
         "STRATEGY10_CONFIRM_BEFORE_ENTRY_SECONDS": "策略10 需要在计划入场前至少提前这么多秒完成估值优势确认。",
         "STRATEGY11_MIN_EDGE": "策略11 的估算方向概率减去当前买入价和成本缓冲后的最小优势。",
         "STRATEGY11_EDGE_BUFFER": "策略11 对手续费、价差和延迟预留的额外安全边际。",
@@ -2574,6 +2600,21 @@ class DashboardState:
                     "strategy10_ofi_weight": _fmt_env(profile.strategy10_ofi_weight),
                     "strategy10_momentum_weight": _fmt_env(profile.strategy10_momentum_weight),
                     "strategy10_max_fair_value": _fmt_env(profile.strategy10_max_fair_value),
+                    "strategy10_min_momentum_delta": (
+                        _fmt_env(profile.strategy10_min_momentum_delta)
+                        if profile.strategy10_min_momentum_delta is not None
+                        else ""
+                    ),
+                    "strategy10_max_momentum_delta": (
+                        _fmt_env(profile.strategy10_max_momentum_delta)
+                        if profile.strategy10_max_momentum_delta is not None
+                        else ""
+                    ),
+                    "strategy10_down_min_edge": (
+                        _fmt_env(profile.strategy10_down_min_edge)
+                        if profile.strategy10_down_min_edge is not None
+                        else ""
+                    ),
                     "strategy10_confirm_before_entry_seconds": _fmt_env(profile.strategy10_confirm_before_entry_seconds),
                     "strategy11_min_edge": _fmt_env(profile.strategy11_min_edge),
                     "strategy11_edge_buffer": _fmt_env(profile.strategy11_edge_buffer),
@@ -5665,7 +5706,7 @@ const HELP_SECTIONS = {
       {
         title: '常见跳过原因',
         bullets: [
-          'price_above_threshold 表示目标方向含费有效价格高于上限；price_below_threshold 表示入场候选价格低于下限。',
+          'price_above_threshold 表示目标方向原始入场价高于上限；price_below_threshold 表示入场候选价格低于下限。',
           '实盘成交后的有效价低于最低入场价不是违规，会在最近明细中显示为价格改善。',
           'order_cost_above_max_stake 表示本轮所需下注金额超过 MAX_STAKE。',
           'max_consecutive_losses_reached 表示连续亏损已达到 MAX_CONSECUTIVE_LOSSES，本轮触发止损重置。',
@@ -5808,6 +5849,8 @@ const REASON_LABELS = {
   strategy10_ofi_unavailable: '策略10 盘口失衡信号不可用',
   strategy10_ofi_stale: '策略10 盘口失衡信号已过期',
   strategy10_momentum_unavailable: '策略10 动量信号不可用',
+  strategy10_momentum_too_cold: '策略10 动量低于测试区间',
+  strategy10_momentum_too_hot: '策略10 动量高于测试区间',
   strategy10_edge_too_low: '策略10 估值优势不足',
   strategy10_signal_conflict: '策略10 锁边后信号反向',
   strategy10_entry_too_late: '策略10 确认出现过晚',
@@ -5884,9 +5927,9 @@ const CONFIG_KEY_NAMES = {
   STRATEGY9_STABILITY_WINDOW_SECONDS: '策略9 稳定窗口秒',
   STRATEGY9_REVERSAL_LOOKBACK_SECONDS: '策略9 衰减回看秒',
   STRATEGY9_MAX_SIGNAL_DECAY: '策略9 最大信号衰减',
-  STRATEGY9_BASE_MAX_ENTRY_PRICE: '策略9 普通有效价帽',
-  STRATEGY9_STRONG_MAX_ENTRY_PRICE: '策略9 强信号有效价帽',
-  STRATEGY9_ULTRA_MAX_ENTRY_PRICE: '策略9 超强信号有效价帽',
+  STRATEGY9_BASE_MAX_ENTRY_PRICE: '策略9 普通价格上限',
+  STRATEGY9_STRONG_MAX_ENTRY_PRICE: '策略9 强信号价格上限',
+  STRATEGY9_ULTRA_MAX_ENTRY_PRICE: '策略9 超强信号价格上限',
   STRATEGY9_STRONG_SIGNAL_GAP: '策略9 强信号优势',
   STRATEGY9_ULTRA_SIGNAL_GAP: '策略9 超强信号优势',
   STRATEGY10_MIN_EDGE: '策略10 最小期望优势',
@@ -5894,6 +5937,9 @@ const CONFIG_KEY_NAMES = {
   STRATEGY10_OFI_WEIGHT: '策略10 OFI 权重',
   STRATEGY10_MOMENTUM_WEIGHT: '策略10 动量权重',
   STRATEGY10_MAX_FAIR_VALUE: '策略10 估值上限',
+  STRATEGY10_MIN_MOMENTUM_DELTA: '策略10 最小动量',
+  STRATEGY10_MAX_MOMENTUM_DELTA: '策略10 最大动量',
+  STRATEGY10_DOWN_MIN_EDGE: '策略10 DOWN 最小优势',
   STRATEGY10_CONFIRM_BEFORE_ENTRY_SECONDS: '策略10 最晚确认秒数',
   STRATEGY11_MIN_EDGE: '策略11 最小概率优势',
   STRATEGY11_EDGE_BUFFER: '策略11 成本缓冲',

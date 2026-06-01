@@ -1460,7 +1460,7 @@ def test_dashboard_live_recent_orders_marks_below_min_fill_as_price_improvement(
         os.chdir(old_cwd)
 
 
-def test_dashboard_live_recent_orders_marks_effective_fill_above_cap(tmp_path: Path):
+def test_dashboard_live_recent_orders_checks_cap_against_raw_fill_price(tmp_path: Path):
     old_cwd = Path.cwd()
     os.chdir(tmp_path)
     env_file = tmp_path / ".env.dashboard"
@@ -1486,9 +1486,42 @@ def test_dashboard_live_recent_orders_marks_effective_fill_above_cap(tmp_path: P
         payload = state.get_live_recent_orders_payload(limit=10, strategy=10)
 
         row = payload["rows"][0]
+        assert row["price_check_status"] == "ok"
+        assert row["price_check_detail"] == "成交原始价在策略入场区间内"
+    finally:
+        state.close()
+        os.chdir(old_cwd)
+
+
+def test_dashboard_live_recent_orders_marks_raw_fill_above_cap(tmp_path: Path):
+    old_cwd = Path.cwd()
+    os.chdir(tmp_path)
+    env_file = tmp_path / ".env.dashboard"
+    env_file.write_text(
+        "LIVE_STRATEGY_IDS=10\n"
+        "STRATEGY_10_MIN_ENTRY_PRICE=0.5\n"
+        "STRATEGY_10_MAX_ENTRY_PRICE=0.54\n",
+        encoding="utf-8",
+    )
+    state = DashboardState(env_file=env_file)
+    try:
+        live_csv = tmp_path / "logs" / "live_orders.csv"
+        live_csv.parent.mkdir(parents=True, exist_ok=True)
+        live_csv.write_text(
+            "timestamp,mode,round_index,strategy,entry_timing,event_slug,start_time,end_time,side,price,"
+            "order_size,order_cost,expected_profit,result,trade_pnl,cash_pnl,skip_reason,raw_price,fee,live_price_cap\n"
+            "2026-05-22T08:55:07+00:00,live,83,10,OPEN,btc-updown-5m-test,"
+            "2026-05-22T08:55:00+00:00,2026-05-22T09:00:00+00:00,UP,0.567325,"
+            "1.9417,1.1010,0.8789,DOWN,-1.1010,-1.1010,,0.55,0.032899974667,0.54\n",
+            encoding="utf-8",
+        )
+
+        payload = state.get_live_recent_orders_payload(limit=10, strategy=10)
+
+        row = payload["rows"][0]
         assert row["price_check_status"] == "above_max"
-        assert row["price_check_label"] == "高于有效价帽"
-        assert "高于最高有效价 0.5400" in row["price_check_detail"]
+        assert row["price_check_label"] == "高于价格上限"
+        assert "高于最高入场价 0.5400" in row["price_check_detail"]
     finally:
         state.close()
         os.chdir(old_cwd)
@@ -4479,7 +4512,7 @@ def test_dashboard_config_payload_includes_strategy9_fields(tmp_path: Path):
     try:
         payload = state.get_config_payload()
         assert payload['labels']['STRATEGY9_STABILITY_SAMPLE_COUNT'] == '策略9 稳定采样数'
-        assert payload['labels']['STRATEGY9_BASE_MAX_ENTRY_PRICE'] == '策略9 普通有效价帽'
+        assert payload['labels']['STRATEGY9_BASE_MAX_ENTRY_PRICE'] == '策略9 普通价格上限'
         assert payload['labels']['STRATEGY9_ULTRA_SIGNAL_GAP'] == '策略9 超强信号优势'
         assert payload['labels']['STRATEGY9_DYNAMIC_SIZING_ENABLED'] == '策略9 动态下注'
         assert payload['field_scope']['STRATEGY9_STABILITY_SAMPLE_COUNT'] == 'strategy_9_only'
@@ -4501,8 +4534,12 @@ def test_dashboard_config_payload_includes_strategy10_fields(tmp_path: Path):
         assert payload['strategy_catalog']['10']['label'] == '估值优势'
         assert payload['labels']['STRATEGY10_MIN_EDGE'] == '策略10 最小期望优势'
         assert payload['labels']['STRATEGY10_EDGE_BUFFER'] == '策略10 成本缓冲'
+        assert payload['labels']['STRATEGY10_MIN_MOMENTUM_DELTA'] == '策略10 最小动量'
+        assert payload['labels']['STRATEGY10_MAX_MOMENTUM_DELTA'] == '策略10 最大动量'
+        assert payload['labels']['STRATEGY10_DOWN_MIN_EDGE'] == '策略10 DOWN 最小优势'
         assert payload['field_scope']['STRATEGY10_MIN_EDGE'] == 'strategy_10_only'
         assert payload['field_scope']['STRATEGY10_MAX_FAIR_VALUE'] == 'strategy_10_only'
+        assert payload['field_scope']['STRATEGY10_MAX_MOMENTUM_DELTA'] == 'strategy_10_only'
         assert 'STRATEGY10_MIN_EDGE' not in payload['editable_keys']
         assert 'STRATEGY10_MAX_FAIR_VALUE' not in payload['editable_keys']
     finally:
@@ -4544,12 +4581,18 @@ def test_dashboard_update_config_accepts_strategy10_confirm_window(tmp_path: Pat
             'STRATEGY_10_MIN_EDGE': '0.05',
             'STRATEGY_10_EDGE_BUFFER': '0.005',
             'STRATEGY_10_CONFIRM_BEFORE_ENTRY_SECONDS': '0',
+            'PAPER_STRATEGY_10_STRATEGY10_MIN_MOMENTUM_DELTA': '-0.02',
+            'PAPER_STRATEGY_10_STRATEGY10_MAX_MOMENTUM_DELTA': '0.02',
+            'PAPER_STRATEGY_10_STRATEGY10_DOWN_MIN_EDGE': '0.07',
         })
 
         assert payload['env_values']['STRATEGY_ID'] == '10'
         assert payload['env_values']['PAPER_STRATEGY_IDS'] == '10'
         assert payload['env_values']['LIVE_STRATEGY_IDS'] == '10'
         assert payload['env_values']['STRATEGY_10_CONFIRM_BEFORE_ENTRY_SECONDS'] == '0'
+        assert payload['env_values']['PAPER_STRATEGY_10_STRATEGY10_MIN_MOMENTUM_DELTA'] == '-0.02'
+        assert payload['env_values']['PAPER_STRATEGY_10_STRATEGY10_MAX_MOMENTUM_DELTA'] == '0.02'
+        assert payload['env_values']['PAPER_STRATEGY_10_STRATEGY10_DOWN_MIN_EDGE'] == '0.07'
     finally:
         state.close()
 

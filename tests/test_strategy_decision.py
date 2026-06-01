@@ -73,7 +73,7 @@ def test_strategy7_uses_general_max_entry_price():
     assert decision.reason == "strategy7_price_too_high"
 
 
-def test_strategy7_max_entry_price_uses_fee_adjusted_effective_price():
+def test_strategy7_max_entry_price_uses_raw_entry_price():
     now = datetime(2026, 4, 30, 1, 0, tzinfo=timezone.utc)
     window = MarketWindow(
         event_id="e1",
@@ -116,8 +116,9 @@ def test_strategy7_max_entry_price_uses_fee_adjusted_effective_price():
         now=now,
     )
 
-    assert decision.side is None
-    assert decision.reason == "strategy7_price_too_high"
+    assert decision.side == "UP"
+    assert decision.signal_current_up_price == pytest.approx(0.54)
+    assert decision.reason is None
 
 
 def test_strategy7_order_cost_multiplier_reduces_high_price_weak_signal():
@@ -716,6 +717,41 @@ def test_strategy10_buys_underpriced_up_edge():
     assert decision.candidate_price == pytest.approx(0.52)
     assert decision.signal_delta == pytest.approx(0.02)
     assert decision.signal_threshold == pytest.approx(0.04)
+    assert decision.signal_probability == pytest.approx(0.62, abs=0.001)
+    assert decision.signal_edge == pytest.approx(0.0775, abs=0.001)
+    assert decision.reason is None
+
+
+def test_strategy10_max_entry_price_uses_raw_entry_price_not_fee_adjusted_price():
+    now = datetime(2026, 4, 30, 1, 0, tzinfo=timezone.utc)
+    cfg = AppConfig(
+        strategy_id=10,
+        max_entry_price=0.54,
+        strategy7_ofi_threshold=0.5,
+        strategy7_momentum_threshold=0.01,
+        strategy7_min_signal_gap=0.0,
+        strategy7_confirm_before_entry_seconds=0,
+        binance_signal_stale_seconds=10.0,
+        strategy10_min_edge=0.04,
+        strategy10_ofi_weight=0.10,
+        strategy10_momentum_weight=1.0,
+    )
+    state = SessionState(signal_round_slug="s1", signal_round_open_up_price=0.50)
+    quote = MarketQuote(
+        slug="s1",
+        up_price=0.53,
+        up_best_ask=0.53,
+        down_price=0.47,
+        down_best_ask=0.47,
+        strategy6_ofi_score=0.8,
+        strategy6_signal_at=now,
+    )
+
+    decision = resolve_side_from_strategy(cfg=cfg, state=state, slug="s1", quote=quote, now=now)
+
+    assert decision.side == "UP"
+    assert decision.candidate_price == pytest.approx(0.53)
+    assert decision.signal_delta == pytest.approx(0.03)
     assert decision.reason is None
 
 
@@ -751,6 +787,37 @@ def test_strategy10_skips_when_best_edge_is_below_threshold():
     assert decision.candidate_price == pytest.approx(0.52)
     assert decision.signal_delta == pytest.approx(0.02)
     assert decision.signal_threshold == pytest.approx(0.12)
+    assert decision.signal_probability == pytest.approx(0.62, abs=0.001)
+    assert decision.signal_edge == pytest.approx(0.0775, abs=0.001)
+
+
+def test_strategy10_skips_when_momentum_is_outside_configured_range():
+    now = datetime(2026, 4, 30, 1, 0, tzinfo=timezone.utc)
+    cfg = AppConfig(
+        strategy_id=10,
+        binance_signal_stale_seconds=10.0,
+        strategy10_min_edge=0.04,
+        strategy10_ofi_weight=0.10,
+        strategy10_momentum_weight=1.0,
+        strategy10_max_momentum_delta=0.02,
+    )
+    state = SessionState(signal_round_slug="s1", signal_round_open_up_price=0.50)
+    quote = MarketQuote(
+        slug="s1",
+        up_price=0.53,
+        up_best_ask=0.53,
+        down_price=0.47,
+        down_best_ask=0.47,
+        strategy6_ofi_score=0.8,
+        strategy6_signal_at=now,
+    )
+
+    decision = resolve_side_from_strategy(cfg=cfg, state=state, slug="s1", quote=quote, now=now)
+
+    assert decision.side is None
+    assert decision.reason == "strategy10_momentum_too_hot"
+    assert decision.signal_delta == pytest.approx(0.03)
+    assert decision.signal_threshold == pytest.approx(0.02)
 
 
 def test_strategy10_edge_uses_fee_adjusted_effective_price():

@@ -772,8 +772,7 @@ def submit_live_strategy_order(
         if use_sdk
         else (cfg.live_order_type or "FOK").upper()
     )
-    effective_market_order_price = plan.max_entry_price if plan.max_entry_price is not None else getattr(cfg, "max_entry_price", None)
-    market_order_price = effective_price_cap_to_raw_price_cap(effective_market_order_price)
+    market_order_price = plan.max_entry_price if plan.max_entry_price is not None else getattr(cfg, "max_entry_price", None)
     order_args = _build_live_market_order_args_for_type(
         token_id=token_id,
         plan=plan,
@@ -840,8 +839,7 @@ def execute_order_plan(
             order_id=order_id,
             response={"success": True, "orderID": order_id, "simulated": True},
         )
-    effective_market_order_price = plan.max_entry_price if plan.max_entry_price is not None else getattr(cfg, "max_entry_price", None)
-    market_order_price = effective_price_cap_to_raw_price_cap(effective_market_order_price)
+    market_order_price = plan.max_entry_price if plan.max_entry_price is not None else getattr(cfg, "max_entry_price", None)
     should_precheck_order_book_price = (
         getattr(cfg, "live_precheck_order_book_depth", True)
         and _order_type_text(getattr(cfg, "live_order_type", "FOK")) in {"FOK", "FAK"}
@@ -914,7 +912,7 @@ def execute_order_plan(
         remaining_budget=max(0.0, remaining_budget - plan.order_cost),
         order_id=order_id,
         response=response,
-        live_price_cap=effective_price_cap_to_raw_price_cap(plan.max_entry_price if plan.max_entry_price is not None else getattr(cfg, "max_entry_price", None)),
+        live_price_cap=plan.max_entry_price if plan.max_entry_price is not None else getattr(cfg, "max_entry_price", None),
     )
 
 

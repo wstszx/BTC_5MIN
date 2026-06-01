@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import pytest
+
 from models import SessionState
 from risk_and_sizing import apply_round_outcome, build_trade_plan, reset_after_stop_loss
 from trader import load_session_state, save_session_state
@@ -124,7 +126,7 @@ def test_build_trade_plan_skips_when_price_above_threshold():
     assert plan.skip_reason == "price_above_threshold"
 
 
-def test_build_trade_plan_applies_crypto_fee_before_max_entry_price_check():
+def test_build_trade_plan_checks_max_entry_price_against_raw_price():
     state = SessionState()
     plan = build_trade_plan(
         state=state,
@@ -135,8 +137,9 @@ def test_build_trade_plan_applies_crypto_fee_before_max_entry_price_check():
         max_consecutive_losses=8,
     )
 
-    assert plan.should_trade is False
-    assert plan.skip_reason == "price_above_threshold"
+    assert plan.should_trade is True
+    assert plan.price == pytest.approx(0.54)
+    assert plan.max_entry_price == pytest.approx(0.54)
 
 
 def test_build_trade_plan_skips_when_order_cost_exceeds_max_stake():
