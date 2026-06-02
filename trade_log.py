@@ -34,6 +34,12 @@ _OBSERVED_PLACEHOLDER_FIELDS = {
     "fee",
 }
 
+_LIVE_FILL_SOURCE_MARKERS = {
+    "official_fill_price_below_min_entry",
+    "official_fill_price_below_decision_floor",
+    "official_fill_price_above_max_entry_price",
+}
+
 
 def row_has_result(row: dict[str, Any]) -> bool:
     result = str(row.get("result") or "").strip()
@@ -88,6 +94,12 @@ def merge_live_trade_log_rows(existing: dict[str, str], incoming: dict[str, Any]
             continue
         if field_name == "skip_reason" and incoming_value in (None, ""):
             merged[field_name] = ""
+            continue
+        if (
+            field_name == "fill_source"
+            and str(existing.get(field_name) or "").strip() in _LIVE_FILL_SOURCE_MARKERS
+            and str(incoming_value or "").strip() == "official_confirmed_trade"
+        ):
             continue
         if incoming_value in (None, ""):
             continue

@@ -9,6 +9,7 @@ from clob_adapter import (
     build_verified_pending_live_trade_plan,
     create_live_clob_client,
     is_live_fok_not_filled_error,
+    is_retryable_live_clob_error,
     read_available_live_balance,
     submit_live_strategy_order,
 )
@@ -70,6 +71,41 @@ class _FokThenFakOrderClient(_InjectedOrderClient):
         return {"success": True, "orderID": "oid-fak-fallback"}
 
 
+class _FakNotMatchedOrderClient(_InjectedOrderClient):
+    def post_order(self, signed_order, order_type):
+        self.posted_orders.append((signed_order, order_type))
+        raise RuntimeError(
+            "[py_clob_client_v2] request error status=400 "
+            "url=https://clob.polymarket.com/order "
+            'body={"error":"no orders found to match with FAK order. FAK orders are partially filled or killed if no match is found."}'
+        )
+
+
+class _MissingOrderBookClient(_InjectedOrderClient):
+    def __init__(self) -> None:
+        super().__init__()
+        self.order_book_calls = []
+
+    def get_order_book(self, token_id):
+        self.order_book_calls.append(token_id)
+        raise RuntimeError(
+            "[py_clob_client_v2] request error status=404 "
+            "url=https://clob.polymarket.com/book "
+            'body={"error":"No orderbook exists for the requested token id"}'
+        )
+
+
+class _MissingOppositeOrderBookClient(_InjectedOrderClient):
+    def get_order_book(self, token_id):
+        if token_id == "up-token":
+            return {"asks": [{"price": "0.54", "size": "10.0"}]}
+        raise RuntimeError(
+            "[py_clob_client_v2] request error status=404 "
+            "url=https://clob.polymarket.com/book "
+            'body={"error":"No orderbook exists for the requested token id"}'
+        )
+
+
 def test_clob_adapter_identifies_fok_not_filled_error():
     exc = RuntimeError(
         "[py_clob_client_v2] request error status=400 "
@@ -78,6 +114,12 @@ def test_clob_adapter_identifies_fok_not_filled_error():
     )
 
     assert is_live_fok_not_filled_error(exc) is True
+
+
+def test_clob_adapter_identifies_closed_client_as_retryable():
+    exc = RuntimeError("Cannot send a request, as the client has been closed.")
+
+    assert is_retryable_live_clob_error(exc) is True
 
 
 @pytest.mark.parametrize(
@@ -376,7 +418,78 @@ def test_clob_adapter_skips_when_order_book_depth_cannot_fill_fok_market_order()
 
     execution = trader._execute_order_plan(
         mode="live",
-        cfg=AppConfig(strategy_id=10, live_order_type="FOK"),
+        cfg=AppConfig(strategy_id=10, live_order_type="FOK", live_fok_fallback_to_fak=False),
+        clob_client=client,
+        strategy_id=10,
+        slug="btc-updown-5m-test",
+        token_id="up-token",
+        plan=plan,
+        remaining_budget=10.0,
+    )
+
+    assert execution.status == "skipped"
+    assert execution.skip_reason == "live_order_book_depth_insufficient"
+    assert client.created_orders == []
+    assert client.posted_orders == []
+
+
+def test_clob_adapter_submits_fak_when_fok_market_buy_notional_is_shallow_but_partial_fill_allowed():
+    client = _ShallowOrderBookClient(
+        {
+            "asks": [
+                {"price": "0.52", "size": "1.0"},
+                {"price": "0.54", "size": "1.0"},
+            ]
+        }
+    )
+    plan = TradePlan(
+        True,
+        side="UP",
+        price=0.54,
+        order_size=2.0,
+        order_cost=1.08,
+        expected_profit=0.92,
+        max_entry_price=0.54,
+    )
+
+    execution = trader._execute_order_plan(
+        mode="live",
+        cfg=AppConfig(strategy_id=10, live_order_type="FOK", live_fok_fallback_to_fak=True),
+        clob_client=client,
+        strategy_id=10,
+        slug="btc-updown-5m-test",
+        token_id="up-token",
+        plan=plan,
+        remaining_budget=10.0,
+    )
+
+    assert execution.status == "submitted"
+    assert execution.order_id == "oid-adapter"
+    assert [posted[1] for posted in client.posted_orders] == ["FAK"]
+
+
+def test_clob_adapter_skips_when_fok_market_buy_notional_is_shallow_and_partial_fill_disabled():
+    client = _ShallowOrderBookClient(
+        {
+            "asks": [
+                {"price": "0.52", "size": "1.0"},
+                {"price": "0.54", "size": "1.0"},
+            ]
+        }
+    )
+    plan = TradePlan(
+        True,
+        side="UP",
+        price=0.54,
+        order_size=2.0,
+        order_cost=1.08,
+        expected_profit=0.92,
+        max_entry_price=0.54,
+    )
+
+    execution = trader._execute_order_plan(
+        mode="live",
+        cfg=AppConfig(strategy_id=10, live_order_type="FOK", live_fok_fallback_to_fak=False),
         clob_client=client,
         strategy_id=10,
         slug="btc-updown-5m-test",
@@ -424,7 +537,7 @@ def test_clob_adapter_skips_when_best_ask_is_too_far_below_decision_price():
     assert client.posted_orders == []
 
 
-def test_clob_adapter_skips_when_best_ask_is_below_min_entry_price():
+def test_clob_adapter_skips_when_best_ask_is_below_min_entry_even_if_improvement_is_small():
     client = _ShallowOrderBookClient({"asks": [{"price": "0.49", "size": "10.0"}]})
     plan = TradePlan(
         True,
@@ -458,8 +571,41 @@ def test_clob_adapter_skips_when_best_ask_is_below_min_entry_price():
     assert client.posted_orders == []
 
 
+def test_clob_adapter_allows_best_ask_above_min_entry_when_improvement_is_small():
+    client = _ShallowOrderBookClient({"asks": [{"price": "0.501", "size": "10.0"}]})
+    plan = TradePlan(
+        True,
+        side="UP",
+        price=0.505,
+        order_size=2.0,
+        order_cost=1.01,
+        expected_profit=0.99,
+        max_entry_price=0.54,
+    )
+
+    execution = trader._execute_order_plan(
+        mode="live",
+        cfg=AppConfig(
+            strategy_id=10,
+            live_order_type="FOK",
+            min_entry_price=0.50,
+            live_max_price_improvement=0.05,
+        ),
+        clob_client=client,
+        strategy_id=10,
+        slug="btc-updown-5m-test",
+        token_id="up-token",
+        plan=plan,
+        remaining_budget=10.0,
+    )
+
+    assert execution.status == "submitted"
+    assert execution.order_id == "oid-adapter"
+    assert [posted[1] for posted in client.posted_orders] == ["FOK"]
+
+
 def test_clob_adapter_skips_fak_when_best_ask_is_below_min_entry_price():
-    client = _ShallowOrderBookClient({"asks": [{"price": "0.48", "size": "10.0"}]})
+    client = _ShallowOrderBookClient({"asks": [{"price": "0.44", "size": "10.0"}]})
     plan = TradePlan(
         True,
         side="UP",
@@ -598,6 +744,92 @@ def test_clob_adapter_falls_back_to_fak_when_fok_market_order_is_not_filled():
     assert client.created_orders[1].order_type == "FAK"
     assert client.created_orders[0].price == pytest.approx(0.54)
     assert client.created_orders[1].price == pytest.approx(0.54)
+
+
+def test_clob_adapter_skips_when_fak_order_has_no_matching_orders():
+    client = _FakNotMatchedOrderClient()
+    plan = TradePlan(
+        True,
+        side="UP",
+        price=0.54,
+        order_size=2.0,
+        order_cost=1.08,
+        expected_profit=0.92,
+        max_entry_price=0.54,
+    )
+
+    execution = trader._execute_order_plan(
+        mode="live",
+        cfg=AppConfig(strategy_id=10, live_order_type="FAK", live_precheck_order_book_depth=False),
+        clob_client=client,
+        strategy_id=10,
+        slug="btc-updown-5m-test",
+        token_id="up-token",
+        plan=plan,
+        remaining_budget=10.0,
+    )
+
+    assert execution.status == "skipped"
+    assert execution.skip_reason == "live_fak_not_matched"
+    assert [posted[1] for posted in client.posted_orders] == ["FAK"]
+
+
+def test_clob_adapter_skips_when_precheck_order_book_does_not_exist():
+    client = _MissingOrderBookClient()
+    plan = TradePlan(
+        True,
+        side="UP",
+        price=0.54,
+        order_size=2.0,
+        order_cost=1.08,
+        expected_profit=0.92,
+        max_entry_price=0.54,
+    )
+
+    execution = trader._execute_order_plan(
+        mode="live",
+        cfg=AppConfig(strategy_id=10, live_order_type="FAK"),
+        clob_client=client,
+        strategy_id=10,
+        slug="btc-updown-5m-test",
+        token_id="up-token",
+        plan=plan,
+        remaining_budget=10.0,
+    )
+
+    assert execution.status == "skipped"
+    assert execution.skip_reason == "live_order_book_unavailable"
+    assert client.posted_orders == []
+    assert len(client.order_book_calls) == 1
+
+
+def test_clob_adapter_continues_when_opposite_precheck_order_book_does_not_exist():
+    client = _MissingOppositeOrderBookClient()
+    plan = TradePlan(
+        True,
+        side="UP",
+        price=0.54,
+        order_size=2.0,
+        order_cost=1.08,
+        expected_profit=0.92,
+        max_entry_price=0.54,
+    )
+
+    execution = trader._execute_order_plan(
+        mode="live",
+        cfg=AppConfig(strategy_id=10, live_order_type="FAK"),
+        clob_client=client,
+        strategy_id=10,
+        slug="btc-updown-5m-test",
+        token_id="up-token",
+        opposite_token_id="down-token",
+        plan=plan,
+        remaining_budget=10.0,
+    )
+
+    assert execution.status == "submitted"
+    assert execution.order_id == "oid-adapter"
+    assert [posted[1] for posted in client.posted_orders] == ["FAK"]
 
 
 def test_clob_adapter_can_disable_fok_to_fak_fallback():

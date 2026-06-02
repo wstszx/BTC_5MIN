@@ -27,7 +27,7 @@ from models import MarketQuote, MarketWindow
 from runtime_control import RuntimeControl
 
 PLAYWRIGHT_CLI_PACKAGE = "@playwright/cli"
-SUPPORTED_STRATEGY_OPTIONS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11']
+SUPPORTED_STRATEGY_OPTIONS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12']
 
 
 def _playwright_cli_command(npx_path: str, session: str, *args: str) -> list[str]:
@@ -2724,7 +2724,7 @@ def test_dashboard_assets_refresh_shared_selector_still_updates_summary_and_rece
 def test_dashboard_assets_use_fixed_report_strategy_options_by_mode():
     js = _dashboard_js()
 
-    assert "paper: ['7', '9', '10', '11']" in js
+    assert "paper: ['7', '9', '10', '11', '12']" in js
     assert "live: ['7', '10']" in js
     assert "const configured = reportStrategyOptionsForMode(effectiveReportMode());" in js
     assert "const multiKey = strategyListKeyForMode(effectiveReportMode());" not in js
@@ -4117,6 +4117,8 @@ def test_dashboard_assets_localize_live_price_improvement_guard():
     assert "live_order_book_depth_insufficient: '盘口深度不足'" in js
     assert "live_order_book_price_below_min_entry: '盘口价格低于入场下限'" in js
     assert "live_order_book_price_improved_too_much: '盘口价格偏离过大'" in js
+    assert "live_order_book_unavailable: '盘口暂不可用'" in js
+    assert "live_fak_not_matched: '实时 FAK 订单无可成交挂单'" in js
     assert "official_fill_price_below_min_entry: '成交价低于入场下限'" in js
     assert "official_fill_price_below_decision_floor: '成交价偏离过大'" in js
     assert "LIVE_MAX_PRICE_IMPROVEMENT: '最大允许价格改善'" in js
@@ -4620,6 +4622,31 @@ def test_dashboard_config_payload_includes_strategy11_fields(tmp_path: Path):
         state.close()
 
 
+def test_dashboard_config_payload_includes_strategy12_catalog_and_profile_fields(tmp_path: Path):
+    env_file = tmp_path / '.env.dashboard'
+    env_file.write_text(
+        'TRADE_MODE=paper\n'
+        'STRATEGY_ID=12\n'
+        'PAPER_STRATEGY_IDS=12\n',
+        encoding='utf-8',
+    )
+    state = DashboardState(env_file=env_file)
+    try:
+        payload = state.get_config_payload()
+        fields = payload['strategy_profiles']['strategies']['12']['fields']
+
+        assert payload['strategy_catalog']['12']['label'] == 'BTC 概率+盘口确认'
+        assert payload['select_options']['PAPER_STRATEGY_IDS'] == SUPPORTED_STRATEGY_OPTIONS
+        assert fields['STRATEGY11_MIN_EDGE']['key'] == 'PAPER_STRATEGY_12_MIN_EDGE'
+        assert fields['STRATEGY11_VOLATILITY_BPS_PER_SQRT_MINUTE']['key'] == (
+            'PAPER_STRATEGY_12_VOLATILITY_BPS_PER_SQRT_MINUTE'
+        )
+        assert fields['STRATEGY7_OFI_THRESHOLD']['key'] == 'PAPER_STRATEGY_12_OFI_THRESHOLD'
+        assert fields['STRATEGY7_MOMENTUM_THRESHOLD']['key'] == 'PAPER_STRATEGY_12_MOMENTUM_THRESHOLD'
+    finally:
+        state.close()
+
+
 def test_dashboard_update_config_accepts_strategy7_values(tmp_path: Path):
     env_file = tmp_path / '.env.dashboard'
     state = DashboardState(env_file=env_file)
@@ -4665,6 +4692,33 @@ def test_dashboard_update_config_accepts_strategy11_values(tmp_path: Path):
         assert payload['env_values']['LIVE_STRATEGY_IDS'] == '11'
         assert payload['env_values']['STRATEGY_11_MIN_EDGE'] == '0.06'
         assert payload['env_values']['STRATEGY_11_CONFIRM_BEFORE_ENTRY_SECONDS'] == '2'
+    finally:
+        state.close()
+
+
+def test_dashboard_update_config_accepts_strategy12_hybrid_values(tmp_path: Path):
+    env_file = tmp_path / '.env.dashboard'
+    state = DashboardState(env_file=env_file)
+    try:
+        payload = state.update_config({
+            'STRATEGY_ID': '12',
+            'PAPER_STRATEGY_IDS': '12',
+            'LIVE_STRATEGY_IDS': '7,10',
+            'PAPER_STRATEGY_12_MIN_EDGE': '0.006',
+            'PAPER_STRATEGY_12_VOLATILITY_BPS_PER_SQRT_MINUTE': '24',
+            'PAPER_STRATEGY_12_MIN_PROBABILITY': '0.54',
+            'PAPER_STRATEGY_12_OFI_THRESHOLD': '0.58',
+            'PAPER_STRATEGY_12_MOMENTUM_THRESHOLD': '0.008',
+            'PAPER_STRATEGY_12_MAX_MOMENTUM_DELTA': '0.12',
+            'PAPER_STRATEGY_12_MIN_SIGNAL_GAP': '0.01',
+        })
+
+        assert payload['env_values']['STRATEGY_ID'] == '12'
+        assert payload['env_values']['PAPER_STRATEGY_IDS'] == '12'
+        assert payload['env_values']['LIVE_STRATEGY_IDS'] == '7,10'
+        assert payload['env_values']['PAPER_STRATEGY_12_MIN_EDGE'] == '0.006'
+        assert payload['env_values']['PAPER_STRATEGY_12_OFI_THRESHOLD'] == '0.58'
+        assert payload['env_values']['PAPER_STRATEGY_12_MOMENTUM_THRESHOLD'] == '0.008'
     finally:
         state.close()
 
@@ -4751,7 +4805,7 @@ def test_dashboard_rejects_invalid_paper_strategy_ids(tmp_path: Path):
     state = DashboardState(env_file=tmp_path / '.env.dashboard')
     try:
         with pytest.raises(ConfigValidationError) as excinfo:
-            state.update_config({'PAPER_STRATEGY_IDS': '12,x'})
+            state.update_config({'PAPER_STRATEGY_IDS': '13,x'})
         assert 'PAPER_STRATEGY_IDS' in excinfo.value.field_errors
     finally:
         state.close()

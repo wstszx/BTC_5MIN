@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from config import AppConfig, build_config_from_env_values, collect_config_warnings, load_env_file_values
 
 
@@ -31,7 +33,7 @@ def test_collect_config_warnings_reports_invalid_scalar_values():
         {
             "STRATEGY_7_MAX_STAKE": "abc",
             "WS_ENABLED": "maybe",
-            "STRATEGY_ID": "12",
+            "STRATEGY_ID": "13",
             "MARKET_TIMEFRAME": "7m",
             "TARGET_PROFIT": "1.2",
         }
@@ -39,7 +41,7 @@ def test_collect_config_warnings_reports_invalid_scalar_values():
 
     assert warnings["STRATEGY_7_MAX_STAKE"] == "Invalid value for STRATEGY_7_MAX_STAKE: expected number, got 'abc'"
     assert warnings["WS_ENABLED"] == "Invalid value for WS_ENABLED: expected true/false, got 'maybe'"
-    assert warnings["STRATEGY_ID"] == "Invalid value for STRATEGY_ID: expected strategy id 1-11, got '12'"
+    assert warnings["STRATEGY_ID"] == "Invalid value for STRATEGY_ID: expected strategy id 1-12, got '13'"
     assert warnings["MARKET_TIMEFRAME"] == "Invalid value for MARKET_TIMEFRAME: expected one of 5m, 15m, got '7m'"
     assert "TARGET_PROFIT" not in warnings
 
@@ -369,6 +371,75 @@ def test_build_config_accepts_strategy11_and_reads_probability_values():
     assert cfg.paper_strategy_profiles[11].strategy11_min_probability == 0.57
     assert cfg.paper_strategy_profiles[11].strategy11_max_probability == 0.93
     assert cfg.paper_strategy_profiles[11].strategy11_confirm_before_entry_seconds == 2
+
+
+def test_build_config_reads_strategy11_paper_trial_overrides_without_live_relaxation():
+    cfg = build_config_from_env_values(
+        {
+            "STRATEGY_ID": "11",
+            "PAPER_STRATEGY_IDS": "11",
+            "LIVE_STRATEGY_IDS": "7,10",
+            "STRATEGY_11_MIN_EDGE": "0.04",
+            "STRATEGY_11_EDGE_BUFFER": "0.005",
+            "STRATEGY_11_VOLATILITY_BPS_PER_SQRT_MINUTE": "18",
+            "STRATEGY_11_MIN_PROBABILITY": "0.55",
+            "STRATEGY_11_CONFIRM_BEFORE_ENTRY_SECONDS": "2",
+            "PAPER_STRATEGY_11_MIN_EDGE": "0.005",
+            "PAPER_STRATEGY_11_EDGE_BUFFER": "0.0",
+            "PAPER_STRATEGY_11_VOLATILITY_BPS_PER_SQRT_MINUTE": "24",
+            "PAPER_STRATEGY_11_MIN_PROBABILITY": "0.54",
+            "PAPER_STRATEGY_11_MAX_ENTRY_PRICE": "0.56",
+            "PAPER_STRATEGY_11_CONFIRM_BEFORE_ENTRY_SECONDS": "0",
+        }
+    )
+
+    assert cfg.live_strategy_ids == [7, 10]
+    assert cfg.paper_strategy_profiles[11].strategy11_min_edge == 0.005
+    assert cfg.paper_strategy_profiles[11].strategy11_edge_buffer == 0.0
+    assert cfg.paper_strategy_profiles[11].strategy11_volatility_bps_per_sqrt_minute == 24.0
+    assert cfg.paper_strategy_profiles[11].strategy11_min_probability == 0.54
+    assert cfg.paper_strategy_profiles[11].max_entry_price == 0.56
+    assert cfg.paper_strategy_profiles[11].strategy11_confirm_before_entry_seconds == 0
+    assert cfg.live_profiles[10].strategy11_min_edge == 0.04
+    assert cfg.live_profiles[10].strategy11_edge_buffer == 0.005
+    assert cfg.live_profiles[10].strategy11_volatility_bps_per_sqrt_minute == 18.0
+    assert cfg.live_profiles[10].strategy11_min_probability == 0.55
+
+
+def test_build_config_accepts_strategy12_hybrid_short_keys():
+    cfg = build_config_from_env_values(
+        {
+            "STRATEGY_ID": "12",
+            "PAPER_STRATEGY_IDS": "12,7",
+            "LIVE_STRATEGY_IDS": "7,10",
+            "PAPER_STRATEGY_12_MIN_EDGE": "0.006",
+            "PAPER_STRATEGY_12_EDGE_BUFFER": "0.001",
+            "PAPER_STRATEGY_12_VOLATILITY_BPS_PER_SQRT_MINUTE": "24",
+            "PAPER_STRATEGY_12_MIN_PROBABILITY": "0.54",
+            "PAPER_STRATEGY_12_MAX_PROBABILITY": "0.93",
+            "PAPER_STRATEGY_12_CONFIRM_BEFORE_ENTRY_SECONDS": "0",
+            "PAPER_STRATEGY_12_OFI_THRESHOLD": "0.58",
+            "PAPER_STRATEGY_12_MOMENTUM_THRESHOLD": "0.008",
+            "PAPER_STRATEGY_12_MAX_MOMENTUM_DELTA": "0.12",
+            "PAPER_STRATEGY_12_MIN_SIGNAL_GAP": "0.01",
+        }
+    )
+
+    profile = cfg.paper_strategy_profiles[12]
+
+    assert cfg.strategy_id == 12
+    assert cfg.paper_strategy_ids == [12, 7]
+    assert cfg.live_strategy_ids == [7, 10]
+    assert profile.strategy11_min_edge == pytest.approx(0.006)
+    assert profile.strategy11_edge_buffer == pytest.approx(0.001)
+    assert profile.strategy11_volatility_bps_per_sqrt_minute == pytest.approx(24.0)
+    assert profile.strategy11_min_probability == pytest.approx(0.54)
+    assert profile.strategy11_max_probability == pytest.approx(0.93)
+    assert profile.strategy11_confirm_before_entry_seconds == 0
+    assert profile.strategy7_ofi_threshold == pytest.approx(0.58)
+    assert profile.strategy7_momentum_threshold == pytest.approx(0.008)
+    assert profile.strategy7_max_momentum_delta == pytest.approx(0.12)
+    assert profile.strategy7_min_signal_gap == pytest.approx(0.01)
 
 
 def test_build_config_reads_strategy7_dynamic_sizing_values_from_strategy_profile_only():

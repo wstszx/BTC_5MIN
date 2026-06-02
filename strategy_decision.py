@@ -465,7 +465,7 @@ def apply_strategy6_signal_to_quote(
     now: datetime | None = None,
     diagnostic_log: Callable[[str], None] | None = None,
 ) -> None:
-    if cfg.strategy_id not in {6, 7, 8, 9, 10, 11} or binance_signal_service is None:
+    if cfg.strategy_id not in {6, 7, 8, 9, 10, 11, 12} or binance_signal_service is None:
         return
     now = now or datetime.now(timezone.utc)
     latest = binance_signal_service.latest()
@@ -935,6 +935,102 @@ def evaluate_strategy11_probability_edge(
     )
 
 
+def _strategy12_probability_skip(decision: SideDecision) -> SideDecision:
+    reason = decision.reason
+    if reason and reason.startswith("strategy11_"):
+        reason = reason.replace("strategy11_", "strategy12_", 1)
+    return SideDecision(
+        side=None,
+        reason=reason,
+        candidate_side=decision.candidate_side,
+        candidate_price=decision.candidate_price,
+        signal_open_up_price=decision.signal_open_up_price,
+        signal_current_up_price=decision.signal_current_up_price,
+        signal_threshold=decision.signal_threshold,
+        signal_delta=decision.signal_delta,
+        signal_probability=decision.signal_probability,
+        signal_edge=decision.signal_edge,
+        signal_locked=decision.signal_locked,
+    )
+
+
+def evaluate_strategy12_hybrid_edge(
+    *,
+    cfg: AppConfig,
+    quote: MarketQuote,
+    now: datetime,
+    window: MarketWindow | None,
+    state: SessionState,
+    signal_open_up_price: float | None,
+    signal_current_up_price: float | None,
+) -> SideDecision:
+    probability_decision = evaluate_strategy11_probability_edge(
+        cfg=cfg,
+        quote=quote,
+        now=now,
+        window=window,
+        state=state,
+    )
+    if probability_decision.side is None:
+        return _strategy12_probability_skip(probability_decision)
+
+    micro_check = evaluate_strategy7_consensus_signal(
+        cfg=cfg,
+        quote=quote,
+        now=now,
+        signal_open_up_price=signal_open_up_price,
+        signal_current_up_price=signal_current_up_price,
+    )
+    if micro_check.decision.side is None:
+        micro_reason = micro_check.decision.reason
+        if micro_reason == "strategy7_signal_conflict":
+            reason = "strategy12_signal_conflict"
+        elif micro_reason:
+            reason = micro_reason.replace("strategy7_", "strategy12_micro_", 1)
+        else:
+            reason = "strategy12_micro_unavailable"
+        return SideDecision(
+            side=None,
+            reason=reason,
+            candidate_side=probability_decision.side,
+            candidate_price=probability_decision.candidate_price,
+            signal_open_up_price=probability_decision.signal_open_up_price,
+            signal_current_up_price=probability_decision.signal_current_up_price,
+            signal_threshold=probability_decision.signal_threshold,
+            signal_delta=probability_decision.signal_delta,
+            signal_probability=probability_decision.signal_probability,
+            signal_edge=probability_decision.signal_edge,
+            ofi_score=micro_check.ofi_score,
+        )
+    if micro_check.decision.side != probability_decision.side:
+        return SideDecision(
+            side=None,
+            reason="strategy12_signal_conflict",
+            candidate_side=probability_decision.side,
+            candidate_price=probability_decision.candidate_price,
+            signal_open_up_price=probability_decision.signal_open_up_price,
+            signal_current_up_price=probability_decision.signal_current_up_price,
+            signal_threshold=probability_decision.signal_threshold,
+            signal_delta=probability_decision.signal_delta,
+            signal_probability=probability_decision.signal_probability,
+            signal_edge=probability_decision.signal_edge,
+            ofi_score=micro_check.ofi_score,
+        )
+
+    return SideDecision(
+        side=probability_decision.side,
+        candidate_side=probability_decision.side,
+        candidate_price=probability_decision.candidate_price,
+        signal_open_up_price=probability_decision.signal_open_up_price,
+        signal_current_up_price=probability_decision.signal_current_up_price,
+        signal_threshold=probability_decision.signal_threshold,
+        signal_delta=probability_decision.signal_delta,
+        signal_probability=probability_decision.signal_probability,
+        signal_edge=probability_decision.signal_edge,
+        ofi_score=micro_check.ofi_score,
+    )
+
+
 def resolve_side_from_strategy(
     *,
     cfg: AppConfig,
@@ -961,7 +1057,7 @@ def resolve_side_from_strategy(
             return SideDecision(side="DOWN", signal_threshold=cfg.ofi_threshold, signal_delta=ofi_score)
         return SideDecision(side=None, reason="ofi_too_weak", signal_threshold=cfg.ofi_threshold, signal_delta=ofi_score)
 
-    if cfg.strategy_id not in {5, 7, 8, 9, 10, 11}:
+    if cfg.strategy_id not in {5, 7, 8, 9, 10, 11, 12}:
         return SideDecision(side=fallback_side_resolver(cfg.strategy_id, state.round_index))
 
     fallback_strategy = cfg.signal_fallback_strategy_id
@@ -978,6 +1074,71 @@ def resolve_side_from_strategy(
         locked_max_entry_price: float | None = None
         if is_valid_signal_price(state.signal_round_open_up_price) and is_valid_signal_price(signal_current_up_price):
             signal_delta = signal_current_up_price - state.signal_round_open_up_price
+        if cfg.strategy_id == 12:
+            now = now or datetime.now(timezone.utc)
+            edge_decision = evaluate_strategy12_hybrid_edge(
+                cfg=cfg,
+                quote=quote,
+                now=now,
+                window=window,
+                state=state,
+                signal_open_up_price=state.signal_round_open_up_price,
+                signal_current_up_price=signal_current_up_price,
+            )
+            state.strategy6_last_ofi_score = edge_decision.ofi_score
+            edge_decision.signal_locked = True
+            if edge_decision.side is None:
+                return edge_decision
+            if edge_decision.side != state.signal_round_locked_side:
+                return SideDecision(
+                    side=None,
+                    reason="strategy12_signal_conflict",
+                    candidate_side=edge_decision.side,
+                    candidate_price=edge_decision.candidate_price,
+                    signal_open_up_price=edge_decision.signal_open_up_price,
+                    signal_current_up_price=edge_decision.signal_current_up_price,
+                    signal_threshold=cfg.strategy11_min_edge,
+                    signal_delta=edge_decision.signal_delta,
+                    signal_probability=edge_decision.signal_probability,
+                    signal_edge=edge_decision.signal_edge,
+                    signal_locked=True,
+                    ofi_score=edge_decision.ofi_score,
+                )
+            candidate_price = resolve_quote_price(state.signal_round_locked_side, quote)
+            price_skip_reason = entry_price_skip_reason(
+                strategy_prefix="strategy12",
+                price=candidate_price,
+                min_entry_price=getattr(cfg, "min_entry_price", None),
+                max_entry_price=getattr(cfg, "max_entry_price", None),
+            )
+            if price_skip_reason is not None:
+                return SideDecision(
+                    side=None,
+                    reason=price_skip_reason,
+                    candidate_side=state.signal_round_locked_side,
+                    candidate_price=candidate_price,
+                    signal_open_up_price=edge_decision.signal_open_up_price,
+                    signal_current_up_price=edge_decision.signal_current_up_price,
+                    signal_threshold=cfg.strategy11_min_edge,
+                    signal_delta=edge_decision.signal_delta,
+                    signal_probability=edge_decision.signal_probability,
+                    signal_edge=edge_decision.signal_edge,
+                    signal_locked=True,
+                    ofi_score=edge_decision.ofi_score,
+                )
+            return SideDecision(
+                side=state.signal_round_locked_side,
+                candidate_side=state.signal_round_locked_side,
+                candidate_price=candidate_price,
+                signal_open_up_price=edge_decision.signal_open_up_price,
+                signal_current_up_price=edge_decision.signal_current_up_price,
+                signal_threshold=cfg.strategy11_min_edge,
+                signal_delta=edge_decision.signal_delta,
+                signal_probability=edge_decision.signal_probability,
+                signal_edge=edge_decision.signal_edge,
+                signal_locked=True,
+                ofi_score=edge_decision.ofi_score,
+            )
         if cfg.strategy_id in {7, 9, 10, 11}:
             now = now or datetime.now(timezone.utc)
             if cfg.strategy_id == 11:
@@ -1020,6 +1181,8 @@ def resolve_side_from_strategy(
                         signal_current_up_price=edge_decision.signal_current_up_price,
                         signal_threshold=cfg.strategy11_min_edge,
                         signal_delta=edge_decision.signal_delta,
+                        signal_probability=edge_decision.signal_probability,
+                        signal_edge=edge_decision.signal_edge,
                         signal_locked=True,
                     )
                 return SideDecision(
@@ -1030,6 +1193,8 @@ def resolve_side_from_strategy(
                     signal_current_up_price=edge_decision.signal_current_up_price,
                     signal_threshold=cfg.strategy11_min_edge,
                     signal_delta=edge_decision.signal_delta,
+                    signal_probability=edge_decision.signal_probability,
+                    signal_edge=edge_decision.signal_edge,
                     signal_locked=True,
                 )
             if cfg.strategy_id == 10:
@@ -1307,6 +1472,8 @@ def resolve_side_from_strategy(
                 signal_current_up_price=edge_decision.signal_current_up_price,
                 signal_threshold=cfg.strategy11_min_edge,
                 signal_delta=edge_decision.signal_delta,
+                signal_probability=edge_decision.signal_probability,
+                signal_edge=edge_decision.signal_edge,
             )
 
         candidate_price = resolve_quote_price(edge_decision.side, quote)
@@ -1326,6 +1493,8 @@ def resolve_side_from_strategy(
                 signal_current_up_price=edge_decision.signal_current_up_price,
                 signal_threshold=cfg.strategy11_min_edge,
                 signal_delta=edge_decision.signal_delta,
+                signal_probability=edge_decision.signal_probability,
+                signal_edge=edge_decision.signal_edge,
             )
 
         if entry_time is not None:
@@ -1340,7 +1509,86 @@ def resolve_side_from_strategy(
             signal_current_up_price=edge_decision.signal_current_up_price,
             signal_threshold=cfg.strategy11_min_edge,
             signal_delta=edge_decision.signal_delta,
+            signal_probability=edge_decision.signal_probability,
+            signal_edge=edge_decision.signal_edge,
             signal_locked=state.signal_round_locked_side in {"UP", "DOWN"},
+        )
+
+    if cfg.strategy_id == 12:
+        edge_decision = evaluate_strategy12_hybrid_edge(
+            cfg=cfg,
+            quote=quote,
+            now=now,
+            window=window,
+            state=state,
+            signal_open_up_price=signal_open_up_price,
+            signal_current_up_price=signal_current_up_price,
+        )
+        state.strategy6_last_ofi_score = edge_decision.ofi_score
+        if edge_decision.side is None:
+            return edge_decision
+
+        effective_confirm_before_entry_seconds = max(
+            0,
+            int(getattr(cfg, "strategy11_confirm_before_entry_seconds", 0)),
+        )
+        if (
+            entry_time is not None
+            and effective_confirm_before_entry_seconds > 0
+            and (entry_time - now).total_seconds() < effective_confirm_before_entry_seconds
+        ):
+            return SideDecision(
+                side=None,
+                reason="strategy12_entry_too_late",
+                candidate_side=edge_decision.side,
+                candidate_price=edge_decision.candidate_price,
+                signal_open_up_price=edge_decision.signal_open_up_price,
+                signal_current_up_price=edge_decision.signal_current_up_price,
+                signal_threshold=cfg.strategy11_min_edge,
+                signal_delta=edge_decision.signal_delta,
+                signal_probability=edge_decision.signal_probability,
+                signal_edge=edge_decision.signal_edge,
+                ofi_score=edge_decision.ofi_score,
+            )
+
+        candidate_price = resolve_quote_price(edge_decision.side, quote)
+        price_skip_reason = entry_price_skip_reason(
+            strategy_prefix="strategy12",
+            price=candidate_price,
+            min_entry_price=getattr(cfg, "min_entry_price", None),
+            max_entry_price=getattr(cfg, "max_entry_price", None),
+        )
+        if price_skip_reason is not None:
+            return SideDecision(
+                side=None,
+                reason=price_skip_reason,
+                candidate_side=edge_decision.side,
+                candidate_price=candidate_price,
+                signal_open_up_price=edge_decision.signal_open_up_price,
+                signal_current_up_price=edge_decision.signal_current_up_price,
+                signal_threshold=cfg.strategy11_min_edge,
+                signal_delta=edge_decision.signal_delta,
+                signal_probability=edge_decision.signal_probability,
+                signal_edge=edge_decision.signal_edge,
+                ofi_score=edge_decision.ofi_score,
+            )
+
+        if entry_time is not None:
+            lock_at = entry_time - timedelta(seconds=max(0, cfg.signal_lock_before_entry_seconds))
+            if now >= lock_at:
+                state.signal_round_locked_side = edge_decision.side
+        return SideDecision(
+            side=edge_decision.side,
+            candidate_side=edge_decision.side,
+            candidate_price=candidate_price,
+            signal_open_up_price=edge_decision.signal_open_up_price,
+            signal_current_up_price=edge_decision.signal_current_up_price,
+            signal_threshold=cfg.strategy11_min_edge,
+            signal_delta=edge_decision.signal_delta,
+            signal_probability=edge_decision.signal_probability,
+            signal_edge=edge_decision.signal_edge,
+            signal_locked=state.signal_round_locked_side in {"UP", "DOWN"},
+            ofi_score=edge_decision.ofi_score,
         )
 
     if cfg.strategy_id in {7, 8, 9}:

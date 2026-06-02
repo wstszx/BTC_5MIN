@@ -43,8 +43,8 @@ def test_runtime_config_uses_split_strategy_ids_even_when_legacy_strategy_ids_ex
 def test_runtime_config_keeps_paper_and_live_strategy_profiles_identical_without_mode_overrides():
     cfg = AppConfig(
         strategy_id=7,
-        paper_strategy_ids=[5, 7, 9, 10, 11],
-        live_strategy_ids=[5, 7, 9, 10, 11],
+        paper_strategy_ids=[5, 7, 9, 10, 11, 12],
+        live_strategy_ids=[5, 7, 9, 10, 11, 12],
     )
     ignored_fields = {
         "trade_mode",
@@ -75,7 +75,7 @@ def test_runtime_config_keeps_paper_and_live_strategy_profiles_identical_without
         if field.init and field.name not in ignored_fields
     ]
 
-    for strategy_id in range(1, 12):
+    for strategy_id in range(1, 13):
         paper_cfg = cfg_for_paper_strategy(cfg, strategy_id)
         live_cfg = cfg_for_live_strategy(cfg, strategy_id)
         assert {

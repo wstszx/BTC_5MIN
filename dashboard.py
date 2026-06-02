@@ -100,8 +100,8 @@ def _write_env_file(path: Path, values: dict[str, str]) -> None:
     atomic_write_text(path, text, encoding="utf-8")
 
 
-SUPPORTED_STRATEGY_ID_TEXTS: set[str] = {str(strategy_id) for strategy_id in range(1, 12)}
-SUPPORTED_STRATEGY_SELECT_OPTIONS: list[str] = [str(strategy_id) for strategy_id in range(1, 12)]
+SUPPORTED_STRATEGY_ID_TEXTS: set[str] = {str(strategy_id) for strategy_id in range(1, 13)}
+SUPPORTED_STRATEGY_SELECT_OPTIONS: list[str] = [str(strategy_id) for strategy_id in range(1, 13)]
 
 
 def _normalize_strategy_id_list_for_key(value: str, key: str, attr_name: str) -> str:
@@ -111,10 +111,10 @@ def _normalize_strategy_id_list_for_key(value: str, key: str, attr_name: str) ->
     if raw and len(normalized_ids) == 1 and normalized_ids[0] == cfg.strategy_id:
         has_valid = any(item in SUPPORTED_STRATEGY_ID_TEXTS for item in raw)
         if not has_valid:
-            raise ValueError(f"Invalid value for {key}: expected comma-separated strategy ids 1-11, got {value!r}")
+            raise ValueError(f"Invalid value for {key}: expected comma-separated strategy ids 1-12, got {value!r}")
     normalized = [str(item) for item in normalized_ids]
     if not normalized:
-        raise ValueError(f"Invalid value for {key}: expected comma-separated strategy ids 1-11, got {value!r}")
+        raise ValueError(f"Invalid value for {key}: expected comma-separated strategy ids 1-12, got {value!r}")
     return ",".join(normalized)
 
 
@@ -471,7 +471,7 @@ def _shared_strategy_profile_key(strategy_id: int | str, base_key: str) -> str:
 
 
 def _split_strategy_profile_key(key: str) -> tuple[str, str, str] | None:
-    match = re.match(r"^(?:(PAPER|LIVE)_)?STRATEGY_(11|10|[1-9])_(.+)$", str(key or ""))
+    match = re.match(r"^(?:(PAPER|LIVE)_)?STRATEGY_(12|11|10|[1-9])_(.+)$", str(key or ""))
     if not match:
         return None
     mode = (match.group(1) or "shared").lower()
@@ -509,7 +509,7 @@ def _strategy_profile_field_names(strategy_id: int | str) -> list[str]:
         )
     if strategy_text == "6":
         fields.extend(["OFI_THRESHOLD", "BINANCE_SIGNAL_STALE_SECONDS"])
-    if strategy_text in {"7", "8", "9", "10", "11"}:
+    if strategy_text in {"7", "8", "9", "10", "11", "12"}:
         fields.extend(
             [
                 "OFI_THRESHOLD",
@@ -568,7 +568,7 @@ def _strategy_profile_field_names(strategy_id: int | str) -> list[str]:
                 "STRATEGY10_CONFIRM_BEFORE_ENTRY_SECONDS",
             ]
         )
-    if strategy_text == "11":
+    if strategy_text in {"11", "12"}:
         fields.extend(
             [
                 "STRATEGY11_MIN_EDGE",
@@ -1634,6 +1634,12 @@ def _strategy_catalog() -> dict[str, dict[str, Any]]:
             "preview": ["BTC MID", "PROBABILITY", "EDGE", "SKIP"],
             "detail": "它不追亏、不靠固定节奏，而是把真实 BTC 距离和时间波动换成概率优势再决定是否入场。",
         },
+        "12": {
+            "label": "BTC 概率+盘口确认",
+            "summary": "先用 BTC 概率定价找低估方向，再要求 Binance OFI 和本轮动量同向确认。",
+            "preview": ["BTC EDGE", "OFI", "MOMENTUM", "SKIP"],
+            "detail": "它比策略11更保守：概率优势不足会跳过，概率方向和微观结构方向冲突也会跳过。",
+        },
     }
 
 
@@ -2328,7 +2334,7 @@ class DashboardState:
             strategy_ids = []
             strategy_ids.extend(getattr(cfg, "paper_strategy_ids", []) or [])
             strategy_ids.extend(getattr(cfg, "live_strategy_ids", []) or [])
-        ofi_strategy_ids = {6, 7, 8, 9, 10, 11}
+        ofi_strategy_ids = {6, 7, 8, 9, 10, 11, 12}
         if cfg.strategy_id not in ofi_strategy_ids and not any(strategy_id in ofi_strategy_ids for strategy_id in strategy_ids):
             return None
         service = BinanceDepth5SignalService(ws_url=cfg.binance_ws_url, stream=cfg.binance_depth_stream)
@@ -5567,7 +5573,7 @@ const state = {
 };
 
 const REPORT_STRATEGY_OPTIONS = {
-  paper: ['7', '9', '10', '11'],
+  paper: ['7', '9', '10', '11', '12'],
   live: ['7', '10'],
 };
 
@@ -5868,6 +5874,7 @@ const REASON_LABELS = {
   live_order_book_depth_insufficient: '盘口深度不足',
   live_order_book_price_below_min_entry: '盘口价格低于入场下限',
   live_order_book_price_improved_too_much: '盘口价格偏离过大',
+  live_order_book_unavailable: '盘口暂不可用',
   official_fill_price_below_min_entry: '成交价低于入场下限',
   official_fill_price_below_decision_floor: '成交价偏离过大',
   strategy11_window_unavailable: '策略11 当前轮次不可用',
@@ -5879,7 +5886,24 @@ const REASON_LABELS = {
   strategy11_entry_too_late: '策略11 确认出现过晚',
   strategy11_price_too_low: '策略11 入场价格过低',
   strategy11_price_too_high: '策略11 入场价格过高',
-  live_fok_not_filled: '策略7 实时 FOK 订单未成交',
+  strategy12_window_unavailable: '策略12 当前轮次不可用',
+  strategy12_btc_price_stale: '策略12 BTC 价格信号已过期',
+  strategy12_btc_price_unavailable: '策略12 BTC 价格不可用',
+  strategy12_probability_unavailable: '策略12 概率估算不可用',
+  strategy12_edge_too_low: '策略12 概率优势不足',
+  strategy12_signal_conflict: '策略12 概率方向与盘口确认冲突',
+  strategy12_entry_too_late: '策略12 确认出现过晚',
+  strategy12_price_too_low: '策略12 入场价格过低',
+  strategy12_price_too_high: '策略12 入场价格过高',
+  strategy12_micro_ofi_unavailable: '策略12 盘口失衡信号不可用',
+  strategy12_micro_ofi_stale: '策略12 盘口失衡信号已过期',
+  strategy12_micro_ofi_too_weak: '策略12 盘口失衡信号过弱',
+  strategy12_micro_momentum_unavailable: '策略12 动量信号不可用',
+  strategy12_micro_momentum_too_weak: '策略12 动量信号过弱',
+  strategy12_micro_momentum_too_hot: '策略12 动量过热，跳过追单',
+  strategy12_micro_confidence_too_low: '策略12 盘口确认优势不足',
+  live_fok_not_filled: '实时 FOK 订单未成交',
+  live_fak_not_matched: '实时 FAK 订单无可成交挂单',
   awaiting_fill_confirmation: '等待成交确认',
   round_in_progress: '轮次仍在进行中',
   round_unresolved: '轮次尚未结算',

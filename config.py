@@ -17,7 +17,7 @@ _ENV_FILE_ENCODINGS: tuple[str, ...] = ("utf-8", "utf-8-sig", "gbk")
 _BOOL_TRUE_VALUES = {"1", "true", "yes", "on"}
 _BOOL_FALSE_VALUES = {"0", "false", "no", "off"}
 _STRATEGY_ID_MIN = 1
-_STRATEGY_ID_MAX = 11
+_STRATEGY_ID_MAX = 12
 
 _STRATEGY7_SHORT_PROFILE_KEYS: dict[str, str] = {
     "OFI_THRESHOLD": "STRATEGY7_OFI_THRESHOLD",
@@ -76,12 +76,28 @@ _STRATEGY11_SHORT_PROFILE_KEYS: dict[str, str] = {
     "MAX_PROBABILITY": "STRATEGY11_MAX_PROBABILITY",
     "CONFIRM_BEFORE_ENTRY_SECONDS": "STRATEGY11_CONFIRM_BEFORE_ENTRY_SECONDS",
 }
+_STRATEGY12_SHORT_PROFILE_KEYS: dict[str, str] = {
+    **_STRATEGY11_SHORT_PROFILE_KEYS,
+    **{
+        key: value
+        for key, value in _STRATEGY7_SHORT_PROFILE_KEYS.items()
+        if key in {
+            "OFI_THRESHOLD",
+            "MOMENTUM_THRESHOLD",
+            "MAX_MOMENTUM_DELTA",
+            "MIN_SIGNAL_GAP",
+            "LATE_CONFIRM_STRONG_SIGNAL_GAP",
+            "LATE_CONFIRM_RELAX_SECONDS",
+        }
+    },
+}
 _STRATEGY_SHORT_PROFILE_KEYS: dict[int, dict[str, str]] = {
     7: _STRATEGY7_SHORT_PROFILE_KEYS,
     8: _STRATEGY7_SHORT_PROFILE_KEYS,
     9: _STRATEGY9_SHORT_PROFILE_KEYS,
     10: _STRATEGY10_SHORT_PROFILE_KEYS,
     11: _STRATEGY11_SHORT_PROFILE_KEYS,
+    12: _STRATEGY12_SHORT_PROFILE_KEYS,
 }
 
 
@@ -972,7 +988,7 @@ def _apply_mode_profile_overrides(mode: str, profile: LiveStrategyProfile) -> Li
 def _profile_for_strategy(cfg: AppConfig, strategy_id: int) -> LiveStrategyProfile:
     strategy7_max_entry_fallback = (
         _strategy_env_float(strategy_id, "STRATEGY7_MAX_ENTRY_PRICE", cfg.max_entry_price)
-        if strategy_id in {7, 8, 9, 10, 11}
+        if strategy_id in {7, 8, 9, 10, 11, 12}
         else cfg.max_entry_price
     )
 

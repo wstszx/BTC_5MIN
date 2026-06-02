@@ -35,6 +35,21 @@ def is_live_fok_not_filled_error(exc: Exception) -> bool:
     )
 
 
+def is_live_fak_not_matched_error(exc: Exception) -> bool:
+    message = str(exc).lower()
+    return "no orders found to match" in message and "fak" in message
+
+
+def is_live_order_book_unavailable_error(exc: Exception) -> bool:
+    message = str(exc).lower()
+    return (
+        "no orderbook exists" in message
+        or "no order book exists" in message
+        or ("status=404" in message and "/book" in message)
+        or ("status_code=404" in message and "book" in message)
+    )
+
+
 def is_live_trading_restricted_error(exc: Exception) -> bool:
     message = str(exc).lower()
     return (
@@ -61,6 +76,7 @@ def is_retryable_live_io_error(exc: Exception) -> bool:
         "ssl",
         "eof occurred",
         "unexpected_eof_while_reading",
+        "client has been closed",
     )
     return any(marker in message for marker in retryable_markers)
 
@@ -143,6 +159,22 @@ def available_order_book_ask_size_at_or_below(book: Any, price_cap: float | None
     return total_size if seen_level else None
 
 
+def available_order_book_ask_notional_at_or_below(book: Any, price_cap: float | None) -> float | None:
+    if book is None or price_cap is None or price_cap <= 0:
+        return None
+    total_notional = Decimal("0")
+    seen_level = False
+    for level in _book_levels(book, "asks"):
+        price = _level_price(level)
+        size = _level_size(level)
+        if price is None or size is None:
+            continue
+        seen_level = True
+        if price <= price_cap:
+            total_notional += Decimal(str(price)) * Decimal(str(size))
+    return float(total_notional) if seen_level else None
+
+
 def best_order_book_ask_price(book: Any) -> float | None:
     best_price: float | None = None
     for level in _book_levels(book, "asks"):
@@ -181,27 +213,39 @@ def price_improvement_floor(price: float | None, max_improvement: float | None) 
     return max(0.0, float(price) - float(max_improvement))
 
 
+def live_execution_price_floor(
+    *,
+    decision_price: float | None,
+    min_entry_price: float | None,
+    max_improvement: float | None,
+) -> float | None:
+    floors = [
+        value
+        for value in (
+            min_entry_price,
+            price_improvement_floor(decision_price, max_improvement),
+        )
+        if value is not None
+    ]
+    return max(floors) if floors else None
+
+
 def read_live_order_book(live_client: Any, token_id: str) -> Any | None:
     get_order_book = getattr(live_client, "get_order_book", None)
     if not callable(get_order_book):
         return None
     try:
-        from py_clob_client_v2 import BookParams
-
-        try:
-            return get_order_book(BookParams(token_id=token_id))
-        except (TypeError, AttributeError):
-            pass
-    except Exception:
-        pass
-    try:
         return get_order_book(token_id)
     except TypeError:
         try:
             return get_order_book(token_id=token_id)
-        except Exception:
+        except Exception as exc:
+            if is_live_order_book_unavailable_error(exc):
+                raise
             return None
-    except Exception:
+    except Exception as exc:
+        if is_live_order_book_unavailable_error(exc):
+            raise
         return None
 
 
@@ -800,6 +844,7 @@ def submit_live_strategy_order(
     token_id: str,
     plan: TradePlan,
     user_usdc_balance: float | None = None,
+    order_type_override: Any | None = None,
     client_factory: Callable[[AppConfig], Any] | None = None,
 ) -> tuple[str, Any]:
     live_client = clob_client or (client_factory or create_live_clob_client)(cfg)
@@ -809,6 +854,8 @@ def submit_live_strategy_order(
         if use_sdk
         else (cfg.live_order_type or "FOK").upper()
     )
+    if order_type_override is not None:
+        order_type = order_type_override
     market_order_price = plan.max_entry_price if plan.max_entry_price is not None else getattr(cfg, "max_entry_price", None)
     order_args = _build_live_market_order_args_for_type(
         token_id=token_id,
@@ -883,48 +930,68 @@ def execute_order_plan(
         and _order_type_text(getattr(cfg, "live_order_type", "FOK")) in {"FOK", "FAK"}
         and market_order_price is not None
     )
+    order_type_override = None
     if should_precheck_order_book_price:
         live_client_for_depth = clob_client or (client_factory or create_live_clob_client)(cfg)
-        book = read_live_order_book(live_client_for_depth, token_id)
-        opposite_book = (
-            read_live_order_book(live_client_for_depth, opposite_token_id)
-            if opposite_token_id and opposite_token_id != token_id
-            else None
-        )
-        best_buy_price = best_possible_binary_buy_price(book, opposite_book)
-        min_entry_price = getattr(cfg, "min_entry_price", None)
-        if (
-            best_buy_price is not None
-            and min_entry_price is not None
-            and best_buy_price + 1e-9 < min_entry_price
-        ):
-            return OrderExecutionResult(
-                status="skipped",
-                remaining_budget=remaining_budget,
-                skip_reason="live_order_book_price_below_min_entry",
-            )
-        improvement_floor = price_improvement_floor(
-            plan.raw_price if plan.raw_price is not None else plan.price,
-            getattr(cfg, "live_max_price_improvement", None),
-        )
-        if (
-            best_buy_price is not None
-            and improvement_floor is not None
-            and best_buy_price + 1e-9 < improvement_floor
-        ):
-            return OrderExecutionResult(
-                status="skipped",
-                remaining_budget=remaining_budget,
-                skip_reason="live_order_book_price_improved_too_much",
-            )
-        should_require_full_depth = _order_type_text(getattr(cfg, "live_order_type", "FOK")) == "FOK"
-        available_size = available_order_book_ask_size_at_or_below(book, market_order_price)
-        if should_require_full_depth and available_size is not None and available_size + 1e-9 < plan.order_size:
-            return OrderExecutionResult(
-                status="skipped",
-                remaining_budget=remaining_budget,
-                skip_reason="live_order_book_depth_insufficient",
-            )
+        if callable(getattr(live_client_for_depth, "get_order_book", None)):
+            try:
+                book = read_live_order_book(live_client_for_depth, token_id)
+            except Exception as exc:
+                if not is_live_order_book_unavailable_error(exc):
+                    raise
+                return OrderExecutionResult(
+                    status="skipped",
+                    remaining_budget=remaining_budget,
+                    skip_reason="live_order_book_unavailable",
+                )
+            if book is None:
+                clob_client = live_client_for_depth
+            else:
+                try:
+                    opposite_book = (
+                        read_live_order_book(live_client_for_depth, opposite_token_id)
+                        if opposite_token_id and opposite_token_id != token_id
+                        else None
+                    )
+                except Exception as exc:
+                    if not is_live_order_book_unavailable_error(exc):
+                        raise
+                    opposite_book = None
+                best_buy_price = best_possible_binary_buy_price(book, opposite_book)
+                decision_price = plan.raw_price if plan.raw_price is not None else plan.price
+                min_entry_price = getattr(cfg, "min_entry_price", None)
+                execution_floor = live_execution_price_floor(
+                    decision_price=decision_price,
+                    min_entry_price=min_entry_price,
+                    max_improvement=getattr(cfg, "live_max_price_improvement", None),
+                )
+                if (
+                    best_buy_price is not None
+                    and execution_floor is not None
+                    and best_buy_price + 1e-9 < execution_floor
+                ):
+                    return OrderExecutionResult(
+                        status="skipped",
+                        remaining_budget=remaining_budget,
+                        skip_reason=(
+                            "live_order_book_price_below_min_entry"
+                            if min_entry_price is not None and best_buy_price + 1e-9 < min_entry_price
+                            else "live_order_book_price_improved_too_much"
+                        ),
+                    )
+                should_require_full_depth = _order_type_text(getattr(cfg, "live_order_type", "FOK")) == "FOK"
+                available_notional = available_order_book_ask_notional_at_or_below(book, market_order_price)
+                if should_require_full_depth and available_notional is not None and available_notional + 1e-9 < plan.order_cost:
+                    fallback_order_type = _fallback_fak_order_type(getattr(cfg, "live_order_type", "FOK"))
+                    if getattr(cfg, "live_fok_fallback_to_fak", True) and fallback_order_type is not None:
+                        order_type_override = fallback_order_type
+                    else:
+                        return OrderExecutionResult(
+                            status="skipped",
+                            remaining_budget=remaining_budget,
+                            skip_reason="live_order_book_depth_insufficient",
+                        )
+                clob_client = live_client_for_depth
         clob_client = live_client_for_depth
     try:
         order_id, response = submit_live_strategy_order(
@@ -933,9 +1000,16 @@ def execute_order_plan(
             token_id=token_id,
             plan=plan,
             user_usdc_balance=remaining_budget,
+            order_type_override=order_type_override,
             client_factory=client_factory,
         )
     except Exception as exc:
+        if is_live_fak_not_matched_error(exc):
+            return OrderExecutionResult(
+                status="skipped",
+                remaining_budget=remaining_budget,
+                skip_reason="live_fak_not_matched",
+            )
         if is_live_fok_not_filled_error(exc):
             return OrderExecutionResult(
                 status="skipped",

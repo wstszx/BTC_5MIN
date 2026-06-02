@@ -4233,6 +4233,63 @@ def test_run_live_trading_skips_transient_clob_submit_error_without_strategy_err
     assert rows[-1]["skip_reason"] == "live_retryable_clob_error"
 
 
+def test_run_live_trading_recreates_cached_clob_client_after_retryable_submit_error(tmp_path, monkeypatch):
+    stop_event = threading.Event()
+    attempts = {"sleep": 0}
+    created_clients: list[_TransientSubmitClobClient] = []
+
+    def fake_sleep(_seconds):
+        attempts["sleep"] += 1
+        if attempts["sleep"] >= 2:
+            stop_event.set()
+
+    def fake_create_client(_cfg):
+        client = _TransientSubmitClobClient(balance_payload={"available": 3.0})
+        created_clients.append(client)
+        return client
+
+    monkeypatch.setattr("trader.time.sleep", fake_sleep)
+    monkeypatch.setattr("trader._create_live_clob_client", fake_create_client)
+    monkeypatch.setattr(
+        "trader._resolve_side_from_strategy",
+        lambda **kwargs: SideDecision(side="UP"),
+    )
+    monkeypatch.setattr(
+        "trader.build_trade_plan",
+        lambda *args, **kwargs: TradePlan(
+            True,
+            "UP",
+            price=0.55,
+            order_size=2.0,
+            order_cost=1.5,
+            expected_profit=0.5,
+        ),
+    )
+
+    result = run_live_trading(
+        AppConfig(
+            trade_mode="live",
+            live_trading_enabled=True,
+            live_private_key="pk",
+            live_funder="0xfunder",
+            strategy_id=7,
+            live_strategy_ids=[7],
+            base_order_cost=1.5,
+            poll_interval_seconds=1,
+        ),
+        market_client=_LiveMarketClient(),
+        state_path=tmp_path / "live_state.json",
+        log_path=tmp_path / "live_orders.csv",
+        stop_event=stop_event,
+    )
+
+    rows = list(csv.DictReader((tmp_path / "live_orders.csv").open(newline="", encoding="utf-8")))
+
+    assert result["status"] == "stopped"
+    assert len(created_clients) == 2
+    assert rows[-1]["skip_reason"] == "live_retryable_clob_error"
+
+
 def test_run_live_trading_skips_missed_entry_window_without_submitting(tmp_path, monkeypatch):
     stop_event = threading.Event()
     stub_clob = _StubClobClient(balance_payload={"available": 3.0})
@@ -7274,6 +7331,107 @@ def test_run_live_trading_settlement_replaces_submitted_plan_with_confirmed_fill
     assert settled["trade_pnl"] == "-1.0321999999999998"
     assert settled["order_id"] == "oid-prev"
     assert settled["fill_source"] == "official_confirmed_trade"
+
+
+def test_run_live_trading_settlement_preserves_low_fill_source_marker(tmp_path, monkeypatch):
+    stop_event = threading.Event()
+    stub_clob = _StubClobClient(
+        order_payloads={"oid-prev": {"status": "filled"}},
+        trade_payloads={"oid-prev": [_confirmed_trade("oid-prev", size=2.0833333333333335, price=0.48)]},
+        balance_payload={"available": 10.0},
+    )
+    state_path = tmp_path / "live_state.json"
+    log_path = tmp_path / "live_orders.csv"
+    state_path.write_text(
+        json.dumps(
+            {
+                "live_strategies": {
+                    "10": {
+                        "round_index": 9,
+                        "cash_pnl": 0.0,
+                        "recovery_loss": 0.0,
+                        "consecutive_losses": 0,
+                        "consecutive_max_stake_skips": 0,
+                        "signal_round_slug": None,
+                        "signal_round_open_up_price": None,
+                        "signal_round_locked_side": None,
+                        "stop_loss_count": 0,
+                        "daily_realized_pnl": 0.0,
+                        "current_day": "2026-05-22",
+                        "pending_live_slug": "btc-updown-5m-prev",
+                        "pending_live_side": "UP",
+                        "pending_live_price": 0.496128,
+                        "pending_live_order_size": 2.0833333333333335,
+                        "pending_live_order_cost": 1.0336,
+                        "pending_live_expected_profit": 1.05,
+                        "pending_live_end_time": "2026-04-02T00:00:00+00:00",
+                        "pending_live_order_id": "oid-prev",
+                        "pending_live_raw_price": 0.48,
+                        "pending_live_raw_order_cost": 1.0,
+                        "pending_live_fee": 0.0336,
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    start = datetime(2026, 4, 1, 23, 55, tzinfo=timezone.utc)
+    append_trade_log(
+        log_path,
+        TradeRecord(
+            timestamp=start,
+            mode="live",
+            round_index=8,
+            strategy=10,
+            entry_timing="OPEN",
+            event_slug="btc-updown-5m-prev",
+            start_time=start,
+            end_time=start + timedelta(minutes=5),
+            side="UP",
+            price=0.496128,
+            order_size=2.0833333333333335,
+            order_cost=1.0336,
+            expected_profit=1.05,
+            order_id="oid-prev",
+            fill_source="official_fill_price_below_min_entry",
+            raw_price=0.48,
+            raw_order_cost=1.0,
+            fee=0.0336,
+        ),
+    )
+
+    def fake_sleep(_seconds):
+        stop_event.set()
+
+    monkeypatch.setattr("trader.time.sleep", fake_sleep)
+    monkeypatch.setattr("trader._resolve_side_from_strategy", lambda **kwargs: SideDecision(side=None, reason="signal_unavailable"))
+
+    result = run_live_trading(
+        AppConfig(
+            trade_mode="live",
+            live_trading_enabled=True,
+            live_private_key="pk",
+            live_funder="0xfunder",
+            live_strategy_ids=[10],
+            strategy_id=10,
+            min_entry_price=0.50,
+            max_stake=25.0,
+            poll_interval_seconds=1,
+        ),
+        market_client=_SettlingLiveClient(),
+        clob_client=stub_clob,
+        state_path=state_path,
+        log_path=log_path,
+        stop_event=stop_event,
+    )
+
+    rows = list(csv.DictReader(log_path.open(newline="", encoding="utf-8")))
+    settled = next(row for row in rows if row["event_slug"] == "btc-updown-5m-prev")
+
+    assert result["status"] == "stopped"
+    assert settled["raw_price"] == "0.48"
+    assert settled["result"] == "DOWN"
+    assert settled["fill_source"] == "official_fill_price_below_min_entry"
 
 
 def test_run_paper_trading_uses_simulated_budget_like_live_execution(tmp_path, monkeypatch):
