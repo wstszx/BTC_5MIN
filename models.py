@@ -12,6 +12,7 @@ class MarketWindow:
     title: str
     start_time: datetime
     end_time: datetime
+    price_to_beat: float | None = None
     up_token_id: str | None = None
     down_token_id: str | None = None
 

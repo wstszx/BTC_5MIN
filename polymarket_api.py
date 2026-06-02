@@ -807,6 +807,7 @@ class PolymarketClient:
             title=str(event.get("title") or market.get("question") or ""),
             start_time=parse_iso_datetime(event.get("startTime") or market.get("eventStartTime") or market.get("startDate")) or datetime.now(timezone.utc),
             end_time=parse_iso_datetime(event.get("endDate") or market.get("endDate")) or datetime.now(timezone.utc),
+            price_to_beat=_optional_float((event.get("eventMetadata") or {}).get("priceToBeat")),
             up_token_id=token_ids.get("UP"),
             down_token_id=token_ids.get("DOWN"),
         )

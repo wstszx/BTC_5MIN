@@ -118,6 +118,24 @@ def test_list_series_events_page_returns_next_cursor(monkeypatch):
     assert next_cursor == "cursor-2"
 
 
+def test_event_to_market_window_carries_price_to_beat_metadata():
+    client = PolymarketClient(AppConfig())
+
+    window = client.event_to_market_window(
+        {
+            "id": "evt-1",
+            "slug": "btc-updown-5m-1779200700",
+            "title": "BTC Up or Down",
+            "startTime": "2026-05-19T14:25:00Z",
+            "endDate": "2026-05-19T14:30:00Z",
+            "eventMetadata": {"priceToBeat": "76449.995"},
+            "markets": [{"id": "mkt-1", "outcomes": '["Up","Down"]'}],
+        }
+    )
+
+    assert window.price_to_beat == pytest.approx(76449.995)
+
+
 def test_quote_from_market_uses_best_levels_and_midpoint_from_ws_book_snapshot(monkeypatch):
     client = PolymarketClient(AppConfig(ws_enabled=True))
     monkeypatch.setattr(client, "_ws_subscribe_assets", lambda asset_ids: None)

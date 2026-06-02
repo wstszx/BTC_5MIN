@@ -659,6 +659,7 @@ def test_run_single_command_runtime_reloads_to_paper_only_when_live_switch_disab
 
     assert exit_code == 0
     assert calls == [
+        ('paper', 'paper', True),
         ('live', 'live', True),
         ('paper', 'paper', False),
     ]
@@ -1058,7 +1059,7 @@ def test_run_single_command_runtime_starts_only_live_when_trade_mode_is_live(mon
     assert calls == [('live', 'live', '15m')]
 
 
-def test_run_single_command_runtime_uses_live_worker_as_both_mode_decision_source(monkeypatch):
+def test_run_single_command_runtime_starts_paper_and_live_workers_in_both_mode(monkeypatch):
     cfg = build_config_from_env_values(
         {
             'TRADE_MODE': 'both',
@@ -1072,7 +1073,7 @@ def test_run_single_command_runtime_uses_live_worker_as_both_mode_decision_sourc
             'MARKET_TIMEFRAME': '15m',
         }
     )
-    calls: list[tuple[str, str, str, object, object]] = []
+    calls: list[tuple[str, str, str, object, object, object]] = []
 
     class FakeDashboardRuntime:
         def serve_forever(self) -> None:
@@ -1085,7 +1086,7 @@ def test_run_single_command_runtime_uses_live_worker_as_both_mode_decision_sourc
             return
 
     def fake_run_paper_trading(cfg, *, stop_event, config_provider, state_path=None, log_path=None, runtime_control=None, stop_when_safe=None):
-        calls.append(('paper', cfg.trade_mode, cfg.market_timeframe, state_path, log_path))
+        calls.append(('paper', cfg.trade_mode, cfg.market_timeframe, tuple(cfg.paper_strategy_ids), state_path, log_path))
         return {'status': 'stopped'}
 
     def fake_run_live_trading(
@@ -1098,7 +1099,7 @@ def test_run_single_command_runtime_uses_live_worker_as_both_mode_decision_sourc
         mirror_paper_state_path=None,
         mirror_paper_log_path=None,
     ):
-        calls.append(('live', cfg.trade_mode, cfg.market_timeframe, mirror_paper_state_path, mirror_paper_log_path))
+        calls.append(('live', cfg.trade_mode, cfg.market_timeframe, tuple(cfg.live_strategy_ids), mirror_paper_state_path, mirror_paper_log_path))
         stop_event.set()
         return {'status': 'stopped'}
 
@@ -1110,14 +1111,22 @@ def test_run_single_command_runtime_uses_live_worker_as_both_mode_decision_sourc
     exit_code = main.run_single_command_runtime()
 
     assert exit_code == 0
-    assert not any(call[0] == 'paper' for call in calls)
     assert calls == [
+        (
+            'paper',
+            'paper',
+            '5m',
+            (5, 6),
+            cfg.logs_dir / 'paper' / '5m' / 'session_state.json',
+            cfg.logs_dir / 'paper' / '5m' / 'paper_trades.csv',
+        ),
         (
             'live',
             'live',
             '15m',
-            cfg.logs_dir / 'paper' / '15m' / 'session_state.json',
-            cfg.logs_dir / 'paper' / '15m' / 'paper_trades.csv',
+            (7,),
+            None,
+            None,
         )
     ]
 

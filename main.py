@@ -374,7 +374,7 @@ def _effective_runtime_mode(cfg: AppConfig, fallback: str = 'paper') -> str:
 
 
 def _mode_runs_paper(mode: str) -> bool:
-    return mode == 'paper'
+    return mode in {'paper', 'both'}
 
 
 def _mode_runs_live(mode: str) -> bool:
@@ -587,13 +587,6 @@ def run_single_command_runtime(
             runtime_control=manager.runtime_control,
             stop_when_safe=manager.restart_requested,
         )
-        if active_mode == 'both':
-            state_path, log_path = _paper_runtime_paths(_cfg_for_active_mode(base_cfg, 'paper'), live_cfg.market_timeframe)
-            live_signature = inspect.signature(run_live_trading)
-            if 'mirror_paper_state_path' in live_signature.parameters:
-                live_kwargs['mirror_paper_state_path'] = state_path
-            if 'mirror_paper_log_path' in live_signature.parameters:
-                live_kwargs['mirror_paper_log_path'] = log_path
         live_target = lambda cfg=live_cfg, live_kwargs=live_kwargs: run_live_trading(cfg, **live_kwargs)
         worker_targets.append(('live-trading-worker', live_target))
 

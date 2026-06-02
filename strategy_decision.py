@@ -889,7 +889,11 @@ def evaluate_strategy11_probability_edge(
     if current_btc_price is None or current_btc_price <= 0:
         return SideDecision(side=None, reason="strategy11_btc_price_unavailable")
     if state.signal_round_slug != window.slug or state.strategy11_round_start_btc_price is None:
-        state.strategy11_round_start_btc_price = float(current_btc_price)
+        price_to_beat = getattr(window, "price_to_beat", None)
+        if price_to_beat is not None and price_to_beat > 0:
+            state.strategy11_round_start_btc_price = float(price_to_beat)
+        else:
+            state.strategy11_round_start_btc_price = float(current_btc_price)
 
     probability = estimate_strategy11_probability(
         cfg=cfg,
