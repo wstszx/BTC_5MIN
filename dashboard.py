@@ -6,6 +6,7 @@ import json
 import os
 import re
 import shutil
+import tempfile
 import threading
 from collections import deque
 from dataclasses import asdict, dataclass, field, fields, replace
@@ -1227,6 +1228,31 @@ def _csv_fieldnames_for_rows(rows: list[dict[str, str]]) -> list[str]:
             if key not in fieldnames:
                 fieldnames.append(key)
     return fieldnames
+
+
+def _write_summary_work_csv(base_csv: Path, rows: list[dict[str, str]], fieldnames: list[str]) -> Path:
+    base_csv.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(
+        "w",
+        newline="",
+        encoding="utf-8",
+        dir=base_csv.parent,
+        prefix=f"{base_csv.stem}_summary_work_",
+        suffix=base_csv.suffix,
+        delete=False,
+    ) as handle:
+        writer = csv.DictWriter(handle, fieldnames=fieldnames, extrasaction="ignore")
+        writer.writeheader()
+        writer.writerows(rows)
+        return Path(handle.name)
+
+
+def _cleanup_summary_work_csv(path: Path) -> None:
+    try:
+        if path.exists():
+            path.unlink()
+    except (FileNotFoundError, PermissionError, OSError):
+        return
 
 
 def _live_result_value(row: dict[str, str]) -> str:
@@ -3310,17 +3336,16 @@ class DashboardState:
                     daily = []
                     strategy_daily = []
                 else:
-                    filtered_csv = paper_csv.with_name(f"{paper_csv.stem}_strategy_{strategy_filter}_summary{paper_csv.suffix}")
-                    with filtered_csv.open("w", newline="", encoding="utf-8") as handle:
-                        writer = csv.DictWriter(handle, fieldnames=list(filtered_rows[0].keys()))
-                        writer.writeheader()
-                        writer.writerows(filtered_rows)
+                    filtered_csv = _write_summary_work_csv(
+                        paper_csv,
+                        filtered_rows,
+                        list(filtered_rows[0].keys()),
+                    )
                     try:
                         daily = summarize_paper_trades(filtered_csv, tz_offset="+08:00")
                         strategy_daily = summarize_paper_trades_by_strategy(filtered_csv, tz_offset="+08:00")
                     finally:
-                        if filtered_csv.exists():
-                            filtered_csv.unlink()
+                        _cleanup_summary_work_csv(filtered_csv)
         except (FileNotFoundError, ValueError):
             daily = []
             strategy_daily = []
@@ -3362,17 +3387,16 @@ class DashboardState:
                     close = getattr(client, "close", None)
                     if callable(close):
                         close()
-                filtered_csv = live_csv.with_name(f"{live_csv.stem}_summary_work{live_csv.suffix}")
-                with filtered_csv.open("w", newline="", encoding="utf-8") as handle:
-                    writer = csv.DictWriter(handle, fieldnames=_csv_fieldnames_for_rows(summary_rows), extrasaction="ignore")
-                    writer.writeheader()
-                    writer.writerows(summary_rows)
+                filtered_csv = _write_summary_work_csv(
+                    live_csv,
+                    summary_rows,
+                    _csv_fieldnames_for_rows(summary_rows),
+                )
                 try:
                     daily = summarize_paper_trades(filtered_csv, tz_offset="+08:00")
                     strategy_daily = summarize_paper_trades_by_strategy(filtered_csv, tz_offset="+08:00")
                 finally:
-                    if filtered_csv.exists():
-                        filtered_csv.unlink()
+                    _cleanup_summary_work_csv(filtered_csv)
         except (FileNotFoundError, ValueError):
             daily = []
             strategy_daily = []

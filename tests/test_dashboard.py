@@ -2250,6 +2250,72 @@ def test_dashboard_live_summary_reads_live_orders_and_filters_by_strategy(tmp_pa
         os.chdir(old_cwd)
 
 
+def test_dashboard_live_summary_uses_unique_work_csv_per_request(tmp_path: Path, monkeypatch):
+    old_cwd = Path.cwd()
+    os.chdir(tmp_path)
+    state = DashboardState(env_file=tmp_path / '.env.dashboard')
+    seen_paths: list[Path] = []
+
+    def fake_summarize(csv_path: Path, *, tz_offset: str = "+08:00"):
+        seen_paths.append(csv_path)
+        return []
+
+    monkeypatch.setattr(dashboard, 'summarize_paper_trades', fake_summarize)
+    monkeypatch.setattr(dashboard, 'summarize_paper_trades_by_strategy', fake_summarize)
+    try:
+        live_csv = tmp_path / 'logs' / 'live_orders.csv'
+        live_csv.parent.mkdir(parents=True, exist_ok=True)
+        live_csv.write_text(
+            'timestamp,mode,round_index,strategy,event_slug,start_time,end_time,side,price,order_size,order_cost,expected_profit,result,trade_pnl,cash_pnl,recovery_loss,consecutive_losses,stop_loss_triggered,skip_reason\n'
+            '2026-04-05T00:00:00+00:00,live,1,7,slug-seven,2026-04-04T23:55:00+00:00,2026-04-05T00:00:00+00:00,UP,0.51,10,5,1,UP,1.5,1.5,0,0,False,\n',
+            encoding='utf-8',
+        )
+
+        state.get_live_summary_payload(strategy='7')
+        state.get_live_summary_payload(strategy='7')
+
+        work_paths = seen_paths[::2]
+        assert len(work_paths) == 2
+        assert work_paths[0] != work_paths[1]
+        assert all(path.name.startswith('live_orders_summary_work_') for path in work_paths)
+        assert not (tmp_path / 'logs' / 'live_orders_summary_work.csv').exists()
+        assert all(not path.exists() for path in work_paths)
+    finally:
+        state.close()
+        os.chdir(old_cwd)
+
+
+def test_dashboard_live_summary_ignores_work_csv_cleanup_permission_error(tmp_path: Path, monkeypatch):
+    old_cwd = Path.cwd()
+    os.chdir(tmp_path)
+    state = DashboardState(env_file=tmp_path / '.env.dashboard')
+    original_unlink = Path.unlink
+
+    def flaky_unlink(path: Path, *args, **kwargs):
+        if 'summary_work' in path.name:
+            raise PermissionError("temporarily locked")
+        return original_unlink(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, 'unlink', flaky_unlink)
+    try:
+        live_csv = tmp_path / 'logs' / 'live_orders.csv'
+        live_csv.parent.mkdir(parents=True, exist_ok=True)
+        live_csv.write_text(
+            'timestamp,mode,round_index,strategy,event_slug,start_time,end_time,side,price,order_size,order_cost,expected_profit,result,trade_pnl,cash_pnl,recovery_loss,consecutive_losses,stop_loss_triggered,skip_reason,signal_delta,signal_threshold,signal_locked\n'
+            '2026-04-05T00:00:00+00:00,live,1,7,slug-seven,2026-04-04T23:55:00+00:00,2026-04-05T00:00:00+00:00,UP,0.51,10,5,1,UP,1.5,1.5,0,0,False,,0.02,0.01,True\n',
+            encoding='utf-8',
+        )
+
+        summary = state.get_live_summary_payload(strategy='7')
+
+        assert summary['mode'] == 'live'
+        assert summary['strategy'] == '7'
+        assert summary['latest']['trade_rows'] == 1
+    finally:
+        state.close()
+        os.chdir(old_cwd)
+
+
 def test_dashboard_live_summary_backfills_settled_submitted_rows(tmp_path: Path, monkeypatch):
     old_cwd = Path.cwd()
     os.chdir(tmp_path)
