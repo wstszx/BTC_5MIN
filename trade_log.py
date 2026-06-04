@@ -32,12 +32,24 @@ _OBSERVED_PLACEHOLDER_FIELDS = {
     "raw_price",
     "raw_order_cost",
     "fee",
+    "effective_price_with_fee",
+    "effective_order_cost_with_fee",
 }
 
 _LIVE_FILL_SOURCE_MARKERS = {
     "official_fill_price_below_min_entry",
     "official_fill_price_below_decision_floor",
     "official_fill_price_above_max_entry_price",
+}
+
+_MIGRATABLE_HEADER_REQUIRED_FIELDS = {
+    "timestamp",
+    "mode",
+    "round_index",
+    "strategy",
+    "event_slug",
+    "start_time",
+    "end_time",
 }
 
 
@@ -109,6 +121,30 @@ def merge_live_trade_log_rows(existing: dict[str, str], incoming: dict[str, Any]
     return merged
 
 
+def _expire_prior_live_observed_placeholders(rows: list[dict[str, Any]], incoming: dict[str, Any]) -> bool:
+    incoming_key = live_trade_log_upsert_key(incoming)
+    if incoming_key is None:
+        return False
+    incoming_strategy, incoming_event_slug, incoming_experiment_id = incoming_key
+    if str(incoming.get("skip_reason") or "").strip() == OBSERVED_WAITING_SKIP_REASON:
+        return False
+    changed = False
+    for row in rows:
+        if not live_row_is_observed_placeholder(row):
+            continue
+        row_key = live_trade_log_upsert_key(row)
+        if row_key is None:
+            continue
+        strategy, event_slug, experiment_id = row_key
+        if strategy != incoming_strategy or experiment_id != incoming_experiment_id:
+            continue
+        if event_slug == incoming_event_slug:
+            continue
+        row["skip_reason"] = "entry_window_missed"
+        changed = True
+    return changed
+
+
 def merge_paper_trade_log_rows(existing: dict[str, str], incoming: dict[str, Any], fieldnames: list[str]) -> dict[str, Any] | None:
     existing_actionable = row_has_result(existing) or _positive_number(existing.get("order_cost")) or _positive_number(existing.get("order_size"))
     incoming_actionable = row_has_result(incoming) or _positive_number(incoming.get("order_cost")) or _positive_number(incoming.get("order_size"))
@@ -122,7 +158,7 @@ def _can_migrate_header(existing_header: list[str], fieldnames: list[str]) -> bo
         return False
     if len(existing_header) > len(fieldnames):
         return False
-    if len(fieldnames) - len(existing_header) > 10:
+    if not _MIGRATABLE_HEADER_REQUIRED_FIELDS.issubset(set(existing_header)):
         return False
     field_index = 0
     for existing_field in existing_header:
@@ -143,6 +179,10 @@ def _rewrite_with_fieldnames(path: Path, rows: list[dict[str, Any]], fieldnames:
 def append_trade_log(path: Path, record: TradeRecord) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     row = asdict(record)
+    if row.get("effective_price_with_fee") in (None, ""):
+        row["effective_price_with_fee"] = row.get("price")
+    if row.get("effective_order_cost_with_fee") in (None, ""):
+        row["effective_order_cost_with_fee"] = row.get("order_cost")
     row["timestamp"] = record.timestamp.isoformat()
     row["start_time"] = record.start_time.isoformat()
     row["end_time"] = record.end_time.isoformat()
@@ -173,6 +213,10 @@ def append_trade_log(path: Path, record: TradeRecord) -> None:
             if row_has_result(existing_row):
                 continue
             existing_rows[index] = merge_live_trade_log_rows(existing_row, row, fieldnames)
+            _rewrite_with_fieldnames(path, existing_rows, fieldnames)
+            return
+        if _expire_prior_live_observed_placeholders(existing_rows, row):
+            existing_rows.append(row)
             _rewrite_with_fieldnames(path, existing_rows, fieldnames)
             return
 

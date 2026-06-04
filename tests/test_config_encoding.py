@@ -148,6 +148,7 @@ def test_build_config_ignores_removed_bet_sizing_mode_keys():
     cfg = build_config_from_env_values(
         {
             "STRATEGY_ID": "7",
+            "PAPER_USE_LIVE_PROFILES": "false",
             "PAPER_STRATEGY_IDS": "7",
             "LIVE_STRATEGY_IDS": "7",
             "BET_SIZING_MODE": "TARGET_PROFIT",
@@ -167,6 +168,7 @@ def test_build_config_ignores_old_mode_specific_strategy_profile_keys():
     cfg = build_config_from_env_values(
         {
             "STRATEGY_ID": "7",
+            "PAPER_USE_LIVE_PROFILES": "false",
             "PAPER_STRATEGY_IDS": "7",
             "LIVE_STRATEGY_IDS": "7",
             "PAPER_STRATEGY_7_BET_SIZING_MODE": "TARGET_PROFIT",
@@ -182,6 +184,7 @@ def test_build_config_prefers_mode_specific_profile_values_over_shared_strategy_
     cfg = build_config_from_env_values(
         {
             "STRATEGY_ID": "7",
+            "PAPER_USE_LIVE_PROFILES": "false",
             "PAPER_STRATEGY_IDS": "7",
             "LIVE_STRATEGY_IDS": "7",
             "TARGET_PROFIT": "1.0",
@@ -278,6 +281,7 @@ def test_build_config_supports_strategy7_max_momentum_delta_overrides():
     cfg = build_config_from_env_values(
         {
             "STRATEGY_ID": "7",
+            "PAPER_USE_LIVE_PROFILES": "false",
             "PAPER_STRATEGY_IDS": "7",
             "LIVE_STRATEGY_IDS": "7",
             "STRATEGY7_MAX_MOMENTUM_DELTA": "0.015",
@@ -309,6 +313,7 @@ def test_build_config_accepts_strategy10_and_reads_edge_values():
     cfg = build_config_from_env_values(
         {
             "STRATEGY_ID": "10",
+            "PAPER_USE_LIVE_PROFILES": "false",
             "PAPER_STRATEGY_IDS": "10,7",
             "LIVE_STRATEGY_IDS": "10",
             "STRATEGY10_MIN_EDGE": "0.045",

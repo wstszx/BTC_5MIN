@@ -211,8 +211,10 @@ def build_resolved_round(event_payload: dict[str, Any]) -> ResolvedRound:
 class PolymarketClient:
     def __init__(self, config: AppConfig | None = None, session: requests.Session | None = None) -> None:
         self.config = config or AppConfig()
-        self.session = session or requests.Session()
-        self.session.headers.update({"User-Agent": "BTC_5MIN/0.1"})
+        self._owns_session = session is None
+        self._session_lock = threading.Lock()
+        self.session = session or self._build_session()
+        self._apply_session_defaults(self.session)
         self._ws_app: websocket.WebSocketApp | None = None
         self._ws_thread: threading.Thread | None = None
         self._ws_lock = threading.Lock()
@@ -230,6 +232,55 @@ class PolymarketClient:
         self._ws_invalid_operation_count: int = 0
         self._ws_ping_thread: threading.Thread | None = None
         self._ws_ping_stop = threading.Event()
+
+
+    def _build_session(self) -> requests.Session:
+        return requests.Session()
+
+    def _apply_session_defaults(self, session: Any) -> None:
+        headers = getattr(session, "headers", None)
+        if headers is not None:
+            headers.update({"User-Agent": "BTC_5MIN/0.1"})
+
+    def _reset_session_after_transport_error(self, failed_session: Any | None = None) -> None:
+        if not self._owns_session:
+            return
+        with self._session_lock:
+            if failed_session is not None and self.session is not failed_session:
+                return
+            old_session = self.session
+            try:
+                old_session.close()
+            except Exception:
+                pass
+            self.session = self._build_session()
+            self._apply_session_defaults(self.session)
+
+    @staticmethod
+    def _is_connection_pool_transport_error(exc: Exception) -> bool:
+        if not isinstance(exc, requests.RequestException):
+            return False
+        cause_chain: list[Any] = [exc, getattr(exc, "__cause__", None), getattr(exc, "__context__", None)]
+        cause_chain.extend(getattr(exc, "args", ()))
+        if any(getattr(item, "winerror", None) in {10053, 10054, 10038} for item in cause_chain):
+            return True
+        text = str(exc).lower()
+        if any(
+            marker in text
+            for marker in (
+                "connection aborted",
+                "connection reset",
+                "connectionreseterror",
+                "connectionabortederror",
+                "winerror 10053",
+                "winerror 10054",
+                "winerror 10038",
+                "non-socket",
+                "not a socket",
+            )
+        ):
+            return True
+        return isinstance(exc, (requests.exceptions.ConnectionError, requests.exceptions.ChunkedEncodingError))
 
 
     def close(self) -> None:
@@ -259,6 +310,11 @@ class PolymarketClient:
             thread.join(timeout=2)
         if ping_thread is not None and ping_thread.is_alive():
             ping_thread.join(timeout=2)
+        if self._owns_session:
+            try:
+                self.session.close()
+            except Exception:
+                pass
 
     def _handle_ws_message(self, raw_message: str) -> None:
         normalized_message = raw_message.strip().upper() if isinstance(raw_message, str) else ""
@@ -416,9 +472,22 @@ class PolymarketClient:
 
     def _handle_ws_close(self, _status_code: Any, _msg: Any) -> None:
         self._ws_ping_stop.set()
+        reason = str(_msg or "").strip()
+        if _status_code not in (None, ""):
+            reason = (f"closed status={_status_code}" + (f" msg={reason}" if reason else "")).strip()
+        if not reason:
+            reason = "websocket_closed"
         with self._ws_lock:
+            self._ws_app = None
+            self._ws_thread = None
+            self._ws_ping_thread = None
             self._ws_opened_at = None
+            self._ws_last_ping_at = None
+            self._ws_last_pong_at = None
             self._ws_subscribed_assets.clear()
+            self._ws_quotes_by_asset.clear()
+            self._ws_current_error = reason
+            self._ws_last_error = reason
 
     def _reset_stale_ws_connection_if_needed(self) -> None:
         with self._ws_lock:
@@ -630,12 +699,15 @@ class PolymarketClient:
         max_delay = max(base_delay, self.config.api_retry_max_delay_seconds)
         last_error: Exception | None = None
         for attempt in range(1, retries + 1):
+            session = self.session
             try:
-                response = self.session.get(f"{base_url}{path}", params=params, timeout=15)
+                response = session.get(f"{base_url}{path}", params=params, timeout=15)
                 response.raise_for_status()
                 return response.json()
             except (requests.RequestException, ValueError) as exc:
                 last_error = exc
+                if self._is_connection_pool_transport_error(exc):
+                    self._reset_session_after_transport_error(session)
                 if attempt >= retries:
                     break
                 delay = min(max_delay, base_delay * (2 ** (attempt - 1)))

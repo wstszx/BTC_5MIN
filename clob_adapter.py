@@ -21,6 +21,7 @@ class OrderExecutionResult:
     skip_reason: str | None = None
     balance_error: str | None = None
     live_price_cap: float | None = None
+    raw_price_cap_sent: float | None = None
 
 
 def is_retryable_live_clob_error(exc: Exception) -> bool:
@@ -77,6 +78,10 @@ def is_retryable_live_io_error(exc: Exception) -> bool:
         "eof occurred",
         "unexpected_eof_while_reading",
         "client has been closed",
+        "winerror 10038",
+        "non-socket",
+        "not a socket",
+        "非套接字",
     )
     return any(marker in message for marker in retryable_markers)
 
@@ -262,29 +267,6 @@ def effective_price_after_fee(price: float, fee_rate: float = POLYMARKET_CRYPTO_
     if not 0 < price < 1 or fee_rate <= 0:
         return price
     return float(Decimal(str(price)) + Decimal(str(fee_rate)) * Decimal(str(price)) * (Decimal("1") - Decimal(str(price))))
-
-
-def effective_price_cap_to_raw_price_cap(
-    effective_price_cap: float | None,
-    *,
-    fee_rate: float = POLYMARKET_CRYPTO_TAKER_FEE_RATE,
-    price_decimals: int = 2,
-) -> float | None:
-    if effective_price_cap is None or not 0 < effective_price_cap < 1:
-        return effective_price_cap
-    if fee_rate <= 0:
-        return effective_price_cap
-    low = 0.0
-    high = min(effective_price_cap, 1.0)
-    for _ in range(48):
-        mid = (low + high) / 2
-        effective_mid = mid + fee_rate * mid * (1 - mid)
-        if effective_mid <= effective_price_cap:
-            low = mid
-        else:
-            high = mid
-    scale = 10**max(0, int(price_decimals))
-    return math.floor(low * scale) / scale
 
 
 def apply_fee_to_trade_plan(plan: TradePlan, *, fee_rate: float = POLYMARKET_CRYPTO_TAKER_FEE_RATE) -> TradePlan:
@@ -925,10 +907,21 @@ def execute_order_plan(
             response={"success": True, "orderID": order_id, "simulated": True},
         )
     market_order_price = plan.max_entry_price if plan.max_entry_price is not None else getattr(cfg, "max_entry_price", None)
+    decision_price = plan.raw_price if plan.raw_price is not None else plan.price
+    min_entry_price = getattr(cfg, "min_entry_price", None)
+    execution_floor = live_execution_price_floor(
+        decision_price=decision_price,
+        min_entry_price=min_entry_price,
+        max_improvement=getattr(cfg, "live_max_price_improvement", None),
+    )
+    should_check_order_book_price = market_order_price is not None or execution_floor is not None
     should_precheck_order_book_price = (
-        getattr(cfg, "live_precheck_order_book_depth", True)
-        and _order_type_text(getattr(cfg, "live_order_type", "FOK")) in {"FOK", "FAK"}
-        and market_order_price is not None
+        should_check_order_book_price
+        or (
+            getattr(cfg, "live_precheck_order_book_depth", True)
+            and _order_type_text(getattr(cfg, "live_order_type", "FOK")) == "FOK"
+            and market_order_price is not None
+        )
     )
     order_type_override = None
     if should_precheck_order_book_price:
@@ -945,6 +938,12 @@ def execute_order_plan(
                     skip_reason="live_order_book_unavailable",
                 )
             if book is None:
+                if should_check_order_book_price:
+                    return OrderExecutionResult(
+                        status="skipped",
+                        remaining_budget=remaining_budget,
+                        skip_reason="live_order_book_unavailable",
+                    )
                 clob_client = live_client_for_depth
             else:
                 try:
@@ -958,13 +957,12 @@ def execute_order_plan(
                         raise
                     opposite_book = None
                 best_buy_price = best_possible_binary_buy_price(book, opposite_book)
-                decision_price = plan.raw_price if plan.raw_price is not None else plan.price
-                min_entry_price = getattr(cfg, "min_entry_price", None)
-                execution_floor = live_execution_price_floor(
-                    decision_price=decision_price,
-                    min_entry_price=min_entry_price,
-                    max_improvement=getattr(cfg, "live_max_price_improvement", None),
-                )
+                if should_check_order_book_price and best_buy_price is None:
+                    return OrderExecutionResult(
+                        status="skipped",
+                        remaining_budget=remaining_budget,
+                        skip_reason="live_order_book_unavailable",
+                    )
                 if (
                     best_buy_price is not None
                     and execution_floor is not None
@@ -979,9 +977,24 @@ def execute_order_plan(
                             else "live_order_book_price_improved_too_much"
                         ),
                     )
+                if (
+                    best_buy_price is not None
+                    and market_order_price is not None
+                    and best_buy_price > market_order_price + 1e-9
+                ):
+                    return OrderExecutionResult(
+                        status="skipped",
+                        remaining_budget=remaining_budget,
+                        skip_reason="live_order_book_price_above_max_entry",
+                    )
                 should_require_full_depth = _order_type_text(getattr(cfg, "live_order_type", "FOK")) == "FOK"
                 available_notional = available_order_book_ask_notional_at_or_below(book, market_order_price)
-                if should_require_full_depth and available_notional is not None and available_notional + 1e-9 < plan.order_cost:
+                if (
+                    getattr(cfg, "live_precheck_order_book_depth", True)
+                    and should_require_full_depth
+                    and available_notional is not None
+                    and available_notional + 1e-9 < plan.order_cost
+                ):
                     fallback_order_type = _fallback_fak_order_type(getattr(cfg, "live_order_type", "FOK"))
                     if getattr(cfg, "live_fok_fallback_to_fak", True) and fallback_order_type is not None:
                         order_type_override = fallback_order_type
@@ -990,8 +1003,14 @@ def execute_order_plan(
                             status="skipped",
                             remaining_budget=remaining_budget,
                             skip_reason="live_order_book_depth_insufficient",
-                        )
+                    )
                 clob_client = live_client_for_depth
+        elif should_check_order_book_price:
+            return OrderExecutionResult(
+                status="skipped",
+                remaining_budget=remaining_budget,
+                skip_reason="live_order_book_unavailable",
+            )
         clob_client = live_client_for_depth
     try:
         order_id, response = submit_live_strategy_order(
@@ -1030,6 +1049,7 @@ def execute_order_plan(
         order_id=order_id,
         response=response,
         live_price_cap=plan.max_entry_price if plan.max_entry_price is not None else getattr(cfg, "max_entry_price", None),
+        raw_price_cap_sent=plan.max_entry_price if plan.max_entry_price is not None else getattr(cfg, "max_entry_price", None),
     )
 
 

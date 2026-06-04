@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
-from atomic_io import atomic_write_text
+from atomic_io import atomic_path_guard, atomic_write_text
 from clob_adapter import (
     create_live_clob_client as _create_live_clob_client,
     read_available_live_balance as _read_available_live_balance,
@@ -1387,28 +1387,29 @@ def _update_live_session_state_from_ledger(
     active_strategy_id: int,
     cfg: AppConfig | None = None,
 ) -> None:
-    if not state_path.exists():
-        return
-    payload = json.loads(state_path.read_text(encoding="utf-8"))
-    if not isinstance(payload, dict):
-        return
-    raw_live_strategies = payload.get("live_strategies")
-    live_strategies = raw_live_strategies if isinstance(raw_live_strategies, dict) else {}
-    for strategy_id, ledger_state in ledger_states.items():
-        strategy_payload = live_strategies.get(strategy_id)
-        if not isinstance(strategy_payload, dict):
-            continue
-        for key in ("cash_pnl", "daily_realized_pnl", "recovery_loss", "consecutive_losses"):
-            strategy_payload[key] = ledger_state[key]
-        if not _live_strategy_uses_recovery_loss(cfg, strategy_id):
-            strategy_payload["recovery_loss"] = 0.0
-    active_state = ledger_states.get(str(active_strategy_id))
-    if active_state is not None:
-        for key in ("cash_pnl", "daily_realized_pnl", "recovery_loss", "consecutive_losses"):
-            payload[key] = active_state[key]
-        if not _live_strategy_uses_recovery_loss(cfg, str(active_strategy_id)):
-            payload["recovery_loss"] = 0.0
-    atomic_write_text(state_path, json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    with atomic_path_guard(state_path):
+        if not state_path.exists():
+            return
+        payload = json.loads(state_path.read_text(encoding="utf-8"))
+        if not isinstance(payload, dict):
+            return
+        raw_live_strategies = payload.get("live_strategies")
+        live_strategies = raw_live_strategies if isinstance(raw_live_strategies, dict) else {}
+        for strategy_id, ledger_state in ledger_states.items():
+            strategy_payload = live_strategies.get(strategy_id)
+            if not isinstance(strategy_payload, dict):
+                continue
+            for key in ("cash_pnl", "daily_realized_pnl", "recovery_loss", "consecutive_losses"):
+                strategy_payload[key] = ledger_state[key]
+            if not _live_strategy_uses_recovery_loss(cfg, strategy_id):
+                strategy_payload["recovery_loss"] = 0.0
+        active_state = ledger_states.get(str(active_strategy_id))
+        if active_state is not None:
+            for key in ("cash_pnl", "daily_realized_pnl", "recovery_loss", "consecutive_losses"):
+                payload[key] = active_state[key]
+            if not _live_strategy_uses_recovery_loss(cfg, str(active_strategy_id)):
+                payload["recovery_loss"] = 0.0
+        atomic_write_text(state_path, json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
 
 
 def _backup_live_ledger_files(*, live_csv: Path, state_path: Path) -> None:
@@ -5898,6 +5899,7 @@ const REASON_LABELS = {
   live_order_book_depth_insufficient: '盘口深度不足',
   live_order_book_price_below_min_entry: '盘口价格低于入场下限',
   live_order_book_price_improved_too_much: '盘口价格偏离过大',
+  live_order_book_price_above_max_entry: '盘口价格高于买入上限',
   live_order_book_unavailable: '盘口暂不可用',
   official_fill_price_below_min_entry: '成交价低于入场下限',
   official_fill_price_below_decision_floor: '成交价偏离过大',

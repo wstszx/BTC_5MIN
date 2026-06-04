@@ -4183,6 +4183,7 @@ def test_dashboard_assets_localize_live_price_improvement_guard():
     assert "live_order_book_depth_insufficient: '盘口深度不足'" in js
     assert "live_order_book_price_below_min_entry: '盘口价格低于入场下限'" in js
     assert "live_order_book_price_improved_too_much: '盘口价格偏离过大'" in js
+    assert "live_order_book_price_above_max_entry: '盘口价格高于买入上限'" in js
     assert "live_order_book_unavailable: '盘口暂不可用'" in js
     assert "live_fak_not_matched: '实时 FAK 订单无可成交挂单'" in js
     assert "official_fill_price_below_min_entry: '成交价低于入场下限'" in js

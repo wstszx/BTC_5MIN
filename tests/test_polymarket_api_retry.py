@@ -39,6 +39,37 @@ class _AlwaysFailSession:
         raise requests.exceptions.ConnectionError("network down")
 
 
+class _AbortOnceSession:
+    def __init__(self):
+        self.headers = {}
+        self.calls = 0
+        self.closed = False
+
+    def get(self, *_args, **_kwargs):
+        self.calls += 1
+        raise requests.exceptions.ConnectionError(
+            "Connection aborted.",
+            ConnectionAbortedError(10053, "software aborted an established connection"),
+        )
+
+    def close(self):
+        self.closed = True
+
+
+class _SuccessSession:
+    def __init__(self):
+        self.headers = {}
+        self.calls = 0
+        self.closed = False
+
+    def get(self, *_args, **_kwargs):
+        self.calls += 1
+        return _StubResponse({"ok": True})
+
+    def close(self):
+        self.closed = True
+
+
 def test_get_json_retries_with_backoff_and_recovers(monkeypatch):
     sleeps = []
     monkeypatch.setattr("polymarket_api.time.sleep", lambda seconds: sleeps.append(seconds))
@@ -66,6 +97,62 @@ def test_get_json_raises_runtime_error_after_retries(monkeypatch):
     assert "Unable to fetch https://example.com/events" in message
     assert "after 2 attempts" in message
     assert client.session.calls == 2
+
+
+def test_get_json_rebuilds_owned_session_after_connection_aborted(monkeypatch):
+    sleeps = []
+    sessions = [_SuccessSession()]
+
+    monkeypatch.setattr("polymarket_api.time.sleep", lambda seconds: sleeps.append(seconds))
+
+    client = PolymarketClient(AppConfig())
+    original_session = _AbortOnceSession()
+
+    def build_session():
+        return sessions.pop(0)
+
+    client._build_session = build_session  # type: ignore[method-assign]
+    client.session = original_session
+    client._apply_session_defaults(client.session)
+
+    payload = client._get_json("/events/keyset", base_url="https://gamma-api.polymarket.com", retries=2)
+
+    assert payload == {"ok": True}
+    assert original_session.calls == 1
+    assert original_session.closed is True
+    assert isinstance(client.session, _SuccessSession)
+    assert client.session.calls == 1
+    assert len(sleeps) == 1
+
+
+def test_get_json_does_not_rebuild_external_session_after_connection_aborted(monkeypatch):
+    monkeypatch.setattr("polymarket_api.time.sleep", lambda _seconds: None)
+
+    session = _AbortOnceSession()
+    client = PolymarketClient(AppConfig(), session=session)
+
+    try:
+        client._get_json("/events/keyset", base_url="https://gamma-api.polymarket.com", retries=1)
+    except RuntimeError:
+        pass
+    else:
+        raise AssertionError("Expected RuntimeError")
+
+    assert client.session is session
+    assert session.closed is False
+
+
+def test_reset_session_after_transport_error_ignores_stale_failed_session():
+    client = PolymarketClient(AppConfig())
+    stale_session = _AbortOnceSession()
+    active_session = _SuccessSession()
+    client.session = active_session
+
+    client._reset_session_after_transport_error(stale_session)
+
+    assert client.session is active_session
+    assert active_session.closed is False
+    assert stale_session.closed is False
 
 
 def test_ws_message_handler_ingests_book_and_price_change():
@@ -365,6 +452,35 @@ def test_ws_subscribe_assets_resubscribes_same_assets_after_socket_reconnect():
             "custom_feature_enabled": True,
         }
     ]
+
+
+def test_ws_close_resets_connection_and_cached_market_quotes():
+    class _AliveThread:
+        def is_alive(self):
+            return True
+
+    cfg = AppConfig(ws_enabled=True)
+    client = PolymarketClient(cfg)
+    now = datetime.now(timezone.utc)
+    client._ws_app = object()
+    client._ws_thread = _AliveThread()
+    client._ws_ping_thread = _AliveThread()
+    client._ws_opened_at = now
+    client._ws_last_message_at = now
+    client._ws_last_ping_at = now
+    client._ws_last_pong_at = now
+    client._ws_subscribed_assets = {"same-a", "same-b"}
+    client._ws_quotes_by_asset["same-a"] = {"last_price": 0.5, "updated_at": now}
+
+    client._handle_ws_close(1006, "closed")
+
+    stats = client.get_ws_runtime_stats()
+    assert stats["ws_connected"] is False
+    assert stats["ws_subscribed_asset_count"] == 0
+    assert stats["ws_cached_asset_count"] == 0
+    assert client._ws_app is None
+    assert client._ws_thread is None
+    assert client._ws_ping_thread is None
 
 
 def test_ws_subscribe_assets_skips_duplicate_subscription_for_same_set():

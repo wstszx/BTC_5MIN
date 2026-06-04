@@ -268,6 +268,42 @@ def test_run_single_command_runtime_cleans_up_if_worker_crashes(monkeypatch):
     assert runtime.shutdown_calls >= 1
     assert runtime.closed == 1
 
+
+def test_run_single_command_runtime_logs_worker_traceback(monkeypatch, tmp_path: Path):
+    class FakeDashboardRuntime:
+        def __init__(self) -> None:
+            self.closed = 0
+            self.shutdown_calls = 0
+
+        def serve_forever(self) -> None:
+            return
+
+        def shutdown(self) -> None:
+            self.shutdown_calls += 1
+
+        def close(self) -> None:
+            self.closed += 1
+
+    runtime = FakeDashboardRuntime()
+    cfg = AppConfig(logs_dir=tmp_path / "logs")
+
+    def fake_run_paper_trading(cfg, *, stop_event, config_provider):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(main, "load_env_file_values", lambda _: {})
+    monkeypatch.setattr(main, "build_config_from_env_values", lambda _: cfg)
+    monkeypatch.setattr(main, "create_dashboard_runtime", lambda **_: runtime)
+    monkeypatch.setattr(main, "run_paper_trading", fake_run_paper_trading)
+
+    exit_code = main.run_single_command_runtime(env_file=tmp_path / ".env.dashboard")
+
+    error_log = tmp_path / "logs" / "runtime_errors.log"
+    log_text = error_log.read_text(encoding="utf-8")
+    assert exit_code == 1
+    assert "worker paper-trading-worker-5m failed" in log_text
+    assert "RuntimeError: boom" in log_text
+
+
 def test_run_single_command_runtime_uses_live_worker_when_trade_mode_live(monkeypatch, tmp_path: Path):
     env_file = tmp_path / ".env.dashboard"
     startup_cfg = AppConfig(
@@ -639,14 +675,13 @@ def test_run_single_command_runtime_reloads_to_paper_only_when_live_switch_disab
 
     def fake_run_paper_trading(cfg, *, stop_event, config_provider, runtime_control=None, stop_when_safe=None):
         calls.append(('paper', cfg.trade_mode, cfg.live_trading_enabled))
-        if len(calls) == 1:
-            runtime_reload['callback']('live_trading_enabled')
-            return {'status': 'stopped'}
         stop_event.set()
         return {'status': 'stopped'}
 
     def fake_run_live_trading(cfg, *, stop_event, config_provider, runtime_control=None, stop_when_safe=None):
         calls.append(('live', cfg.trade_mode, cfg.live_trading_enabled))
+        if len(calls) == 1:
+            runtime_reload['callback']('live_trading_enabled')
         runtime_control.update_worker_state(round_in_progress=False, safe_to_switch=True, pending_live_order=False, current_round_slug=None)
         return {'status': 'stopped', 'skip_reason': 'live_trading_disabled'}
 
@@ -659,7 +694,6 @@ def test_run_single_command_runtime_reloads_to_paper_only_when_live_switch_disab
 
     assert exit_code == 0
     assert calls == [
-        ('paper', 'paper', True),
         ('live', 'live', True),
         ('paper', 'paper', False),
     ]
@@ -936,6 +970,7 @@ def test_build_config_from_env_values_prefers_mode_specific_strategy_overrides()
     cfg = build_config_from_env_values(
         {
             'TRADE_MODE': 'both',
+            'PAPER_USE_LIVE_PROFILES': 'false',
             'PAPER_STRATEGY_IDS': '7,9,10,11',
             'LIVE_STRATEGY_IDS': '7,10',
             'STRATEGY_10_BASE_ORDER_COST': '1.5',
@@ -1059,16 +1094,16 @@ def test_run_single_command_runtime_starts_only_live_when_trade_mode_is_live(mon
     assert calls == [('live', 'live', '15m')]
 
 
-def test_run_single_command_runtime_starts_paper_and_live_workers_in_both_mode(monkeypatch):
+def test_run_single_command_runtime_runs_paper_only_for_non_live_strategies_in_both_mode(monkeypatch):
     cfg = build_config_from_env_values(
         {
             'TRADE_MODE': 'both',
             'LIVE_TRADING_ENABLED': 'true',
             'POLYMARKET_PRIVATE_KEY': 'pk',
             'POLYMARKET_FUNDER': '0xfunder',
-            'PAPER_TIMEFRAMES': '5m',
-            'PAPER_5M_STRATEGY_ID': '5',
-            'PAPER_5M_STRATEGY_IDS': '5,6',
+            'PAPER_TIMEFRAMES': '15m',
+            'PAPER_15M_STRATEGY_ID': '5',
+            'PAPER_15M_STRATEGY_IDS': '5,7,10',
             'LIVE_STRATEGY_IDS': '7',
             'MARKET_TIMEFRAME': '15m',
         }
@@ -1115,18 +1150,18 @@ def test_run_single_command_runtime_starts_paper_and_live_workers_in_both_mode(m
         (
             'paper',
             'paper',
-            '5m',
-            (5, 6),
-            cfg.logs_dir / 'paper' / '5m' / 'session_state.json',
-            cfg.logs_dir / 'paper' / '5m' / 'paper_trades.csv',
+            '15m',
+            (5, 10),
+            cfg.logs_dir / 'paper' / '15m' / 'session_state.json',
+            cfg.logs_dir / 'paper' / '15m' / 'paper_trades.csv',
         ),
         (
             'live',
             'live',
             '15m',
             (7,),
-            None,
-            None,
+            cfg.logs_dir / 'paper' / '15m' / 'session_state.json',
+            cfg.logs_dir / 'paper' / '15m' / 'paper_trades.csv',
         )
     ]
 

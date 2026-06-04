@@ -5,7 +5,7 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
-from atomic_io import atomic_write_text
+from atomic_io import atomic_path_guard, atomic_write_text
 from live_pending import normalize_pending_live_trades
 from models import LiveStrategyState, PaperStrategyState, PendingLiveTrade, PendingPaperTrade, SessionState, Strategy9SignalSample
 
@@ -188,9 +188,10 @@ def save_session_state(path: Path, state: SessionState) -> None:
 
 
 def _load_session_state_legacy(path: Path) -> SessionState:
-    if not path.exists():
-        return SessionState()
-    payload = json.loads(path.read_text(encoding="utf-8"))
+    with atomic_path_guard(path):
+        if not path.exists():
+            return SessionState()
+        payload = json.loads(path.read_text(encoding="utf-8"))
     pending_paper_trades = [
         item if isinstance(item, PendingPaperTrade) else PendingPaperTrade(**item)
         for item in payload.pop("pending_paper_trades", [])
@@ -224,55 +225,56 @@ def load_session_state(
     effective_paper_strategy_ids: list[int] | None = None,
     effective_live_strategy_ids: list[int] | None = None,
 ) -> SessionState:
-    state = _load_session_state_legacy(path)
-    selected_paper_strategy_ids = list(effective_paper_strategy_ids or [])
-    selected_live_strategy_ids = list(effective_live_strategy_ids or [])
-    if not path.exists():
-        return state
+    with atomic_path_guard(path):
+        state = _load_session_state_legacy(path)
+        selected_paper_strategy_ids = list(effective_paper_strategy_ids or [])
+        selected_live_strategy_ids = list(effective_live_strategy_ids or [])
+        if not path.exists():
+            return state
 
-    payload = json.loads(path.read_text(encoding="utf-8"))
-    raw_paper_strategy_map = payload.get("paper_strategies")
-    if selected_paper_strategy_ids:
-        if not isinstance(raw_paper_strategy_map, dict):
-            state.paper_strategies = {
-                strategy_id: PaperStrategyState(
-                    round_index=state.round_index,
-                    cash_pnl=state.cash_pnl,
-                    recovery_loss=state.recovery_loss,
-                    consecutive_losses=state.consecutive_losses,
-                    consecutive_max_stake_skips=state.consecutive_max_stake_skips,
-                    signal_round_slug=state.signal_round_slug,
-                    signal_round_open_up_price=state.signal_round_open_up_price,
-                    signal_round_locked_side=state.signal_round_locked_side,
-                    strategy6_last_ofi_score=state.strategy6_last_ofi_score,
-                    strategy9_signal_samples=list(state.strategy9_signal_samples),
-                    stop_loss_count=state.stop_loss_count,
-                    daily_realized_pnl=state.daily_realized_pnl,
-                    current_day=state.current_day,
-                    pending_paper_trades=list(state.pending_paper_trades),
-                    last_processed_paper_event_slug=state.last_processed_paper_event_slug,
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        raw_paper_strategy_map = payload.get("paper_strategies")
+        if selected_paper_strategy_ids:
+            if not isinstance(raw_paper_strategy_map, dict):
+                state.paper_strategies = {
+                    strategy_id: PaperStrategyState(
+                        round_index=state.round_index,
+                        cash_pnl=state.cash_pnl,
+                        recovery_loss=state.recovery_loss,
+                        consecutive_losses=state.consecutive_losses,
+                        consecutive_max_stake_skips=state.consecutive_max_stake_skips,
+                        signal_round_slug=state.signal_round_slug,
+                        signal_round_open_up_price=state.signal_round_open_up_price,
+                        signal_round_locked_side=state.signal_round_locked_side,
+                        strategy6_last_ofi_score=state.strategy6_last_ofi_score,
+                        strategy9_signal_samples=list(state.strategy9_signal_samples),
+                        stop_loss_count=state.stop_loss_count,
+                        daily_realized_pnl=state.daily_realized_pnl,
+                        current_day=state.current_day,
+                        pending_paper_trades=list(state.pending_paper_trades),
+                        last_processed_paper_event_slug=state.last_processed_paper_event_slug,
+                    )
+                    for strategy_id in selected_paper_strategy_ids
+                }
+            else:
+                hydrated_map: dict[int, PaperStrategyState] = {}
+                for raw_key, raw_value in raw_paper_strategy_map.items():
+                    hydrated_map[int(raw_key)] = hydrate_paper_strategy_state(raw_value)
+                for strategy_id in selected_paper_strategy_ids:
+                    hydrated_map.setdefault(strategy_id, PaperStrategyState())
+                state.paper_strategies = hydrated_map
+
+        if selected_live_strategy_ids:
+            state.live_strategies = hydrate_live_strategy_map(payload, selected_live_strategy_ids)
+            if not isinstance(payload.get("live_strategies"), dict):
+                active_live_state = state.live_strategies.get(
+                    trusted_legacy_live_strategy_id(payload, selected_live_strategy_ids)
                 )
-                for strategy_id in selected_paper_strategy_ids
-            }
-        else:
-            hydrated_map: dict[int, PaperStrategyState] = {}
-            for raw_key, raw_value in raw_paper_strategy_map.items():
-                hydrated_map[int(raw_key)] = hydrate_paper_strategy_state(raw_value)
-            for strategy_id in selected_paper_strategy_ids:
-                hydrated_map.setdefault(strategy_id, PaperStrategyState())
-            state.paper_strategies = hydrated_map
-
-    if selected_live_strategy_ids:
-        state.live_strategies = hydrate_live_strategy_map(payload, selected_live_strategy_ids)
-        if not isinstance(payload.get("live_strategies"), dict):
-            active_live_state = state.live_strategies.get(
-                trusted_legacy_live_strategy_id(payload, selected_live_strategy_ids)
-            )
-        else:
-            active_live_state = None
-        if active_live_state is not None:
-            apply_live_strategy_state_to_session_state(state, active_live_state)
-    return state
+            else:
+                active_live_state = None
+            if active_live_state is not None:
+                apply_live_strategy_state_to_session_state(state, active_live_state)
+        return state
 
 
 def clone_session_state(state: SessionState) -> SessionState:

@@ -40,6 +40,40 @@ def test_trade_log_appends_records_and_trader_reexports_helper(tmp_path):
     assert trader_append_trade_log is append_trade_log
 
 
+def test_trade_log_writes_explicit_effective_price_aliases(tmp_path):
+    log_path = tmp_path / "paper_trades.csv"
+    start = datetime(2026, 4, 30, 1, 0, tzinfo=timezone.utc)
+
+    append_trade_log(
+        log_path,
+        TradeRecord(
+            timestamp=start + timedelta(seconds=30),
+            mode="paper",
+            round_index=1,
+            strategy=10,
+            entry_timing="OPEN",
+            event_slug="btc-updown-5m-fee",
+            start_time=start,
+            end_time=start + timedelta(minutes=5),
+            side="UP",
+            price=0.537472,
+            order_size=1.923075,
+            order_cost=1.0335989664,
+            expected_profit=0.8894760336,
+            raw_price=0.52,
+            raw_order_cost=0.999999,
+            fee=0.0335999664,
+        ),
+    )
+
+    rows = list(csv.DictReader(log_path.open(encoding="utf-8", newline="")))
+
+    assert rows[0]["raw_price"] == "0.52"
+    assert rows[0]["price"] == "0.537472"
+    assert rows[0]["effective_price_with_fee"] == "0.537472"
+    assert rows[0]["effective_order_cost_with_fee"] == "1.0335989664"
+
+
 def test_trade_log_updates_existing_paper_strategy_round_instead_of_duplicating(tmp_path):
     log_path = tmp_path / "paper_trades.csv"
     start = datetime(2026, 5, 7, 14, 0, tzinfo=timezone.utc)

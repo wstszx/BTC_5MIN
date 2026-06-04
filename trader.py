@@ -112,6 +112,7 @@ from clob_adapter import (
     is_retryable_live_clob_error as _is_retryable_live_clob_error,
     is_retryable_live_io_error as _is_retryable_live_io_error,
     live_clob_client_config_key as _live_clob_client_config_key,
+    live_execution_price_floor as _live_execution_price_floor,
     price_improvement_floor as _price_improvement_floor,
     read_available_live_balance as _adapter_read_available_live_balance,
     submit_live_strategy_order as _adapter_submit_live_strategy_order,
@@ -520,6 +521,65 @@ def _opposite_token_id_for_side(token_ids: dict[str, str], side: str | None) -> 
     return token_ids.get(opposite_side) if opposite_side is not None else None
 
 
+def _valid_binary_quote_price(value: float | None) -> float | None:
+    try:
+        price = float(value)
+    except (TypeError, ValueError):
+        return None
+    if 0 < price < 1:
+        return price
+    return None
+
+
+def _best_possible_quote_binary_buy_price(side: str, quote: MarketQuote) -> float | None:
+    candidates: list[float] = []
+    same_side_price = _valid_binary_quote_price(resolve_quote_price(side, quote))
+    if same_side_price is not None:
+        candidates.append(same_side_price)
+    opposite_side = _opposite_binary_side(side)
+    opposite_bid = None
+    if opposite_side == "UP":
+        opposite_bid = quote.up_best_bid
+    elif opposite_side == "DOWN":
+        opposite_bid = quote.down_best_bid
+    opposite_bid_price = _valid_binary_quote_price(opposite_bid)
+    if opposite_bid_price is not None:
+        candidates.append(1.0 - opposite_bid_price)
+    return min(candidates) if candidates else None
+
+
+def _live_quote_execution_guard_enabled(cfg: AppConfig) -> bool:
+    return str(getattr(cfg, "live_order_type", "FOK") or "FOK").strip().upper() == "FAK"
+
+
+def _live_quote_execution_skip_reason(
+    *,
+    cfg: AppConfig,
+    plan: TradePlan,
+    side: str,
+    quote: MarketQuote,
+) -> str | None:
+    if not _live_quote_execution_guard_enabled(cfg):
+        return None
+    best_buy_price = _best_possible_quote_binary_buy_price(side, quote)
+    decision_price = plan.raw_price if plan.raw_price is not None else plan.price
+    min_entry_price = getattr(cfg, "min_entry_price", None)
+    execution_floor = _live_execution_price_floor(
+        decision_price=decision_price,
+        min_entry_price=min_entry_price,
+        max_improvement=getattr(cfg, "live_max_price_improvement", None),
+    )
+    if (
+        best_buy_price is None
+        or execution_floor is None
+        or best_buy_price + 1e-9 >= execution_floor
+    ):
+        return None
+    if min_entry_price is not None and best_buy_price + 1e-9 < min_entry_price:
+        return "live_order_book_price_below_min_entry"
+    return "live_order_book_price_improved_too_much"
+
+
 def _execute_order_plan(
     *,
     mode: str,
@@ -636,6 +696,167 @@ def _sleep_until_round_end(
         if not _sleep_if_not_stopped(stop_event, cfg.poll_interval_seconds):
             return False
     return True
+
+
+def _build_live_trade_plan_for_decision(
+    *,
+    cfg: AppConfig,
+    state: SessionState | LiveStrategyState,
+    market: dict[str, Any],
+    side_decision: SideDecision,
+    side: str,
+    price: float | None,
+) -> TradePlan:
+    return build_trade_plan(
+        state=state,
+        side=side,
+        price=price,
+        min_entry_price=getattr(cfg, "min_entry_price", getattr(cfg, "min_price_threshold", None)),
+        max_entry_price=_max_entry_price_for_decision(cfg, side_decision),
+        min_price_threshold=getattr(cfg, 'min_price_threshold', None),
+        max_price_threshold=cfg.max_price_threshold,
+        min_stake=_effective_min_order_cost(cfg, market),
+        max_stake=cfg.max_stake,
+        max_consecutive_losses=cfg.max_consecutive_losses,
+        base_order_cost=cfg.base_order_cost,
+        order_cost_multiplier=_order_cost_multiplier_for_decision(cfg, side_decision, price),
+    )
+
+
+def _execute_live_order_with_fak_retry(
+    *,
+    cfg: AppConfig,
+    market_client: Any,
+    market: dict[str, Any],
+    live_client: Any | None,
+    strategy_id: int,
+    strategy_state: SessionState | LiveStrategyState,
+    target_round: MarketWindow,
+    entry_time: datetime,
+    now: datetime,
+    quote: MarketQuote,
+    side_decision: SideDecision,
+    side: str,
+    price: float | None,
+    token_id: str,
+    opposite_token_id: str | None,
+    plan: TradePlan,
+    remaining_live_budget: float | None,
+    balance_error: str | None = None,
+    binance_signal_service: BinanceDepth5SignalService | None = None,
+) -> tuple[OrderExecutionResult, TradePlan, SideDecision, str, float | None, MarketQuote]:
+    current_quote = quote
+    current_decision = side_decision
+    current_side = side
+    current_price = price
+    current_plan = plan
+    current_token_id = token_id
+    current_opposite_token_id = opposite_token_id
+    execution = OrderExecutionResult(
+        status="skipped",
+        remaining_budget=remaining_live_budget,
+        skip_reason="not_attempted",
+        balance_error=balance_error,
+    )
+    retry_count = max(0, int(getattr(cfg, "live_fak_no_match_retry_count", 0) or 0))
+    retry_delay = max(0.0, float(getattr(cfg, "live_fak_no_match_retry_delay_seconds", 0.0) or 0.0))
+    attempt = 0
+    while True:
+        quote_skip_reason = (
+            _live_quote_execution_skip_reason(
+                cfg=cfg,
+                plan=current_plan,
+                side=current_side,
+                quote=current_quote,
+            )
+            if remaining_live_budget is not None
+            else None
+        )
+        execution = (
+            OrderExecutionResult(
+                status="skipped",
+                remaining_budget=remaining_live_budget,
+                skip_reason=quote_skip_reason,
+                balance_error=balance_error,
+            )
+            if quote_skip_reason is not None
+            else _execute_order_plan(
+                mode="live",
+                cfg=cfg,
+                clob_client=live_client,
+                strategy_id=strategy_id,
+                slug=target_round.slug,
+                token_id=current_token_id,
+                plan=current_plan,
+                remaining_budget=remaining_live_budget,
+                opposite_token_id=current_opposite_token_id,
+                balance_error=balance_error,
+            )
+        )
+        if execution.skip_reason != "live_fak_not_matched" or attempt >= retry_count:
+            return execution, current_plan, current_decision, current_side, current_price, current_quote
+        attempt += 1
+        if retry_delay > 0:
+            time.sleep(retry_delay)
+        current_quote = market_client.quote_from_market(market)
+        _apply_strategy6_signal_to_quote(
+            cfg=cfg,
+            quote=current_quote,
+            binance_signal_service=binance_signal_service,
+            diagnostic_log=_runtime_log,
+        )
+        refreshed_decision = _resolve_side_from_strategy(
+            cfg=cfg,
+            state=strategy_state,
+            slug=target_round.slug,
+            quote=current_quote,
+            market_client=market_client,
+            window=target_round,
+            now=datetime.now(timezone.utc),
+            entry_time=entry_time,
+        )
+        if refreshed_decision.side != current_side:
+            execution = OrderExecutionResult(
+                status="skipped",
+                remaining_budget=remaining_live_budget,
+                skip_reason=refreshed_decision.reason or "live_fak_retry_signal_changed",
+                balance_error=balance_error,
+            )
+            return execution, current_plan, refreshed_decision, current_side, current_price, current_quote
+        refreshed_price = resolve_quote_price(current_side, current_quote)
+        refreshed_plan = _build_live_trade_plan_for_decision(
+            cfg=cfg,
+            state=strategy_state,
+            market=market,
+            side_decision=refreshed_decision,
+            side=current_side,
+            price=refreshed_price,
+        )
+        refreshed_quote_skip_reason = _live_quote_execution_skip_reason(
+            cfg=cfg,
+            plan=refreshed_plan,
+            side=current_side,
+            quote=current_quote,
+        )
+        if refreshed_quote_skip_reason is not None:
+            execution = OrderExecutionResult(
+                status="skipped",
+                remaining_budget=remaining_live_budget,
+                skip_reason=refreshed_quote_skip_reason,
+                balance_error=balance_error,
+            )
+            return execution, refreshed_plan, refreshed_decision, current_side, refreshed_price, current_quote
+        if not refreshed_plan.should_trade:
+            execution = OrderExecutionResult(
+                status="skipped",
+                remaining_budget=remaining_live_budget,
+                skip_reason=refreshed_plan.skip_reason,
+                balance_error=balance_error,
+            )
+            return execution, refreshed_plan, refreshed_decision, current_side, refreshed_price, current_quote
+        current_decision = refreshed_decision
+        current_price = refreshed_price
+        current_plan = refreshed_plan
 
 
 def place_live_order(
@@ -959,19 +1180,13 @@ def place_live_order(
             "signal_delta": side_decision.signal_delta,
             "signal_locked": side_decision.signal_locked,
         }
-    plan = build_trade_plan(
+    plan = _build_live_trade_plan_for_decision(
+        cfg=cfg,
         state=state,
+        market=market,
+        side_decision=side_decision,
         side=side,
         price=price,
-        min_entry_price=getattr(cfg, "min_entry_price", getattr(cfg, "min_price_threshold", None)),
-        max_entry_price=_max_entry_price_for_decision(cfg, side_decision),
-        min_price_threshold=getattr(cfg, 'min_price_threshold', None),
-        max_price_threshold=cfg.max_price_threshold,
-        min_stake=_effective_min_order_cost(cfg, market),
-        max_stake=cfg.max_stake,
-        max_consecutive_losses=cfg.max_consecutive_losses,
-        base_order_cost=cfg.base_order_cost,
-        order_cost_multiplier=_order_cost_multiplier_for_decision(cfg, side_decision, price),
     )
     token_ids = extract_token_ids(market.get("clobTokenIds"), market.get("outcomes"))
     token_id = token_ids.get(side)
@@ -1117,16 +1332,24 @@ def place_live_order(
         }
 
     remaining_live_budget = _read_available_live_balance(cfg=cfg, clob_client=live_client)
-    execution = _execute_order_plan(
-        mode="live",
+    execution, plan, side_decision, side, price, quote = _execute_live_order_with_fak_retry(
         cfg=cfg,
-        clob_client=live_client,
+        market_client=market_client,
+        market=market,
+        live_client=live_client,
         strategy_id=cfg.strategy_id,
-        slug=target_round.slug,
+        strategy_state=state,
+        target_round=target_round,
+        entry_time=entry_time,
+        now=now,
+        quote=quote,
+        side_decision=side_decision,
+        side=side,
+        price=price,
         token_id=token_id,
-        plan=plan,
-        remaining_budget=remaining_live_budget,
         opposite_token_id=opposite_token_id,
+        plan=plan,
+        remaining_live_budget=remaining_live_budget,
     )
     if execution.status == "skipped":
         append_trade_log(
@@ -1217,6 +1440,7 @@ def place_live_order(
             raw_order_cost=executed_plan.raw_order_cost,
             fee=executed_plan.fee,
             live_price_cap=live_price_cap,
+            raw_price_cap_sent=execution.raw_price_cap_sent,
             tracks_recovery_loss=executed_plan.tracks_recovery_loss,
             **_signal_record_kwargs(side_decision),
         ),
@@ -1245,6 +1469,8 @@ def place_live_order(
         "order_size": executed_plan.order_size,
         "raw_order_cost": executed_plan.raw_order_cost,
         "fee": executed_plan.fee,
+        "effective_price_with_fee": executed_plan.price,
+        "effective_order_cost_with_fee": executed_plan.order_cost,
         "live_price_cap": live_price_cap,
         "order_cost": executed_plan.order_cost,
         "expected_profit": executed_plan.expected_profit,
@@ -1916,19 +2142,13 @@ def run_live_trading(
                                 }
                             )
                             continue
-                        plan = build_trade_plan(
+                        plan = _build_live_trade_plan_for_decision(
+                            cfg=strategy_cfg,
                             state=strategy_state,
+                            market=market,
+                            side_decision=side_decision,
                             side=side,
                             price=price,
-                            min_entry_price=getattr(strategy_cfg, "min_entry_price", getattr(strategy_cfg, "min_price_threshold", None)),
-                            max_entry_price=_max_entry_price_for_decision(strategy_cfg, side_decision),
-                            min_price_threshold=getattr(strategy_cfg, "min_price_threshold", None),
-                            max_price_threshold=strategy_cfg.max_price_threshold,
-                            min_stake=_effective_min_order_cost(strategy_cfg, market),
-                            max_stake=strategy_cfg.max_stake,
-                            max_consecutive_losses=strategy_cfg.max_consecutive_losses,
-                            base_order_cost=strategy_cfg.base_order_cost,
-                            order_cost_multiplier=_order_cost_multiplier_for_decision(strategy_cfg, side_decision, price),
                         )
                         token_ids = extract_token_ids(market.get("clobTokenIds"), market.get("outcomes"))
                         token_id = token_ids.get(side)
@@ -2047,17 +2267,26 @@ def run_live_trading(
                                 }
                             )
                             continue
-                        execution = _execute_order_plan(
-                            mode="live",
+                        execution, plan, side_decision, side, price, strategy_quote = _execute_live_order_with_fak_retry(
                             cfg=strategy_cfg,
-                            clob_client=live_client,
+                            market_client=market_client,
+                            market=market,
+                            live_client=live_client,
                             strategy_id=strategy_id,
-                            slug=target_round.slug,
+                            strategy_state=strategy_state,
+                            target_round=target_round,
+                            entry_time=entry_time,
+                            now=now,
+                            quote=strategy_quote,
+                            side_decision=side_decision,
+                            side=side,
+                            price=price,
                             token_id=token_id,
-                            plan=plan,
-                            remaining_budget=remaining_live_budget,
                             opposite_token_id=opposite_token_id,
+                            plan=plan,
+                            remaining_live_budget=remaining_live_budget,
                             balance_error=balance_read_error,
+                            binance_signal_service=binance_signal_service,
                         )
                         remaining_live_budget = execution.remaining_budget
                         if execution.status == "skipped":
@@ -2091,6 +2320,18 @@ def run_live_trading(
                             )
                             strategy_state.last_processed_live_event_slug = target_round.slug
                             state.live_strategies[strategy_id] = strategy_state
+                            _mirror_live_decision_to_paper_skip(
+                                mirror_state_path=mirror_paper_state_path,
+                                mirror_log_path=mirror_paper_log_path,
+                                cfg=strategy_cfg,
+                                strategy_id=strategy_id,
+                                window=target_round,
+                                strategy_state=strategy_state,
+                                side=side,
+                                price=price,
+                                side_decision=side_decision,
+                                skip_reason=execution.skip_reason,
+                            )
                             strategy_results.append(
                                 {
                                     "strategy_id": strategy_id,
@@ -2150,6 +2391,7 @@ def run_live_trading(
                                 raw_order_cost=executed_plan.raw_order_cost,
                                 fee=executed_plan.fee,
                                 live_price_cap=execution.live_price_cap,
+                                raw_price_cap_sent=execution.raw_price_cap_sent,
                                 **_signal_record_kwargs(side_decision),
                             ),
                         )
@@ -2187,6 +2429,8 @@ def run_live_trading(
                                 "order_size": executed_plan.order_size,
                                 "raw_order_cost": executed_plan.raw_order_cost,
                                 "fee": executed_plan.fee,
+                                "effective_price_with_fee": executed_plan.price,
+                                "effective_order_cost_with_fee": executed_plan.order_cost,
                                 "order_cost": executed_plan.order_cost,
                                 "expected_profit": executed_plan.expected_profit,
                                 "order_type": strategy_cfg.live_order_type.upper(),
@@ -2760,6 +3004,47 @@ def run_paper_trading(
                         continue
     
                     strategy_session.consecutive_max_stake_skips = 0
+                    execution_skip_reason = _live_quote_execution_skip_reason(
+                        cfg=strategy_cfg,
+                        plan=plan,
+                        side=side,
+                        quote=strategy_quote,
+                    )
+                    if execution_skip_reason is not None:
+                        append_trade_log(
+                            log_path,
+                            TradeRecord(
+                                timestamp=datetime.now(timezone.utc),
+                                mode="paper",
+                                experiment_id=experiment_id,
+                                round_index=strategy_session.round_index,
+                                strategy=strategy_id,
+                                entry_timing=strategy_cfg.entry_timing,
+                                event_slug=target_round.slug,
+                                start_time=target_round.start_time,
+                                end_time=target_round.end_time,
+                                side=side,
+                                price=price,
+                                order_size=0.0,
+                                order_cost=0.0,
+                                expected_profit=0.0,
+                                result=None,
+                                trade_pnl=0.0,
+                                cash_pnl=strategy_session.cash_pnl,
+                                recovery_loss=strategy_session.recovery_loss,
+                                consecutive_losses=strategy_session.consecutive_losses,
+                                skip_reason=execution_skip_reason,
+                                **_signal_record_kwargs(side_decision),
+                            ),
+                        )
+                        strategy_session.last_processed_paper_event_slug = target_round.slug
+                        strategy_session.round_index += 1
+                        state.paper_strategies[strategy_id] = _session_state_to_paper_strategy_state(strategy_session)
+                        _sync_legacy_paper_state_fields(state, strategy_ids)
+                        round_completed = True
+                        _copy_session_state_into(loaded_state, state)
+                        save_session_state(state_path, state)
+                        continue
                     if (entry_time - now).total_seconds() > 1:
                         state.paper_strategies[strategy_id] = _session_state_to_paper_strategy_state(strategy_session)
                         continue

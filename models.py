@@ -110,7 +110,10 @@ class TradeRecord:
     raw_price: float | None = None
     raw_order_cost: float | None = None
     fee: float = 0.0
+    effective_price_with_fee: float | None = None
+    effective_order_cost_with_fee: float | None = None
     live_price_cap: float | None = None
+    raw_price_cap_sent: float | None = None
     balance_error: str | None = None
     tracks_recovery_loss: bool = False
 

@@ -1739,7 +1739,16 @@ class _StubClobClient:
             balance_payload if balance_payload is not None else {"available": 100.0, "balance": 100.0}
         )
         self.trade_payloads = trade_payloads or {}
-        self.order_books = order_books or {}
+        self.order_books = order_books or {
+            "up-token": {
+                "asks": [{"price": "0.52", "size": "100.0"}],
+                "bids": [{"price": "0.45", "size": "100.0"}],
+            },
+            "down-token": {
+                "asks": [{"price": "0.52", "size": "100.0"}],
+                "bids": [{"price": "0.45", "size": "100.0"}],
+            },
+        }
         self.order_book_calls = []
 
     def create_market_order(self, order_args):
@@ -1814,6 +1823,19 @@ class _FokNotFilledThenFakFilledClobClient(_StubClobClient):
                 '"orderID":"0xdeadbeef"}'
             )
         return {"success": True, "orderID": "oid-fak-456"}
+
+
+class _FakNotMatchedThenFilledClobClient(_StubClobClient):
+    def post_order(self, order, order_type):
+        self.posted_orders.append((order, order_type))
+        if len(self.posted_orders) == 1:
+            raise RuntimeError(
+                "[py_clob_client_v2] request error status=400 "
+                "url=https://clob.polymarket.com/order "
+                'body={"error":"no orders found to match with FAK order. FAK orders are partially filled or killed if no match is found.",'
+                '"orderID":"0xdeadbeef"}'
+            )
+        return {"success": True, "orderID": "oid-fak-retry"}
 
 
 class _TransientSubmitClobClient(_StubClobClient):
@@ -3085,6 +3107,8 @@ def test_place_live_order_logs_fee_adjusted_effective_fill_after_submission(tmp_
     assert result["fee"] == pytest.approx(0.0335999664)
     assert result["raw_order_cost"] == pytest.approx(0.999999)
     assert result["order_cost"] == pytest.approx(1.0335989664)
+    assert result["effective_price_with_fee"] == pytest.approx(0.537472)
+    assert result["effective_order_cost_with_fee"] == pytest.approx(1.0335989664)
     assert result["expected_profit"] == pytest.approx(0.8894760336)
     assert state.pending_live_price == pytest.approx(0.537472)
     assert state.pending_live_order_cost == pytest.approx(1.0335989664)
@@ -3095,6 +3119,8 @@ def test_place_live_order_logs_fee_adjusted_effective_fill_after_submission(tmp_
     assert rows[-1]["fee"] == "0.0335999664"
     assert rows[-1]["raw_order_cost"] == "0.999999"
     assert rows[-1]["order_cost"] == "1.0335989664"
+    assert rows[-1]["effective_price_with_fee"] == "0.537472"
+    assert rows[-1]["effective_order_cost_with_fee"] == "1.0335989664"
 
 
 def test_place_live_order_audits_official_fill_above_max_entry_price(tmp_path, monkeypatch):
@@ -3141,13 +3167,14 @@ def test_place_live_order_audits_official_fill_above_max_entry_price(tmp_path, m
     assert any("max_entry_price=0.54" in message for message in messages)
 
 
-def test_place_live_order_skips_when_opposite_bid_implies_price_below_min_entry(tmp_path, monkeypatch):
+def test_place_live_order_skips_fak_when_quote_implies_price_below_min_entry_without_rest_precheck(tmp_path, monkeypatch):
     class _DownDecisionLiveMarketClient(_LiveMarketClient):
         def quote_from_market(self, _market):
             return MarketQuote(
                 slug="btc-updown-5m-test",
                 up_price=0.465,
                 down_price=0.535,
+                up_best_bid=0.54,
                 up_best_ask=0.465,
                 down_best_ask=0.535,
                 strategy6_ofi_score=-0.8,
@@ -3187,8 +3214,194 @@ def test_place_live_order_skips_when_opposite_bid_implies_price_below_min_entry(
 
     assert result["status"] == "skipped"
     assert result["skip_reason"] == "live_order_book_price_below_min_entry"
-    assert stub_clob.order_book_calls == ["down-token", "up-token"]
+    assert stub_clob.order_book_calls == []
     assert stub_clob.created_orders == []
+    assert rows[-1]["skip_reason"] == "live_order_book_price_below_min_entry"
+
+
+def test_place_live_order_skips_fak_when_quote_improvement_exceeds_decision_floor_without_rest_precheck(
+    tmp_path,
+    monkeypatch,
+):
+    class _UpDecisionLiveMarketClient(_LiveMarketClient):
+        def quote_from_market(self, _market):
+            return MarketQuote(
+                slug="btc-updown-5m-test",
+                up_price=0.56,
+                down_price=0.44,
+                up_best_ask=0.56,
+                down_best_bid=0.52,
+                down_best_ask=0.44,
+                strategy6_ofi_score=0.8,
+                strategy6_signal_at=datetime.now(timezone.utc),
+                fetched_at=datetime.now(timezone.utc),
+            )
+
+    monkeypatch.setattr("trader._resolve_side_from_strategy", lambda **kwargs: SideDecision(side="UP"))
+    cfg = AppConfig(
+        live_trading_enabled=True,
+        strategy_id=10,
+        live_order_type="FAK",
+        min_entry_price=0.45,
+        max_entry_price=0.57,
+        live_max_price_improvement=0.05,
+        strategy10_confirm_before_entry_seconds=0,
+        signal_lock_before_entry_seconds=0,
+    )
+    stub_clob = _StubClobClient(
+        order_books={
+            "up-token": {"asks": [{"price": "0.56", "size": "10.0"}]},
+            "down-token": {"bids": [{"price": "0.52", "size": "10.0"}]},
+        }
+    )
+    state_path = tmp_path / "state.json"
+    log_path = tmp_path / "live.csv"
+
+    result = place_live_order(
+        cfg=cfg,
+        market_client=_UpDecisionLiveMarketClient(),
+        clob_client=stub_clob,
+        state_path=state_path,
+        log_path=log_path,
+    )
+
+    rows = list(csv.DictReader(log_path.open(newline="", encoding="utf-8")))
+
+    assert result["status"] == "skipped"
+    assert result["skip_reason"] == "live_order_book_price_improved_too_much"
+    assert stub_clob.order_book_calls == []
+    assert stub_clob.created_orders == []
+    assert rows[-1]["skip_reason"] == "live_order_book_price_improved_too_much"
+
+
+def test_place_live_order_retries_fak_no_match_once_after_fresh_quote_validation(tmp_path, monkeypatch):
+    class _RetryQuoteLiveMarketClient(_LiveMarketClient):
+        def __init__(self):
+            self.quote_calls = 0
+
+        def quote_from_market(self, _market):
+            self.quote_calls += 1
+            return MarketQuote(
+                slug="btc-updown-5m-test",
+                up_price=0.46,
+                down_price=0.54,
+                down_best_ask=0.54,
+                up_best_bid=0.45,
+                strategy6_ofi_score=-0.8,
+                strategy6_signal_at=datetime.now(timezone.utc),
+                fetched_at=datetime.now(timezone.utc),
+            )
+
+    market_client = _RetryQuoteLiveMarketClient()
+    monkeypatch.setattr("trader._resolve_side_from_strategy", lambda **kwargs: SideDecision(side="DOWN"))
+    sleeps: list[float] = []
+    monkeypatch.setattr("trader.time.sleep", lambda seconds: sleeps.append(seconds))
+    cfg = AppConfig(
+        live_trading_enabled=True,
+        strategy_id=10,
+        live_order_type="FAK",
+        min_entry_price=0.52,
+        max_entry_price=0.54,
+        live_max_price_improvement=0.05,
+        strategy10_confirm_before_entry_seconds=0,
+        signal_lock_before_entry_seconds=0,
+    )
+    stub_clob = _FakNotMatchedThenFilledClobClient(
+        order_payloads={
+            "oid-fak-retry": {
+                "status": "filled",
+                "filled_order_size": "2.0",
+                "filled_order_cost": "1.08",
+                "avg_price": "0.54",
+            }
+        },
+        order_books={
+            "down-token": {"asks": [{"price": "0.54", "size": "10.0"}]},
+            "up-token": {"bids": [{"price": "0.45", "size": "10.0"}]},
+        },
+    )
+
+    result = place_live_order(
+        cfg=cfg,
+        market_client=market_client,
+        clob_client=stub_clob,
+        state_path=tmp_path / "state.json",
+        log_path=tmp_path / "live.csv",
+    )
+
+    assert result["status"] == "submitted"
+    assert result["order_id"] == "oid-fak-retry"
+    assert market_client.quote_calls == 2
+    assert sleeps == [pytest.approx(0.35)]
+    assert [posted[1] for posted in stub_clob.posted_orders] == ["FAK", "FAK"]
+    assert len(stub_clob.created_orders) == 2
+
+
+def test_place_live_order_does_not_retry_fak_no_match_when_fresh_quote_fails_guard(tmp_path, monkeypatch):
+    class _WorseRetryQuoteLiveMarketClient(_LiveMarketClient):
+        def __init__(self):
+            self.quote_calls = 0
+
+        def quote_from_market(self, _market):
+            self.quote_calls += 1
+            if self.quote_calls == 1:
+                return MarketQuote(
+                    slug="btc-updown-5m-test",
+                    up_price=0.46,
+                    down_price=0.54,
+                    down_best_ask=0.54,
+                    up_best_bid=0.45,
+                    strategy6_ofi_score=-0.8,
+                    strategy6_signal_at=datetime.now(timezone.utc),
+                    fetched_at=datetime.now(timezone.utc),
+                )
+            return MarketQuote(
+                slug="btc-updown-5m-test",
+                up_price=0.49,
+                down_price=0.51,
+                down_best_ask=0.51,
+                up_best_bid=0.49,
+                strategy6_ofi_score=-0.8,
+                strategy6_signal_at=datetime.now(timezone.utc),
+                fetched_at=datetime.now(timezone.utc),
+            )
+
+    market_client = _WorseRetryQuoteLiveMarketClient()
+    monkeypatch.setattr("trader._resolve_side_from_strategy", lambda **kwargs: SideDecision(side="DOWN"))
+    sleeps: list[float] = []
+    monkeypatch.setattr("trader.time.sleep", lambda seconds: sleeps.append(seconds))
+    cfg = AppConfig(
+        live_trading_enabled=True,
+        strategy_id=10,
+        live_order_type="FAK",
+        min_entry_price=0.52,
+        max_entry_price=0.54,
+        live_max_price_improvement=0.05,
+        strategy10_confirm_before_entry_seconds=0,
+        signal_lock_before_entry_seconds=0,
+    )
+    stub_clob = _FakNotMatchedThenFilledClobClient(
+        order_books={
+            "down-token": {"asks": [{"price": "0.54", "size": "10.0"}]},
+            "up-token": {"bids": [{"price": "0.45", "size": "10.0"}]},
+        },
+    )
+
+    result = place_live_order(
+        cfg=cfg,
+        market_client=market_client,
+        clob_client=stub_clob,
+        state_path=tmp_path / "state.json",
+        log_path=tmp_path / "live.csv",
+    )
+
+    rows = list(csv.DictReader((tmp_path / "live.csv").open(newline="", encoding="utf-8")))
+
+    assert result["status"] == "skipped"
+    assert result["skip_reason"] == "live_order_book_price_below_min_entry"
+    assert market_client.quote_calls == 2
+    assert sleeps == [pytest.approx(0.35)]
+    assert [posted[1] for posted in stub_clob.posted_orders] == ["FAK"]
     assert rows[-1]["skip_reason"] == "live_order_book_price_below_min_entry"
 
 
@@ -3314,7 +3527,8 @@ def test_place_live_order_logs_official_market_order_price_cap(tmp_path):
                 "filled_order_cost": "1.04",
                 "avg_price": "0.52",
             }
-        }
+        },
+        order_books={"up-token": {"asks": [{"price": "0.52", "size": "10.0"}]}},
     )
     state_path = tmp_path / "state.json"
     log_path = tmp_path / "live.csv"
@@ -3369,6 +3583,7 @@ def test_place_live_order_logs_official_market_order_price_cap(tmp_path):
             raw_order_cost=executed_plan.raw_order_cost,
             fee=executed_plan.fee,
             live_price_cap=execution.live_price_cap,
+            raw_price_cap_sent=execution.raw_price_cap_sent,
         ),
     )
 
@@ -3376,7 +3591,9 @@ def test_place_live_order_logs_official_market_order_price_cap(tmp_path):
 
     assert execution.status == "submitted"
     assert execution.live_price_cap == pytest.approx(0.54)
+    assert execution.raw_price_cap_sent == pytest.approx(0.54)
     assert rows[-1]["live_price_cap"] == "0.54"
+    assert rows[-1]["raw_price_cap_sent"] == "0.54"
 
 
 def test_place_live_order_rejects_submission_response_without_acceptance(tmp_path):
@@ -3982,7 +4199,10 @@ def test_run_live_trading_executes_inside_paper_entry_threshold(tmp_path, monkey
 
 def test_run_live_trading_mirrors_same_decision_to_paper_state_and_log(tmp_path, monkeypatch):
     stop_event = threading.Event()
-    stub_clob = _StubClobClient(balance_payload={"available": 3.0})
+    stub_clob = _StubClobClient(
+        balance_payload={"available": 3.0},
+        order_books={"up-token": {"asks": [{"price": "0.55", "size": "10.0"}]}},
+    )
 
     def fake_sleep(_seconds):
         stop_event.set()
@@ -4120,6 +4340,67 @@ def test_run_live_trading_settles_mirrored_pending_paper_trade(tmp_path, monkeyp
     assert rows[-1]["event_slug"] == "btc-updown-5m-test"
     assert rows[-1]["result"] == "UP"
     assert float(rows[-1]["trade_pnl"]) == pytest.approx(0.9)
+
+
+def test_run_live_trading_mirrors_execution_skip_to_paper_log(tmp_path, monkeypatch):
+    stop_event = threading.Event()
+
+    def fake_sleep(_seconds):
+        stop_event.set()
+
+    monkeypatch.setattr("trader.time.sleep", fake_sleep)
+    monkeypatch.setattr(
+        "trader._resolve_side_from_strategy",
+        lambda **kwargs: SideDecision(side="UP"),
+    )
+    monkeypatch.setattr(
+        "trader.build_trade_plan",
+        lambda *args, **kwargs: TradePlan(
+            True,
+            "UP",
+            price=0.55,
+            order_size=2.0,
+            order_cost=1.0,
+            expected_profit=0.8181818181818181,
+        ),
+    )
+
+    result = run_live_trading(
+        AppConfig(
+            trade_mode="live",
+            live_trading_enabled=True,
+            live_private_key="pk",
+            live_funder="0xfunder",
+            strategy_id=10,
+            live_strategy_ids=[10],
+            paper_strategy_ids=[10],
+            base_order_cost=1.0,
+            poll_interval_seconds=1,
+            live_order_type="FAK",
+            min_entry_price=0.55,
+            live_max_price_improvement=0.05,
+        ),
+        market_client=_LiveMarketClient(),
+        clob_client=_StubClobClient(balance_payload={"available": 3.0}),
+        state_path=tmp_path / "live_state.json",
+        log_path=tmp_path / "live_orders.csv",
+        mirror_paper_state_path=tmp_path / "paper_state.json",
+        mirror_paper_log_path=tmp_path / "paper_trades.csv",
+        stop_event=stop_event,
+    )
+
+    paper_state = load_session_state(tmp_path / "paper_state.json", effective_paper_strategy_ids=[10])
+    paper_rows = list(csv.DictReader((tmp_path / "paper_trades.csv").open(newline="", encoding="utf-8")))
+    live_rows = list(csv.DictReader((tmp_path / "live_orders.csv").open(newline="", encoding="utf-8")))
+
+    assert result["status"] == "stopped"
+    assert live_rows[-1]["skip_reason"] == "live_order_book_price_below_min_entry"
+    assert paper_rows[-1]["mode"] == "paper"
+    assert paper_rows[-1]["event_slug"] == "btc-updown-5m-test"
+    assert paper_rows[-1]["side"] == "UP"
+    assert paper_rows[-1]["skip_reason"] == "live_order_book_price_below_min_entry"
+    assert paper_state.paper_strategies[10].last_processed_paper_event_slug == "btc-updown-5m-test"
+    assert paper_state.paper_strategies[10].pending_paper_trades == []
 
 
 def test_run_live_trading_skips_fok_not_filled_without_runtime_error(tmp_path, monkeypatch):
@@ -6409,6 +6690,68 @@ def test_append_trade_log_replaces_live_observed_placeholder_with_final_skip(tmp
     assert rows[0]["skip_reason"] == "price_below_threshold"
 
 
+def test_append_trade_log_expires_prior_live_observed_placeholder_when_next_round_arrives(tmp_path):
+    log_path = tmp_path / "live_orders.csv"
+    start = datetime(2026, 5, 1, 8, 45, tzinfo=timezone.utc)
+    end = start + timedelta(minutes=5)
+
+    append_trade_log(
+        log_path,
+        TradeRecord(
+            timestamp=start,
+            mode="live",
+            round_index=1,
+            strategy=10,
+            entry_timing="OPEN",
+            event_slug="btc-updown-5m-old",
+            start_time=start,
+            end_time=end,
+            side="SKIP",
+            price=None,
+            order_size=0.0,
+            order_cost=0.0,
+            expected_profit=0.0,
+            result=None,
+            trade_pnl=0.0,
+            cash_pnl=-5.1824,
+            recovery_loss=2.0,
+            consecutive_losses=1,
+            skip_reason="observed_waiting_for_entry",
+        ),
+    )
+    append_trade_log(
+        log_path,
+        TradeRecord(
+            timestamp=start + timedelta(minutes=5, seconds=2),
+            mode="live",
+            round_index=2,
+            strategy=10,
+            entry_timing="OPEN",
+            event_slug="btc-updown-5m-new",
+            start_time=end,
+            end_time=end + timedelta(minutes=5),
+            side="SKIP",
+            price=0.62,
+            order_size=0.0,
+            order_cost=0.0,
+            expected_profit=0.0,
+            result=None,
+            trade_pnl=0.0,
+            cash_pnl=-5.1824,
+            recovery_loss=2.0,
+            consecutive_losses=1,
+            skip_reason="strategy10_price_too_high",
+        ),
+    )
+
+    rows = list(csv.DictReader(log_path.open(newline="", encoding="utf-8")))
+    assert len(rows) == 2
+    assert rows[0]["event_slug"] == "btc-updown-5m-old"
+    assert rows[0]["skip_reason"] == "entry_window_missed"
+    assert rows[1]["event_slug"] == "btc-updown-5m-new"
+    assert rows[1]["skip_reason"] == "strategy10_price_too_high"
+
+
 def test_paper_experiment_id_defaults_to_strategy_prefix():
     state = PaperStrategyState()
 
@@ -7480,6 +7823,65 @@ def test_run_paper_trading_uses_simulated_budget_like_live_execution(tmp_path, m
     assert len(rows) == 2
     assert ",3,OPEN,btc-updown-5m-test," in rows[1]
     assert "insufficient_live_wallet_balance" in rows[1]
+
+
+def test_run_paper_trading_applies_live_quote_execution_guard_for_fak(tmp_path, monkeypatch):
+    stop_event = threading.Event()
+
+    def fake_sleep(_seconds):
+        stop_event.set()
+
+    class _GuardedPaperClient(_LiveMarketClient):
+        def quote_from_market(self, _market):
+            return MarketQuote(
+                slug="btc-updown-5m-test",
+                up_price=0.54,
+                down_price=0.46,
+                up_best_ask=0.52,
+                down_best_bid=0.48,
+                fetched_at=datetime.now(timezone.utc),
+            )
+
+    monkeypatch.setattr("trader.time.sleep", fake_sleep)
+    monkeypatch.setattr(
+        "trader._resolve_side_from_strategy",
+        lambda **kwargs: SideDecision(side="UP"),
+    )
+    monkeypatch.setattr(
+        "trader.build_trade_plan",
+        lambda *args, **kwargs: TradePlan(
+            True,
+            "UP",
+            price=0.54,
+            order_size=2.0,
+            order_cost=1.08,
+            expected_profit=0.92,
+        ),
+    )
+
+    result = run_paper_trading(
+        AppConfig(
+            trade_mode="paper",
+            paper_strategy_ids=[10],
+            live_order_type="FAK",
+            min_entry_price=0.55,
+            live_max_price_improvement=0.05,
+            poll_interval_seconds=1,
+        ),
+        client=_GuardedPaperClient(),
+        state_path=tmp_path / "paper_state.json",
+        log_path=tmp_path / "paper_trades.csv",
+        stop_event=stop_event,
+    )
+
+    state = load_session_state(tmp_path / "paper_state.json", effective_paper_strategy_ids=[10])
+    rows = list(csv.DictReader((tmp_path / "paper_trades.csv").open(newline="", encoding="utf-8")))
+
+    assert result["status"] == "stopped"
+    assert state.paper_strategies[10].pending_paper_trades == []
+    assert rows[-1]["event_slug"] == "btc-updown-5m-test"
+    assert rows[-1]["side"] == "UP"
+    assert rows[-1]["skip_reason"] == "live_order_book_price_below_min_entry"
 
 
 def test_settled_pending_paper_trade_writes_single_final_csv_row(tmp_path):

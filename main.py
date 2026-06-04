@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import inspect
+import traceback
 from dataclasses import replace
 import sys
 import threading
@@ -347,6 +348,27 @@ def _paper_cfg_for_timeframe(cfg: AppConfig, timeframe: str) -> AppConfig:
     return timeframe_cfg
 
 
+def _paper_cfg_excluding_live_strategies(cfg: AppConfig, live_strategy_ids: list[int]) -> AppConfig | None:
+    paper_strategy_ids = [
+        strategy_id
+        for strategy_id in list(getattr(cfg, 'paper_strategy_ids', []) or [])
+        if strategy_id not in live_strategy_ids
+    ]
+    if not paper_strategy_ids:
+        return None
+    if paper_strategy_ids == list(getattr(cfg, 'paper_strategy_ids', []) or []):
+        return cfg
+    worker_cfg = replace(cfg, paper_strategy_ids=paper_strategy_ids)
+    worker_cfg.paper_profiles = getattr(cfg, 'paper_profiles', {})
+    worker_cfg.paper_strategy_profiles = {
+        strategy_id: profile
+        for strategy_id, profile in getattr(cfg, 'paper_strategy_profiles', {}).items()
+        if strategy_id in paper_strategy_ids
+    }
+    worker_cfg.live_profiles = getattr(cfg, 'live_profiles', {})
+    return worker_cfg
+
+
 class _PaperRuntimeControlProxy:
     def __init__(self, runtime_control: RuntimeControl, worker_key: str) -> None:
         self._runtime_control = runtime_control
@@ -399,17 +421,35 @@ def _load_shared_config(env_file: Path) -> AppConfig:
     return build_config_from_env_values(env_values)
 
 
+def _append_worker_error_traceback(logs_dir: Path, worker_name: str, exc: BaseException) -> None:
+    log_path = logs_dir / "runtime_errors.log"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    timestamp = time.strftime("%Y-%m-%dT%H:%M:%S%z")
+    traceback_text = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
+    with log_path.open("a", encoding="utf-8") as handle:
+        handle.write(f"[{timestamp}] worker {worker_name} failed\n")
+        handle.write(traceback_text)
+        if not traceback_text.endswith("\n"):
+            handle.write("\n")
+
+
 def _spawn_runtime_worker(
     *,
     name: str,
     target,
     stop_event: threading.Event,
     worker_errors: list[tuple[str, BaseException]],
+    logs_dir: Path | None = None,
 ) -> threading.Thread:
     def _runner() -> None:
         try:
             target()
         except BaseException as exc:  # pragma: no cover - exercised in integration tests
+            if logs_dir is not None:
+                try:
+                    _append_worker_error_traceback(logs_dir, name, exc)
+                except BaseException:
+                    pass
             worker_errors.append((name, exc))
             stop_event.set()
 
@@ -526,14 +566,33 @@ def run_single_command_runtime(
     def _config_provider() -> AppConfig:
         return _load_shared_config(env_path)
 
+    def _paper_worker_cfg_for_timeframe(
+        source_cfg: AppConfig,
+        timeframe: str,
+        *,
+        live_enabled: bool,
+    ) -> AppConfig | None:
+        paper_source_cfg = _cfg_for_active_mode(source_cfg, 'paper')
+        timeframe_cfg = _paper_cfg_for_timeframe(paper_source_cfg, timeframe)
+        live_strategy_ids = (
+            list(getattr(_cfg_for_active_mode(source_cfg, 'live'), 'live_strategy_ids', []) or [])
+            if live_enabled
+            else []
+        )
+        return _paper_cfg_excluding_live_strategies(timeframe_cfg, live_strategy_ids)
+
     def _append_paper_worker_targets(
         base_cfg: AppConfig,
         worker_targets: list[tuple[str, object]],
         *,
         live_enabled: bool,
     ) -> None:
+        live_strategy_ids = list(getattr(_cfg_for_active_mode(base_cfg, 'live'), 'live_strategy_ids', []) or []) if live_enabled else []
         paper_cfg = _cfg_for_active_mode(base_cfg, 'paper')
+        paper_cfg = _paper_cfg_excluding_live_strategies(paper_cfg, live_strategy_ids) or paper_cfg
         if not hasattr(paper_cfg, '__dataclass_fields__') or not hasattr(paper_cfg, 'paper_profiles'):
+            if live_enabled and not getattr(paper_cfg, 'paper_strategy_ids', []):
+                return
             paper_kwargs = _build_worker_call_kwargs(
                 run_paper_trading,
                 stop_event=stop_event,
@@ -555,13 +614,17 @@ def run_single_command_runtime(
         supports_log_path = 'log_path' in paper_signature.parameters
         for timeframe in paper_timeframes:
             timeframe_cfg = _paper_cfg_for_timeframe(paper_cfg, timeframe)
+            timeframe_cfg = _paper_cfg_excluding_live_strategies(timeframe_cfg, live_strategy_ids)
+            if timeframe_cfg is None:
+                continue
             state_path, log_path = _paper_runtime_paths(paper_cfg, timeframe)
             paper_kwargs = _build_worker_call_kwargs(
                 run_paper_trading,
                 stop_event=stop_event,
-                config_provider=lambda timeframe=timeframe: _paper_cfg_for_timeframe(
-                    _cfg_for_active_mode(_config_provider(), 'paper'),
+                config_provider=lambda timeframe=timeframe: _paper_worker_cfg_for_timeframe(
+                    _config_provider(),
                     timeframe,
+                    live_enabled=live_enabled,
                 ),
                 runtime_control=_runtime_control_for_paper(
                     runtime_control=manager.runtime_control,
@@ -587,6 +650,13 @@ def run_single_command_runtime(
             runtime_control=manager.runtime_control,
             stop_when_safe=manager.restart_requested,
         )
+        live_signature = inspect.signature(run_live_trading)
+        if active_mode == 'both':
+            mirror_state_path, mirror_log_path = _paper_runtime_paths(live_cfg, live_cfg.market_timeframe)
+            if 'mirror_paper_state_path' in live_signature.parameters:
+                live_kwargs['mirror_paper_state_path'] = mirror_state_path
+            if 'mirror_paper_log_path' in live_signature.parameters:
+                live_kwargs['mirror_paper_log_path'] = mirror_log_path
         live_target = lambda cfg=live_cfg, live_kwargs=live_kwargs: run_live_trading(cfg, **live_kwargs)
         worker_targets.append(('live-trading-worker', live_target))
 
@@ -613,6 +683,7 @@ def run_single_command_runtime(
             target=dashboard_runtime.serve_forever,
             stop_event=stop_event,
             worker_errors=worker_errors,
+            logs_dir=startup_cfg.logs_dir if isinstance(startup_cfg, AppConfig) else None,
         )
 
         while not stop_event.is_set():
@@ -643,6 +714,7 @@ def run_single_command_runtime(
                     target=target,
                     stop_event=stop_event,
                     worker_errors=worker_errors,
+                    logs_dir=base_cfg.logs_dir if isinstance(base_cfg, AppConfig) else None,
                 )
                 for name, target in worker_targets
             ]

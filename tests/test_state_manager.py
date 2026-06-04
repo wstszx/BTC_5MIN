@@ -1,8 +1,15 @@
 from __future__ import annotations
 
 import json
+import subprocess
+import sys
+import threading
+import textwrap
+import time
 from pathlib import Path
 
+import atomic_io
+import pytest
 from models import PendingPaperTrade, SessionState, Strategy9SignalSample
 from state_manager import load_session_state, save_session_state
 from trader import load_session_state as trader_load_session_state
@@ -100,3 +107,138 @@ def test_state_manager_save_session_state_roundtrips(tmp_path: Path):
 
     assert loaded.cash_pnl == 1.25
     assert loaded.strategy9_signal_samples[0].ofi_score == 0.7
+
+
+def test_state_manager_save_session_state_outwaits_long_windows_replace_denial(
+    monkeypatch,
+    tmp_path: Path,
+):
+    state_path = tmp_path / "session_state.json"
+    attempts = 0
+    original_replace = Path.replace
+
+    def flaky_replace(self: Path, target: Path):
+        nonlocal attempts
+        attempts += 1
+        if attempts <= 6:
+            raise PermissionError(13, "Permission denied", str(target))
+        return original_replace(self, target)
+
+    monkeypatch.setattr(Path, "replace", flaky_replace)
+    monkeypatch.setattr(atomic_io.time, "sleep", lambda _seconds: None)
+
+    save_session_state(state_path, SessionState(cash_pnl=2.5))
+
+    assert attempts == 7
+    assert load_session_state(state_path).cash_pnl == 2.5
+
+
+def test_load_session_state_waits_for_in_process_atomic_replace(monkeypatch, tmp_path: Path):
+    state_path = tmp_path / "session_state.json"
+    state_path.write_text(json.dumps({"cash_pnl": 0.0}), encoding="utf-8")
+    original_replace = Path.replace
+    replace_started = threading.Event()
+    allow_replace = threading.Event()
+    reader_done = threading.Event()
+    writer_errors: list[BaseException] = []
+    reader_values: list[float] = []
+
+    def blocked_replace(self: Path, target: Path):
+        if Path(target) == state_path:
+            replace_started.set()
+            assert allow_replace.wait(timeout=2.0)
+        return original_replace(self, target)
+
+    def write_state():
+        try:
+            save_session_state(state_path, SessionState(cash_pnl=9.0))
+        except BaseException as exc:
+            writer_errors.append(exc)
+
+    def read_state():
+        reader_values.append(load_session_state(state_path).cash_pnl)
+        reader_done.set()
+
+    monkeypatch.setattr(Path, "replace", blocked_replace)
+    writer = threading.Thread(target=write_state)
+    writer.start()
+    assert replace_started.wait(timeout=2.0)
+    reader = threading.Thread(target=read_state)
+    reader.start()
+    completed_while_replace_blocked = reader_done.wait(timeout=0.1)
+    allow_replace.set()
+    writer.join(timeout=2.0)
+    reader.join(timeout=2.0)
+
+    assert writer_errors == []
+    assert completed_while_replace_blocked is False
+    assert reader_values == [9.0]
+
+
+def test_state_manager_save_waits_for_external_process_path_lock(tmp_path: Path):
+    if sys.platform != "win32":
+        pytest.skip("Windows file-lock behavior")
+
+    state_path = tmp_path / "session_state.json"
+    lock_path = tmp_path / ".session_state.json.lock"
+    lock_acquired_path = tmp_path / "lock_acquired.txt"
+    release_lock_path = tmp_path / "release_lock.txt"
+    holder_code = textwrap.dedent(
+        f"""
+        import msvcrt
+        from pathlib import Path
+        import time
+
+        lock_path = Path(r"{lock_path}")
+        lock_acquired_path = Path(r"{lock_acquired_path}")
+        release_lock_path = Path(r"{release_lock_path}")
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+        with lock_path.open("a+b") as handle:
+            handle.seek(0)
+            if not handle.read(1):
+                handle.write(b"0")
+                handle.flush()
+            handle.seek(0)
+            msvcrt.locking(handle.fileno(), msvcrt.LK_LOCK, 1)
+            lock_acquired_path.write_text("1", encoding="utf-8")
+            try:
+                while not release_lock_path.exists():
+                    time.sleep(0.01)
+            finally:
+                handle.seek(0)
+                msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+        """
+    )
+
+    holder = subprocess.Popen([sys.executable, "-c", holder_code])
+    try:
+        deadline = time.monotonic() + 5.0
+        while not lock_acquired_path.exists():
+            assert holder.poll() is None
+            assert time.monotonic() < deadline
+            time.sleep(0.01)
+
+        writer_done = threading.Event()
+        writer_errors: list[BaseException] = []
+
+        def write_state():
+            try:
+                save_session_state(state_path, SessionState(cash_pnl=4.0))
+            except BaseException as exc:
+                writer_errors.append(exc)
+            finally:
+                writer_done.set()
+
+        writer = threading.Thread(target=write_state)
+        writer.start()
+
+        assert writer_done.wait(timeout=0.2) is False
+        release_lock_path.write_text("1", encoding="utf-8")
+        writer.join(timeout=5.0)
+        assert writer_done.is_set()
+    finally:
+        release_lock_path.write_text("1", encoding="utf-8")
+        holder.wait(timeout=5.0)
+
+    assert writer_errors == []
+    assert load_session_state(state_path).cash_pnl == 4.0

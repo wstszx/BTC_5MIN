@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 from contextlib import contextmanager
-from dataclasses import dataclass, field, fields
+from dataclasses import dataclass, field, fields, replace
 from pathlib import Path
 
 MARKET_TIMEFRAME = "MARKET_TIMEFRAME"
@@ -144,6 +144,7 @@ _INT_CONFIG_KEYS: frozenset[str] = frozenset(
         "HISTORY_ENTRY_MAX_OFFSET_SECONDS",
         "POLYMARKET_CHAIN_ID",
         "POLYMARKET_SIGNATURE_TYPE",
+        "LIVE_FAK_NO_MATCH_RETRY_COUNT",
     }
 )
 _FLOAT_CONFIG_KEYS: frozenset[str] = frozenset(
@@ -210,11 +211,13 @@ _FLOAT_CONFIG_KEYS: frozenset[str] = frozenset(
         "FINAL_PRICE_POLL_INTERVAL_SECONDS",
         "WS_TRADE_GUARD_STALE_SECONDS",
         "WS_PING_INTERVAL_SECONDS",
+        "LIVE_FAK_NO_MATCH_RETRY_DELAY_SECONDS",
     }
 )
 _BOOL_CONFIG_KEYS: frozenset[str] = frozenset(
     {
         "LIVE_TRADING_ENABLED",
+        "PAPER_USE_LIVE_PROFILES",
         "POLYMARKET_FOK_FALLBACK_TO_FAK",
         "POLYMARKET_PRECHECK_ORDER_BOOK_DEPTH",
         "WS_ENABLED",
@@ -1303,6 +1306,7 @@ class AppConfig:
     strategy_ids: list[int] = field(default_factory=list)
     paper_strategy_ids: list[int] = field(default_factory=lambda: _parse_strategy_id_list(os.getenv(PAPER_STRATEGY_IDS), fallback=_env_int(STRATEGY_ID, 2)))
     paper_simulated_wallet_balance: float = field(default_factory=lambda: _env_float("PAPER_SIMULATED_WALLET_BALANCE", 1_000_000.0))
+    paper_use_live_profiles: bool = field(default_factory=lambda: _env_bool("PAPER_USE_LIVE_PROFILES", True))
     trade_mode: str = field(default_factory=lambda: (os.getenv("TRADE_MODE") or "paper").strip().lower() or "paper")
     strategy_id: int = field(default_factory=lambda: _env_int("STRATEGY_ID", 2))
     live_strategy_ids: list[int] = field(default_factory=list)
@@ -1422,6 +1426,10 @@ class AppConfig:
     live_order_type: str = field(default_factory=lambda: (os.getenv("POLYMARKET_ORDER_TYPE") or "FOK").upper())
     live_fok_fallback_to_fak: bool = field(default_factory=lambda: _env_bool("POLYMARKET_FOK_FALLBACK_TO_FAK", True))
     live_precheck_order_book_depth: bool = field(default_factory=lambda: _env_bool("POLYMARKET_PRECHECK_ORDER_BOOK_DEPTH", True))
+    live_fak_no_match_retry_count: int = field(default_factory=lambda: _env_int("LIVE_FAK_NO_MATCH_RETRY_COUNT", 1))
+    live_fak_no_match_retry_delay_seconds: float = field(
+        default_factory=lambda: _env_float("LIVE_FAK_NO_MATCH_RETRY_DELAY_SECONDS", 0.35)
+    )
     paper_profiles: dict[str, PaperTimeframeProfile] = field(init=False)
     paper_strategy_profiles: dict[int, LiveStrategyProfile] = field(init=False)
     live_profiles: dict[int, LiveStrategyProfile] = field(init=False)
@@ -1514,7 +1522,7 @@ class AppConfig:
             for strategy_id in [profile.strategy_id, *profile.paper_strategy_ids]:
                 if strategy_id not in paper_profile_strategy_ids:
                     paper_profile_strategy_ids.append(strategy_id)
-        self.paper_strategy_profiles = {
+        raw_paper_profiles = {
             strategy_id: _paper_strategy_profile_for_strategy(self, strategy_id)
             for strategy_id in paper_profile_strategy_ids
         }
@@ -1522,6 +1530,11 @@ class AppConfig:
             strategy_id: _live_profile_for_strategy(self, strategy_id)
             for strategy_id in self.live_strategy_ids
         }
+        if self.paper_use_live_profiles:
+            for strategy_id, live_profile in self.live_profiles.items():
+                if strategy_id in raw_paper_profiles:
+                    raw_paper_profiles[strategy_id] = replace(live_profile)
+        self.paper_strategy_profiles = raw_paper_profiles
 
     @property
     def market_definition(self) -> MarketTimeframeDefinition:
