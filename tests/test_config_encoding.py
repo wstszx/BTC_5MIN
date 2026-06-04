@@ -309,6 +309,40 @@ def test_build_config_accepts_strategy_9_in_strategy_lists():
     assert cfg.live_strategy_ids == [9]
 
 
+def test_build_config_promotes_paper_trial_profile_when_strategy_is_enabled_live_without_live_overrides():
+    cfg = build_config_from_env_values(
+        {
+            "TRADE_MODE": "both",
+            "PAPER_STRATEGY_IDS": "9,11,12",
+            "LIVE_STRATEGY_IDS": "9,11,12",
+            "PAPER_STRATEGY_9_BASE_ORDER_COST": "1.2",
+            "PAPER_STRATEGY_9_MAX_ENTRY_PRICE": "0.55",
+            "PAPER_STRATEGY_9_STABILITY_SAMPLE_COUNT": "1",
+            "PAPER_STRATEGY_9_STABILITY_REQUIRED_COUNT": "1",
+            "PAPER_STRATEGY_11_MIN_EDGE": "0.005",
+            "PAPER_STRATEGY_11_EDGE_BUFFER": "0.0",
+            "PAPER_STRATEGY_11_MIN_PROBABILITY": "0.54",
+            "PAPER_STRATEGY_12_MAX_ENTRY_PRICE": "0.56",
+            "PAPER_STRATEGY_12_MIN_EDGE": "0.006",
+            "PAPER_STRATEGY_12_OFI_THRESHOLD": "0.58",
+        }
+    )
+
+    for strategy_id in (9, 11, 12):
+        assert cfg.live_profiles[strategy_id] == cfg.paper_strategy_profiles[strategy_id]
+
+    assert cfg.live_profiles[9].base_order_cost == pytest.approx(1.2)
+    assert cfg.live_profiles[9].max_entry_price == pytest.approx(0.55)
+    assert cfg.live_profiles[9].strategy9_stability_sample_count == 1
+    assert cfg.live_profiles[9].strategy9_stability_required_count == 1
+    assert cfg.live_profiles[11].strategy11_min_edge == pytest.approx(0.005)
+    assert cfg.live_profiles[11].strategy11_edge_buffer == pytest.approx(0.0)
+    assert cfg.live_profiles[11].strategy11_min_probability == pytest.approx(0.54)
+    assert cfg.live_profiles[12].max_entry_price == pytest.approx(0.56)
+    assert cfg.live_profiles[12].strategy11_min_edge == pytest.approx(0.006)
+    assert cfg.live_profiles[12].strategy7_ofi_threshold == pytest.approx(0.58)
+
+
 def test_build_config_accepts_strategy10_and_reads_edge_values():
     cfg = build_config_from_env_values(
         {

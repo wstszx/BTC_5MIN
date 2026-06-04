@@ -988,6 +988,13 @@ def _apply_mode_profile_overrides(mode: str, profile: LiveStrategyProfile) -> Li
     return profile
 
 
+def _has_explicit_mode_profile_overrides(mode: str, strategy_id: int) -> bool:
+    return any(
+        _explicit_mode_profile_key(mode, strategy_id, base_key) is not None
+        for base_key in _PROFILE_FIELD_BASE_KEYS.values()
+    )
+
+
 def _profile_for_strategy(cfg: AppConfig, strategy_id: int) -> LiveStrategyProfile:
     strategy7_max_entry_fallback = (
         _strategy_env_float(strategy_id, "STRATEGY7_MAX_ENTRY_PRICE", cfg.max_entry_price)
@@ -1526,10 +1533,17 @@ class AppConfig:
             strategy_id: _paper_strategy_profile_for_strategy(self, strategy_id)
             for strategy_id in paper_profile_strategy_ids
         }
-        self.live_profiles = {
-            strategy_id: _live_profile_for_strategy(self, strategy_id)
-            for strategy_id in self.live_strategy_ids
-        }
+        self.live_profiles = {}
+        for strategy_id in self.live_strategy_ids:
+            paper_profile = raw_paper_profiles.get(strategy_id)
+            if (
+                self.paper_use_live_profiles
+                and paper_profile is not None
+                and not _has_explicit_mode_profile_overrides("LIVE", strategy_id)
+            ):
+                self.live_profiles[strategy_id] = replace(paper_profile)
+            else:
+                self.live_profiles[strategy_id] = _live_profile_for_strategy(self, strategy_id)
         if self.paper_use_live_profiles:
             for strategy_id, live_profile in self.live_profiles.items():
                 if strategy_id in raw_paper_profiles:
