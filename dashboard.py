@@ -5597,15 +5597,6 @@ const state = {
   helpReturnFocusId: 'btnHelp',
 };
 
-const REPORT_STRATEGY_OPTIONS = {
-  paper: ['7', '9', '10', '11', '12'],
-  live: ['7', '10'],
-};
-
-function reportStrategyOptionsForMode(mode) {
-  return (REPORT_STRATEGY_OPTIONS[String(mode || '').toLowerCase()] || REPORT_STRATEGY_OPTIONS.paper).slice();
-}
-
 const POLL_MS = {
   market: 3000,
   summary: 20000,
@@ -6343,6 +6334,42 @@ function parseStrategyIdList(rawValue) {
     .split(',')
     .map((item) => String(item || '').trim())
     .filter((item, index, arr) => item && arr.indexOf(item) === index);
+}
+
+function configuredStrategyIdsForMode(mode) {
+  const normalizedMode = String(mode || '').toLowerCase() === 'live' ? 'live' : 'paper';
+  const payload = state.config || {};
+  const envValues = payload.env_values || {};
+  const constraints = ((payload.live_health || {}).constraints) || {};
+  const draft = currentUnifiedStrategyDraftForReport();
+  if (draft) {
+    const unified = resolveUnifiedStrategySelection(payload, draft);
+    if (unified.multiKey === strategyListKeyForMode(normalizedMode) && unified.selected.length > 0) {
+      return unified.selected.slice();
+    }
+  }
+  if (normalizedMode === 'live') {
+    const liveIds = parseStrategyIdList(envValues.LIVE_STRATEGY_IDS);
+    if (liveIds.length > 0) {
+      return liveIds;
+    }
+    if (Array.isArray(constraints.live_strategy_ids) && constraints.live_strategy_ids.length > 0) {
+      return constraints.live_strategy_ids.map((item) => String(item));
+    }
+    return parseStrategyIdList(envValues.STRATEGY_IDS || envValues.STRATEGY_ID);
+  }
+  const paperIds = parseStrategyIdList(envValues.PAPER_STRATEGY_IDS);
+  if (paperIds.length > 0) {
+    return paperIds;
+  }
+  if (Array.isArray(constraints.paper_strategy_ids) && constraints.paper_strategy_ids.length > 0) {
+    return constraints.paper_strategy_ids.map((item) => String(item));
+  }
+  return parseStrategyIdList(envValues.STRATEGY_IDS || envValues.STRATEGY_ID);
+}
+
+function reportStrategyOptionsForMode(mode) {
+  return configuredStrategyIdsForMode(mode);
 }
 
 function parsePaperTimeframeList(rawValue) {
