@@ -1088,7 +1088,7 @@ def test_strategy11_edge_too_low_skip_keeps_probability_diagnostics():
     assert fields["signal_reason"] == "strategy11_edge_too_low"
 
 
-def test_strategy11_paper_tuning_can_emit_trial_signal_without_relaxing_live_defaults():
+def test_strategy11_shared_tuning_can_emit_trial_signal():
     now = datetime(2026, 4, 30, 1, 2, 0, tzinfo=timezone.utc)
     window = MarketWindow(
         event_id="e1",
@@ -1104,13 +1104,11 @@ def test_strategy11_paper_tuning_can_emit_trial_signal_without_relaxing_live_def
             "STRATEGY_ID": "11",
             "PAPER_STRATEGY_IDS": "11",
             "LIVE_STRATEGY_IDS": "7,10",
-            "STRATEGY_11_MIN_EDGE": "0.04",
-            "STRATEGY_11_VOLATILITY_BPS_PER_SQRT_MINUTE": "18",
-            "PAPER_STRATEGY_11_MIN_EDGE": "0.005",
-            "PAPER_STRATEGY_11_MIN_PROBABILITY": "0.54",
-            "PAPER_STRATEGY_11_VOLATILITY_BPS_PER_SQRT_MINUTE": "24",
-            "PAPER_STRATEGY_11_MAX_ENTRY_PRICE": "0.56",
-            "PAPER_STRATEGY_11_CONFIRM_BEFORE_ENTRY_SECONDS": "0",
+            "STRATEGY_11_MIN_EDGE": "0.005",
+            "STRATEGY_11_MIN_PROBABILITY": "0.54",
+            "STRATEGY_11_VOLATILITY_BPS_PER_SQRT_MINUTE": "24",
+            "STRATEGY_11_MAX_ENTRY_PRICE": "0.56",
+            "STRATEGY_11_CONFIRM_BEFORE_ENTRY_SECONDS": "0",
         }
     )
     paper_cfg = cfg_for_paper_strategy(cfg, 11)

@@ -30,13 +30,10 @@ def cfg_for_live_strategy(cfg: AppConfig, strategy_id: int) -> AppConfig:
 
 
 def cfg_for_paper_strategy(cfg: AppConfig, strategy_id: int) -> AppConfig:
-    if getattr(cfg, "paper_use_live_profiles", True):
-        live_profile = getattr(cfg, "live_profiles", {}).get(strategy_id)
-        if live_profile is not None:
-            overrides = asdict(live_profile)
-            overrides["strategy_id"] = strategy_id
-            return replace(cfg, **overrides)
-    profile = getattr(cfg, "paper_strategy_profiles", {}).get(strategy_id)
+    profile = (
+        getattr(cfg, "paper_strategy_profiles", {}).get(strategy_id)
+        or getattr(cfg, "live_profiles", {}).get(strategy_id)
+    )
     if profile is None:
         return replace(cfg, strategy_id=strategy_id)
     overrides = asdict(profile)

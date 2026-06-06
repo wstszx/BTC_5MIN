@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 from contextlib import contextmanager
-from dataclasses import dataclass, field, fields, replace
+from dataclasses import dataclass, field
 from pathlib import Path
 
 MARKET_TIMEFRAME = "MARKET_TIMEFRAME"
@@ -558,6 +558,11 @@ def _parse_strategy_id_list(raw: str | None, *, fallback: int) -> list[int]:
     return strategy_ids or [fallback]
 
 
+def _exclude_strategy_ids(strategy_ids: list[int], excluded_strategy_ids: list[int]) -> list[int]:
+    excluded = set(excluded_strategy_ids)
+    return [strategy_id for strategy_id in strategy_ids if strategy_id not in excluded]
+
+
 @dataclass(frozen=True, slots=True)
 class MarketTimeframeDefinition:
     timeframe: str
@@ -625,20 +630,6 @@ def _strategy_profile_keys(strategy_id: int, base_key: str) -> tuple[str, ...]:
     return tuple(keys)
 
 
-def _mode_strategy_profile_keys(mode: str, strategy_id: int, base_key: str) -> tuple[str, ...]:
-    keys: list[str] = []
-    display_base_key = display_strategy_profile_base_key(strategy_id, base_key)
-    mode_prefix = mode.upper()
-    for candidate in (
-        f"{mode_prefix}_{_strategy_profile_prefix(strategy_id)}_{display_base_key}",
-        f"{mode_prefix}_{_strategy_profile_prefix(strategy_id)}_{base_key}",
-        *_strategy_profile_keys(strategy_id, base_key),
-    ):
-        if candidate not in keys:
-            keys.append(candidate)
-    return tuple(keys)
-
-
 def _first_env_key(keys: tuple[str, ...]) -> str | None:
     for key in keys:
         if os.getenv(key) is not None:
@@ -677,12 +668,6 @@ def _strategy_env_select(strategy_id: int, base_key: str, default: str) -> str:
     if allowed is not None and value not in allowed:
         return allowed[0]
     return value
-
-
-def _explicit_mode_profile_key(mode: str, strategy_id: int, base_key: str) -> str | None:
-    mode_keys = _mode_strategy_profile_keys(mode, strategy_id, base_key)
-    legacy_keys = set(_strategy_profile_keys(strategy_id, base_key))
-    return _first_env_key(tuple(key for key in mode_keys if key not in legacy_keys))
 
 
 @dataclass(frozen=True, slots=True)
@@ -904,95 +889,6 @@ def _cap_profile_safety_limits(cfg: AppConfig, profile: LiveStrategyProfile) -> 
     if cfg.max_stake is not None and profile.max_stake is not None:
         profile.max_stake = min(profile.max_stake, cfg.max_stake)
     return profile
-
-
-_PROFILE_FIELD_BASE_KEYS: dict[str, str] = {
-    field.name: field.name.upper()
-    for field in fields(LiveStrategyProfile)
-    if field.name != "strategy_id"
-}
-_PROFILE_FIELD_BASE_KEYS.update(
-    {
-        "strategy7_ofi_threshold": "STRATEGY7_OFI_THRESHOLD",
-        "strategy7_momentum_threshold": "STRATEGY7_MOMENTUM_THRESHOLD",
-        "strategy7_max_momentum_delta": "STRATEGY7_MAX_MOMENTUM_DELTA",
-        "strategy7_max_entry_price": "STRATEGY7_MAX_ENTRY_PRICE",
-        "strategy7_min_signal_gap": "STRATEGY7_MIN_SIGNAL_GAP",
-        "strategy7_confirm_before_entry_seconds": "STRATEGY7_CONFIRM_BEFORE_ENTRY_SECONDS",
-        "strategy7_late_confirm_strong_signal_gap": "STRATEGY7_LATE_CONFIRM_STRONG_SIGNAL_GAP",
-        "strategy7_late_confirm_relax_seconds": "STRATEGY7_LATE_CONFIRM_RELAX_SECONDS",
-        "strategy7_dynamic_sizing_enabled": "STRATEGY7_DYNAMIC_SIZING_ENABLED",
-        "strategy7_sizing_reference_price": "STRATEGY7_SIZING_REFERENCE_PRICE",
-        "strategy7_sizing_price_step": "STRATEGY7_SIZING_PRICE_STEP",
-        "strategy7_sizing_price_step_reduction": "STRATEGY7_SIZING_PRICE_STEP_REDUCTION",
-        "strategy7_sizing_min_multiplier": "STRATEGY7_SIZING_MIN_MULTIPLIER",
-        "strategy7_sizing_max_multiplier": "STRATEGY7_SIZING_MAX_MULTIPLIER",
-        "strategy7_sizing_strong_signal_gap": "STRATEGY7_SIZING_STRONG_SIGNAL_GAP",
-        "strategy7_sizing_strong_signal_boost": "STRATEGY7_SIZING_STRONG_SIGNAL_BOOST",
-        "strategy9_dynamic_sizing_enabled": "STRATEGY9_DYNAMIC_SIZING_ENABLED",
-        "strategy9_sizing_reference_price": "STRATEGY9_SIZING_REFERENCE_PRICE",
-        "strategy9_sizing_price_step": "STRATEGY9_SIZING_PRICE_STEP",
-        "strategy9_sizing_price_step_reduction": "STRATEGY9_SIZING_PRICE_STEP_REDUCTION",
-        "strategy9_sizing_min_multiplier": "STRATEGY9_SIZING_MIN_MULTIPLIER",
-        "strategy9_sizing_max_multiplier": "STRATEGY9_SIZING_MAX_MULTIPLIER",
-        "strategy9_sizing_strong_signal_gap": "STRATEGY9_SIZING_STRONG_SIGNAL_GAP",
-        "strategy9_sizing_strong_signal_boost": "STRATEGY9_SIZING_STRONG_SIGNAL_BOOST",
-        "strategy9_stability_sample_count": "STRATEGY9_STABILITY_SAMPLE_COUNT",
-        "strategy9_stability_required_count": "STRATEGY9_STABILITY_REQUIRED_COUNT",
-        "strategy9_stability_window_seconds": "STRATEGY9_STABILITY_WINDOW_SECONDS",
-        "strategy9_reversal_lookback_seconds": "STRATEGY9_REVERSAL_LOOKBACK_SECONDS",
-        "strategy9_max_signal_decay": "STRATEGY9_MAX_SIGNAL_DECAY",
-        "strategy9_base_max_entry_price": "STRATEGY9_BASE_MAX_ENTRY_PRICE",
-        "strategy9_strong_max_entry_price": "STRATEGY9_STRONG_MAX_ENTRY_PRICE",
-        "strategy9_ultra_max_entry_price": "STRATEGY9_ULTRA_MAX_ENTRY_PRICE",
-        "strategy9_strong_signal_gap": "STRATEGY9_STRONG_SIGNAL_GAP",
-        "strategy9_ultra_signal_gap": "STRATEGY9_ULTRA_SIGNAL_GAP",
-        "strategy10_min_edge": "STRATEGY10_MIN_EDGE",
-        "strategy10_edge_buffer": "STRATEGY10_EDGE_BUFFER",
-        "strategy10_ofi_weight": "STRATEGY10_OFI_WEIGHT",
-        "strategy10_momentum_weight": "STRATEGY10_MOMENTUM_WEIGHT",
-        "strategy10_max_fair_value": "STRATEGY10_MAX_FAIR_VALUE",
-        "strategy10_min_momentum_delta": "STRATEGY10_MIN_MOMENTUM_DELTA",
-        "strategy10_max_momentum_delta": "STRATEGY10_MAX_MOMENTUM_DELTA",
-        "strategy10_down_min_edge": "STRATEGY10_DOWN_MIN_EDGE",
-        "strategy10_confirm_before_entry_seconds": "STRATEGY10_CONFIRM_BEFORE_ENTRY_SECONDS",
-        "strategy11_min_edge": "STRATEGY11_MIN_EDGE",
-        "strategy11_edge_buffer": "STRATEGY11_EDGE_BUFFER",
-        "strategy11_volatility_bps_per_sqrt_minute": "STRATEGY11_VOLATILITY_BPS_PER_SQRT_MINUTE",
-        "strategy11_min_probability": "STRATEGY11_MIN_PROBABILITY",
-        "strategy11_max_probability": "STRATEGY11_MAX_PROBABILITY",
-        "strategy11_confirm_before_entry_seconds": "STRATEGY11_CONFIRM_BEFORE_ENTRY_SECONDS",
-    }
-)
-
-
-def _apply_mode_profile_overrides(mode: str, profile: LiveStrategyProfile) -> LiveStrategyProfile:
-    for field_name, base_key in _PROFILE_FIELD_BASE_KEYS.items():
-        key = _explicit_mode_profile_key(mode, profile.strategy_id, base_key)
-        if key is None:
-            continue
-        current_value = getattr(profile, field_name)
-        if isinstance(current_value, bool):
-            value = _env_bool(key, current_value)
-        elif isinstance(current_value, int) and not isinstance(current_value, bool):
-            value = _env_int(key, current_value)
-        elif isinstance(current_value, float):
-            value = _env_float(key, current_value)
-        elif current_value is None:
-            value = _env_optional_float(key)
-        elif isinstance(current_value, str):
-            value = _env_select(key, current_value)
-        else:
-            continue
-        setattr(profile, field_name, value)
-    return profile
-
-
-def _has_explicit_mode_profile_overrides(mode: str, strategy_id: int) -> bool:
-    return any(
-        _explicit_mode_profile_key(mode, strategy_id, base_key) is not None
-        for base_key in _PROFILE_FIELD_BASE_KEYS.values()
-    )
 
 
 def _profile_for_strategy(cfg: AppConfig, strategy_id: int) -> LiveStrategyProfile:
@@ -1296,11 +1192,11 @@ def _profile_for_strategy(cfg: AppConfig, strategy_id: int) -> LiveStrategyProfi
 
 
 def _live_profile_for_strategy(cfg: AppConfig, strategy_id: int) -> LiveStrategyProfile:
-    return _apply_mode_profile_overrides("LIVE", _profile_for_strategy(cfg, strategy_id))
+    return _profile_for_strategy(cfg, strategy_id)
 
 
 def _paper_strategy_profile_for_strategy(cfg: AppConfig, strategy_id: int) -> LiveStrategyProfile:
-    return _apply_mode_profile_overrides("PAPER", _profile_for_strategy(cfg, strategy_id))
+    return _profile_for_strategy(cfg, strategy_id)
 
 
 @dataclass(slots=True)
@@ -1456,14 +1352,22 @@ class AppConfig:
             self.live_strategy_ids = list(legacy_strategy_ids)
         elif not self.live_strategy_ids:
             self.live_strategy_ids = _parse_strategy_id_list(os.getenv(LIVE_STRATEGY_IDS), fallback=self.strategy_id)
+        live_claims_strategy_ids = os.getenv(LIVE_STRATEGY_IDS) is not None or self.trade_mode in {"live", "both"}
+        if live_claims_strategy_ids:
+            self.paper_strategy_ids = _exclude_strategy_ids(self.paper_strategy_ids, self.live_strategy_ids)
         self.paper_profiles = {}
         for timeframe in self.paper_timeframes:
             prefix = f"PAPER_{timeframe.upper()}"
             strategy_id = _env_int(f"{prefix}_STRATEGY_ID", self.strategy_id)
+            paper_strategy_ids = _paper_profile_strategy_ids(prefix, self.paper_strategy_ids, strategy_id)
+            if live_claims_strategy_ids:
+                paper_strategy_ids = _exclude_strategy_ids(paper_strategy_ids, self.live_strategy_ids)
+                if strategy_id in set(self.live_strategy_ids) and paper_strategy_ids:
+                    strategy_id = paper_strategy_ids[0]
             self.paper_profiles[timeframe] = PaperTimeframeProfile(
                 timeframe=timeframe,
                 strategy_id=strategy_id,
-                paper_strategy_ids=_paper_profile_strategy_ids(prefix, self.paper_strategy_ids, strategy_id),
+                paper_strategy_ids=paper_strategy_ids,
                 base_order_cost=self.base_order_cost,
                 max_consecutive_losses=self.max_consecutive_losses,
                 min_stake=self.min_stake,
@@ -1527,27 +1431,18 @@ class AppConfig:
         paper_profile_strategy_ids: list[int] = list(self.paper_strategy_ids)
         for profile in self.paper_profiles.values():
             for strategy_id in [profile.strategy_id, *profile.paper_strategy_ids]:
+                if live_claims_strategy_ids and strategy_id in set(self.live_strategy_ids):
+                    continue
                 if strategy_id not in paper_profile_strategy_ids:
                     paper_profile_strategy_ids.append(strategy_id)
         raw_paper_profiles = {
             strategy_id: _paper_strategy_profile_for_strategy(self, strategy_id)
             for strategy_id in paper_profile_strategy_ids
         }
-        self.live_profiles = {}
-        for strategy_id in self.live_strategy_ids:
-            paper_profile = raw_paper_profiles.get(strategy_id)
-            if (
-                self.paper_use_live_profiles
-                and paper_profile is not None
-                and not _has_explicit_mode_profile_overrides("LIVE", strategy_id)
-            ):
-                self.live_profiles[strategy_id] = replace(paper_profile)
-            else:
-                self.live_profiles[strategy_id] = _live_profile_for_strategy(self, strategy_id)
-        if self.paper_use_live_profiles:
-            for strategy_id, live_profile in self.live_profiles.items():
-                if strategy_id in raw_paper_profiles:
-                    raw_paper_profiles[strategy_id] = replace(live_profile)
+        self.live_profiles = {
+            strategy_id: _live_profile_for_strategy(self, strategy_id)
+            for strategy_id in self.live_strategy_ids
+        }
         self.paper_strategy_profiles = raw_paper_profiles
 
     @property

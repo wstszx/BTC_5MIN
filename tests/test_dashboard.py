@@ -939,7 +939,7 @@ def test_live_health_payload_reports_read_only_constraints(tmp_path: Path, monke
         assert payload["constraints"]["taker_base_fee"] == 1000
         assert payload["constraints"]["order_type"] == "FOK"
         assert payload["constraints"]["available_balance"] == pytest.approx(34.292807)
-        assert payload["constraints"]["paper_strategy_ids"] == ["5", "7", "10"]
+        assert payload["constraints"]["paper_strategy_ids"] == ["5"]
         assert payload["constraints"]["live_strategy_ids"] == ["7", "10"]
         assert {item["id"] for item in payload["checks"]} >= {
             "live_config",
@@ -3190,20 +3190,20 @@ def test_dashboard_config_payload_exposes_and_saves_strategy_profile_overrides(t
 
         assert payload['strategy_profiles']['mode'] == 'live'
         strategy_seven = payload['strategy_profiles']['strategies']['7']
-        assert strategy_seven['fields']['BASE_ORDER_COST']['key'] == 'LIVE_STRATEGY_7_BASE_ORDER_COST'
+        assert strategy_seven['fields']['BASE_ORDER_COST']['key'] == 'STRATEGY_7_BASE_ORDER_COST'
         assert strategy_seven['fields']['BASE_ORDER_COST']['value'] == '5.5'
-        assert strategy_seven['fields']['BASE_ORDER_COST']['inherited'] is True
+        assert strategy_seven['fields']['BASE_ORDER_COST']['inherited'] is False
         assert payload['strategy_profiles']['strategies']['3']['fields']['BASE_ORDER_COST']['value'] == '1.0'
         assert payload['strategy_profiles']['strategies']['3']['fields']['BASE_ORDER_COST']['inherited'] is True
 
         updated = state.update_config({'LIVE_STRATEGY_3_BASE_ORDER_COST': '4.25'})
 
         assert updated['strategy_profiles']['strategies']['3']['fields']['BASE_ORDER_COST']['value'] == '4.25'
-        assert updated['strategy_profiles']['strategies']['3']['fields']['BASE_ORDER_COST']['key'] == 'LIVE_STRATEGY_3_BASE_ORDER_COST'
+        assert updated['strategy_profiles']['strategies']['3']['fields']['BASE_ORDER_COST']['key'] == 'STRATEGY_3_BASE_ORDER_COST'
         text = env_file.read_text(encoding='utf-8')
         lines = set(text.splitlines())
-        assert 'LIVE_STRATEGY_3_BASE_ORDER_COST=4.25' in text
-        assert 'STRATEGY_3_BASE_ORDER_COST=4.25' not in lines
+        assert 'LIVE_STRATEGY_3_BASE_ORDER_COST=4.25' not in text
+        assert 'STRATEGY_3_BASE_ORDER_COST=4.25' in lines
     finally:
         state.close()
 
@@ -4668,12 +4668,12 @@ def test_dashboard_update_config_accepts_strategy10_confirm_window(tmp_path: Pat
         })
 
         assert payload['env_values']['STRATEGY_ID'] == '10'
-        assert payload['env_values']['PAPER_STRATEGY_IDS'] == '10'
+        assert payload['env_values']['PAPER_STRATEGY_IDS'] == ''
         assert payload['env_values']['LIVE_STRATEGY_IDS'] == '10'
         assert payload['env_values']['STRATEGY_10_CONFIRM_BEFORE_ENTRY_SECONDS'] == '0'
-        assert payload['env_values']['PAPER_STRATEGY_10_STRATEGY10_MIN_MOMENTUM_DELTA'] == '-0.02'
-        assert payload['env_values']['PAPER_STRATEGY_10_STRATEGY10_MAX_MOMENTUM_DELTA'] == '0.02'
-        assert payload['env_values']['PAPER_STRATEGY_10_STRATEGY10_DOWN_MIN_EDGE'] == '0.07'
+        assert payload['env_values']['STRATEGY_10_MIN_MOMENTUM_DELTA'] == '-0.02'
+        assert payload['env_values']['STRATEGY_10_MAX_MOMENTUM_DELTA'] == '0.02'
+        assert payload['env_values']['STRATEGY_10_DOWN_MIN_EDGE'] == '0.07'
     finally:
         state.close()
 
@@ -4708,12 +4708,12 @@ def test_dashboard_config_payload_includes_strategy12_catalog_and_profile_fields
 
         assert payload['strategy_catalog']['12']['label'] == 'BTC 概率+盘口确认'
         assert payload['select_options']['PAPER_STRATEGY_IDS'] == SUPPORTED_STRATEGY_OPTIONS
-        assert fields['STRATEGY11_MIN_EDGE']['key'] == 'PAPER_STRATEGY_12_MIN_EDGE'
+        assert fields['STRATEGY11_MIN_EDGE']['key'] == 'STRATEGY_12_MIN_EDGE'
         assert fields['STRATEGY11_VOLATILITY_BPS_PER_SQRT_MINUTE']['key'] == (
-            'PAPER_STRATEGY_12_VOLATILITY_BPS_PER_SQRT_MINUTE'
+            'STRATEGY_12_VOLATILITY_BPS_PER_SQRT_MINUTE'
         )
-        assert fields['STRATEGY7_OFI_THRESHOLD']['key'] == 'PAPER_STRATEGY_12_OFI_THRESHOLD'
-        assert fields['STRATEGY7_MOMENTUM_THRESHOLD']['key'] == 'PAPER_STRATEGY_12_MOMENTUM_THRESHOLD'
+        assert fields['STRATEGY7_OFI_THRESHOLD']['key'] == 'STRATEGY_12_OFI_THRESHOLD'
+        assert fields['STRATEGY7_MOMENTUM_THRESHOLD']['key'] == 'STRATEGY_12_MOMENTUM_THRESHOLD'
     finally:
         state.close()
 
@@ -4759,7 +4759,7 @@ def test_dashboard_update_config_accepts_strategy11_values(tmp_path: Path):
             'STRATEGY_11_CONFIRM_BEFORE_ENTRY_SECONDS': '2',
         })
         assert payload['env_values']['STRATEGY_ID'] == '11'
-        assert payload['env_values']['PAPER_STRATEGY_IDS'] == '11'
+        assert payload['env_values']['PAPER_STRATEGY_IDS'] == ''
         assert payload['env_values']['LIVE_STRATEGY_IDS'] == '11'
         assert payload['env_values']['STRATEGY_11_MIN_EDGE'] == '0.06'
         assert payload['env_values']['STRATEGY_11_CONFIRM_BEFORE_ENTRY_SECONDS'] == '2'
@@ -4787,14 +4787,14 @@ def test_dashboard_update_config_accepts_strategy12_hybrid_values(tmp_path: Path
         assert payload['env_values']['STRATEGY_ID'] == '12'
         assert payload['env_values']['PAPER_STRATEGY_IDS'] == '12'
         assert payload['env_values']['LIVE_STRATEGY_IDS'] == '7,10'
-        assert payload['env_values']['PAPER_STRATEGY_12_MIN_EDGE'] == '0.006'
-        assert payload['env_values']['PAPER_STRATEGY_12_OFI_THRESHOLD'] == '0.58'
-        assert payload['env_values']['PAPER_STRATEGY_12_MOMENTUM_THRESHOLD'] == '0.008'
+        assert payload['env_values']['STRATEGY_12_MIN_EDGE'] == '0.006'
+        assert payload['env_values']['STRATEGY_12_OFI_THRESHOLD'] == '0.58'
+        assert payload['env_values']['STRATEGY_12_MOMENTUM_THRESHOLD'] == '0.008'
     finally:
         state.close()
 
 
-def test_dashboard_update_config_preserves_live_strategy_ids_in_both_mode_when_only_paper_updates(tmp_path: Path):
+def test_dashboard_update_config_preserves_live_strategy_ids_and_removes_paper_overlap(tmp_path: Path):
     env_file = tmp_path / '.env.dashboard'
     env_file.write_text(
         'TRADE_MODE=both\n'
@@ -4812,16 +4812,16 @@ def test_dashboard_update_config_preserves_live_strategy_ids_in_both_mode_when_o
             'PAPER_STRATEGY_IDS': '7,9,10,11',
         })
 
-        assert payload['env_values']['PAPER_STRATEGY_IDS'] == '7,9,10,11'
+        assert payload['env_values']['PAPER_STRATEGY_IDS'] == '9,11'
         assert payload['env_values']['LIVE_STRATEGY_IDS'] == '7,10'
         text = env_file.read_text(encoding='utf-8')
-        assert 'PAPER_STRATEGY_IDS=7,9,10,11' in text
+        assert 'PAPER_STRATEGY_IDS=9,11' in text
         assert 'LIVE_STRATEGY_IDS=7,10' in text
     finally:
         state.close()
 
 
-def test_dashboard_update_config_accepts_mode_specific_strategy_profile_values(tmp_path: Path):
+def test_dashboard_update_config_deduplicates_live_and_paper_strategy_ids(tmp_path: Path):
     env_file = tmp_path / '.env.dashboard'
     state = DashboardState(env_file=env_file)
     try:
@@ -4830,23 +4830,19 @@ def test_dashboard_update_config_accepts_mode_specific_strategy_profile_values(t
             'STRATEGY_ID': '10',
             'PAPER_STRATEGY_IDS': '7,9,10,11',
             'LIVE_STRATEGY_IDS': '7,10',
-            'PAPER_STRATEGY_10_MIN_ENTRY_PRICE': '0.45',
-            'LIVE_STRATEGY_10_MIN_ENTRY_PRICE': '0.50',
-            'PAPER_STRATEGY_10_STRATEGY10_MIN_EDGE': '0.04',
-            'LIVE_STRATEGY_10_STRATEGY10_MIN_EDGE': '0.05',
+            'STRATEGY_10_MIN_ENTRY_PRICE': '0.49',
+            'STRATEGY_10_STRATEGY10_MIN_EDGE': '0.05',
         })
 
-        assert payload['env_values']['PAPER_STRATEGY_IDS'] == '7,9,10,11'
+        assert payload['env_values']['PAPER_STRATEGY_IDS'] == '9,11'
         assert payload['env_values']['LIVE_STRATEGY_IDS'] == '7,10'
-        assert payload['env_values']['PAPER_STRATEGY_10_MIN_ENTRY_PRICE'] == '0.45'
-        assert payload['env_values']['LIVE_STRATEGY_10_MIN_ENTRY_PRICE'] == '0.5'
-        assert payload['env_values']['PAPER_STRATEGY_10_STRATEGY10_MIN_EDGE'] == '0.04'
-        assert payload['env_values']['LIVE_STRATEGY_10_STRATEGY10_MIN_EDGE'] == '0.05'
+        assert payload['env_values']['STRATEGY_10_MIN_ENTRY_PRICE'] == '0.49'
+        assert payload['env_values']['STRATEGY_10_MIN_EDGE'] == '0.05'
     finally:
         state.close()
 
 
-def test_dashboard_strategy_profile_payload_uses_mode_specific_keys(tmp_path: Path):
+def test_dashboard_strategy_profile_payload_uses_shared_strategy_keys(tmp_path: Path):
     env_file = tmp_path / '.env.dashboard'
     env_file.write_text(
         'TRADE_MODE=both\n'
@@ -4865,8 +4861,8 @@ def test_dashboard_strategy_profile_payload_uses_mode_specific_keys(tmp_path: Pa
 
         strategy10_min_entry = payload['strategy_profiles']['strategies']['10']['fields']['MIN_ENTRY_PRICE']
         assert payload['strategy_profiles']['mode'] == 'paper'
-        assert strategy10_min_entry['key'] == 'PAPER_STRATEGY_10_MIN_ENTRY_PRICE'
-        assert strategy10_min_entry['value'] == '0.45'
+        assert strategy10_min_entry['key'] == 'STRATEGY_10_MIN_ENTRY_PRICE'
+        assert strategy10_min_entry['value'] == '0.49'
         assert strategy10_min_entry['inherited'] is False
     finally:
         state.close()

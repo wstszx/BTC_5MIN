@@ -485,11 +485,38 @@ def _split_strategy_profile_key(key: str) -> tuple[str, str, str] | None:
 
 
 def _strategy_profile_key_for_mode(mode: str, strategy_id: int | str, base_key: str) -> str:
-    shared_key = _shared_strategy_profile_key(strategy_id, base_key)
-    normalized_mode = str(mode or "shared").strip().lower()
-    if normalized_mode in {"paper", "live"}:
-        return f"{normalized_mode.upper()}_{shared_key}"
-    return shared_key
+    return _shared_strategy_profile_key(strategy_id, base_key)
+
+
+def _parse_strategy_id_texts(value: str | None) -> list[str]:
+    strategy_ids: list[str] = []
+    seen: set[str] = set()
+    for item in str(value or "").split(","):
+        candidate = item.strip()
+        if candidate not in SUPPORTED_STRATEGY_ID_TEXTS or candidate in seen:
+            continue
+        seen.add(candidate)
+        strategy_ids.append(candidate)
+    return strategy_ids
+
+
+def _deduplicate_paper_live_strategy_ids(env_values: dict[str, str]) -> None:
+    if "LIVE_STRATEGY_IDS" not in env_values:
+        return
+    live_ids = _parse_strategy_id_texts(env_values.get("LIVE_STRATEGY_IDS", ""))
+    if not live_ids:
+        return
+    paper_ids = _parse_strategy_id_texts(env_values.get("PAPER_STRATEGY_IDS", ""))
+    filtered_paper_ids = [strategy_id for strategy_id in paper_ids if strategy_id not in set(live_ids)]
+    env_values["PAPER_STRATEGY_IDS"] = ",".join(filtered_paper_ids)
+
+
+def _shared_strategy_profile_update_key(key: str) -> str:
+    strategy_profile_key = _split_strategy_profile_key(key)
+    if strategy_profile_key is None:
+        return key
+    _, strategy_id, base_key = strategy_profile_key
+    return _shared_strategy_profile_key(strategy_id, base_key)
 
 
 def _strategy_profile_field_names(strategy_id: int | str) -> list[str]:
@@ -2561,13 +2588,16 @@ class DashboardState:
                     validation_errors[key] = str(exc)
             else:
                 merged[key] = effective_value
+        if LIVE_STRATEGY_IDS in self._env_values:
+            _deduplicate_paper_live_strategy_ids(merged)
         return merged, validation_errors
 
     def get_config_payload(self) -> dict[str, Any]:
         with self._lock:
             env_values, validation_errors = self._merged_env_values()
             for key, value in self._env_values.items():
-                if _split_strategy_profile_key(key) is not None:
+                strategy_profile_key = _split_strategy_profile_key(key)
+                if strategy_profile_key is not None and strategy_profile_key[0] == "shared":
                     env_values[key] = value
             config_warnings = collect_config_warnings(self._env_values)
             runtime_status = self._build_runtime_status(env_values, config_warnings=config_warnings)
@@ -2702,7 +2732,8 @@ class DashboardState:
                 for key, value in preserved_masked_values.items()
             }
 
-        for key, value in values.items():
+        for raw_key, value in values.items():
+            key = _shared_strategy_profile_update_key(raw_key)
             normalized = "" if value is None else str(value).strip()
             if key in self.SECRET_CONFIG_KEYS and normalized == preserved_masks.get(key) and preserved_masked_values.get(key):
                 normalized_updates[key] = preserved_masked_values[key]
@@ -2723,6 +2754,7 @@ class DashboardState:
                     self._env_values.pop(key, None)
                 else:
                     self._env_values[key] = normalized
+            _deduplicate_paper_live_strategy_ids(self._env_values)
             _write_env_file(self.env_file, self._env_values)
             self._last_saved_at = datetime.now(timezone.utc)
 
@@ -2820,17 +2852,9 @@ class DashboardState:
         paper_ids = [str(item) for item in _paper_strategy_ids_for_runtime(cfg)]
         live_ids = [str(item) for item in _live_strategy_ids_for_runtime(cfg)]
         diffs: list[str] = []
-        missing_paper_ids = [strategy_id for strategy_id in live_ids if strategy_id not in paper_ids]
-        if missing_paper_ids:
-            diffs.append(f"missing paper strategies for live: {','.join(missing_paper_ids)}")
-        for strategy_id_text in sorted(set(live_ids) - set(missing_paper_ids), key=lambda item: int(item)):
-            strategy_id = int(strategy_id_text)
-            paper_cfg = _runtime_cfg_for_paper_strategy(cfg, strategy_id)
-            live_cfg = _cfg_for_live_strategy(cfg, strategy_id)
-            for attr_name in _LIVE_HEALTH_PROFILE_COMPARE_ATTRS:
-                if getattr(paper_cfg, attr_name, None) != getattr(live_cfg, attr_name, None):
-                    diffs.append(f"S{strategy_id_text}.{attr_name}")
-                    break
+        overlapping_ids = sorted(set(paper_ids) & set(live_ids), key=lambda item: int(item))
+        if overlapping_ids:
+            diffs.append(f"strategies in both paper and live: {','.join(overlapping_ids)}")
         return paper_ids, live_ids, diffs
 
     def _live_health_market_constraints(

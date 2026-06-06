@@ -966,7 +966,7 @@ def test_active_mode_worker_config_preserves_strategy_profile_overrides():
     assert paper_strategy_cfg.strategy10_min_edge == pytest.approx(0.05)
 
 
-def test_build_config_from_env_values_prefers_mode_specific_strategy_overrides():
+def test_build_config_from_env_values_uses_shared_strategy_overrides_and_excludes_live_from_paper():
     cfg = build_config_from_env_values(
         {
             'TRADE_MODE': 'both',
@@ -992,19 +992,19 @@ def test_build_config_from_env_values_prefers_mode_specific_strategy_overrides()
     paper_strategy_cfg = cfg_for_paper_strategy(cfg, 10)
     live_strategy_cfg = cfg_for_live_strategy(cfg, 10)
 
-    assert cfg.paper_strategy_ids == [7, 9, 10, 11]
+    assert cfg.paper_strategy_ids == [9, 11]
     assert cfg.live_strategy_ids == [7, 10]
-    assert paper_strategy_cfg.base_order_cost == pytest.approx(1.0)
-    assert paper_strategy_cfg.min_entry_price == pytest.approx(0.45)
+    assert paper_strategy_cfg.base_order_cost == pytest.approx(1.5)
+    assert paper_strategy_cfg.min_entry_price == pytest.approx(0.49)
     assert paper_strategy_cfg.max_entry_price == pytest.approx(0.54)
-    assert paper_strategy_cfg.strategy10_min_edge == pytest.approx(0.035)
-    assert paper_strategy_cfg.strategy10_min_momentum_delta == pytest.approx(-0.02)
-    assert paper_strategy_cfg.strategy10_max_momentum_delta == pytest.approx(0.02)
-    assert paper_strategy_cfg.strategy10_down_min_edge == pytest.approx(0.07)
-    assert live_strategy_cfg.base_order_cost == pytest.approx(2.0)
-    assert live_strategy_cfg.min_entry_price == pytest.approx(0.50)
+    assert paper_strategy_cfg.strategy10_min_edge == pytest.approx(0.045)
+    assert paper_strategy_cfg.strategy10_min_momentum_delta is None
+    assert paper_strategy_cfg.strategy10_max_momentum_delta is None
+    assert paper_strategy_cfg.strategy10_down_min_edge is None
+    assert live_strategy_cfg.base_order_cost == pytest.approx(1.5)
+    assert live_strategy_cfg.min_entry_price == pytest.approx(0.49)
     assert live_strategy_cfg.max_entry_price == pytest.approx(0.54)
-    assert live_strategy_cfg.strategy10_min_edge == pytest.approx(0.05)
+    assert live_strategy_cfg.strategy10_min_edge == pytest.approx(0.045)
     assert live_strategy_cfg.strategy10_min_momentum_delta is None
     assert live_strategy_cfg.strategy10_max_momentum_delta is None
     assert live_strategy_cfg.strategy10_down_min_edge is None

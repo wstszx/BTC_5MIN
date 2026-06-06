@@ -129,11 +129,12 @@ def test_build_config_applies_shared_strategy_profile_overrides_to_paper_and_liv
 
     assert cfg.live_strategy_ids == [5, 2]
     assert cfg.signal_weak_signal_mode == "SKIP"
-    for profile in (cfg.live_profiles[5], cfg.paper_strategy_profiles[5]):
-        assert profile.strategy_id == 5
-        assert profile.base_order_cost == 12.5
-        assert profile.signal_weak_signal_mode == "FORCE"
-        assert profile.strategy7_confirm_before_entry_seconds == 18
+    assert 5 not in cfg.paper_strategy_profiles
+    profile = cfg.live_profiles[5]
+    assert profile.strategy_id == 5
+    assert profile.base_order_cost == 12.5
+    assert profile.signal_weak_signal_mode == "FORCE"
+    assert profile.strategy7_confirm_before_entry_seconds == 18
     assert cfg.live_profiles[2].signal_weak_signal_mode == "SKIP"
 
 
@@ -160,7 +161,7 @@ def test_build_config_ignores_removed_bet_sizing_mode_keys():
     assert "STRATEGY_2_BET_SIZING_MODE" not in warnings
     assert "STRATEGY_3_BET_SIZING_MODE" not in warnings
     assert not hasattr(cfg, "bet_sizing_mode")
-    assert not hasattr(cfg.paper_strategy_profiles[7], "bet_sizing_mode")
+    assert 7 not in cfg.paper_strategy_profiles
     assert not hasattr(cfg.live_profiles[7], "bet_sizing_mode")
 
 
@@ -176,11 +177,11 @@ def test_build_config_ignores_old_mode_specific_strategy_profile_keys():
         }
     )
 
-    assert not hasattr(cfg.paper_strategy_profiles[7], "bet_sizing_mode")
+    assert 7 not in cfg.paper_strategy_profiles
     assert not hasattr(cfg.live_profiles[7], "bet_sizing_mode")
 
 
-def test_build_config_prefers_mode_specific_profile_values_over_shared_strategy_values():
+def test_build_config_ignores_mode_specific_profile_values_and_uses_shared_strategy_values():
     cfg = build_config_from_env_values(
         {
             "STRATEGY_ID": "7",
@@ -208,19 +209,16 @@ def test_build_config_prefers_mode_specific_profile_values_over_shared_strategy_
 
     assert cfg.base_order_cost == 1.0
     assert cfg.max_stake is None
-    paper = cfg.paper_strategy_profiles[7]
     live = cfg.live_profiles[7]
-    assert paper.base_order_cost == 3.0
-    assert paper.max_stake == 30.0
-    assert live.base_order_cost == 4.0
-    assert live.max_stake == 40.0
-    for profile in (paper, live):
-        assert profile.min_entry_price == 0.50
-        assert profile.max_entry_price == 0.54
-        assert profile.live_max_price_improvement == 0.04
-        assert profile.max_consecutive_losses == 7
-        assert profile.strategy7_ofi_threshold == 0.58
-        assert profile.strategy7_momentum_threshold == 0.008
+    assert 7 not in cfg.paper_strategy_profiles
+    assert live.base_order_cost == 1.2
+    assert live.max_stake == 60.0
+    assert live.min_entry_price == 0.50
+    assert live.max_entry_price == 0.54
+    assert live.live_max_price_improvement == 0.04
+    assert live.max_consecutive_losses == 7
+    assert live.strategy7_ofi_threshold == 0.58
+    assert live.strategy7_momentum_threshold == 0.008
 
 
 def test_build_config_supports_fok_fallback_to_fak_toggle():
@@ -271,10 +269,8 @@ def test_build_config_applies_strategy_overrides_with_split_strategy_ids():
     assert cfg.live_profiles[7].max_entry_price == 0.55
     assert cfg.live_profiles[7].strategy7_ofi_threshold == 0.58
     assert cfg.live_profiles[7].strategy7_max_momentum_delta is None
-    assert cfg.paper_strategy_profiles[3].base_order_cost == 4.0
-    assert cfg.paper_strategy_profiles[3].min_stake == 3.0
-    assert cfg.paper_strategy_profiles[3].max_stake == 30.0
-    assert cfg.paper_strategy_profiles[7].base_order_cost == 5.5
+    assert 3 not in cfg.paper_strategy_profiles
+    assert 7 not in cfg.paper_strategy_profiles
 
 
 def test_build_config_supports_strategy7_max_momentum_delta_overrides():
@@ -292,8 +288,8 @@ def test_build_config_supports_strategy7_max_momentum_delta_overrides():
     )
 
     assert cfg.strategy7_max_momentum_delta is None
-    assert cfg.paper_strategy_profiles[7].strategy7_max_momentum_delta == 0.012
-    assert cfg.live_profiles[7].strategy7_max_momentum_delta == 0.018
+    assert 7 not in cfg.paper_strategy_profiles
+    assert cfg.live_profiles[7].strategy7_max_momentum_delta == 0.02
 
 
 def test_build_config_ignores_invalid_paper_strategy_entries():
@@ -305,39 +301,40 @@ def test_build_config_ignores_invalid_paper_strategy_entries():
 def test_build_config_accepts_strategy_9_in_strategy_lists():
     cfg = build_config_from_env_values({"STRATEGY_ID": "3", "PAPER_STRATEGY_IDS": "9,8,6", "LIVE_STRATEGY_IDS": "9"})
 
-    assert cfg.paper_strategy_ids == [9, 8, 6]
+    assert cfg.paper_strategy_ids == [8, 6]
     assert cfg.live_strategy_ids == [9]
 
 
-def test_build_config_promotes_paper_trial_profile_when_strategy_is_enabled_live_without_live_overrides():
+def test_build_config_excludes_live_strategies_from_paper_and_uses_one_shared_profile():
     cfg = build_config_from_env_values(
         {
             "TRADE_MODE": "both",
             "PAPER_STRATEGY_IDS": "9,11,12",
             "LIVE_STRATEGY_IDS": "9,11,12",
-            "PAPER_STRATEGY_9_BASE_ORDER_COST": "1.2",
-            "PAPER_STRATEGY_9_MAX_ENTRY_PRICE": "0.55",
-            "PAPER_STRATEGY_9_STABILITY_SAMPLE_COUNT": "1",
-            "PAPER_STRATEGY_9_STABILITY_REQUIRED_COUNT": "1",
-            "PAPER_STRATEGY_11_MIN_EDGE": "0.005",
-            "PAPER_STRATEGY_11_EDGE_BUFFER": "0.0",
-            "PAPER_STRATEGY_11_MIN_PROBABILITY": "0.54",
-            "PAPER_STRATEGY_12_MAX_ENTRY_PRICE": "0.56",
-            "PAPER_STRATEGY_12_MIN_EDGE": "0.006",
-            "PAPER_STRATEGY_12_OFI_THRESHOLD": "0.58",
+            "STRATEGY_9_BASE_ORDER_COST": "1.2",
+            "STRATEGY_9_MAX_ENTRY_PRICE": "0.55",
+            "STRATEGY_9_STABILITY_SAMPLE_COUNT": "1",
+            "STRATEGY_9_STABILITY_REQUIRED_COUNT": "1",
+            "STRATEGY_11_MIN_EDGE": "0.04",
+            "STRATEGY_11_EDGE_BUFFER": "0.008",
+            "STRATEGY_11_MIN_PROBABILITY": "0.56",
+            "STRATEGY_12_MAX_ENTRY_PRICE": "0.56",
+            "STRATEGY_12_MIN_EDGE": "0.006",
+            "STRATEGY_12_OFI_THRESHOLD": "0.58",
         }
     )
 
-    for strategy_id in (9, 11, 12):
-        assert cfg.live_profiles[strategy_id] == cfg.paper_strategy_profiles[strategy_id]
-
+    assert cfg.paper_strategy_ids == []
+    assert cfg.live_strategy_ids == [9, 11, 12]
+    for strategy_id in cfg.live_strategy_ids:
+        assert strategy_id not in cfg.paper_strategy_profiles
     assert cfg.live_profiles[9].base_order_cost == pytest.approx(1.2)
     assert cfg.live_profiles[9].max_entry_price == pytest.approx(0.55)
     assert cfg.live_profiles[9].strategy9_stability_sample_count == 1
     assert cfg.live_profiles[9].strategy9_stability_required_count == 1
-    assert cfg.live_profiles[11].strategy11_min_edge == pytest.approx(0.005)
-    assert cfg.live_profiles[11].strategy11_edge_buffer == pytest.approx(0.0)
-    assert cfg.live_profiles[11].strategy11_min_probability == pytest.approx(0.54)
+    assert cfg.live_profiles[11].strategy11_min_edge == pytest.approx(0.04)
+    assert cfg.live_profiles[11].strategy11_edge_buffer == pytest.approx(0.008)
+    assert cfg.live_profiles[11].strategy11_min_probability == pytest.approx(0.56)
     assert cfg.live_profiles[12].max_entry_price == pytest.approx(0.56)
     assert cfg.live_profiles[12].strategy11_min_edge == pytest.approx(0.006)
     assert cfg.live_profiles[12].strategy7_ofi_threshold == pytest.approx(0.58)
@@ -367,20 +364,13 @@ def test_build_config_accepts_strategy10_and_reads_edge_values():
     )
 
     assert cfg.strategy_id == 10
-    assert cfg.paper_strategy_ids == [10, 7]
+    assert cfg.paper_strategy_ids == [7]
     assert cfg.live_strategy_ids == [10]
     assert cfg.strategy10_min_edge == 0.04
     assert cfg.strategy10_ofi_weight == 0.08
     assert cfg.strategy10_momentum_weight == 1.0
     assert cfg.strategy10_edge_buffer == 0.005
-    assert cfg.paper_strategy_profiles[10].strategy10_min_edge == 0.06
-    assert cfg.paper_strategy_profiles[10].strategy10_ofi_weight == 0.12
-    assert cfg.paper_strategy_profiles[10].strategy10_momentum_weight == 1.4
-    assert cfg.paper_strategy_profiles[10].strategy10_edge_buffer == 0.01
-    assert cfg.paper_strategy_profiles[10].strategy10_confirm_before_entry_seconds == 1
-    assert cfg.paper_strategy_profiles[10].strategy10_min_momentum_delta == -0.02
-    assert cfg.paper_strategy_profiles[10].strategy10_max_momentum_delta == 0.02
-    assert cfg.paper_strategy_profiles[10].strategy10_down_min_edge == 0.07
+    assert 10 not in cfg.paper_strategy_profiles
     assert cfg.live_profiles[10].strategy10_min_edge == 0.07
     assert cfg.live_profiles[10].strategy10_min_momentum_delta is None
     assert cfg.live_profiles[10].strategy10_max_momentum_delta is None
@@ -402,14 +392,15 @@ def test_build_config_accepts_strategy11_and_reads_probability_values():
     )
 
     assert cfg.strategy_id == 11
-    assert cfg.paper_strategy_ids == [11, 10]
+    assert cfg.paper_strategy_ids == [10]
     assert cfg.live_strategy_ids == [11]
-    assert cfg.paper_strategy_profiles[11].strategy11_min_edge == 0.06
-    assert cfg.paper_strategy_profiles[11].strategy11_edge_buffer == 0.01
-    assert cfg.paper_strategy_profiles[11].strategy11_volatility_bps_per_sqrt_minute == 18.0
-    assert cfg.paper_strategy_profiles[11].strategy11_min_probability == 0.57
-    assert cfg.paper_strategy_profiles[11].strategy11_max_probability == 0.93
-    assert cfg.paper_strategy_profiles[11].strategy11_confirm_before_entry_seconds == 2
+    assert 11 not in cfg.paper_strategy_profiles
+    assert cfg.live_profiles[11].strategy11_min_edge == 0.06
+    assert cfg.live_profiles[11].strategy11_edge_buffer == 0.01
+    assert cfg.live_profiles[11].strategy11_volatility_bps_per_sqrt_minute == 18.0
+    assert cfg.live_profiles[11].strategy11_min_probability == 0.57
+    assert cfg.live_profiles[11].strategy11_max_probability == 0.93
+    assert cfg.live_profiles[11].strategy11_confirm_before_entry_seconds == 2
 
 
 def test_build_config_reads_strategy11_paper_trial_overrides_without_live_relaxation():
@@ -433,16 +424,59 @@ def test_build_config_reads_strategy11_paper_trial_overrides_without_live_relaxa
     )
 
     assert cfg.live_strategy_ids == [7, 10]
-    assert cfg.paper_strategy_profiles[11].strategy11_min_edge == 0.005
-    assert cfg.paper_strategy_profiles[11].strategy11_edge_buffer == 0.0
-    assert cfg.paper_strategy_profiles[11].strategy11_volatility_bps_per_sqrt_minute == 24.0
-    assert cfg.paper_strategy_profiles[11].strategy11_min_probability == 0.54
+    assert cfg.paper_strategy_profiles[11].strategy11_min_edge == 0.04
+    assert cfg.paper_strategy_profiles[11].strategy11_edge_buffer == 0.005
+    assert cfg.paper_strategy_profiles[11].strategy11_volatility_bps_per_sqrt_minute == 18.0
+    assert cfg.paper_strategy_profiles[11].strategy11_min_probability == 0.55
     assert cfg.paper_strategy_profiles[11].max_entry_price == 0.56
-    assert cfg.paper_strategy_profiles[11].strategy11_confirm_before_entry_seconds == 0
+    assert cfg.paper_strategy_profiles[11].strategy11_confirm_before_entry_seconds == 2
     assert cfg.live_profiles[10].strategy11_min_edge == 0.04
     assert cfg.live_profiles[10].strategy11_edge_buffer == 0.005
     assert cfg.live_profiles[10].strategy11_volatility_bps_per_sqrt_minute == 18.0
     assert cfg.live_profiles[10].strategy11_min_probability == 0.55
+
+
+def test_build_config_ignores_mode_specific_strategy11_profile_overrides():
+    cfg = build_config_from_env_values(
+        {
+            "TRADE_MODE": "both",
+            "STRATEGY_ID": "7",
+            "PAPER_STRATEGY_IDS": "7,9,10,11,12",
+            "LIVE_STRATEGY_IDS": "11",
+            "STRATEGY_11_BASE_ORDER_COST": "5",
+            "STRATEGY_11_MAX_ENTRY_PRICE": "0.54",
+            "STRATEGY_11_MIN_EDGE": "0.04",
+            "STRATEGY_11_EDGE_BUFFER": "0.005",
+            "STRATEGY_11_MIN_PROBABILITY": "0.55",
+            "STRATEGY_11_VOLATILITY_BPS_PER_SQRT_MINUTE": "18",
+            "STRATEGY_11_CONFIRM_BEFORE_ENTRY_SECONDS": "2",
+            "PAPER_STRATEGY_11_MAX_ENTRY_PRICE": "0.56",
+            "PAPER_STRATEGY_11_MIN_EDGE": "0.005",
+            "PAPER_STRATEGY_11_EDGE_BUFFER": "0.0",
+            "PAPER_STRATEGY_11_MIN_PROBABILITY": "0.54",
+            "PAPER_STRATEGY_11_VOLATILITY_BPS_PER_SQRT_MINUTE": "24",
+            "PAPER_STRATEGY_11_CONFIRM_BEFORE_ENTRY_SECONDS": "0",
+            "LIVE_STRATEGY_11_BASE_ORDER_COST": "2",
+            "LIVE_STRATEGY_11_MAX_ENTRY_PRICE": "0.54",
+            "LIVE_STRATEGY_11_MIN_EDGE": "0.04",
+            "LIVE_STRATEGY_11_EDGE_BUFFER": "0.008",
+            "LIVE_STRATEGY_11_MIN_PROBABILITY": "0.56",
+            "LIVE_STRATEGY_11_VOLATILITY_BPS_PER_SQRT_MINUTE": "18",
+            "LIVE_STRATEGY_11_CONFIRM_BEFORE_ENTRY_SECONDS": "2",
+        }
+    )
+
+    live = cfg.live_profiles[11]
+
+    assert 11 not in cfg.paper_strategy_ids
+    assert 11 not in cfg.paper_strategy_profiles
+    assert live.base_order_cost == 5.0
+    assert live.max_entry_price == 0.54
+    assert live.strategy11_min_edge == 0.04
+    assert live.strategy11_edge_buffer == 0.005
+    assert live.strategy11_min_probability == 0.55
+    assert live.strategy11_volatility_bps_per_sqrt_minute == 18.0
+    assert live.strategy11_confirm_before_entry_seconds == 2
 
 
 def test_build_config_accepts_strategy12_hybrid_short_keys():
@@ -467,18 +501,18 @@ def test_build_config_accepts_strategy12_hybrid_short_keys():
     profile = cfg.paper_strategy_profiles[12]
 
     assert cfg.strategy_id == 12
-    assert cfg.paper_strategy_ids == [12, 7]
+    assert cfg.paper_strategy_ids == [12]
     assert cfg.live_strategy_ids == [7, 10]
-    assert profile.strategy11_min_edge == pytest.approx(0.006)
-    assert profile.strategy11_edge_buffer == pytest.approx(0.001)
-    assert profile.strategy11_volatility_bps_per_sqrt_minute == pytest.approx(24.0)
-    assert profile.strategy11_min_probability == pytest.approx(0.54)
-    assert profile.strategy11_max_probability == pytest.approx(0.93)
-    assert profile.strategy11_confirm_before_entry_seconds == 0
-    assert profile.strategy7_ofi_threshold == pytest.approx(0.58)
-    assert profile.strategy7_momentum_threshold == pytest.approx(0.008)
-    assert profile.strategy7_max_momentum_delta == pytest.approx(0.12)
-    assert profile.strategy7_min_signal_gap == pytest.approx(0.01)
+    assert profile.strategy11_min_edge == pytest.approx(0.04)
+    assert profile.strategy11_edge_buffer == pytest.approx(0.005)
+    assert profile.strategy11_volatility_bps_per_sqrt_minute == pytest.approx(18.0)
+    assert profile.strategy11_min_probability == pytest.approx(0.55)
+    assert profile.strategy11_max_probability == pytest.approx(0.95)
+    assert profile.strategy11_confirm_before_entry_seconds == 2
+    assert profile.strategy7_ofi_threshold == pytest.approx(0.7)
+    assert profile.strategy7_momentum_threshold == pytest.approx(0.025)
+    assert profile.strategy7_max_momentum_delta is None
+    assert profile.strategy7_min_signal_gap == pytest.approx(0.03)
 
 
 def test_build_config_reads_strategy7_dynamic_sizing_values_from_strategy_profile_only():
@@ -508,11 +542,11 @@ def test_build_config_reads_strategy7_dynamic_sizing_values_from_strategy_profil
 
     assert cfg.strategy7_dynamic_sizing_enabled is False
     assert cfg.strategy7_sizing_reference_price == 0.50
-    assert cfg.paper_strategy_profiles[7].strategy7_dynamic_sizing_enabled is False
+    assert cfg.paper_strategy_profiles[7].strategy7_dynamic_sizing_enabled is True
     assert cfg.paper_strategy_profiles[7].strategy7_sizing_reference_price == 0.51
     assert cfg.paper_strategy_profiles[7].strategy7_sizing_price_step == 0.02
     assert cfg.paper_strategy_profiles[7].strategy7_sizing_price_step_reduction == 0.15
-    assert cfg.paper_strategy_profiles[7].strategy7_sizing_min_multiplier == 0.60
+    assert cfg.paper_strategy_profiles[7].strategy7_sizing_min_multiplier == 0.45
     assert cfg.paper_strategy_profiles[7].strategy7_sizing_max_multiplier == 1.10
     assert cfg.paper_strategy_profiles[7].strategy7_sizing_strong_signal_gap == 0.03
     assert cfg.paper_strategy_profiles[7].strategy7_sizing_strong_signal_boost == 0.25
@@ -545,11 +579,11 @@ def test_build_config_reads_strategy9_dynamic_sizing_values_from_strategy_profil
 
     assert cfg.strategy9_dynamic_sizing_enabled is False
     assert cfg.strategy9_sizing_reference_price == 0.50
-    assert cfg.paper_strategy_profiles[9].strategy9_dynamic_sizing_enabled is False
+    assert cfg.paper_strategy_profiles[9].strategy9_dynamic_sizing_enabled is True
     assert cfg.paper_strategy_profiles[9].strategy9_sizing_reference_price == 0.51
     assert cfg.paper_strategy_profiles[9].strategy9_sizing_price_step == 0.02
     assert cfg.paper_strategy_profiles[9].strategy9_sizing_price_step_reduction == 0.15
-    assert cfg.paper_strategy_profiles[9].strategy9_sizing_min_multiplier == 0.60
+    assert cfg.paper_strategy_profiles[9].strategy9_sizing_min_multiplier == 0.45
     assert cfg.paper_strategy_profiles[9].strategy9_sizing_max_multiplier == 1.10
     assert cfg.paper_strategy_profiles[9].strategy9_sizing_strong_signal_gap == 0.03
     assert cfg.paper_strategy_profiles[9].strategy9_sizing_strong_signal_boost == 0.25
