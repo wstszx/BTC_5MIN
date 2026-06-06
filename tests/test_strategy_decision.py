@@ -1166,6 +1166,8 @@ def test_strategy12_buys_when_probability_edge_and_microstructure_confirm():
         strategy11_max_probability=0.95,
         strategy11_confirm_before_entry_seconds=0,
         binance_signal_stale_seconds=10.0,
+        strategy9_stability_sample_count=1,
+        strategy9_stability_required_count=1,
     )
     state = SessionState(signal_round_slug="s1", signal_round_open_up_price=0.50)
     quote = MarketQuote(
@@ -1257,6 +1259,155 @@ def test_strategy12_skips_when_probability_and_microstructure_conflict():
     assert decision.signal_probability is not None
     assert decision.signal_edge is not None
     assert decision.ofi_score == pytest.approx(-0.72)
+
+
+def test_strategy12_requires_microstructure_stability_before_entry():
+    now = datetime(2026, 4, 30, 1, 2, 0, tzinfo=timezone.utc)
+    window = MarketWindow(
+        event_id="e1",
+        market_id="m1",
+        slug="s1",
+        title="BTC",
+        start_time=datetime(2026, 4, 30, 1, 0, 0, tzinfo=timezone.utc),
+        end_time=datetime(2026, 4, 30, 1, 5, 0, tzinfo=timezone.utc),
+        price_to_beat=100000.0,
+    )
+    cfg = AppConfig(
+        strategy_id=12,
+        max_entry_price=0.56,
+        strategy7_ofi_threshold=0.58,
+        strategy7_momentum_threshold=0.008,
+        strategy7_min_signal_gap=0.01,
+        strategy7_max_momentum_delta=0.12,
+        strategy9_stability_sample_count=2,
+        strategy9_stability_required_count=2,
+        strategy9_stability_window_seconds=6.0,
+        strategy11_min_edge=0.005,
+        strategy11_edge_buffer=0.0,
+        strategy11_volatility_bps_per_sqrt_minute=24.0,
+        strategy11_min_probability=0.54,
+        strategy11_max_probability=0.95,
+        strategy11_confirm_before_entry_seconds=0,
+        binance_signal_stale_seconds=10.0,
+    )
+    state = SessionState(signal_round_slug="s1", signal_round_open_up_price=0.50)
+    quote = MarketQuote(
+        slug="s1",
+        up_price=0.52,
+        up_best_ask=0.52,
+        down_price=0.48,
+        down_best_ask=0.48,
+        strategy6_ofi_score=0.72,
+        strategy6_signal_at=now,
+        binance_mid_price=100120.0,
+        binance_signal_at=now,
+    )
+
+    first = resolve_side_from_strategy(
+        cfg=cfg,
+        state=state,
+        slug="s1",
+        quote=quote,
+        window=window,
+        entry_time=now,
+        now=now,
+    )
+    second = resolve_side_from_strategy(
+        cfg=cfg,
+        state=state,
+        slug="s1",
+        quote=quote,
+        window=window,
+        entry_time=now + timedelta(seconds=2),
+        now=now + timedelta(seconds=2),
+    )
+
+    assert first.side is None
+    assert first.reason == "strategy12_micro_unstable"
+    assert first.candidate_side == "UP"
+    assert first.signal_edge is not None
+    assert second.side == "UP"
+    assert second.reason is None
+
+
+def test_strategy12_skips_when_microstructure_signal_decays():
+    now = datetime(2026, 4, 30, 1, 2, 0, tzinfo=timezone.utc)
+    window = MarketWindow(
+        event_id="e1",
+        market_id="m1",
+        slug="s1",
+        title="BTC",
+        start_time=datetime(2026, 4, 30, 1, 0, 0, tzinfo=timezone.utc),
+        end_time=datetime(2026, 4, 30, 1, 5, 0, tzinfo=timezone.utc),
+        price_to_beat=100000.0,
+    )
+    cfg = AppConfig(
+        strategy_id=12,
+        max_entry_price=0.56,
+        strategy7_ofi_threshold=0.58,
+        strategy7_momentum_threshold=0.008,
+        strategy7_min_signal_gap=0.01,
+        strategy7_max_momentum_delta=0.12,
+        strategy9_stability_sample_count=1,
+        strategy9_stability_required_count=1,
+        strategy9_reversal_lookback_seconds=6.0,
+        strategy9_max_signal_decay=0.35,
+        strategy11_min_edge=0.005,
+        strategy11_edge_buffer=0.0,
+        strategy11_volatility_bps_per_sqrt_minute=24.0,
+        strategy11_min_probability=0.54,
+        strategy11_max_probability=0.95,
+        strategy11_confirm_before_entry_seconds=0,
+        binance_signal_stale_seconds=10.0,
+    )
+    state = SessionState(signal_round_slug="s1", signal_round_open_up_price=0.50)
+    strong_quote = MarketQuote(
+        slug="s1",
+        up_price=0.56,
+        up_best_ask=0.56,
+        down_price=0.44,
+        down_best_ask=0.44,
+        strategy6_ofi_score=0.90,
+        strategy6_signal_at=now,
+        binance_mid_price=100120.0,
+        binance_signal_at=now,
+    )
+    weak_quote = MarketQuote(
+        slug="s1",
+        up_price=0.52,
+        up_best_ask=0.52,
+        down_price=0.48,
+        down_best_ask=0.48,
+        strategy6_ofi_score=0.79,
+        strategy6_signal_at=now + timedelta(seconds=2),
+        binance_mid_price=100120.0,
+        binance_signal_at=now + timedelta(seconds=2),
+    )
+
+    first = resolve_side_from_strategy(
+        cfg=cfg,
+        state=state,
+        slug="s1",
+        quote=strong_quote,
+        window=window,
+        entry_time=now,
+        now=now,
+    )
+    second = resolve_side_from_strategy(
+        cfg=cfg,
+        state=state,
+        slug="s1",
+        quote=weak_quote,
+        window=window,
+        entry_time=now + timedelta(seconds=2),
+        now=now + timedelta(seconds=2),
+    )
+
+    assert first.side == "UP"
+    assert second.side is None
+    assert second.reason == "strategy12_micro_decaying"
+    assert second.candidate_side == "UP"
+    assert second.signal_edge is not None
 
 
 def test_strategy12_probability_skip_keeps_strategy12_reason_and_diagnostics():

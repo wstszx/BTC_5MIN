@@ -1017,6 +1017,49 @@ def evaluate_strategy12_hybrid_edge(
             ofi_score=micro_check.ofi_score,
         )
 
+    if (
+        micro_check.ofi_score is None
+        or micro_check.momentum_delta is None
+        or not is_valid_signal_price(signal_current_up_price)
+    ):
+        return SideDecision(
+            side=None,
+            reason="strategy12_micro_unavailable",
+            candidate_side=probability_decision.side,
+            candidate_price=probability_decision.candidate_price,
+            signal_open_up_price=probability_decision.signal_open_up_price,
+            signal_current_up_price=probability_decision.signal_current_up_price,
+            signal_threshold=probability_decision.signal_threshold,
+            signal_delta=probability_decision.signal_delta,
+            signal_probability=probability_decision.signal_probability,
+            signal_edge=probability_decision.signal_edge,
+            ofi_score=micro_check.ofi_score,
+        )
+    quality_check = evaluate_strategy9_quality(
+        cfg=cfg,
+        state=state,
+        now=now,
+        side=probability_decision.side,
+        ofi_score=micro_check.ofi_score,
+        momentum_delta=micro_check.momentum_delta,
+        signal_current_up_price=signal_current_up_price,
+    )
+    if quality_check.reason is not None:
+        reason = quality_check.reason.replace("strategy9_signal_", "strategy12_micro_", 1)
+        return SideDecision(
+            side=None,
+            reason=reason,
+            candidate_side=probability_decision.side,
+            candidate_price=probability_decision.candidate_price,
+            signal_open_up_price=probability_decision.signal_open_up_price,
+            signal_current_up_price=probability_decision.signal_current_up_price,
+            signal_threshold=probability_decision.signal_threshold,
+            signal_delta=probability_decision.signal_delta,
+            signal_probability=probability_decision.signal_probability,
+            signal_edge=probability_decision.signal_edge,
+            ofi_score=micro_check.ofi_score,
+        )
+
     return SideDecision(
         side=probability_decision.side,
         candidate_side=probability_decision.side,
