@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 from models import TradeRecord
 from trade_log import append_trade_log
@@ -235,6 +236,51 @@ def test_trade_log_migrates_existing_rows_when_new_columns_are_inserted(tmp_path
     assert rows[0]["signal_edge"] == ""
     assert rows[0]["signal_max_entry_price"] == ""
     assert rows[0]["sizing_multiplier"] == ""
+
+
+def test_trade_log_recovers_when_legacy_schema_rotation_is_blocked(tmp_path, monkeypatch):
+    log_path = tmp_path / "live_orders.csv"
+    log_path.write_text(
+        "timestamp,mode\n2026-06-06T13:25:16+00:00,live\n",
+        encoding="utf-8",
+    )
+    original_replace = Path.replace
+
+    def blocked_replace(self: Path, target: Path):
+        if self == log_path:
+            raise PermissionError(32, "file is in use", str(self), str(target))
+        return original_replace(self, target)
+
+    monkeypatch.setattr(Path, "replace", blocked_replace)
+    start = datetime(2026, 6, 6, 13, 25, tzinfo=timezone.utc)
+
+    append_trade_log(
+        log_path,
+        TradeRecord(
+            timestamp=start + timedelta(seconds=16),
+            mode="live",
+            round_index=446,
+            strategy=11,
+            entry_timing="OPEN",
+            event_slug="btc-updown-5m-1780752300",
+            start_time=start,
+            end_time=start + timedelta(minutes=5),
+            side="SKIP",
+            price=None,
+            order_size=0.0,
+            order_cost=0.0,
+            expected_profit=0.0,
+            skip_reason="strategy11_edge_too_low",
+            experiment_id="strategy-11",
+        ),
+    )
+
+    assert list(tmp_path.glob("live_orders_legacy_*.csv")) == []
+    rows = list(csv.DictReader(log_path.open(encoding="utf-8", newline="")))
+    assert [row["event_slug"] for row in rows] == ["", "btc-updown-5m-1780752300"]
+    assert rows[0]["mode"] == "live"
+    assert rows[1]["strategy"] == "11"
+    assert rows[1]["skip_reason"] == "strategy11_edge_too_low"
 
 
 def test_live_trade_log_keeps_order_id_and_replaces_plan_with_confirmed_fill(tmp_path):

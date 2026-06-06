@@ -176,6 +176,10 @@ def _rewrite_with_fieldnames(path: Path, rows: list[dict[str, Any]], fieldnames:
         writer.writerows(rows)
 
 
+def _rows_with_fieldnames(rows: list[dict[str, Any]], fieldnames: list[str]) -> list[dict[str, Any]]:
+    return [{field_name: row.get(field_name, "") for field_name in fieldnames} for row in rows]
+
+
 def append_trade_log(path: Path, record: TradeRecord) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     row = asdict(record)
@@ -198,9 +202,15 @@ def append_trade_log(path: Path, record: TradeRecord) -> None:
                     existing_rows = list(csv.DictReader(handle))
                 _rewrite_with_fieldnames(path, existing_rows, fieldnames)
             else:
+                with path.open("r", newline="", encoding="utf-8") as handle:
+                    existing_rows = list(csv.DictReader(handle))
                 legacy_path = path.with_name(f"{path.stem}_legacy_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}{path.suffix}")
-                path.replace(legacy_path)
-                write_header = True
+                try:
+                    path.replace(legacy_path)
+                    write_header = True
+                except PermissionError:
+                    _rewrite_with_fieldnames(path, _rows_with_fieldnames(existing_rows, fieldnames), fieldnames)
+                    write_header = False
 
     upsert_key = live_trade_log_upsert_key(row)
     if upsert_key is not None and path.exists() and not write_header:
