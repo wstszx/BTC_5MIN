@@ -140,3 +140,51 @@ def test_sync_paper_binance_signal_service_starts_for_strategy11(monkeypatch):
 
     assert service is instances[0]
     assert instances[0].started == 1
+
+
+def test_sync_paper_binance_signal_service_restarts_matching_service():
+    class ExistingBinanceSignalService:
+        ws_url = 'wss://stream.binance.com:9443/ws/btcusdt@depth5'
+
+        def __init__(self):
+            self.started = 0
+            self.closed = 0
+
+        def start(self):
+            self.started += 1
+
+        def close(self):
+            self.closed += 1
+
+    service = ExistingBinanceSignalService()
+
+    result = _sync_paper_binance_signal_service(
+        cfg=AppConfig(strategy_id=11),
+        strategy_ids=[11],
+        service=service,
+    )
+
+    assert result is service
+    assert service.started == 1
+
+
+def test_sync_paper_binance_signal_service_reuses_matching_service_without_start_method():
+    class _NoopService:
+        ws_url = 'wss://stream.binance.com:9443/ws/btcusdt@depth5'
+
+        def __init__(self):
+            self.closed = 0
+
+        def close(self):
+            self.closed += 1
+
+    service = _NoopService()
+
+    result = _sync_paper_binance_signal_service(
+        cfg=AppConfig(strategy_id=6, paper_strategy_ids=[6]),
+        strategy_ids=[6],
+        service=service,
+    )
+
+    assert result is service
+    assert service.closed == 0

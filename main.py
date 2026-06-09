@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import inspect
+import json
 import traceback
 from dataclasses import replace
 import sys
@@ -433,6 +434,25 @@ def _append_worker_error_traceback(logs_dir: Path, worker_name: str, exc: BaseEx
             handle.write("\n")
 
 
+def _format_worker_result(result: object) -> str:
+    try:
+        return json.dumps(result, ensure_ascii=False, sort_keys=True, default=str)
+    except TypeError:
+        return repr(result)
+
+
+def _append_worker_return_event(logs_dir: Path, worker_name: str, result: object) -> None:
+    log_path = logs_dir / "runtime_events.log"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    timestamp = time.strftime("%Y-%m-%dT%H:%M:%S%z")
+    with log_path.open("a", encoding="utf-8") as handle:
+        handle.write(f"[{timestamp}] worker {worker_name} returned {_format_worker_result(result)}\n")
+
+
+def _worker_result_is_error(result: object) -> bool:
+    return isinstance(result, dict) and str(result.get("status") or "").strip().lower() == "error"
+
+
 def _spawn_runtime_worker(
     *,
     name: str,
@@ -443,7 +463,14 @@ def _spawn_runtime_worker(
 ) -> threading.Thread:
     def _runner() -> None:
         try:
-            target()
+            result = target()
+            if logs_dir is not None:
+                try:
+                    _append_worker_return_event(logs_dir, name, result)
+                except BaseException:
+                    pass
+            if _worker_result_is_error(result):
+                raise RuntimeError(f"worker returned error status: {_format_worker_result(result)}")
         except BaseException as exc:  # pragma: no cover - exercised in integration tests
             if logs_dir is not None:
                 try:
@@ -472,8 +499,6 @@ def _wait_for_runtime_exit(
         if any(not worker_thread.is_alive() for worker_thread in worker_threads):
             return
         time.sleep(0.1)
-
-
 
 
 class RuntimeManager:
@@ -665,6 +690,7 @@ def run_single_command_runtime(
     trader_threads: list[threading.Thread] = []
     printed_startup = False
     first_worker = True
+
     try:
         initial_mode = manager.snapshot().active_mode
         if _mode_runs_live(initial_mode):

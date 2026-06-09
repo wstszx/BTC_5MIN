@@ -4195,6 +4195,15 @@ def test_dashboard_assets_localize_live_price_improvement_guard():
     assert "LIVE_MAX_PRICE_IMPROVEMENT: '最大允许价格改善'" in js
 
 
+def test_dashboard_recent_reason_title_includes_live_order_book_price_detail():
+    js = _dashboard_js()
+
+    assert "function reasonDetailText(row)" in js
+    assert "row.live_order_book_price" in js
+    assert "row.live_price_cap" in js
+    assert "reasonDetailText(row)" in js
+
+
 def test_dashboard_assets_localize_provisional_loss_result():
     js = _dashboard_js()
 

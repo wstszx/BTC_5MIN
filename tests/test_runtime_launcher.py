@@ -304,6 +304,70 @@ def test_run_single_command_runtime_logs_worker_traceback(monkeypatch, tmp_path:
     assert "RuntimeError: boom" in log_text
 
 
+def test_run_single_command_runtime_logs_worker_return_value(monkeypatch, tmp_path: Path):
+    class FakeDashboardRuntime:
+        def serve_forever(self) -> None:
+            return
+
+        def shutdown(self) -> None:
+            return
+
+        def close(self) -> None:
+            return
+
+    cfg = AppConfig(logs_dir=tmp_path / "logs")
+
+    def fake_run_paper_trading(cfg, *, stop_event, config_provider):
+        return {"status": "stopped", "reason": "test"}
+
+    monkeypatch.setattr(main, "load_env_file_values", lambda _: {})
+    monkeypatch.setattr(main, "build_config_from_env_values", lambda _: cfg)
+    monkeypatch.setattr(main, "create_dashboard_runtime", lambda **_: FakeDashboardRuntime())
+    monkeypatch.setattr(main, "run_paper_trading", fake_run_paper_trading)
+
+    exit_code = main.run_single_command_runtime(env_file=tmp_path / ".env.dashboard")
+
+    event_log = tmp_path / "logs" / "runtime_events.log"
+    log_text = event_log.read_text(encoding="utf-8")
+    assert exit_code == 0
+    assert "worker paper-trading-worker-5m returned" in log_text
+    assert '"status": "stopped"' in log_text
+    assert '"reason": "test"' in log_text
+
+
+def test_run_single_command_runtime_treats_worker_error_return_as_failure(monkeypatch, tmp_path: Path):
+    class FakeDashboardRuntime:
+        def serve_forever(self) -> None:
+            return
+
+        def shutdown(self) -> None:
+            return
+
+        def close(self) -> None:
+            return
+
+    cfg = AppConfig(logs_dir=tmp_path / "logs")
+
+    def fake_run_paper_trading(cfg, *, stop_event, config_provider):
+        return {"status": "error", "error": "quiet failure"}
+
+    monkeypatch.setattr(main, "load_env_file_values", lambda _: {})
+    monkeypatch.setattr(main, "build_config_from_env_values", lambda _: cfg)
+    monkeypatch.setattr(main, "create_dashboard_runtime", lambda **_: FakeDashboardRuntime())
+    monkeypatch.setattr(main, "run_paper_trading", fake_run_paper_trading)
+
+    exit_code = main.run_single_command_runtime(env_file=tmp_path / ".env.dashboard")
+
+    event_log = tmp_path / "logs" / "runtime_events.log"
+    error_log = tmp_path / "logs" / "runtime_errors.log"
+    assert exit_code == 1
+    assert '"status": "error"' in event_log.read_text(encoding="utf-8")
+    error_text = error_log.read_text(encoding="utf-8")
+    assert "worker paper-trading-worker-5m failed" in error_text
+    assert "worker returned error status" in error_text
+    assert "quiet failure" in error_text
+
+
 def test_run_single_command_runtime_uses_live_worker_when_trade_mode_live(monkeypatch, tmp_path: Path):
     env_file = tmp_path / ".env.dashboard"
     startup_cfg = AppConfig(
@@ -368,6 +432,52 @@ def test_run_single_command_runtime_uses_live_worker_when_trade_mode_live(monkey
     assert live_calls['provider_cfg'] is refreshed_cfg
     assert dashboard_runtime.shutdown_calls >= 1
     assert dashboard_runtime.close_calls == 1
+
+
+def test_run_single_command_runtime_does_not_start_live_log_watchdog(monkeypatch, tmp_path: Path):
+    env_file = tmp_path / ".env.dashboard"
+    startup_cfg = AppConfig(
+        trade_mode="live",
+        live_trading_enabled=True,
+        live_private_key="pk",
+        live_funder="0xfunder",
+    )
+    watchdog_calls: list[dict[str, object]] = []
+
+    class FakeDashboardRuntime:
+        def serve_forever(self) -> None:
+            return
+
+        def shutdown(self) -> None:
+            return
+
+        def close(self) -> None:
+            return
+
+    class FakeWatchdogThread:
+        def join(self, timeout: float | None = None) -> None:
+            return
+
+    def fake_run_live_trading(cfg, *, stop_event, config_provider):
+        return {"status": "stopped"}
+
+    def fake_run_paper_trading(*args, **kwargs):
+        raise AssertionError("paper worker should not start in live mode")
+
+    def fake_spawn_live_log_watchdog(**kwargs):
+        watchdog_calls.append(dict(kwargs))
+        return FakeWatchdogThread()
+
+    monkeypatch.setattr(main, "_load_shared_config", lambda _: startup_cfg)
+    monkeypatch.setattr(main, "create_dashboard_runtime", lambda **_: FakeDashboardRuntime())
+    monkeypatch.setattr(main, "run_live_trading", fake_run_live_trading, raising=False)
+    monkeypatch.setattr(main, "run_paper_trading", fake_run_paper_trading)
+    monkeypatch.setattr(main, "_spawn_live_log_watchdog", fake_spawn_live_log_watchdog, raising=False)
+
+    exit_code = main.run_single_command_runtime(env_file=env_file)
+
+    assert exit_code == 0
+    assert watchdog_calls == []
 
 
 def test_run_single_command_runtime_live_mode_without_live_switch_fails_fast(monkeypatch, tmp_path: Path):

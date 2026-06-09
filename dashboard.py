@@ -6051,6 +6051,17 @@ function reasonText(reason) {
   return rawReason;
 }
 
+function reasonDetailText(row) {
+  const parts = [reasonText(row.skip_reason)];
+  if (row.live_order_book_price !== undefined && row.live_order_book_price !== null && String(row.live_order_book_price).trim() !== '') {
+    parts.push('盘口价 ' + fmtNum(row.live_order_book_price, 4));
+  }
+  if (row.live_price_cap !== undefined && row.live_price_cap !== null && String(row.live_price_cap).trim() !== '') {
+    parts.push('买入上限 ' + fmtNum(row.live_price_cap, 4));
+  }
+  return parts.join(' / ');
+}
+
 function formatConfigLabel(key, labels) {
   const base = (labels && labels[key]) || CONFIG_KEY_NAMES[key] || key;
   if (state.showInternalKeys) {
@@ -8552,7 +8563,7 @@ function renderRecent(payload) {
       : priceValue;
     const rowClass = isPending ? 'recent-pending' : (isMissedEntry ? 'recent-missed-entry' : '');
     const balanceError = String(row.balance_error || '').trim();
-    const reasonTitle = balanceError ? (reasonText(row.skip_reason) + ' / ' + balanceError) : reasonText(row.skip_reason);
+    const reasonTitle = balanceError ? (reasonDetailText(row) + ' / ' + balanceError) : reasonDetailText(row);
     const reasonHtml = isMissedEntry
       ? ('<span class="skip-reason-badge missed-entry">' + esc(reasonText(row.skip_reason)) + '</span>')
       : esc(reasonText(row.skip_reason));

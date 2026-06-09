@@ -20,6 +20,7 @@ class OrderExecutionResult:
     response: Any | None = None
     skip_reason: str | None = None
     balance_error: str | None = None
+    live_order_book_price: float | None = None
     live_price_cap: float | None = None
     raw_price_cap_sent: float | None = None
 
@@ -914,16 +915,17 @@ def execute_order_plan(
         min_entry_price=min_entry_price,
         max_improvement=getattr(cfg, "live_max_price_improvement", None),
     )
-    should_check_order_book_price = market_order_price is not None or execution_floor is not None
+    order_type_text = _order_type_text(getattr(cfg, "live_order_type", "FOK"))
+    should_check_order_book_price = order_type_text == "FOK" and (
+        market_order_price is not None or execution_floor is not None
+    )
     should_precheck_order_book_price = (
-        should_check_order_book_price
-        or (
-            getattr(cfg, "live_precheck_order_book_depth", True)
-            and _order_type_text(getattr(cfg, "live_order_type", "FOK")) == "FOK"
-            and market_order_price is not None
-        )
+        getattr(cfg, "live_precheck_order_book_depth", True)
+        and order_type_text == "FOK"
+        and (market_order_price is not None or should_check_order_book_price)
     )
     order_type_override = None
+    live_order_book_price = None
     if should_precheck_order_book_price:
         live_client_for_depth = clob_client or (client_factory or create_live_clob_client)(cfg)
         if callable(getattr(live_client_for_depth, "get_order_book", None)):
@@ -957,6 +959,7 @@ def execute_order_plan(
                         raise
                     opposite_book = None
                 best_buy_price = best_possible_binary_buy_price(book, opposite_book)
+                live_order_book_price = best_buy_price
                 if should_check_order_book_price and best_buy_price is None:
                     return OrderExecutionResult(
                         status="skipped",
@@ -976,6 +979,7 @@ def execute_order_plan(
                             if min_entry_price is not None and best_buy_price + 1e-9 < min_entry_price
                             else "live_order_book_price_improved_too_much"
                         ),
+                        live_order_book_price=best_buy_price,
                     )
                 if (
                     best_buy_price is not None
@@ -986,8 +990,10 @@ def execute_order_plan(
                         status="skipped",
                         remaining_budget=remaining_budget,
                         skip_reason="live_order_book_price_above_max_entry",
+                        live_order_book_price=best_buy_price,
+                        live_price_cap=market_order_price,
                     )
-                should_require_full_depth = _order_type_text(getattr(cfg, "live_order_type", "FOK")) == "FOK"
+                should_require_full_depth = order_type_text == "FOK"
                 available_notional = available_order_book_ask_notional_at_or_below(book, market_order_price)
                 if (
                     getattr(cfg, "live_precheck_order_book_depth", True)
@@ -1048,6 +1054,7 @@ def execute_order_plan(
         remaining_budget=max(0.0, remaining_budget - plan.order_cost),
         order_id=order_id,
         response=response,
+        live_order_book_price=live_order_book_price,
         live_price_cap=plan.max_entry_price if plan.max_entry_price is not None else getattr(cfg, "max_entry_price", None),
         raw_price_cap_sent=plan.max_entry_price if plan.max_entry_price is not None else getattr(cfg, "max_entry_price", None),
     )

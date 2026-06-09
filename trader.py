@@ -155,6 +155,9 @@ def _sync_paper_binance_signal_service(
         return None
 
     if service is not None and getattr(service, "ws_url", None) == expected_url:
+        start = getattr(service, "start", None)
+        if callable(start):
+            start()
         return service
 
     if service is not None:
@@ -323,6 +326,10 @@ def _order_cost_multiplier_for_decision(cfg: AppConfig, side_decision: SideDecis
     multiplier = _effective_decision_order_cost_multiplier(cfg=cfg, decision=side_decision, price=price)
     side_decision.order_cost_multiplier = multiplier
     return multiplier
+
+
+def _entry_delay_seconds(now: datetime, entry_time: datetime) -> float:
+    return max(0.0, (now - entry_time).total_seconds())
 
 
 def _market_min_order_size(market: dict[str, Any]) -> float | None:
@@ -1119,6 +1126,7 @@ def place_live_order(
         }
     if _entry_window_missed(now, entry_time, grace_seconds=cfg.entry_grace_seconds):
         skip_reason = "entry_window_missed"
+        entry_delay_seconds = _entry_delay_seconds(now, entry_time)
         if dry_run:
             return {
                 "status": "dry_run",
@@ -1129,6 +1137,7 @@ def place_live_order(
                 "should_trade": False,
                 "skip_reason": skip_reason,
                 "entry_time": entry_time.isoformat(),
+                "entry_delay_seconds": entry_delay_seconds,
                 "projected_max_stake_skip_streak": 0,
                 "signal_open_up_price": side_decision.signal_open_up_price,
                 "signal_current_up_price": side_decision.signal_current_up_price,
@@ -1158,6 +1167,8 @@ def place_live_order(
                 recovery_loss=state.recovery_loss,
                 consecutive_losses=state.consecutive_losses,
                 skip_reason=skip_reason,
+                entry_time=entry_time,
+                entry_delay_seconds=entry_delay_seconds,
                 **_signal_record_kwargs(side_decision),
             ),
         )
@@ -1173,6 +1184,7 @@ def place_live_order(
             "should_trade": False,
             "skip_reason": skip_reason,
             "entry_time": entry_time.isoformat(),
+            "entry_delay_seconds": entry_delay_seconds,
             "projected_max_stake_skip_streak": 0,
             "signal_open_up_price": side_decision.signal_open_up_price,
             "signal_current_up_price": side_decision.signal_current_up_price,
@@ -1375,6 +1387,8 @@ def place_live_order(
                 consecutive_losses=state.consecutive_losses,
                 skip_reason=execution.skip_reason,
                 balance_error=execution.balance_error,
+                live_order_book_price=execution.live_order_book_price,
+                live_price_cap=execution.live_price_cap,
                 **_signal_record_kwargs(side_decision),
             ),
         )
@@ -1394,6 +1408,8 @@ def place_live_order(
             "expected_profit": plan.expected_profit,
             "order_type": cfg.live_order_type.upper(),
             "balance_error": execution.balance_error,
+            "live_order_book_price": execution.live_order_book_price,
+            "live_price_cap": execution.live_price_cap,
             "signal_open_up_price": side_decision.signal_open_up_price,
             "signal_current_up_price": side_decision.signal_current_up_price,
             "signal_threshold": side_decision.signal_threshold,
@@ -1439,6 +1455,7 @@ def place_live_order(
             raw_price=executed_plan.raw_price,
             raw_order_cost=executed_plan.raw_order_cost,
             fee=executed_plan.fee,
+            live_order_book_price=execution.live_order_book_price,
             live_price_cap=live_price_cap,
             raw_price_cap_sent=execution.raw_price_cap_sent,
             tracks_recovery_loss=executed_plan.tracks_recovery_loss,
@@ -1471,6 +1488,7 @@ def place_live_order(
         "fee": executed_plan.fee,
         "effective_price_with_fee": executed_plan.price,
         "effective_order_cost_with_fee": executed_plan.order_cost,
+        "live_order_book_price": execution.live_order_book_price,
         "live_price_cap": live_price_cap,
         "order_cost": executed_plan.order_cost,
         "expected_profit": executed_plan.expected_profit,
@@ -2081,6 +2099,7 @@ def run_live_trading(
                             )
                             continue
                         if _entry_window_missed(now, entry_time, grace_seconds=strategy_cfg.entry_grace_seconds):
+                            entry_delay_seconds = _entry_delay_seconds(now, entry_time)
                             append_trade_log(
                                 log_path,
                                 TradeRecord(
@@ -2103,6 +2122,8 @@ def run_live_trading(
                                     recovery_loss=strategy_state.recovery_loss,
                                     consecutive_losses=strategy_state.consecutive_losses,
                                     skip_reason="entry_window_missed",
+                                    entry_time=entry_time,
+                                    entry_delay_seconds=entry_delay_seconds,
                                     **_signal_record_kwargs(side_decision),
                                 ),
                             )
@@ -2134,6 +2155,7 @@ def run_live_trading(
                                     "order_cost": 0.0,
                                     "expected_profit": 0.0,
                                     "entry_time": entry_time.isoformat(),
+                                    "entry_delay_seconds": entry_delay_seconds,
                                     "signal_open_up_price": side_decision.signal_open_up_price,
                                     "signal_current_up_price": side_decision.signal_current_up_price,
                                     "signal_threshold": side_decision.signal_threshold,
@@ -2315,6 +2337,8 @@ def run_live_trading(
                                     consecutive_losses=strategy_state.consecutive_losses,
                                     skip_reason=execution.skip_reason,
                                     balance_error=execution.balance_error,
+                                    live_order_book_price=execution.live_order_book_price,
+                                    live_price_cap=execution.live_price_cap,
                                     **_signal_record_kwargs(side_decision),
                                 ),
                             )
@@ -2345,6 +2369,8 @@ def run_live_trading(
                                     "order_size": plan.order_size,
                                     "order_cost": plan.order_cost,
                                     "expected_profit": plan.expected_profit,
+                                    "live_order_book_price": execution.live_order_book_price,
+                                    "live_price_cap": execution.live_price_cap,
                                     "signal_open_up_price": side_decision.signal_open_up_price,
                                     "signal_current_up_price": side_decision.signal_current_up_price,
                                     "signal_threshold": side_decision.signal_threshold,
@@ -2390,6 +2416,7 @@ def run_live_trading(
                                 raw_price=executed_plan.raw_price,
                                 raw_order_cost=executed_plan.raw_order_cost,
                                 fee=executed_plan.fee,
+                                live_order_book_price=execution.live_order_book_price,
                                 live_price_cap=execution.live_price_cap,
                                 raw_price_cap_sent=execution.raw_price_cap_sent,
                                 **_signal_record_kwargs(side_decision),
@@ -2433,6 +2460,8 @@ def run_live_trading(
                                 "effective_order_cost_with_fee": executed_plan.order_cost,
                                 "order_cost": executed_plan.order_cost,
                                 "expected_profit": executed_plan.expected_profit,
+                                "live_order_book_price": execution.live_order_book_price,
+                                "live_price_cap": execution.live_price_cap,
                                 "order_type": strategy_cfg.live_order_type.upper(),
                                 "order_id": execution.order_id,
                                 "response": execution.response,

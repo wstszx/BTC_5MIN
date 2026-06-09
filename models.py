@@ -112,10 +112,13 @@ class TradeRecord:
     fee: float = 0.0
     effective_price_with_fee: float | None = None
     effective_order_cost_with_fee: float | None = None
+    live_order_book_price: float | None = None
     live_price_cap: float | None = None
     raw_price_cap_sent: float | None = None
     balance_error: str | None = None
     tracks_recovery_loss: bool = False
+    entry_time: datetime | None = None
+    entry_delay_seconds: float | None = None
 
 
 @dataclass(slots=True)

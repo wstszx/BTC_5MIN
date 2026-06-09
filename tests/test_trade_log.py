@@ -75,6 +75,72 @@ def test_trade_log_writes_explicit_effective_price_aliases(tmp_path):
     assert rows[0]["effective_order_cost_with_fee"] == "1.0335989664"
 
 
+def test_trade_log_writes_live_order_book_price(tmp_path):
+    log_path = tmp_path / "live_orders.csv"
+    start = datetime(2026, 6, 8, 5, 50, tzinfo=timezone.utc)
+
+    append_trade_log(
+        log_path,
+        TradeRecord(
+            timestamp=start + timedelta(seconds=3),
+            mode="live",
+            round_index=799,
+            strategy=11,
+            entry_timing="OPEN",
+            event_slug="btc-updown-5m-1780897800",
+            start_time=start,
+            end_time=start + timedelta(minutes=5),
+            side="UP",
+            price=0.51,
+            order_size=0.0,
+            order_cost=0.0,
+            expected_profit=0.0,
+            skip_reason="live_order_book_price_above_max_entry",
+            live_order_book_price=0.58,
+            live_price_cap=0.54,
+        ),
+    )
+
+    rows = list(csv.DictReader(log_path.open(encoding="utf-8", newline="")))
+
+    assert rows[0]["price"] == "0.51"
+    assert rows[0]["live_order_book_price"] == "0.58"
+    assert rows[0]["live_price_cap"] == "0.54"
+
+
+def test_trade_log_writes_entry_timing_diagnostics(tmp_path):
+    log_path = tmp_path / "live_orders.csv"
+    start = datetime(2026, 6, 9, 2, 5, tzinfo=timezone.utc)
+    entry_time = start + timedelta(seconds=12)
+
+    append_trade_log(
+        log_path,
+        TradeRecord(
+            timestamp=entry_time + timedelta(seconds=7),
+            mode="live",
+            round_index=974,
+            strategy=11,
+            entry_timing="OPEN",
+            event_slug="btc-updown-5m-1780970700",
+            start_time=start,
+            end_time=start + timedelta(minutes=5),
+            side="UP",
+            price=0.51,
+            order_size=0.0,
+            order_cost=0.0,
+            expected_profit=0.0,
+            skip_reason="entry_window_missed",
+            entry_time=entry_time,
+            entry_delay_seconds=7.0,
+        ),
+    )
+
+    rows = list(csv.DictReader(log_path.open(encoding="utf-8", newline="")))
+
+    assert rows[0]["entry_time"] == "2026-06-09T02:05:12+00:00"
+    assert rows[0]["entry_delay_seconds"] == "7.0"
+
+
 def test_trade_log_updates_existing_paper_strategy_round_instead_of_duplicating(tmp_path):
     log_path = tmp_path / "paper_trades.csv"
     start = datetime(2026, 5, 7, 14, 0, tzinfo=timezone.utc)

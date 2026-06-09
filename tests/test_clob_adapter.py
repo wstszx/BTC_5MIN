@@ -640,7 +640,7 @@ def test_clob_adapter_allows_best_ask_above_min_entry_when_improvement_is_small(
     assert [posted[1] for posted in client.posted_orders] == ["FOK"]
 
 
-def test_clob_adapter_skips_fak_when_rest_order_book_best_ask_is_below_min_entry():
+def test_clob_adapter_submits_fak_without_rest_floor_precheck():
     client = _ShallowOrderBookClient({"asks": [{"price": "0.44", "size": "10.0"}]})
     plan = TradePlan(
         True,
@@ -668,13 +668,13 @@ def test_clob_adapter_skips_fak_when_rest_order_book_best_ask_is_below_min_entry
         remaining_budget=10.0,
     )
 
-    assert execution.status == "skipped"
-    assert execution.skip_reason == "live_order_book_price_below_min_entry"
-    assert client.created_orders == []
-    assert client.posted_orders == []
+    assert execution.status == "submitted"
+    assert execution.order_id == "oid-adapter"
+    assert client.created_orders[0].price == pytest.approx(0.54)
+    assert [posted[1] for posted in client.posted_orders] == ["FAK"]
 
 
-def test_clob_adapter_skips_market_order_below_min_entry_without_price_cap():
+def test_clob_adapter_submits_fak_without_rest_floor_precheck_when_price_cap_is_unset():
     client = _ShallowOrderBookClient({"asks": [{"price": "0.02", "size": "100.0"}]})
     plan = TradePlan(
         True,
@@ -703,13 +703,13 @@ def test_clob_adapter_skips_market_order_below_min_entry_without_price_cap():
         remaining_budget=10.0,
     )
 
-    assert execution.status == "skipped"
-    assert execution.skip_reason == "live_order_book_price_below_min_entry"
-    assert client.created_orders == []
-    assert client.posted_orders == []
+    assert execution.status == "submitted"
+    assert execution.order_id == "oid-adapter"
+    assert client.created_orders[0].price is None
+    assert [posted[1] for posted in client.posted_orders] == ["FAK"]
 
 
-def test_clob_adapter_skips_market_order_when_required_book_has_no_price():
+def test_clob_adapter_submits_fak_when_rest_book_has_no_price():
     client = _ShallowOrderBookClient({"asks": []})
     plan = TradePlan(
         True,
@@ -732,14 +732,14 @@ def test_clob_adapter_skips_market_order_when_required_book_has_no_price():
         remaining_budget=10.0,
     )
 
-    assert execution.status == "skipped"
-    assert execution.skip_reason == "live_order_book_unavailable"
-    assert client.created_orders == []
-    assert client.posted_orders == []
+    assert execution.status == "submitted"
+    assert execution.order_id == "oid-adapter"
+    assert client.created_orders[0].price == pytest.approx(0.54)
+    assert [posted[1] for posted in client.posted_orders] == ["FAK"]
 
 
 @pytest.mark.parametrize("client", [_NoOrderBookMethodClient(), _NoneOrderBookClient()])
-def test_clob_adapter_skips_market_order_when_order_book_cannot_be_verified(client):
+def test_clob_adapter_submits_fak_when_rest_order_book_cannot_be_verified(client):
     plan = TradePlan(
         True,
         side="UP",
@@ -761,13 +761,13 @@ def test_clob_adapter_skips_market_order_when_order_book_cannot_be_verified(clie
         remaining_budget=10.0,
     )
 
-    assert execution.status == "skipped"
-    assert execution.skip_reason == "live_order_book_unavailable"
-    assert client.created_orders == []
-    assert client.posted_orders == []
+    assert execution.status == "submitted"
+    assert execution.order_id == "oid-adapter"
+    assert client.created_orders[0].price == pytest.approx(0.54)
+    assert [posted[1] for posted in client.posted_orders] == ["FAK"]
 
 
-def test_clob_adapter_skips_market_order_above_max_entry_price():
+def test_clob_adapter_submits_fak_with_official_price_cap_when_rest_book_is_above_max_entry():
     client = _ShallowOrderBookClient({"asks": [{"price": "0.58", "size": "10.0"}]})
     plan = TradePlan(
         True,
@@ -796,13 +796,15 @@ def test_clob_adapter_skips_market_order_above_max_entry_price():
         remaining_budget=10.0,
     )
 
-    assert execution.status == "skipped"
-    assert execution.skip_reason == "live_order_book_price_above_max_entry"
-    assert client.created_orders == []
-    assert client.posted_orders == []
+    assert execution.status == "submitted"
+    assert execution.order_id == "oid-adapter"
+    assert execution.live_order_book_price is None
+    assert execution.live_price_cap == pytest.approx(0.54)
+    assert client.created_orders[0].price == pytest.approx(0.54)
+    assert [posted[1] for posted in client.posted_orders] == ["FAK"]
 
 
-def test_clob_adapter_checks_fak_opposite_rest_order_book_before_submission():
+def test_clob_adapter_submits_fak_without_opposite_rest_order_book_precheck():
     client = _MappedOrderBookClient(
         {
             "down-token": {"asks": [{"price": "0.54", "size": "10.0"}]},
@@ -836,11 +838,11 @@ def test_clob_adapter_checks_fak_opposite_rest_order_book_before_submission():
         remaining_budget=10.0,
     )
 
-    assert execution.status == "skipped"
-    assert execution.skip_reason == "live_order_book_price_below_min_entry"
-    assert client.order_book_calls == ["down-token", "up-token"]
-    assert client.created_orders == []
-    assert client.posted_orders == []
+    assert execution.status == "submitted"
+    assert execution.order_id == "oid-adapter"
+    assert client.order_book_calls == []
+    assert client.created_orders[0].price == pytest.approx(0.54)
+    assert [posted[1] for posted in client.posted_orders] == ["FAK"]
 
 
 def test_clob_adapter_ignores_same_token_bid_when_opposite_token_is_unknown():
@@ -939,7 +941,7 @@ def test_clob_adapter_skips_when_fak_order_has_no_matching_orders():
     assert [posted[1] for posted in client.posted_orders] == ["FAK"]
 
 
-def test_clob_adapter_skips_fak_when_required_order_book_is_missing():
+def test_clob_adapter_submits_fak_when_required_rest_order_book_is_missing():
     client = _MissingOrderBookClient()
     plan = TradePlan(
         True,
@@ -962,11 +964,11 @@ def test_clob_adapter_skips_fak_when_required_order_book_is_missing():
         remaining_budget=10.0,
     )
 
-    assert execution.status == "skipped"
-    assert execution.skip_reason == "live_order_book_unavailable"
-    assert client.order_book_calls == ["up-token"]
-    assert client.created_orders == []
-    assert client.posted_orders == []
+    assert execution.status == "submitted"
+    assert execution.order_id == "oid-adapter"
+    assert client.order_book_calls == []
+    assert client.created_orders[0].price == pytest.approx(0.54)
+    assert [posted[1] for posted in client.posted_orders] == ["FAK"]
 
 
 def test_clob_adapter_continues_when_opposite_precheck_order_book_does_not_exist():

@@ -190,6 +190,8 @@ def append_trade_log(path: Path, record: TradeRecord) -> None:
     row["timestamp"] = record.timestamp.isoformat()
     row["start_time"] = record.start_time.isoformat()
     row["end_time"] = record.end_time.isoformat()
+    if record.entry_time is not None:
+        row["entry_time"] = record.entry_time.isoformat()
     fieldnames = list(row.keys())
 
     write_header = not path.exists()

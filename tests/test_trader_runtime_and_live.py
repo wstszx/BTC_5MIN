@@ -4608,6 +4608,42 @@ def test_run_live_trading_skips_missed_entry_window_without_submitting(tmp_path,
     assert "entry_window_missed" in rows[1]
 
 
+def test_run_live_trading_logs_entry_delay_for_missed_window(tmp_path, monkeypatch):
+    stop_event = threading.Event()
+    stub_clob = _StubClobClient(balance_payload={"available": 3.0})
+
+    def fake_sleep(_seconds):
+        stop_event.set()
+
+    monkeypatch.setattr("trader.time.sleep", fake_sleep)
+
+    result = run_live_trading(
+        AppConfig(
+            trade_mode="live",
+            live_trading_enabled=True,
+            live_private_key="pk",
+            live_funder="0xfunder",
+            strategy_id=4,
+            live_strategy_ids=[4],
+            open_delay_seconds=0,
+            entry_grace_seconds=1,
+            poll_interval_seconds=1,
+        ),
+        market_client=_MissedEntryNoNextLiveClient(),
+        clob_client=stub_clob,
+        state_path=tmp_path / "live_state.json",
+        log_path=tmp_path / "live_orders.csv",
+        stop_event=stop_event,
+    )
+
+    rows = list(csv.DictReader((tmp_path / "live_orders.csv").open(newline="", encoding="utf-8")))
+
+    assert result["status"] == "stopped"
+    assert rows[0]["skip_reason"] == "entry_window_missed"
+    assert rows[0]["entry_time"]
+    assert float(rows[0]["entry_delay_seconds"]) > 0
+
+
 def test_run_live_trading_does_not_advance_same_missed_live_round_twice(tmp_path, monkeypatch):
     state_path = tmp_path / "live_state.json"
     log_path = tmp_path / "live_orders.csv"
