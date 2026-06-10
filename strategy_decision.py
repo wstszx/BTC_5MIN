@@ -70,6 +70,9 @@ class Strategy11Probability:
     best_side: str | None
     best_price: float | None
     best_edge: float | None
+    diagnostic_best_side: str | None = None
+    diagnostic_best_price: float | None = None
+    diagnostic_best_edge: float | None = None
 
 
 def resolve_quote_price(side: str, quote: MarketQuote) -> float | None:
@@ -308,9 +311,16 @@ def estimate_strategy11_probability(
     best_side: str | None = None
     best_price: float | None = None
     best_edge: float | None = None
+    diagnostic_best_side: str | None = None
+    diagnostic_best_price: float | None = None
+    diagnostic_best_edge: float | None = None
     for side, price, edge in (("UP", up_price, up_edge), ("DOWN", down_price, down_edge)):
         if edge is None:
             continue
+        if diagnostic_best_edge is None or edge > diagnostic_best_edge:
+            diagnostic_best_side = side
+            diagnostic_best_price = price
+            diagnostic_best_edge = edge
         probability = up_probability if side == "UP" else down_probability
         if probability < min_probability:
             continue
@@ -327,6 +337,9 @@ def estimate_strategy11_probability(
         best_side=best_side,
         best_price=best_price,
         best_edge=best_edge,
+        diagnostic_best_side=diagnostic_best_side,
+        diagnostic_best_price=diagnostic_best_price,
+        diagnostic_best_edge=diagnostic_best_edge,
     )
 
 
@@ -908,18 +921,33 @@ def evaluate_strategy11_probability_edge(
     min_edge = max(0.0, float(getattr(cfg, "strategy11_min_edge", 0.0)))
     distance = float(current_btc_price) - float(state.strategy11_round_start_btc_price)
     best_probability = strategy11_best_probability(probability)
+    diagnostic_side = probability.best_side or probability.diagnostic_best_side
+    diagnostic_price = probability.best_price
+    diagnostic_edge = probability.best_edge
+    if probability.best_side is None:
+        diagnostic_price = probability.diagnostic_best_price
+        diagnostic_edge = probability.diagnostic_best_edge
+        if diagnostic_side == "UP":
+            best_probability = probability.up_probability
+        elif diagnostic_side == "DOWN":
+            best_probability = probability.down_probability
+    reason = (
+        "strategy11_probability_too_low"
+        if probability.best_side is None
+        else "strategy11_edge_too_low"
+    )
     if probability.best_side is None or probability.best_edge is None or probability.best_edge < min_edge:
         return SideDecision(
             side=None,
-            reason="strategy11_edge_too_low",
-            candidate_side=probability.best_side,
-            candidate_price=probability.best_price,
+            reason=reason,
+            candidate_side=diagnostic_side,
+            candidate_price=diagnostic_price,
             signal_open_up_price=state.strategy11_round_start_btc_price,
             signal_current_up_price=float(current_btc_price),
             signal_threshold=min_edge,
             signal_delta=distance,
             signal_probability=best_probability,
-            signal_edge=probability.best_edge,
+            signal_edge=diagnostic_edge,
         )
 
     return SideDecision(

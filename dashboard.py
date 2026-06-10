@@ -5922,6 +5922,7 @@ const REASON_LABELS = {
   strategy11_btc_price_stale: '策略11 BTC 价格信号已过期',
   strategy11_btc_price_unavailable: '策略11 BTC 价格不可用',
   strategy11_probability_unavailable: '策略11 概率估算不可用',
+  strategy11_probability_too_low: '策略11 概率不足',
   strategy11_edge_too_low: '策略11 概率优势不足',
   strategy11_signal_conflict: '策略11 锁边后信号反向',
   strategy11_entry_too_late: '策略11 确认出现过晚',
