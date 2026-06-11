@@ -178,6 +178,24 @@ def test_strategy7_order_cost_multiplier_preserves_full_size_for_strong_signal_n
     assert multiplier == pytest.approx(1.00)
 
 
+def test_strategy7_decision_multiplier_reduces_effective_order_size_without_dynamic_sizing():
+    cfg = AppConfig(strategy_id=7, strategy7_dynamic_sizing_enabled=False)
+    decision = SideDecision(
+        side="UP",
+        candidate_price=0.66,
+        signal_delta=0.16,
+        order_cost_multiplier=0.5,
+    )
+
+    multiplier = effective_decision_order_cost_multiplier(
+        cfg=cfg,
+        decision=decision,
+        price=0.66,
+    )
+
+    assert multiplier == pytest.approx(0.5)
+
+
 def test_strategy9_order_cost_multiplier_reuses_dynamic_sizing_when_enabled():
     cfg = AppConfig(
         strategy_id=9,
@@ -294,8 +312,8 @@ def test_strategy7_skips_when_momentum_is_too_hot():
     state = SessionState(signal_round_slug="s1", signal_round_open_up_price=0.50)
     quote = MarketQuote(
         slug="s1",
-        up_price=0.53,
-        up_best_ask=0.53,
+        up_price=0.56,
+        up_best_ask=0.56,
         strategy6_ofi_score=0.7,
         strategy6_signal_at=now,
     )
@@ -304,8 +322,98 @@ def test_strategy7_skips_when_momentum_is_too_hot():
 
     assert decision.side is None
     assert decision.reason == "strategy7_momentum_too_hot"
-    assert decision.signal_delta == pytest.approx(0.03)
+    assert decision.signal_delta == pytest.approx(0.06)
     assert state.signal_round_locked_side is None
+
+
+def test_strategy7_allows_borderline_hot_momentum_with_reduced_size():
+    now = datetime(2026, 4, 30, 1, 0, tzinfo=timezone.utc)
+    cfg = AppConfig(
+        strategy_id=7,
+        max_entry_price=0.70,
+        strategy7_ofi_threshold=0.5,
+        strategy7_momentum_threshold=0.006,
+        strategy7_min_signal_gap=0.006,
+        strategy7_max_momentum_delta=0.14,
+        strategy7_confirm_before_entry_seconds=0,
+        binance_signal_stale_seconds=10.0,
+    )
+    state = SessionState(signal_round_slug="s1", signal_round_open_up_price=0.50)
+    quote = MarketQuote(
+        slug="s1",
+        up_price=0.66,
+        up_best_ask=0.66,
+        strategy6_ofi_score=0.72,
+        strategy6_signal_at=now,
+    )
+
+    decision = resolve_side_from_strategy(cfg=cfg, state=state, slug="s1", quote=quote, now=now)
+
+    assert decision.side == "UP"
+    assert decision.reason is None
+    assert decision.signal_delta == pytest.approx(0.16)
+    assert decision.signal_threshold == pytest.approx(0.14)
+    assert decision.order_cost_multiplier == pytest.approx(0.5)
+
+
+def test_strategy7_still_skips_extremely_hot_momentum():
+    now = datetime(2026, 4, 30, 1, 0, tzinfo=timezone.utc)
+    cfg = AppConfig(
+        strategy_id=7,
+        strategy7_ofi_threshold=0.5,
+        strategy7_momentum_threshold=0.006,
+        strategy7_min_signal_gap=0.006,
+        strategy7_max_momentum_delta=0.14,
+        strategy7_confirm_before_entry_seconds=0,
+        binance_signal_stale_seconds=10.0,
+    )
+    state = SessionState(signal_round_slug="s1", signal_round_open_up_price=0.50)
+    quote = MarketQuote(
+        slug="s1",
+        up_price=0.73,
+        up_best_ask=0.73,
+        strategy6_ofi_score=0.72,
+        strategy6_signal_at=now,
+    )
+
+    decision = resolve_side_from_strategy(cfg=cfg, state=state, slug="s1", quote=quote, now=now)
+
+    assert decision.side is None
+    assert decision.reason == "strategy7_momentum_too_hot"
+    assert decision.signal_delta == pytest.approx(0.23)
+
+
+def test_strategy7_locked_borderline_hot_momentum_keeps_threshold_and_reduced_size():
+    now = datetime(2026, 4, 30, 1, 0, tzinfo=timezone.utc)
+    cfg = AppConfig(
+        strategy_id=7,
+        max_entry_price=0.70,
+        strategy7_ofi_threshold=0.5,
+        strategy7_momentum_threshold=0.006,
+        strategy7_min_signal_gap=0.006,
+        strategy7_max_momentum_delta=0.14,
+        strategy7_confirm_before_entry_seconds=0,
+        binance_signal_stale_seconds=10.0,
+    )
+    state = SessionState(
+        signal_round_slug="s1",
+        signal_round_open_up_price=0.50,
+        signal_round_locked_side="UP",
+    )
+    quote = MarketQuote(
+        slug="s1",
+        up_price=0.66,
+        up_best_ask=0.66,
+        strategy6_ofi_score=0.72,
+        strategy6_signal_at=now,
+    )
+
+    decision = resolve_side_from_strategy(cfg=cfg, state=state, slug="s1", quote=quote, now=now)
+
+    assert decision.side == "UP"
+    assert decision.signal_locked is True
+    assert decision.signal_threshold == pytest.approx(0.14)
+    assert decision.order_cost_multiplier == pytest.approx(0.5)
 
 
 def test_strategy7_revalidates_locked_side_before_entry():
