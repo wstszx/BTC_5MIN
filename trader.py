@@ -768,6 +768,7 @@ def _execute_live_order_with_fak_retry(
     retry_count = max(0, int(getattr(cfg, "live_fak_no_match_retry_count", 0) or 0))
     retry_delay = max(0.0, float(getattr(cfg, "live_fak_no_match_retry_delay_seconds", 0.0) or 0.0))
     attempt = 0
+    low_entry_revalidated = False
     while True:
         quote_skip_reason = (
             _live_quote_execution_skip_reason(
@@ -800,6 +801,58 @@ def _execute_live_order_with_fak_retry(
                 balance_error=balance_error,
             )
         )
+        if (
+            strategy_id == 7
+            and not low_entry_revalidated
+            and execution.skip_reason == "live_order_book_price_below_min_entry"
+        ):
+            low_entry_revalidated = True
+            current_quote = market_client.quote_from_market(market)
+            _apply_strategy6_signal_to_quote(
+                cfg=cfg,
+                quote=current_quote,
+                binance_signal_service=binance_signal_service,
+                diagnostic_log=_runtime_log,
+            )
+            refreshed_decision = _resolve_side_from_strategy(
+                cfg=cfg,
+                state=strategy_state,
+                slug=target_round.slug,
+                quote=current_quote,
+                market_client=market_client,
+                window=target_round,
+                now=datetime.now(timezone.utc),
+                entry_time=entry_time,
+            )
+            if refreshed_decision.side != current_side:
+                execution = OrderExecutionResult(
+                    status="skipped",
+                    remaining_budget=remaining_live_budget,
+                    skip_reason=refreshed_decision.reason or "strategy7_revalidation_signal_changed",
+                    balance_error=balance_error,
+                )
+                return execution, current_plan, refreshed_decision, current_side, current_price, current_quote
+            refreshed_price = resolve_quote_price(current_side, current_quote)
+            refreshed_plan = _build_live_trade_plan_for_decision(
+                cfg=cfg,
+                state=strategy_state,
+                market=market,
+                side_decision=refreshed_decision,
+                side=current_side,
+                price=refreshed_price,
+            )
+            if not refreshed_plan.should_trade:
+                execution = OrderExecutionResult(
+                    status="skipped",
+                    remaining_budget=remaining_live_budget,
+                    skip_reason=refreshed_plan.skip_reason,
+                    balance_error=balance_error,
+                )
+                return execution, refreshed_plan, refreshed_decision, current_side, refreshed_price, current_quote
+            current_decision = refreshed_decision
+            current_price = refreshed_price
+            current_plan = refreshed_plan
+            continue
         if execution.skip_reason != "live_fak_not_matched" or attempt >= retry_count:
             return execution, current_plan, current_decision, current_side, current_price, current_quote
         attempt += 1
