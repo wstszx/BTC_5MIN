@@ -916,12 +916,13 @@ def execute_order_plan(
         max_improvement=getattr(cfg, "live_max_price_improvement", None),
     )
     order_type_text = _order_type_text(getattr(cfg, "live_order_type", "FOK"))
-    should_check_order_book_price = order_type_text == "FOK" and (
+    should_require_live_book = order_type_text == "FOK"
+    should_check_order_book_price = order_type_text in {"FOK", "FAK"} and (
         market_order_price is not None or execution_floor is not None
     )
     should_precheck_order_book_price = (
         getattr(cfg, "live_precheck_order_book_depth", True)
-        and order_type_text == "FOK"
+        and order_type_text in {"FOK", "FAK"}
         and (market_order_price is not None or should_check_order_book_price)
     )
     order_type_override = None
@@ -934,13 +935,15 @@ def execute_order_plan(
             except Exception as exc:
                 if not is_live_order_book_unavailable_error(exc):
                     raise
-                return OrderExecutionResult(
-                    status="skipped",
-                    remaining_budget=remaining_budget,
-                    skip_reason="live_order_book_unavailable",
-                )
+                if should_require_live_book:
+                    return OrderExecutionResult(
+                        status="skipped",
+                        remaining_budget=remaining_budget,
+                        skip_reason="live_order_book_unavailable",
+                    )
+                book = None
             if book is None:
-                if should_check_order_book_price:
+                if should_require_live_book and should_check_order_book_price:
                     return OrderExecutionResult(
                         status="skipped",
                         remaining_budget=remaining_budget,
@@ -960,7 +963,7 @@ def execute_order_plan(
                     opposite_book = None
                 best_buy_price = best_possible_binary_buy_price(book, opposite_book)
                 live_order_book_price = best_buy_price
-                if should_check_order_book_price and best_buy_price is None:
+                if should_require_live_book and should_check_order_book_price and best_buy_price is None:
                     return OrderExecutionResult(
                         status="skipped",
                         remaining_budget=remaining_budget,
@@ -984,6 +987,7 @@ def execute_order_plan(
                 if (
                     best_buy_price is not None
                     and market_order_price is not None
+                    and order_type_text == "FOK"
                     and best_buy_price > market_order_price + 1e-9
                 ):
                     return OrderExecutionResult(
@@ -1011,7 +1015,7 @@ def execute_order_plan(
                             skip_reason="live_order_book_depth_insufficient",
                     )
                 clob_client = live_client_for_depth
-        elif should_check_order_book_price:
+        elif should_require_live_book and should_check_order_book_price:
             return OrderExecutionResult(
                 status="skipped",
                 remaining_budget=remaining_budget,

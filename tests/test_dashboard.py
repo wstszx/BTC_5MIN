@@ -138,7 +138,7 @@ def test_dashboard_rejects_unknown_config_keys(tmp_path: Path):
         try:
             state.update_config({"UNKNOWN_KEY": "1"})
         except ValueError as exc:
-            assert "Unsupported keys" in str(exc)
+            assert "不支持的配置项" in str(exc)
         else:
             raise AssertionError("Expected ValueError")
     finally:
@@ -159,8 +159,8 @@ def test_dashboard_rejects_invalid_config_values(tmp_path: Path):
 
         assert "STRATEGY_7_MAX_STAKE" in message
         assert "WS_ENABLED" in message
-        assert field_errors["STRATEGY_7_MAX_STAKE"].startswith("Invalid value for STRATEGY_7_MAX_STAKE")
-        assert field_errors["WS_ENABLED"].startswith("Invalid value for WS_ENABLED")
+        assert field_errors["STRATEGY_7_MAX_STAKE"].startswith("策略7 单笔最大下注金额的值无效")
+        assert field_errors["WS_ENABLED"].startswith("实时连接开关的值无效")
         assert not env_file.exists()
     finally:
         state.close()
@@ -177,7 +177,7 @@ def test_dashboard_payload_uses_effective_values_for_invalid_env_file(tmp_path: 
         assert "TARGET_PROFIT" not in payload["env_values"]
         assert payload["env_values"]["STRATEGY_7_MAX_STAKE"] == "abc"
         assert "STRATEGY_7_MAX_STAKE" not in payload["validation_errors"]
-        assert payload["validation_errors"]["WS_ENABLED"]
+        assert payload["validation_errors"]["WS_ENABLED"].startswith("实时连接开关的值无效")
     finally:
         state.close()
 
@@ -1040,6 +1040,26 @@ def test_dashboard_reason_text_translates_prefixed_runtime_errors():
     assert "return REASON_LABELS[reasonCode];" in js
 
 
+def test_dashboard_reason_text_falls_back_to_chinese_for_unknown_machine_codes():
+    js = _dashboard_js()
+
+    assert "function fallbackReasonText(reasonCode)" in js
+    assert "return fallbackReasonText(reasonCode);" in js
+    assert "probability_too_low: '概率不足'" in js
+    assert "if (strategyMatch) {" in js
+
+
+def test_dashboard_assets_localize_runtime_state_codes_and_market_terms():
+    html = _dashboard_html()
+    js = _dashboard_js()
+
+    assert "Tick size" not in html
+    assert "最小报价单位" in html
+    assert "function formatSwitchStateLabel(value)" in js
+    assert "switching: '切换中'" in js
+    assert "esc(formatSwitchStateLabel(card.switch_state || '--'))" in js
+
+
 def test_dashboard_assets_hide_paper_and_live_sections_by_active_mode():
     js = _dashboard_js()
 
@@ -1586,8 +1606,8 @@ def test_dashboard_config_payload_exposes_runtime_config_warnings(tmp_path: Path
     try:
         payload = state.get_config_payload()
 
-        assert payload["config_warnings"]["STRATEGY_7_MAX_STAKE"].startswith("Invalid value for STRATEGY_7_MAX_STAKE")
-        assert payload["config_warnings"]["STRATEGY_IDS"] == "Invalid entries for STRATEGY_IDS ignored: x"
+        assert payload["config_warnings"]["STRATEGY_7_MAX_STAKE"].startswith("策略7 单笔最大下注金额的值无效")
+        assert payload["config_warnings"]["STRATEGY_IDS"] == "统一策略组合已忽略无效条目：x"
         assert payload["runtime_status"]["config_warning_count"] == 2
     finally:
         state.close()
@@ -2981,6 +3001,27 @@ def test_dashboard_runtime_payload_exposes_worker_runtime_alert(tmp_path: Path):
         assert "Polymarket 限制当前地区实盘交易" in runtime["runtime_alert_message"]
         assert runtime["runtime_alert_level"] == "error"
         assert runtime["runtime_alert_at"] is not None
+    finally:
+        state.close()
+
+
+def test_dashboard_runtime_payload_localizes_stale_live_orders_alert(tmp_path: Path):
+    control = RuntimeControl(initial_mode="live")
+    control.update_worker_state(
+        runtime_alert_code="live_orders_stale",
+        runtime_alert_message=(
+            "Live orders log has not advanced for 38.7 minutes; last live row was "
+            "2026-06-09T04:40:59.769402+00:00."
+        ),
+        runtime_alert_level="warning",
+    )
+    state = DashboardState(env_file=tmp_path / ".env.dashboard", runtime_control=control)
+    try:
+        payload = state.get_config_payload()
+        runtime = payload["runtime_status"]
+        assert "实盘订单日志已 38.7 分钟未更新" in runtime["runtime_alert_message"]
+        assert "Live orders log" not in runtime["runtime_alert_message"]
+        assert runtime["runtime_alert_level"] == "warning"
     finally:
         state.close()
 

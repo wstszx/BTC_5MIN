@@ -1574,6 +1574,13 @@ def _localize_runtime_message(message: str | None) -> str | None:
     lowered = message.lower()
     if "trading restricted" in lowered or "geoblock" in lowered:
         return "Polymarket 限制当前地区实盘交易。程序已保持运行，但当前地区无法提交实盘订单；请更换允许地区或切回模拟盘。"
+    stale_live_orders = re.match(
+        r"Live orders log has not advanced for ([0-9.]+) minutes?; last live row was (.+?)\.?$",
+        message.strip(),
+    )
+    if stale_live_orders:
+        minutes, last_row = stale_live_orders.groups()
+        return f"实盘订单日志已 {minutes} 分钟未更新；最后一条实盘记录为 {last_row}。"
     mapping = {
         "Live trading is disabled.": "实盘交易未开启。",
         "Live trading is disabled. Set LIVE_TRADING_ENABLED=true (or config flag) to submit orders.": "并行实盘未开启。请先打开并行实盘开关。",
@@ -1781,6 +1788,7 @@ class DashboardState:
         "ENABLE_LIVE_TRADING": "并行实盘",
         "TRADE_MODE": "运行视角",
         "MARKET_TIMEFRAME": "市场频次",
+        "PAPER_TIMEFRAMES": "纸面频次组合",
         "LIVE_TRADING_ENABLED": "并行实盘开关",
         "POLYMARKET_PRIVATE_KEY": "实盘私钥",
         "POLYMARKET_FUNDER": "\u5b9e\u76d8\u94b1\u5305\u5730\u5740",
@@ -1869,6 +1877,53 @@ class DashboardState:
         "FINAL_PRICE_WAIT_SECONDS": "官方结算等待秒",
         "FINAL_PRICE_POLL_INTERVAL_SECONDS": "官方结算轮询秒",
     }
+
+    @classmethod
+    def _display_config_key(cls, key: str) -> str:
+        key_text = str(key or "").strip()
+        strategy_profile_key = _split_strategy_profile_key(key_text)
+        if strategy_profile_key is not None:
+            _, strategy_id, base_key = strategy_profile_key
+            base_label = cls.CONFIG_LABELS.get(base_key, base_key)
+            return f"策略{strategy_id} {base_label}"
+        paper_profile_key = _split_paper_profile_key(key_text)
+        if paper_profile_key is not None:
+            timeframe, base_key = paper_profile_key
+            base_label = cls.CONFIG_LABELS.get(base_key, base_key)
+            return f"{timeframe} 纸面 {base_label}"
+        return cls.CONFIG_LABELS.get(key_text, key_text)
+
+    @classmethod
+    def _localize_config_message(cls, key: str, message: str) -> str:
+        key_text = str(key or "").strip()
+        text = str(message or "").strip()
+        label = cls._display_config_key(key_text)
+        value_match = re.match(
+            r"Invalid value for ([A-Z0-9_]+): expected (.+), got (.+)$",
+            text,
+        )
+        if value_match:
+            _, expected, raw_value = value_match.groups()
+            expected_label = {
+                "true/false": "true/false",
+                "integer": "整数",
+                "number": "数字",
+                "comma-separated strategy ids 1-12": "1-12 的策略编号列表",
+                "comma-separated 5m/15m": "5m/15m 频次列表",
+            }.get(expected, expected.replace("one of", "可选值"))
+            return f"{label}的值无效（{key_text}）：需要 {expected_label}，当前为 {raw_value}。"
+        entries_match = re.match(r"Invalid entries for ([A-Z0-9_]+) ignored: (.+)$", text)
+        if entries_match:
+            _, entries = entries_match.groups()
+            return f"{label}已忽略无效条目：{entries}"
+        return text
+
+    @classmethod
+    def _localize_config_messages(cls, messages: dict[str, str]) -> dict[str, str]:
+        return {
+            key: cls._localize_config_message(key, message)
+            for key, message in messages.items()
+        }
 
     SELECT_OPTIONS: dict[str, list[str]] = {
         "ENABLE_LIVE_TRADING": ["false", "true"],
@@ -2585,7 +2640,7 @@ class DashboardState:
                     merged[key] = self._normalize_config_value(key, raw_value)
                 except ValueError as exc:
                     merged[key] = effective_value
-                    validation_errors[key] = str(exc)
+                    validation_errors[key] = self._localize_config_message(key, str(exc))
             else:
                 merged[key] = effective_value
         if LIVE_STRATEGY_IDS in self._env_values:
@@ -2599,7 +2654,7 @@ class DashboardState:
                 strategy_profile_key = _split_strategy_profile_key(key)
                 if strategy_profile_key is not None and strategy_profile_key[0] == "shared":
                     env_values[key] = value
-            config_warnings = collect_config_warnings(self._env_values)
+            config_warnings = self._localize_config_messages(collect_config_warnings(self._env_values))
             runtime_status = self._build_runtime_status(env_values, config_warnings=config_warnings)
             strategy_catalog = json.loads(json.dumps(self.STRATEGY_CATALOG))
             field_groups = json.loads(json.dumps(self.FIELD_GROUPS))
@@ -2711,14 +2766,14 @@ class DashboardState:
 
     def update_config(self, values: dict[str, str]) -> dict[str, Any]:
         if not isinstance(values, dict):
-            raise ValueError("Config payload must be an object.")
+            raise ValueError("配置请求必须是对象。")
         unsupported = sorted(
             key
             for key in values.keys()
             if key not in self.EDITABLE_CONFIG_KEYS and _split_strategy_profile_key(key) is None
         )
         if unsupported:
-            raise ValueError(f"Unsupported keys: {', '.join(unsupported)}")
+            raise ValueError(f"不支持的配置项：{', '.join(unsupported)}")
 
         normalized_updates: dict[str, str] = {}
         field_errors: dict[str, str] = {}
@@ -2744,7 +2799,7 @@ class DashboardState:
             try:
                 normalized_updates[key] = self._normalize_config_value(key, normalized)
             except ValueError as exc:
-                field_errors[key] = str(exc)
+                field_errors[key] = self._localize_config_message(key, str(exc))
         if field_errors:
             raise ConfigValidationError(field_errors)
 
@@ -4120,7 +4175,7 @@ def _dashboard_html() -> str:
               <div class="kv"><div class="k">可用余额</div><div id="liveHealthBalance" class="v">--</div></div>
               <div class="kv"><div class="k">订单类型</div><div id="liveHealthOrderType" class="v">--</div></div>
               <div class="kv"><div class="k">最小下单</div><div id="liveHealthMinOrder" class="v">--</div></div>
-              <div class="kv"><div class="k">Tick size</div><div id="liveHealthTickSize" class="v">--</div></div>
+              <div class="kv"><div class="k">最小报价单位</div><div id="liveHealthTickSize" class="v">--</div></div>
               <div class="kv"><div class="k">手续费</div><div id="liveHealthFees" class="v">--</div></div>
               <div class="kv"><div class="k">策略组合</div><div id="liveHealthStrategies" class="v">--</div></div>
             </div>
@@ -5946,15 +6001,100 @@ const REASON_LABELS = {
   strategy12_micro_confidence_too_low: '策略12 盘口确认优势不足',
   live_fok_not_filled: '实时 FOK 订单未成交',
   live_fak_not_matched: '实时 FAK 订单无可成交挂单',
+  live_retryable_clob_error: '实盘 CLOB 可重试异常',
+  live_nonretryable_clob_error: '实盘 CLOB 不可重试异常',
+  live_trading_disabled: '实盘交易未开启',
   awaiting_fill_confirmation: '等待成交确认',
   round_in_progress: '轮次仍在进行中',
   round_unresolved: '轮次尚未结算',
+  already_processed_round: '本轮已处理',
   live_wallet_balance_unavailable: '实盘钱包余额不可用',
   insufficient_live_wallet_balance: '实盘钱包余额不足',
   strategy_evaluation_error: '策略评估异常',
   strategy_settlement_error: '策略结算异常',
+  settlement_retryable_clob_error: '结算 CLOB 可重试异常',
+  settlement_error: '结算异常',
   market_timeframe: '市场频次切换待生效',
   'INVALID OPERATION': '实时连接订阅请求无效',
+};
+
+const REASON_PHRASE_LABELS = {
+  probability_too_low: '概率不足',
+  probability_unavailable: '概率估算不可用',
+  edge_too_low: '优势不足',
+  confidence_too_low: '信号优势不足',
+  price_too_low: '入场价格过低',
+  price_too_high: '入场价格过高',
+  btc_price_stale: 'BTC 价格信号已过期',
+  btc_price_unavailable: 'BTC 价格不可用',
+  window_unavailable: '当前轮次不可用',
+  signal_conflict: '信号方向冲突',
+  entry_too_late: '确认出现过晚',
+  entry_window_missed: '已错过入场时间',
+  order_book_depth_insufficient: '盘口深度不足',
+  order_book_price_below_min_entry: '盘口价格低于入场下限',
+  order_book_price_above_max_entry: '盘口价格高于买入上限',
+  order_book_price_improved_too_much: '盘口价格偏离过大',
+  order_book_unavailable: '盘口暂不可用',
+  fak_not_matched: 'FAK 订单无可成交挂单',
+  fok_not_filled: 'FOK 订单未成交',
+  retryable_clob_error: 'CLOB 可重试异常',
+  nonretryable_clob_error: 'CLOB 不可重试异常',
+  wallet_balance_unavailable: '钱包余额不可用',
+  wallet_balance_insufficient: '钱包余额不足',
+  trading_disabled: '交易未开启',
+  settlement_error: '结算异常',
+  evaluation_error: '评估异常',
+};
+
+const REASON_TOKEN_LABELS = {
+  strategy: '策略',
+  signal: '信号',
+  price: '价格',
+  probability: '概率',
+  edge: '优势',
+  confidence: '置信度',
+  btc: 'BTC',
+  ofi: '盘口失衡',
+  momentum: '动量',
+  micro: '盘口确认',
+  window: '轮次',
+  entry: '入场',
+  order: '订单',
+  book: '盘口',
+  depth: '深度',
+  wallet: '钱包',
+  balance: '余额',
+  live: '实盘',
+  paper: '纸面',
+  round: '轮次',
+  settlement: '结算',
+  evaluation: '评估',
+  clob: 'CLOB',
+  error: '异常',
+  unavailable: '不可用',
+  insufficient: '不足',
+  stale: '已过期',
+  weak: '过弱',
+  hot: '过热',
+  cold: '过冷',
+  conflict: '冲突',
+  late: '过晚',
+  missed: '已错过',
+  disabled: '未开启',
+  invalid: '无效',
+  above: '高于',
+  below: '低于',
+  max: '最高',
+  min: '最低',
+  too: '',
+  low: '过低',
+  high: '过高',
+  not: '未',
+  filled: '成交',
+  matched: '匹配成交',
+  retryable: '可重试',
+  nonretryable: '不可重试',
 };
 
 const CONFIG_KEY_NAMES = {
@@ -6049,7 +6189,72 @@ function reasonText(reason) {
   if (REASON_LABELS[reasonCode]) {
     return REASON_LABELS[reasonCode];
   }
-  return rawReason;
+  return fallbackReasonText(reasonCode);
+}
+
+function fallbackReasonText(reasonCode) {
+  const raw = String(reasonCode || '').trim();
+  if (!raw) {
+    return '--';
+  }
+  if (REASON_PHRASE_LABELS[raw]) {
+    return REASON_PHRASE_LABELS[raw];
+  }
+  const strategyMatch = raw.match(/^strategy([0-9]+)_(.+)$/);
+  if (strategyMatch) {
+    const detail = fallbackReasonDetailText(strategyMatch[2]);
+    return '策略' + strategyMatch[1] + ' ' + (detail || '未识别跳过原因');
+  }
+  if (raw.startsWith('live_')) {
+    return '实盘 ' + (fallbackReasonDetailText(raw.slice(5)) || '未识别跳过原因');
+  }
+  if (raw.startsWith('paper_')) {
+    return '纸面 ' + (fallbackReasonDetailText(raw.slice(6)) || '未识别跳过原因');
+  }
+  if (raw.includes('_')) {
+    return fallbackReasonDetailText(raw) || '未识别跳过原因';
+  }
+  return raw;
+}
+
+function fallbackReasonDetailText(detailCode) {
+  const code = String(detailCode || '').trim();
+  if (!code) {
+    return '';
+  }
+  if (REASON_PHRASE_LABELS[code]) {
+    return REASON_PHRASE_LABELS[code];
+  }
+  const parts = [];
+  let hasUnknown = false;
+  const tokens = code.split('_').filter(Boolean);
+  for (let i = 0; i < tokens.length; i += 1) {
+    const threeToken = tokens.slice(i, i + 3).join('_');
+    if (REASON_PHRASE_LABELS[threeToken]) {
+      parts.push(REASON_PHRASE_LABELS[threeToken]);
+      i += 2;
+      continue;
+    }
+    const twoToken = tokens.slice(i, i + 2).join('_');
+    if (REASON_PHRASE_LABELS[twoToken]) {
+      parts.push(REASON_PHRASE_LABELS[twoToken]);
+      i += 1;
+      continue;
+    }
+    const label = REASON_TOKEN_LABELS[tokens[i]];
+    if (label === '') {
+      continue;
+    }
+    if (label) {
+      parts.push(label);
+    } else {
+      hasUnknown = true;
+    }
+  }
+  if (!parts.length) {
+    return hasUnknown ? '未识别跳过原因' : '';
+  }
+  return parts.join('') + (hasUnknown ? '等原因' : '');
 }
 
 function reasonDetailText(row) {
@@ -7059,7 +7264,7 @@ function renderPaperRuntimeCards(payload) {
       +   '</div>'
       +   '<div class="rows">'
       +     '<div class="row"><span class="label">目标模式</span><span class="value">' + esc(formatModeLabel(card.desired_mode || 'paper')) + '</span></div>'
-      +     '<div class="row"><span class="label">切换状态</span><span class="value">' + esc(card.switch_state || '--') + '</span></div>'
+      +     '<div class="row"><span class="label">切换状态</span><span class="value">' + esc(formatSwitchStateLabel(card.switch_state || '--')) + '</span></div>'
       +     '<div class="row"><span class="label">当前轮次</span><span class="value">' + esc(roundSlug) + '</span></div>'
       +     '<div class="row"><span class="label">计划下单</span><span class="value">' + esc(shouldTrade === undefined ? '--' : (shouldTrade ? '是' : '否')) + '</span></div>'
       +   '</div>'
@@ -7262,6 +7467,13 @@ const RUNTIME_LABELS = {
 const STATUS_LABELS = {
   true: '是',
   false: '否',
+};
+
+const SWITCH_STATE_LABELS = {
+  idle: '空闲',
+  pending: '等待切换',
+  switching: '切换中',
+  blocked: '已阻止',
 };
 
 function classifyPnl(value) {
@@ -7564,6 +7776,11 @@ function renderHelpDrawer() {
 function formatModeLabel(value) {
   const normalized = String(value || 'paper').toLowerCase();
   return OPTION_LABELS.TRADE_MODE[normalized] || normalized;
+}
+
+function formatSwitchStateLabel(value) {
+  const normalized = String(value || '').toLowerCase();
+  return SWITCH_STATE_LABELS[normalized] || value || '--';
 }
 
 function isSingleLiveToggleKey(key) {
