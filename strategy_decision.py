@@ -1242,6 +1242,34 @@ def _strategy13_best_probability(edge: Strategy13ProbabilityEdge) -> float | Non
     return None
 
 
+def _strategy13_side_probability(edge: Strategy13ProbabilityEdge, side: str | None) -> float | None:
+    if side == "UP":
+        return edge.up_probability
+    if side == "DOWN":
+        return edge.down_probability
+    return None
+
+
+def _strategy13_side_edge(edge: Strategy13ProbabilityEdge, side: str | None) -> float | None:
+    if side == "UP":
+        return edge.up_edge
+    if side == "DOWN":
+        return edge.down_edge
+    return None
+
+
+def _strategy13_resolve_finite_price(value: object) -> float | None:
+    if value is None:
+        return None
+    try:
+        price = float(value)
+    except (TypeError, ValueError):
+        return None
+    if price > 0 and isfinite(price):
+        return price
+    return None
+
+
 def _strategy13_decision_from_edge(
     *,
     cfg: AppConfig,
@@ -1276,6 +1304,53 @@ def _strategy13_decision_from_edge(
     )
 
 
+def _strategy13_selected_edge(edge: Strategy13ProbabilityEdge, quote: MarketQuote, side: str) -> Strategy13ProbabilityEdge:
+    return Strategy13ProbabilityEdge(
+        up_probability=edge.up_probability,
+        down_probability=edge.down_probability,
+        raw_up_probability=edge.raw_up_probability,
+        raw_down_probability=edge.raw_down_probability,
+        volatility_bps=edge.volatility_bps,
+        up_effective_price=edge.up_effective_price,
+        down_effective_price=edge.down_effective_price,
+        up_edge=edge.up_edge,
+        down_edge=edge.down_edge,
+        best_side=side,
+        best_price=resolve_quote_price(side, quote),
+        best_effective_price=edge.up_effective_price if side == "UP" else edge.down_effective_price,
+        best_edge=_strategy13_side_edge(edge, side),
+    )
+
+
+def _strategy13_select_eligible_edge(
+    *,
+    edge: Strategy13ProbabilityEdge,
+    quote: MarketQuote,
+    min_probability: float,
+    min_edge: float,
+) -> tuple[Strategy13ProbabilityEdge, str | None]:
+    probability_eligible: list[str] = []
+    fully_eligible: list[str] = []
+    for side in ("UP", "DOWN"):
+        probability = _strategy13_side_probability(edge, side)
+        side_edge = _strategy13_side_edge(edge, side)
+        if probability is None or probability < min_probability:
+            continue
+        probability_eligible.append(side)
+        if side_edge is not None and side_edge >= min_edge:
+            fully_eligible.append(side)
+
+    if fully_eligible:
+        selected_side = max(
+            fully_eligible,
+            key=lambda side: _strategy13_side_edge(edge, side) if _strategy13_side_edge(edge, side) is not None else float("-inf"),
+        )
+        return _strategy13_selected_edge(edge, quote, selected_side), None
+    if probability_eligible:
+        return edge, "strategy13_edge_too_low"
+    return edge, "strategy13_probability_too_low"
+
+
 def evaluate_strategy13_probability_edge(
     *,
     cfg: AppConfig,
@@ -1294,15 +1369,17 @@ def evaluate_strategy13_probability_edge(
             reason="strategy13_btc_price_stale",
             signal_threshold=cfg.binance_signal_stale_seconds,
         )
-    current_btc_price = getattr(quote, "binance_mid_price", None)
-    if current_btc_price is None or current_btc_price <= 0:
+    current_btc_price = _strategy13_resolve_finite_price(getattr(quote, "binance_mid_price", None))
+    if current_btc_price is None:
+        state.strategy11_round_start_btc_price = _strategy13_resolve_finite_price(state.strategy11_round_start_btc_price)
         return SideDecision(side=None, reason="strategy13_btc_price_unavailable")
+    state.strategy11_round_start_btc_price = _strategy13_resolve_finite_price(state.strategy11_round_start_btc_price)
     if state.signal_round_slug != window.slug or state.strategy11_round_start_btc_price is None:
-        price_to_beat = getattr(window, "price_to_beat", None)
-        if price_to_beat is not None and price_to_beat > 0:
-            state.strategy11_round_start_btc_price = float(price_to_beat)
+        price_to_beat = _strategy13_resolve_finite_price(getattr(window, "price_to_beat", None))
+        if price_to_beat is not None:
+            state.strategy11_round_start_btc_price = price_to_beat
         else:
-            state.strategy11_round_start_btc_price = float(current_btc_price)
+            state.strategy11_round_start_btc_price = current_btc_price
 
     edge = estimate_strategy13_probability_edge(
         cfg=cfg,
@@ -1317,7 +1394,13 @@ def evaluate_strategy13_probability_edge(
     best_probability = _strategy13_best_probability(edge)
     min_probability = max(0.5, min(0.99, float(getattr(cfg, "strategy13_min_probability", 0.58))))
     min_edge = max(0.0, float(getattr(cfg, "strategy13_min_edge", 0.0)))
-    if edge.best_side is None or best_probability is None or best_probability < min_probability:
+    selected_edge, rejection_reason = _strategy13_select_eligible_edge(
+        edge=edge,
+        quote=quote,
+        min_probability=min_probability,
+        min_edge=min_edge,
+    )
+    if rejection_reason is not None:
         return _strategy13_decision_from_edge(
             cfg=cfg,
             state=state,
@@ -1325,18 +1408,10 @@ def evaluate_strategy13_probability_edge(
             now=now,
             window=window,
             edge=edge,
-            reason="strategy13_probability_too_low",
+            reason=rejection_reason,
         )
-    if edge.best_edge is None or edge.best_edge < min_edge:
-        return _strategy13_decision_from_edge(
-            cfg=cfg,
-            state=state,
-            quote=quote,
-            now=now,
-            window=window,
-            edge=edge,
-            reason="strategy13_edge_too_low",
-        )
+    edge = selected_edge
+    best_probability = _strategy13_best_probability(edge)
 
     ofi_score = resolve_strategy6_ofi_score(quote)
     if getattr(cfg, "strategy13_confirm_micro", True):
@@ -1518,6 +1593,7 @@ def resolve_side_from_strategy(
                 signal_open_up_price=state.signal_round_open_up_price,
                 signal_current_up_price=signal_current_up_price,
             )
+            state.strategy6_last_ofi_score = edge_decision.ofi_score
             edge_decision.signal_locked = True
             if edge_decision.side is None:
                 return edge_decision
