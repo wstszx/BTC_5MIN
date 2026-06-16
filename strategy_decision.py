@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from math import erf, sqrt
+from math import erf, isfinite, sqrt
 from statistics import pstdev
 from typing import Any
 
@@ -367,15 +367,25 @@ def estimate_strategy11_probability(
 
 
 def _strategy13_clamped_volatility_bps(cfg: AppConfig) -> float:
-    min_bps = max(0.1, float(getattr(cfg, "strategy13_vol_min_bps", 8.0)))
-    max_bps = max(min_bps, float(getattr(cfg, "strategy13_vol_max_bps", 45.0)))
-    configured = float(getattr(cfg, "strategy11_volatility_bps_per_sqrt_minute", min_bps))
+    min_bps = _strategy13_finite_float(getattr(cfg, "strategy13_vol_min_bps", 8.0), 8.0)
+    min_bps = max(0.1, min_bps)
+    max_bps = _strategy13_finite_float(getattr(cfg, "strategy13_vol_max_bps", 45.0), 45.0)
+    max_bps = max(min_bps, max_bps)
+    configured = _strategy13_finite_float(getattr(cfg, "strategy11_volatility_bps_per_sqrt_minute", min_bps), min_bps)
     return max(min_bps, min(max_bps, configured))
+
+
+def _strategy13_finite_float(value: object, default: float) -> float:
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError):
+        return default
+    return numeric if isfinite(numeric) else default
 
 
 def _strategy13_shrink_probability(probability: float, shrink: float) -> float:
     bounded = _clamp_probability(probability, low=0.0, high=1.0)
-    shrink_value = max(0.0, min(1.0, float(shrink)))
+    shrink_value = max(0.0, min(1.0, _strategy13_finite_float(shrink, 0.25)))
     return _clamp_probability(0.5 + (bounded - 0.5) * (1.0 - shrink_value), low=0.0, high=1.0)
 
 
@@ -388,24 +398,34 @@ def estimate_strategy13_probability_edge(
     round_start_btc_price: float,
 ) -> Strategy13ProbabilityEdge | None:
     current_btc_price = getattr(quote, "binance_mid_price", None)
-    if current_btc_price is None or current_btc_price <= 0 or round_start_btc_price <= 0:
+    try:
+        current_btc_price = float(current_btc_price)
+        round_start_btc_price = float(round_start_btc_price)
+    except (TypeError, ValueError):
+        return None
+    if (
+        not isfinite(current_btc_price)
+        or not isfinite(round_start_btc_price)
+        or current_btc_price <= 0
+        or round_start_btc_price <= 0
+    ):
         return None
 
     remaining_seconds = max(1.0, (window.end_time - now).total_seconds())
     remaining_minutes = max(remaining_seconds / 60.0, 1.0 / 60.0)
     volatility_bps = _strategy13_clamped_volatility_bps(cfg)
     sigma_price = round_start_btc_price * (volatility_bps / 10_000.0) * sqrt(remaining_minutes)
-    if sigma_price <= 0:
+    if not isfinite(sigma_price) or sigma_price <= 0:
         return None
 
-    distance = float(current_btc_price) - float(round_start_btc_price)
+    distance = current_btc_price - round_start_btc_price
     raw_up_probability = _normal_cdf(distance / sigma_price)
     raw_down_probability = 1.0 - raw_up_probability
-    shrink = float(getattr(cfg, "strategy13_probability_shrink", 0.25))
+    shrink = _strategy13_finite_float(getattr(cfg, "strategy13_probability_shrink", 0.25), 0.25)
     up_probability = _strategy13_shrink_probability(raw_up_probability, shrink)
     down_probability = 1.0 - up_probability
 
-    edge_buffer = max(0.0, float(getattr(cfg, "strategy13_edge_buffer", 0.0)))
+    edge_buffer = max(0.0, _strategy13_finite_float(getattr(cfg, "strategy13_edge_buffer", 0.0), 0.0))
     up_price = resolve_quote_price("UP", quote)
     down_price = resolve_quote_price("DOWN", quote)
     up_effective_price = effective_price_after_fee(up_price) if is_valid_signal_price(up_price) else None

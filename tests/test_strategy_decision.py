@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 
@@ -1408,6 +1409,75 @@ def test_strategy13_edge_uses_fee_adjusted_effective_price():
     assert edge.best_price == pytest.approx(0.55)
     assert edge.best_effective_price == pytest.approx(effective_price_after_fee(0.55))
     assert edge.best_edge == pytest.approx(edge.up_probability - effective_price_after_fee(0.55), abs=0.001)
+
+
+def test_strategy13_probability_edge_rejects_non_finite_btc_inputs():
+    now = datetime(2026, 4, 30, 1, 4, 0, tzinfo=timezone.utc)
+    window = MarketWindow(
+        event_id="e1",
+        market_id="m1",
+        slug="s1",
+        title="BTC",
+        start_time=datetime(2026, 4, 30, 1, 0, 0, tzinfo=timezone.utc),
+        end_time=datetime(2026, 4, 30, 1, 5, 0, tzinfo=timezone.utc),
+    )
+    cfg = AppConfig(
+        strategy_id=13,
+        strategy13_vol_min_bps=8.0,
+        strategy13_vol_max_bps=45.0,
+        strategy13_probability_shrink=0.25,
+        strategy13_edge_buffer=0.0,
+        strategy13_min_probability=0.50,
+        strategy13_min_edge=0.0,
+    )
+    quote = MarketQuote(
+        slug="s1",
+        up_best_ask=0.50,
+        down_best_ask=0.50,
+        binance_mid_price=100080.0,
+        binance_signal_at=now,
+    )
+
+    assert (
+        estimate_strategy13_probability_edge(
+            cfg=cfg,
+            quote=replace(quote, binance_mid_price=math.nan),
+            window=window,
+            now=now,
+            round_start_btc_price=100000.0,
+        )
+        is None
+    )
+    assert (
+        estimate_strategy13_probability_edge(
+            cfg=cfg,
+            quote=replace(quote, binance_mid_price=math.inf),
+            window=window,
+            now=now,
+            round_start_btc_price=100000.0,
+        )
+        is None
+    )
+    assert (
+        estimate_strategy13_probability_edge(
+            cfg=cfg,
+            quote=quote,
+            window=window,
+            now=now,
+            round_start_btc_price=math.nan,
+        )
+        is None
+    )
+    assert (
+        estimate_strategy13_probability_edge(
+            cfg=cfg,
+            quote=quote,
+            window=window,
+            now=now,
+            round_start_btc_price=math.inf,
+        )
+        is None
+    )
 
 
 def test_strategy11_shared_tuning_can_emit_trial_signal():
