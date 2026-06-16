@@ -75,6 +75,23 @@ class Strategy11Probability:
     diagnostic_best_edge: float | None = None
 
 
+@dataclass(slots=True)
+class Strategy13ProbabilityEdge:
+    up_probability: float
+    down_probability: float
+    raw_up_probability: float
+    raw_down_probability: float
+    volatility_bps: float
+    up_effective_price: float | None
+    down_effective_price: float | None
+    up_edge: float | None
+    down_edge: float | None
+    best_side: str | None
+    best_price: float | None
+    best_effective_price: float | None
+    best_edge: float | None
+
+
 def resolve_quote_price(side: str, quote: MarketQuote) -> float | None:
     if side == "UP":
         return quote.up_best_ask if quote.up_best_ask is not None else quote.up_price
@@ -346,6 +363,86 @@ def estimate_strategy11_probability(
         diagnostic_best_side=diagnostic_best_side,
         diagnostic_best_price=diagnostic_best_price,
         diagnostic_best_edge=diagnostic_best_edge,
+    )
+
+
+def _strategy13_clamped_volatility_bps(cfg: AppConfig) -> float:
+    min_bps = max(0.1, float(getattr(cfg, "strategy13_vol_min_bps", 8.0)))
+    max_bps = max(min_bps, float(getattr(cfg, "strategy13_vol_max_bps", 45.0)))
+    configured = float(getattr(cfg, "strategy11_volatility_bps_per_sqrt_minute", min_bps))
+    return max(min_bps, min(max_bps, configured))
+
+
+def _strategy13_shrink_probability(probability: float, shrink: float) -> float:
+    bounded = _clamp_probability(probability, low=0.0, high=1.0)
+    shrink_value = max(0.0, min(1.0, float(shrink)))
+    return _clamp_probability(0.5 + (bounded - 0.5) * (1.0 - shrink_value), low=0.0, high=1.0)
+
+
+def estimate_strategy13_probability_edge(
+    *,
+    cfg: AppConfig,
+    quote: MarketQuote,
+    window: MarketWindow,
+    now: datetime,
+    round_start_btc_price: float,
+) -> Strategy13ProbabilityEdge | None:
+    current_btc_price = getattr(quote, "binance_mid_price", None)
+    if current_btc_price is None or current_btc_price <= 0 or round_start_btc_price <= 0:
+        return None
+
+    remaining_seconds = max(1.0, (window.end_time - now).total_seconds())
+    remaining_minutes = max(remaining_seconds / 60.0, 1.0 / 60.0)
+    volatility_bps = _strategy13_clamped_volatility_bps(cfg)
+    sigma_price = round_start_btc_price * (volatility_bps / 10_000.0) * sqrt(remaining_minutes)
+    if sigma_price <= 0:
+        return None
+
+    distance = float(current_btc_price) - float(round_start_btc_price)
+    raw_up_probability = _normal_cdf(distance / sigma_price)
+    raw_down_probability = 1.0 - raw_up_probability
+    shrink = float(getattr(cfg, "strategy13_probability_shrink", 0.25))
+    up_probability = _strategy13_shrink_probability(raw_up_probability, shrink)
+    down_probability = 1.0 - up_probability
+
+    edge_buffer = max(0.0, float(getattr(cfg, "strategy13_edge_buffer", 0.0)))
+    up_price = resolve_quote_price("UP", quote)
+    down_price = resolve_quote_price("DOWN", quote)
+    up_effective_price = effective_price_after_fee(up_price) if is_valid_signal_price(up_price) else None
+    down_effective_price = effective_price_after_fee(down_price) if is_valid_signal_price(down_price) else None
+    up_edge = up_probability - up_effective_price - edge_buffer if up_effective_price is not None else None
+    down_edge = down_probability - down_effective_price - edge_buffer if down_effective_price is not None else None
+
+    best_side: str | None = None
+    best_price: float | None = None
+    best_effective_price: float | None = None
+    best_edge: float | None = None
+    for side, price, effective_price, edge in (
+        ("UP", up_price, up_effective_price, up_edge),
+        ("DOWN", down_price, down_effective_price, down_edge),
+    ):
+        if edge is None:
+            continue
+        if best_edge is None or edge > best_edge:
+            best_side = side
+            best_price = price
+            best_effective_price = effective_price
+            best_edge = edge
+
+    return Strategy13ProbabilityEdge(
+        up_probability=up_probability,
+        down_probability=down_probability,
+        raw_up_probability=raw_up_probability,
+        raw_down_probability=raw_down_probability,
+        volatility_bps=volatility_bps,
+        up_effective_price=up_effective_price,
+        down_effective_price=down_effective_price,
+        up_edge=up_edge,
+        down_edge=down_edge,
+        best_side=best_side,
+        best_price=best_price,
+        best_effective_price=best_effective_price,
+        best_edge=best_edge,
     )
 
 

@@ -1,14 +1,22 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 
 import pytest
 
+from clob_adapter import effective_price_after_fee
 from config import AppConfig, build_config_from_env_values
 from models import MarketQuote, MarketWindow, SessionState
 from runtime_config import cfg_for_paper_strategy
 from runtime_helpers import signal_record_kwargs
-from strategy_decision import SideDecision, effective_decision_order_cost_multiplier, resolve_side_from_strategy, strategy7_order_cost_multiplier
+from strategy_decision import (
+    SideDecision,
+    effective_decision_order_cost_multiplier,
+    estimate_strategy13_probability_edge,
+    resolve_side_from_strategy,
+    strategy7_order_cost_multiplier,
+)
 from trader import SideDecision as TraderSideDecision
 from trader import _resolve_side_from_strategy
 
@@ -1241,6 +1249,154 @@ def test_strategy11_edge_too_low_skip_keeps_probability_diagnostics():
     assert fields["signal_probability"] == pytest.approx(0.61)
     assert fields["signal_edge"] == pytest.approx(0.006)
     assert fields["signal_reason"] == "strategy11_edge_too_low"
+
+
+def test_strategy13_probability_moves_with_btc_distance_and_remaining_time():
+    now = datetime(2026, 4, 30, 1, 4, 0, tzinfo=timezone.utc)
+    window = MarketWindow(
+        event_id="e1",
+        market_id="m1",
+        slug="s1",
+        title="BTC",
+        start_time=datetime(2026, 4, 30, 1, 0, 0, tzinfo=timezone.utc),
+        end_time=datetime(2026, 4, 30, 1, 5, 0, tzinfo=timezone.utc),
+    )
+    cfg = AppConfig(
+        strategy_id=13,
+        strategy13_vol_min_bps=8.0,
+        strategy13_vol_max_bps=45.0,
+        strategy13_probability_shrink=0.25,
+        strategy13_edge_buffer=0.0,
+        strategy13_min_probability=0.50,
+        strategy13_min_edge=0.0,
+    )
+    up_quote = MarketQuote(
+        slug="s1",
+        up_best_ask=0.50,
+        down_best_ask=0.50,
+        binance_mid_price=100080.0,
+        binance_signal_at=now,
+    )
+    down_quote = MarketQuote(
+        slug="s1",
+        up_best_ask=0.50,
+        down_best_ask=0.50,
+        binance_mid_price=99920.0,
+        binance_signal_at=now,
+    )
+
+    up_edge = estimate_strategy13_probability_edge(
+        cfg=cfg,
+        quote=up_quote,
+        window=window,
+        now=now,
+        round_start_btc_price=100000.0,
+    )
+    down_edge = estimate_strategy13_probability_edge(
+        cfg=cfg,
+        quote=down_quote,
+        window=window,
+        now=now,
+        round_start_btc_price=100000.0,
+    )
+
+    assert up_edge is not None
+    assert down_edge is not None
+    assert up_edge.up_probability > 0.5
+    assert up_edge.down_probability < 0.5
+    assert down_edge.down_probability > 0.5
+    assert down_edge.up_probability < 0.5
+    assert up_edge.best_side == "UP"
+    assert down_edge.best_side == "DOWN"
+
+
+def test_strategy13_probability_shrink_reduces_confidence_toward_half():
+    now = datetime(2026, 4, 30, 1, 4, 0, tzinfo=timezone.utc)
+    window = MarketWindow(
+        event_id="e1",
+        market_id="m1",
+        slug="s1",
+        title="BTC",
+        start_time=datetime(2026, 4, 30, 1, 0, 0, tzinfo=timezone.utc),
+        end_time=datetime(2026, 4, 30, 1, 5, 0, tzinfo=timezone.utc),
+    )
+    base_cfg = AppConfig(
+        strategy_id=13,
+        strategy13_vol_min_bps=8.0,
+        strategy13_vol_max_bps=45.0,
+        strategy13_edge_buffer=0.0,
+        strategy13_min_probability=0.50,
+        strategy13_min_edge=0.0,
+    )
+    quote = MarketQuote(
+        slug="s1",
+        up_best_ask=0.50,
+        down_best_ask=0.50,
+        binance_mid_price=100120.0,
+        binance_signal_at=now,
+    )
+
+    unshrunk = estimate_strategy13_probability_edge(
+        cfg=replace(base_cfg, strategy13_probability_shrink=0.0),
+        quote=quote,
+        window=window,
+        now=now,
+        round_start_btc_price=100000.0,
+    )
+    shrunk = estimate_strategy13_probability_edge(
+        cfg=replace(base_cfg, strategy13_probability_shrink=0.5),
+        quote=quote,
+        window=window,
+        now=now,
+        round_start_btc_price=100000.0,
+    )
+
+    assert unshrunk is not None
+    assert shrunk is not None
+    assert shrunk.up_probability < unshrunk.up_probability
+    assert shrunk.up_probability > 0.5
+
+
+def test_strategy13_edge_uses_fee_adjusted_effective_price():
+    now = datetime(2026, 4, 30, 1, 4, 0, tzinfo=timezone.utc)
+    window = MarketWindow(
+        event_id="e1",
+        market_id="m1",
+        slug="s1",
+        title="BTC",
+        start_time=datetime(2026, 4, 30, 1, 0, 0, tzinfo=timezone.utc),
+        end_time=datetime(2026, 4, 30, 1, 5, 0, tzinfo=timezone.utc),
+    )
+    cfg = AppConfig(
+        strategy_id=13,
+        strategy13_min_edge=0.0,
+        strategy13_edge_buffer=0.0,
+        strategy13_vol_min_bps=30.0,
+        strategy13_vol_max_bps=30.0,
+        strategy13_probability_shrink=0.0,
+        strategy13_min_probability=0.50,
+    )
+    quote = MarketQuote(
+        slug="s1",
+        up_best_ask=0.55,
+        down_best_ask=0.45,
+        binance_mid_price=100140.0,
+        binance_signal_at=now,
+    )
+
+    edge = estimate_strategy13_probability_edge(
+        cfg=cfg,
+        quote=quote,
+        window=window,
+        now=now,
+        round_start_btc_price=100000.0,
+    )
+
+    assert edge is not None
+    assert edge.best_side == "UP"
+    assert edge.best_price == pytest.approx(0.55)
+    assert edge.best_effective_price == pytest.approx(effective_price_after_fee(0.55))
+    assert edge.best_edge == pytest.approx(edge.up_probability - effective_price_after_fee(0.55), abs=0.001)
 
 
 def test_strategy11_shared_tuning_can_emit_trial_signal():
