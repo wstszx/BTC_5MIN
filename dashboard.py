@@ -1908,7 +1908,7 @@ class DashboardState:
                 "true/false": "true/false",
                 "integer": "整数",
                 "number": "数字",
-                "comma-separated strategy ids 1-12": "1-12 的策略编号列表",
+                "comma-separated strategy ids 1-13": "1-13 的策略编号列表",
                 "comma-separated 5m/15m": "5m/15m 频次列表",
             }.get(expected, expected.replace("one of", "可选值"))
             return f"{label}的值无效（{key_text}）：需要 {expected_label}，当前为 {raw_value}。"
