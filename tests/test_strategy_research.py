@@ -309,13 +309,55 @@ def test_strategy_research_strategy_7_rejects_low_confidence_before_price_gate(t
     assert report.top_candidates[0].skipped == 1
 
 
-def test_strategy_research_strategy_7_applies_momentum_overheat_gate(tmp_path):
+def test_strategy_research_strategy_7_reduces_size_for_borderline_hot_momentum(tmp_path):
     csv_path = tmp_path / "strategy7_hot_history.csv"
     csv_path.write_text(
         "\n".join(
             [
                 "event_id,market_id,slug,title,series_id,start_time,end_time,price_to_beat,final_price,result,up_token_id,down_token_id,entry_price_open_up,entry_price_open_down,entry_price_preclose_up,entry_price_preclose_down,strategy6_ofi_score",
                 "1,101,s7-hot,Round A,10684,2026-03-29T00:00:00Z,2026-03-29T00:05:00Z,100,101,UP,up-a,down-a,0.44,0.56,0.51,0.49,0.80",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    cfg = AppConfig(
+        max_stake=25.0,
+        max_price_threshold=0.65,
+        max_entry_price=0.56,
+        strategy7_ofi_threshold=0.50,
+        strategy7_momentum_threshold=0.01,
+        strategy7_min_signal_gap=0.0,
+        strategy7_max_momentum_delta=0.06,
+        strategy7_confirm_before_entry_seconds=0,
+    )
+
+    report = run_strategy_research(
+        csv_path,
+        cfg,
+        strategy_ids=[7],
+        reset_rounds=[2],
+        base_order_costs=[0.5],
+        entry_timing="PRE_CLOSE",
+        segments=1,
+        top_n=1,
+    )
+
+    candidate = report.top_candidates[0]
+    assert candidate.trades == 1
+    assert candidate.skipped == 0
+    assert candidate.wins == 1
+    assert candidate.total_pnl == pytest.approx(0.24019607843137253)
+    assert candidate.max_single_order_cost == pytest.approx(0.25)
+    assert candidate.required_bankroll == pytest.approx(0.25)
+
+
+def test_strategy_research_strategy_7_skips_extremely_hot_momentum(tmp_path):
+    csv_path = tmp_path / "strategy7_extremely_hot_history.csv"
+    csv_path.write_text(
+        "\n".join(
+            [
+                "event_id,market_id,slug,title,series_id,start_time,end_time,price_to_beat,final_price,result,up_token_id,down_token_id,entry_price_open_up,entry_price_open_down,entry_price_preclose_up,entry_price_preclose_down,strategy6_ofi_score",
+                "1,101,s7-extreme-hot,Round A,10684,2026-03-29T00:00:00Z,2026-03-29T00:05:00Z,100,101,UP,up-a,down-a,0.44,0.56,0.55,0.45,0.80",
             ]
         ),
         encoding="utf-8",

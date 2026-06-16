@@ -196,6 +196,7 @@ def _simulate_segment(
         if consecutive_losses >= reset_round:
             consecutive_losses = 0
 
+        side_decision: SideDecision | None = None
         signal_open_up_price = _optional_float(row.get("entry_price_open_up"))
         signal_current_up_price = _select_signal_current_up_price(row, entry_timing)
         ofi_score = _select_ofi_score(row)
@@ -252,6 +253,7 @@ def _simulate_segment(
                     skipped += 1
                     round_index += 1
                     continue
+                side_decision = replace(signal_check.decision, ofi_score=signal_check.ofi_score)
                 side = signal_check.decision.side
             else:
                 try:
@@ -329,16 +331,18 @@ def _simulate_segment(
         if price > cfg.max_price_threshold:
             skipped += 1
             continue
+        if side_decision is None:
+            side_decision = SideDecision(
+                side=side,
+                signal_delta=signal_current_up_price - signal_open_up_price
+                if signal_current_up_price is not None and signal_open_up_price is not None
+                else None,
+                ofi_score=ofi_score,
+            )
         order_cost_multiplier = (
             effective_decision_order_cost_multiplier(
                 cfg=replace(cfg, strategy_id=strategy_id),
-                decision=SideDecision(
-                    side=side,
-                    signal_delta=signal_current_up_price - signal_open_up_price
-                    if signal_current_up_price is not None and signal_open_up_price is not None
-                    else None,
-                    ofi_score=ofi_score,
-                ),
+                decision=side_decision,
                 price=price,
             )
             if strategy_id in {7, 9}
