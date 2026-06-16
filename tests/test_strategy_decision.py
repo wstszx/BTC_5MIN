@@ -1253,7 +1253,7 @@ def test_strategy11_edge_too_low_skip_keeps_probability_diagnostics():
 
 def test_strategy13_probability_moves_with_btc_distance_and_remaining_time():
     now = datetime(2026, 4, 30, 1, 4, 0, tzinfo=timezone.utc)
-    window = MarketWindow(
+    short_window = MarketWindow(
         event_id="e1",
         market_id="m1",
         slug="s1",
@@ -1261,6 +1261,7 @@ def test_strategy13_probability_moves_with_btc_distance_and_remaining_time():
         start_time=datetime(2026, 4, 30, 1, 0, 0, tzinfo=timezone.utc),
         end_time=datetime(2026, 4, 30, 1, 5, 0, tzinfo=timezone.utc),
     )
+    long_window = replace(short_window, end_time=datetime(2026, 4, 30, 1, 10, 0, tzinfo=timezone.utc))
     cfg = AppConfig(
         strategy_id=13,
         strategy13_vol_min_bps=8.0,
@@ -1288,21 +1289,31 @@ def test_strategy13_probability_moves_with_btc_distance_and_remaining_time():
     up_edge = estimate_strategy13_probability_edge(
         cfg=cfg,
         quote=up_quote,
-        window=window,
+        window=short_window,
+        now=now,
+        round_start_btc_price=100000.0,
+    )
+    long_time_up_edge = estimate_strategy13_probability_edge(
+        cfg=cfg,
+        quote=up_quote,
+        window=long_window,
         now=now,
         round_start_btc_price=100000.0,
     )
     down_edge = estimate_strategy13_probability_edge(
         cfg=cfg,
         quote=down_quote,
-        window=window,
+        window=short_window,
         now=now,
         round_start_btc_price=100000.0,
     )
 
     assert up_edge is not None
+    assert long_time_up_edge is not None
     assert down_edge is not None
     assert up_edge.up_probability > 0.5
+    assert long_time_up_edge.up_probability > 0.5
+    assert up_edge.up_probability - 0.5 > long_time_up_edge.up_probability - 0.5
     assert up_edge.down_probability < 0.5
     assert down_edge.down_probability > 0.5
     assert down_edge.up_probability < 0.5
