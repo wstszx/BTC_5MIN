@@ -17,6 +17,8 @@ def live_strategy_ids_for_runtime(cfg: AppConfig) -> list[int]:
     strategy_ids = list(getattr(cfg, "live_strategy_ids", []) or [])
     if strategy_ids:
         return strategy_ids
+    if cfg.strategy_id == 13:
+        return []
     return [cfg.strategy_id]
 
 

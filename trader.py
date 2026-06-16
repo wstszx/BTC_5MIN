@@ -146,7 +146,7 @@ def _sync_paper_binance_signal_service(
     strategy_ids: list[int],
     service: BinanceDepth5SignalService | None,
 ) -> BinanceDepth5SignalService | None:
-    needs_service = any(strategy_id in {6, 7, 8, 9, 10, 11, 12} for strategy_id in strategy_ids)
+    needs_service = any(strategy_id in {6, 7, 8, 9, 10, 11, 12, 13} for strategy_id in strategy_ids)
     expected_url = _binance_signal_service_url(cfg)
 
     if not needs_service:
@@ -808,10 +808,12 @@ def _execute_live_order_with_fak_retry(
         ):
             low_entry_revalidated = True
             current_quote = market_client.quote_from_market(market)
+            refreshed_now = datetime.now(timezone.utc)
             _apply_strategy6_signal_to_quote(
                 cfg=cfg,
                 quote=current_quote,
                 binance_signal_service=binance_signal_service,
+                now=refreshed_now,
                 diagnostic_log=_runtime_log,
             )
             refreshed_decision = _resolve_side_from_strategy(
@@ -821,7 +823,7 @@ def _execute_live_order_with_fak_retry(
                 quote=current_quote,
                 market_client=market_client,
                 window=target_round,
-                now=datetime.now(timezone.utc),
+                now=refreshed_now,
                 entry_time=entry_time,
             )
             if refreshed_decision.side != current_side:
@@ -859,10 +861,12 @@ def _execute_live_order_with_fak_retry(
         if retry_delay > 0:
             time.sleep(retry_delay)
         current_quote = market_client.quote_from_market(market)
+        retry_now = datetime.now(timezone.utc)
         _apply_strategy6_signal_to_quote(
             cfg=cfg,
             quote=current_quote,
             binance_signal_service=binance_signal_service,
+            now=retry_now,
             diagnostic_log=_runtime_log,
         )
         refreshed_decision = _resolve_side_from_strategy(
@@ -872,7 +876,7 @@ def _execute_live_order_with_fak_retry(
             quote=current_quote,
             market_client=market_client,
             window=target_round,
-            now=datetime.now(timezone.utc),
+            now=retry_now,
             entry_time=entry_time,
         )
         if refreshed_decision.side != current_side:
@@ -1003,6 +1007,7 @@ def place_live_order(
         cfg=cfg,
         quote=quote,
         binance_signal_service=binance_signal_service,
+        now=now,
         diagnostic_log=_runtime_log,
     )
     print('[live] quote {' + _describe_quote_source(quote) + '}', flush=True)
@@ -2014,6 +2019,7 @@ def run_live_trading(
                             cfg=strategy_cfg,
                             quote=strategy_quote,
                             binance_signal_service=binance_signal_service,
+                            now=now,
                             diagnostic_log=_runtime_log,
                         )
                         side_decision = _resolve_side_from_strategy(
@@ -2797,6 +2803,7 @@ def run_paper_trading(
                         cfg=strategy_cfg,
                         quote=strategy_quote,
                         binance_signal_service=binance_signal_service,
+                        now=now,
                         diagnostic_log=_runtime_log,
                     )
                     _runtime_log('strategy=' + str(strategy_id) + ' round=' + target_round.slug + ' quote {' + _describe_quote_source(strategy_quote) + '}')
@@ -3214,6 +3221,7 @@ def run_paper_trading(
                         cfg=strategy_cfg,
                         quote=strategy_quote,
                         binance_signal_service=binance_signal_service,
+                        now=now,
                         diagnostic_log=_runtime_log,
                     )
                     side_decision = _resolve_side_from_strategy(

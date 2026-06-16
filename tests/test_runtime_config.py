@@ -40,6 +40,12 @@ def test_runtime_config_uses_split_strategy_ids_even_when_legacy_strategy_ids_ex
     assert live_strategy_ids_for_runtime(cfg) == [6]
 
 
+def test_runtime_config_keeps_strategy13_live_explicit_opt_in():
+    assert live_strategy_ids_for_runtime(AppConfig(strategy_id=13, live_strategy_ids=[])) == []
+    assert live_strategy_ids_for_runtime(AppConfig(strategy_id=13, live_strategy_ids=[13])) == [13]
+    assert live_strategy_ids_for_runtime(AppConfig(strategy_id=12, live_strategy_ids=[])) == [12]
+
+
 def test_runtime_config_keeps_paper_and_live_strategy_profiles_identical_without_mode_overrides():
     cfg = AppConfig(
         strategy_id=7,

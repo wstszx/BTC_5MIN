@@ -68,6 +68,56 @@ def test_apply_strategy6_signal_to_quote_copies_binance_mid_price_for_strategy11
     assert quote.binance_signal_at == signal.signal_at
 
 
+def test_apply_strategy6_signal_to_quote_copies_binance_mid_price_for_strategy13():
+    service = BinanceDepth5SignalService(ws_url='wss://stream.binance.com:9443/ws', stream='btcusdt@depth5')
+    signal = service.push_payload(
+        {'b': [['100000', '5']], 'a': [['100020', '1']]},
+        now=datetime.now(timezone.utc) - timedelta(seconds=1),
+    )
+    cfg = AppConfig(strategy_id=13)
+    quote = MarketQuote(slug='s1')
+
+    _apply_strategy6_signal_to_quote(cfg=cfg, quote=quote, binance_signal_service=service)
+
+    assert quote.strategy6_ofi_score == signal.ofi_score
+    assert quote.strategy6_signal_at == signal.signal_at
+    assert quote.binance_mid_price == 100010.0
+    assert quote.binance_signal_at == signal.signal_at
+
+
+def test_apply_strategy6_signal_to_quote_preserves_fresh_strategy13_quote_binance_price():
+    class EmptyBinanceSignalService:
+        def __init__(self):
+            self.refresh_calls = 0
+
+        def latest(self):
+            return None
+
+        def refresh_from_rest(self, *, now):
+            self.refresh_calls += 1
+            return None
+
+    signal_at = datetime.now(timezone.utc) - timedelta(seconds=1)
+    cfg = AppConfig(strategy_id=13, binance_signal_stale_seconds=10.0)
+    quote = MarketQuote(
+        slug='s1',
+        binance_mid_price=100140.0,
+        binance_signal_at=signal_at,
+    )
+    service = EmptyBinanceSignalService()
+
+    _apply_strategy6_signal_to_quote(
+        cfg=cfg,
+        quote=quote,
+        binance_signal_service=service,
+        now=datetime.now(timezone.utc),
+    )
+
+    assert service.refresh_calls == 0
+    assert quote.binance_mid_price == 100140.0
+    assert quote.binance_signal_at == signal_at
+
+
 def test_apply_strategy6_signal_to_quote_is_noop_for_other_strategies():
     service = BinanceDepth5SignalService(ws_url='wss://stream.binance.com:9443/ws', stream='btcusdt@depth5')
     service.push_payload({'b': [['100000', '5']], 'a': [['100001', '1']]})
@@ -135,6 +185,34 @@ def test_sync_paper_binance_signal_service_starts_for_strategy11(monkeypatch):
     service = _sync_paper_binance_signal_service(
         cfg=AppConfig(strategy_id=2),
         strategy_ids=[2, 11],
+        service=None,
+    )
+
+    assert service is instances[0]
+    assert instances[0].started == 1
+
+
+def test_sync_paper_binance_signal_service_starts_for_strategy13(monkeypatch):
+    instances = []
+
+    class RecordingBinanceSignalService:
+        def __init__(self, *, ws_url, stream):
+            self.ws_url = ws_url.rstrip("/") + "/" + stream.lstrip("/")
+            self.started = 0
+            self.closed = 0
+            instances.append(self)
+
+        def start(self):
+            self.started += 1
+
+        def close(self):
+            self.closed += 1
+
+    monkeypatch.setattr("trader.BinanceDepth5SignalService", RecordingBinanceSignalService)
+
+    service = _sync_paper_binance_signal_service(
+        cfg=AppConfig(strategy_id=2),
+        strategy_ids=[2, 13],
         service=None,
     )
 

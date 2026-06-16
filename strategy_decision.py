@@ -601,9 +601,17 @@ def apply_strategy6_signal_to_quote(
     now: datetime | None = None,
     diagnostic_log: Callable[[str], None] | None = None,
 ) -> None:
-    if cfg.strategy_id not in {6, 7, 8, 9, 10, 11, 12} or binance_signal_service is None:
+    if cfg.strategy_id not in {6, 7, 8, 9, 10, 11, 12, 13} or binance_signal_service is None:
         return
     now = now or datetime.now(timezone.utc)
+    quote_binance_signal_at = getattr(quote, "binance_signal_at", None)
+    if (
+        cfg.strategy_id == 13
+        and getattr(quote, "binance_mid_price", None) is not None
+        and quote_binance_signal_at is not None
+        and (now - quote_binance_signal_at).total_seconds() <= max(0.0, cfg.binance_signal_stale_seconds)
+    ):
+        return
     latest = binance_signal_service.latest()
     if latest is None or (now - latest.signal_at).total_seconds() > max(0.0, cfg.binance_signal_stale_seconds):
         try:
