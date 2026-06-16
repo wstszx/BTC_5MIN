@@ -268,6 +268,32 @@ def _paper_strategy_profile_from_cfg(cfg: AppConfig, strategy_id: int) -> LiveSt
             'strategy11_confirm_before_entry_seconds',
             cfg.strategy11_confirm_before_entry_seconds,
         ),
+        strategy13_min_edge=getattr(existing, 'strategy13_min_edge', cfg.strategy13_min_edge),
+        strategy13_edge_buffer=getattr(existing, 'strategy13_edge_buffer', cfg.strategy13_edge_buffer),
+        strategy13_vol_lookback_seconds=getattr(
+            existing,
+            'strategy13_vol_lookback_seconds',
+            cfg.strategy13_vol_lookback_seconds,
+        ),
+        strategy13_vol_min_bps=getattr(existing, 'strategy13_vol_min_bps', cfg.strategy13_vol_min_bps),
+        strategy13_vol_max_bps=getattr(existing, 'strategy13_vol_max_bps', cfg.strategy13_vol_max_bps),
+        strategy13_probability_shrink=getattr(
+            existing,
+            'strategy13_probability_shrink',
+            cfg.strategy13_probability_shrink,
+        ),
+        strategy13_min_probability=getattr(existing, 'strategy13_min_probability', cfg.strategy13_min_probability),
+        strategy13_confirm_micro=getattr(existing, 'strategy13_confirm_micro', cfg.strategy13_confirm_micro),
+        strategy13_micro_disagree_penalty=getattr(
+            existing,
+            'strategy13_micro_disagree_penalty',
+            cfg.strategy13_micro_disagree_penalty,
+        ),
+        strategy13_confirm_before_entry_seconds=getattr(
+            existing,
+            'strategy13_confirm_before_entry_seconds',
+            cfg.strategy13_confirm_before_entry_seconds,
+        ),
     )
 
 
@@ -340,6 +366,16 @@ def _paper_cfg_for_timeframe(cfg: AppConfig, timeframe: str) -> AppConfig:
         strategy11_min_probability=profile.strategy11_min_probability,
         strategy11_max_probability=profile.strategy11_max_probability,
         strategy11_confirm_before_entry_seconds=profile.strategy11_confirm_before_entry_seconds,
+        strategy13_min_edge=profile.strategy13_min_edge,
+        strategy13_edge_buffer=profile.strategy13_edge_buffer,
+        strategy13_vol_lookback_seconds=profile.strategy13_vol_lookback_seconds,
+        strategy13_vol_min_bps=profile.strategy13_vol_min_bps,
+        strategy13_vol_max_bps=profile.strategy13_vol_max_bps,
+        strategy13_probability_shrink=profile.strategy13_probability_shrink,
+        strategy13_min_probability=profile.strategy13_min_probability,
+        strategy13_confirm_micro=profile.strategy13_confirm_micro,
+        strategy13_micro_disagree_penalty=profile.strategy13_micro_disagree_penalty,
+        strategy13_confirm_before_entry_seconds=profile.strategy13_confirm_before_entry_seconds,
     )
     timeframe_cfg.paper_strategy_profiles = strategy_profiles
     timeframe_cfg.paper_strategy_profiles = {

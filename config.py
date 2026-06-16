@@ -17,7 +17,7 @@ _ENV_FILE_ENCODINGS: tuple[str, ...] = ("utf-8", "utf-8-sig", "gbk")
 _BOOL_TRUE_VALUES = {"1", "true", "yes", "on"}
 _BOOL_FALSE_VALUES = {"0", "false", "no", "off"}
 _STRATEGY_ID_MIN = 1
-_STRATEGY_ID_MAX = 12
+_STRATEGY_ID_MAX = 13
 
 _STRATEGY7_SHORT_PROFILE_KEYS: dict[str, str] = {
     "OFI_THRESHOLD": "STRATEGY7_OFI_THRESHOLD",
@@ -91,6 +91,18 @@ _STRATEGY12_SHORT_PROFILE_KEYS: dict[str, str] = {
         }
     },
 }
+_STRATEGY13_SHORT_PROFILE_KEYS: dict[str, str] = {
+    "MIN_EDGE": "STRATEGY13_MIN_EDGE",
+    "EDGE_BUFFER": "STRATEGY13_EDGE_BUFFER",
+    "VOL_LOOKBACK_SECONDS": "STRATEGY13_VOL_LOOKBACK_SECONDS",
+    "VOL_MIN_BPS": "STRATEGY13_VOL_MIN_BPS",
+    "VOL_MAX_BPS": "STRATEGY13_VOL_MAX_BPS",
+    "PROBABILITY_SHRINK": "STRATEGY13_PROBABILITY_SHRINK",
+    "MIN_PROBABILITY": "STRATEGY13_MIN_PROBABILITY",
+    "CONFIRM_MICRO": "STRATEGY13_CONFIRM_MICRO",
+    "MICRO_DISAGREE_PENALTY": "STRATEGY13_MICRO_DISAGREE_PENALTY",
+    "CONFIRM_BEFORE_ENTRY_SECONDS": "STRATEGY13_CONFIRM_BEFORE_ENTRY_SECONDS",
+}
 _STRATEGY_SHORT_PROFILE_KEYS: dict[int, dict[str, str]] = {
     7: _STRATEGY7_SHORT_PROFILE_KEYS,
     8: _STRATEGY7_SHORT_PROFILE_KEYS,
@@ -98,6 +110,7 @@ _STRATEGY_SHORT_PROFILE_KEYS: dict[int, dict[str, str]] = {
     10: _STRATEGY10_SHORT_PROFILE_KEYS,
     11: _STRATEGY11_SHORT_PROFILE_KEYS,
     12: _STRATEGY12_SHORT_PROFILE_KEYS,
+    13: _STRATEGY13_SHORT_PROFILE_KEYS,
 }
 
 
@@ -135,6 +148,8 @@ _INT_CONFIG_KEYS: frozenset[str] = frozenset(
         "STRATEGY9_STABILITY_SAMPLE_COUNT",
         "STRATEGY9_STABILITY_REQUIRED_COUNT",
         "STRATEGY11_CONFIRM_BEFORE_ENTRY_SECONDS",
+        "STRATEGY13_VOL_LOOKBACK_SECONDS",
+        "STRATEGY13_CONFIRM_BEFORE_ENTRY_SECONDS",
         "WS_QUOTE_STALE_SECONDS",
         "WS_CONNECT_TIMEOUT_SECONDS",
         "WS_LOG_EVERY_UPDATES",
@@ -203,6 +218,13 @@ _FLOAT_CONFIG_KEYS: frozenset[str] = frozenset(
         "STRATEGY11_VOLATILITY_BPS_PER_SQRT_MINUTE",
         "STRATEGY11_MIN_PROBABILITY",
         "STRATEGY11_MAX_PROBABILITY",
+        "STRATEGY13_MIN_EDGE",
+        "STRATEGY13_EDGE_BUFFER",
+        "STRATEGY13_VOL_MIN_BPS",
+        "STRATEGY13_VOL_MAX_BPS",
+        "STRATEGY13_PROBABILITY_SHRINK",
+        "STRATEGY13_MIN_PROBABILITY",
+        "STRATEGY13_MICRO_DISAGREE_PENALTY",
         "BINANCE_SIGNAL_STALE_SECONDS",
         "NEAR_ENTRY_POLL_WINDOW_SECONDS",
         "POLL_INTERVAL_SECONDS",
@@ -223,6 +245,7 @@ _BOOL_CONFIG_KEYS: frozenset[str] = frozenset(
         "WS_ENABLED",
         "STRATEGY7_DYNAMIC_SIZING_ENABLED",
         "STRATEGY9_DYNAMIC_SIZING_ENABLED",
+        "STRATEGY13_CONFIRM_MICRO",
     }
 )
 _SELECT_CONFIG_OPTIONS: dict[str, tuple[str, ...]] = {
@@ -302,6 +325,16 @@ _GLOBAL_STRATEGY_CONFIG_KEYS: frozenset[str] = frozenset(
         "STRATEGY11_MIN_PROBABILITY",
         "STRATEGY11_MAX_PROBABILITY",
         "STRATEGY11_CONFIRM_BEFORE_ENTRY_SECONDS",
+        "STRATEGY13_MIN_EDGE",
+        "STRATEGY13_EDGE_BUFFER",
+        "STRATEGY13_VOL_LOOKBACK_SECONDS",
+        "STRATEGY13_VOL_MIN_BPS",
+        "STRATEGY13_VOL_MAX_BPS",
+        "STRATEGY13_PROBABILITY_SHRINK",
+        "STRATEGY13_MIN_PROBABILITY",
+        "STRATEGY13_CONFIRM_MICRO",
+        "STRATEGY13_MICRO_DISAGREE_PENALTY",
+        "STRATEGY13_CONFIRM_BEFORE_ENTRY_SECONDS",
     }
 )
 
@@ -731,6 +764,16 @@ class PaperTimeframeProfile:
     strategy11_min_probability: float
     strategy11_max_probability: float
     strategy11_confirm_before_entry_seconds: int
+    strategy13_min_edge: float
+    strategy13_edge_buffer: float
+    strategy13_vol_lookback_seconds: int
+    strategy13_vol_min_bps: float
+    strategy13_vol_max_bps: float
+    strategy13_probability_shrink: float
+    strategy13_min_probability: float
+    strategy13_confirm_micro: bool
+    strategy13_micro_disagree_penalty: float
+    strategy13_confirm_before_entry_seconds: int
     min_entry_price: float | None
     max_entry_price: float
     strategy7_max_entry_price: float
@@ -807,6 +850,56 @@ class LiveStrategyProfile:
     strategy11_min_probability: float
     strategy11_max_probability: float
     strategy11_confirm_before_entry_seconds: int
+    strategy13_min_edge: float
+    strategy13_edge_buffer: float
+    strategy13_vol_lookback_seconds: int
+    strategy13_vol_min_bps: float
+    strategy13_vol_max_bps: float
+    strategy13_probability_shrink: float
+    strategy13_min_probability: float
+    strategy13_confirm_micro: bool
+    strategy13_micro_disagree_penalty: float
+    strategy13_confirm_before_entry_seconds: int
+
+    @property
+    def min_edge(self) -> float:
+        return self.strategy13_min_edge
+
+    @property
+    def edge_buffer(self) -> float:
+        return self.strategy13_edge_buffer
+
+    @property
+    def vol_lookback_seconds(self) -> int:
+        return self.strategy13_vol_lookback_seconds
+
+    @property
+    def vol_min_bps(self) -> float:
+        return self.strategy13_vol_min_bps
+
+    @property
+    def vol_max_bps(self) -> float:
+        return self.strategy13_vol_max_bps
+
+    @property
+    def probability_shrink(self) -> float:
+        return self.strategy13_probability_shrink
+
+    @property
+    def min_probability(self) -> float:
+        return self.strategy13_min_probability
+
+    @property
+    def confirm_micro(self) -> bool:
+        return self.strategy13_confirm_micro
+
+    @property
+    def micro_disagree_penalty(self) -> float:
+        return self.strategy13_micro_disagree_penalty
+
+    @property
+    def confirm_before_entry_seconds(self) -> int:
+        return self.strategy13_confirm_before_entry_seconds
 
 
 def _base_live_profile_for_strategy(cfg: AppConfig, strategy_id: int) -> LiveStrategyProfile:
@@ -880,6 +973,16 @@ def _base_live_profile_for_strategy(cfg: AppConfig, strategy_id: int) -> LiveStr
         strategy11_min_probability=cfg.strategy11_min_probability,
         strategy11_max_probability=cfg.strategy11_max_probability,
         strategy11_confirm_before_entry_seconds=cfg.strategy11_confirm_before_entry_seconds,
+        strategy13_min_edge=cfg.strategy13_min_edge,
+        strategy13_edge_buffer=cfg.strategy13_edge_buffer,
+        strategy13_vol_lookback_seconds=cfg.strategy13_vol_lookback_seconds,
+        strategy13_vol_min_bps=cfg.strategy13_vol_min_bps,
+        strategy13_vol_max_bps=cfg.strategy13_vol_max_bps,
+        strategy13_probability_shrink=cfg.strategy13_probability_shrink,
+        strategy13_min_probability=cfg.strategy13_min_probability,
+        strategy13_confirm_micro=cfg.strategy13_confirm_micro,
+        strategy13_micro_disagree_penalty=cfg.strategy13_micro_disagree_penalty,
+        strategy13_confirm_before_entry_seconds=cfg.strategy13_confirm_before_entry_seconds,
     )
 
 
@@ -894,7 +997,7 @@ def _cap_profile_safety_limits(cfg: AppConfig, profile: LiveStrategyProfile) -> 
 def _profile_for_strategy(cfg: AppConfig, strategy_id: int) -> LiveStrategyProfile:
     strategy7_max_entry_fallback = (
         _strategy_env_float(strategy_id, "STRATEGY7_MAX_ENTRY_PRICE", cfg.max_entry_price)
-        if strategy_id in {7, 8, 9, 10, 11, 12}
+        if strategy_id in {7, 8, 9, 10, 11, 12, 13}
         else cfg.max_entry_price
     )
 
@@ -1188,6 +1291,40 @@ def _profile_for_strategy(cfg: AppConfig, strategy_id: int) -> LiveStrategyProfi
                 "STRATEGY11_CONFIRM_BEFORE_ENTRY_SECONDS",
                 cfg.strategy11_confirm_before_entry_seconds,
             ),
+            strategy13_min_edge=_strategy_env_float(strategy_id, "STRATEGY13_MIN_EDGE", cfg.strategy13_min_edge),
+            strategy13_edge_buffer=_strategy_env_float(strategy_id, "STRATEGY13_EDGE_BUFFER", cfg.strategy13_edge_buffer),
+            strategy13_vol_lookback_seconds=_strategy_env_int(
+                strategy_id,
+                "STRATEGY13_VOL_LOOKBACK_SECONDS",
+                cfg.strategy13_vol_lookback_seconds,
+            ),
+            strategy13_vol_min_bps=_strategy_env_float(strategy_id, "STRATEGY13_VOL_MIN_BPS", cfg.strategy13_vol_min_bps),
+            strategy13_vol_max_bps=_strategy_env_float(strategy_id, "STRATEGY13_VOL_MAX_BPS", cfg.strategy13_vol_max_bps),
+            strategy13_probability_shrink=_strategy_env_float(
+                strategy_id,
+                "STRATEGY13_PROBABILITY_SHRINK",
+                cfg.strategy13_probability_shrink,
+            ),
+            strategy13_min_probability=_strategy_env_float(
+                strategy_id,
+                "STRATEGY13_MIN_PROBABILITY",
+                cfg.strategy13_min_probability,
+            ),
+            strategy13_confirm_micro=_strategy_env_bool(
+                strategy_id,
+                "STRATEGY13_CONFIRM_MICRO",
+                cfg.strategy13_confirm_micro,
+            ),
+            strategy13_micro_disagree_penalty=_strategy_env_float(
+                strategy_id,
+                "STRATEGY13_MICRO_DISAGREE_PENALTY",
+                cfg.strategy13_micro_disagree_penalty,
+            ),
+            strategy13_confirm_before_entry_seconds=_strategy_env_int(
+                strategy_id,
+                "STRATEGY13_CONFIRM_BEFORE_ENTRY_SECONDS",
+                cfg.strategy13_confirm_before_entry_seconds,
+            ),
         )
 
 
@@ -1281,6 +1418,16 @@ class AppConfig:
     strategy11_min_probability: float = 0.55
     strategy11_max_probability: float = 0.95
     strategy11_confirm_before_entry_seconds: int = 2
+    strategy13_min_edge: float = field(default_factory=lambda: _env_float("STRATEGY13_MIN_EDGE", 0.035))
+    strategy13_edge_buffer: float = field(default_factory=lambda: _env_float("STRATEGY13_EDGE_BUFFER", 0.005))
+    strategy13_vol_lookback_seconds: int = field(default_factory=lambda: _env_int("STRATEGY13_VOL_LOOKBACK_SECONDS", 300))
+    strategy13_vol_min_bps: float = field(default_factory=lambda: _env_float("STRATEGY13_VOL_MIN_BPS", 8.0))
+    strategy13_vol_max_bps: float = field(default_factory=lambda: _env_float("STRATEGY13_VOL_MAX_BPS", 45.0))
+    strategy13_probability_shrink: float = field(default_factory=lambda: _env_float("STRATEGY13_PROBABILITY_SHRINK", 0.35))
+    strategy13_min_probability: float = field(default_factory=lambda: _env_float("STRATEGY13_MIN_PROBABILITY", 0.58))
+    strategy13_confirm_micro: bool = field(default_factory=lambda: _env_bool("STRATEGY13_CONFIRM_MICRO", True))
+    strategy13_micro_disagree_penalty: float = field(default_factory=lambda: _env_float("STRATEGY13_MICRO_DISAGREE_PENALTY", 0.02))
+    strategy13_confirm_before_entry_seconds: int = field(default_factory=lambda: _env_int("STRATEGY13_CONFIRM_BEFORE_ENTRY_SECONDS", 2))
     binance_ws_url: str = field(default_factory=lambda: os.getenv('BINANCE_WS_URL') or 'wss://stream.binance.com:9443/ws')
     binance_depth_stream: str = field(default_factory=lambda: os.getenv('BINANCE_DEPTH_STREAM') or 'btcusdt@depth5')
     binance_signal_stale_seconds: float = 2.0
@@ -1348,11 +1495,12 @@ class AppConfig:
             legacy_strategy_ids = list(self.strategy_ids)
         if os.getenv(PAPER_STRATEGY_IDS) is None and legacy_strategy_ids:
             self.paper_strategy_ids = list(legacy_strategy_ids)
-        if os.getenv(LIVE_STRATEGY_IDS) is None and legacy_strategy_ids:
+        raw_live_strategy_ids = os.getenv(LIVE_STRATEGY_IDS)
+        if raw_live_strategy_ids is None and legacy_strategy_ids:
             self.live_strategy_ids = list(legacy_strategy_ids)
         elif not self.live_strategy_ids:
-            self.live_strategy_ids = _parse_strategy_id_list(os.getenv(LIVE_STRATEGY_IDS), fallback=self.strategy_id)
-        live_claims_strategy_ids = os.getenv(LIVE_STRATEGY_IDS) is not None or self.trade_mode in {"live", "both"}
+            self.live_strategy_ids = _parse_strategy_id_list(raw_live_strategy_ids, fallback=self.strategy_id)
+        live_claims_strategy_ids = bool(raw_live_strategy_ids and raw_live_strategy_ids.strip()) or self.trade_mode in {"live", "both"}
         if live_claims_strategy_ids:
             self.paper_strategy_ids = _exclude_strategy_ids(self.paper_strategy_ids, self.live_strategy_ids)
         self.paper_profiles = {}
@@ -1424,6 +1572,16 @@ class AppConfig:
                 strategy11_min_probability=self.strategy11_min_probability,
                 strategy11_max_probability=self.strategy11_max_probability,
                 strategy11_confirm_before_entry_seconds=self.strategy11_confirm_before_entry_seconds,
+                strategy13_min_edge=self.strategy13_min_edge,
+                strategy13_edge_buffer=self.strategy13_edge_buffer,
+                strategy13_vol_lookback_seconds=self.strategy13_vol_lookback_seconds,
+                strategy13_vol_min_bps=self.strategy13_vol_min_bps,
+                strategy13_vol_max_bps=self.strategy13_vol_max_bps,
+                strategy13_probability_shrink=self.strategy13_probability_shrink,
+                strategy13_min_probability=self.strategy13_min_probability,
+                strategy13_confirm_micro=self.strategy13_confirm_micro,
+                strategy13_micro_disagree_penalty=self.strategy13_micro_disagree_penalty,
+                strategy13_confirm_before_entry_seconds=self.strategy13_confirm_before_entry_seconds,
                 min_entry_price=self.min_entry_price,
                 max_entry_price=self.max_entry_price,
                 strategy7_max_entry_price=self.strategy7_max_entry_price,
@@ -1448,6 +1606,10 @@ class AppConfig:
     @property
     def market_definition(self) -> MarketTimeframeDefinition:
         return MARKET_TIMEFRAME_DEFINITIONS[self.market_timeframe]
+
+    @property
+    def live_strategy_profiles(self) -> dict[int, LiveStrategyProfile]:
+        return self.live_profiles
 
     @property
     def series_id(self) -> int:
