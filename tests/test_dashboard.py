@@ -27,7 +27,7 @@ from models import MarketQuote, MarketWindow
 from runtime_control import RuntimeControl
 
 PLAYWRIGHT_CLI_PACKAGE = "@playwright/cli"
-SUPPORTED_STRATEGY_OPTIONS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12']
+SUPPORTED_STRATEGY_OPTIONS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12', '13']
 
 
 def _playwright_cli_command(npx_path: str, session: str, *args: str) -> list[str]:
@@ -4922,7 +4922,7 @@ def test_dashboard_rejects_invalid_paper_strategy_ids(tmp_path: Path):
     state = DashboardState(env_file=tmp_path / '.env.dashboard')
     try:
         with pytest.raises(ConfigValidationError) as excinfo:
-            state.update_config({'PAPER_STRATEGY_IDS': '13,x'})
+            state.update_config({'PAPER_STRATEGY_IDS': '14,x'})
         assert 'PAPER_STRATEGY_IDS' in excinfo.value.field_errors
     finally:
         state.close()

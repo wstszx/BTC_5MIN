@@ -101,8 +101,8 @@ def _write_env_file(path: Path, values: dict[str, str]) -> None:
     atomic_write_text(path, text, encoding="utf-8")
 
 
-SUPPORTED_STRATEGY_ID_TEXTS: set[str] = {str(strategy_id) for strategy_id in range(1, 13)}
-SUPPORTED_STRATEGY_SELECT_OPTIONS: list[str] = [str(strategy_id) for strategy_id in range(1, 13)]
+SUPPORTED_STRATEGY_ID_TEXTS: set[str] = {str(strategy_id) for strategy_id in range(1, 14)}
+SUPPORTED_STRATEGY_SELECT_OPTIONS: list[str] = [str(strategy_id) for strategy_id in range(1, 14)]
 
 
 def _normalize_strategy_id_list_for_key(value: str, key: str, attr_name: str) -> str:
@@ -112,10 +112,10 @@ def _normalize_strategy_id_list_for_key(value: str, key: str, attr_name: str) ->
     if raw and len(normalized_ids) == 1 and normalized_ids[0] == cfg.strategy_id:
         has_valid = any(item in SUPPORTED_STRATEGY_ID_TEXTS for item in raw)
         if not has_valid:
-            raise ValueError(f"Invalid value for {key}: expected comma-separated strategy ids 1-12, got {value!r}")
+            raise ValueError(f"Invalid value for {key}: expected comma-separated strategy ids 1-13, got {value!r}")
     normalized = [str(item) for item in normalized_ids]
     if not normalized:
-        raise ValueError(f"Invalid value for {key}: expected comma-separated strategy ids 1-12, got {value!r}")
+        raise ValueError(f"Invalid value for {key}: expected comma-separated strategy ids 1-13, got {value!r}")
     return ",".join(normalized)
 
 
@@ -472,7 +472,7 @@ def _shared_strategy_profile_key(strategy_id: int | str, base_key: str) -> str:
 
 
 def _split_strategy_profile_key(key: str) -> tuple[str, str, str] | None:
-    match = re.match(r"^(?:(PAPER|LIVE)_)?STRATEGY_(12|11|10|[1-9])_(.+)$", str(key or ""))
+    match = re.match(r"^(?:(PAPER|LIVE)_)?STRATEGY_(13|12|11|10|[1-9])_(.+)$", str(key or ""))
     if not match:
         return None
     mode = (match.group(1) or "shared").lower()
