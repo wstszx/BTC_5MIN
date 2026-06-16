@@ -377,21 +377,51 @@ def test_build_config_accepts_strategy13_paper_profile_without_live_default():
     assert cfg.paper_strategy_ids == [13]
     assert cfg.live_strategy_ids == [7]
     assert 13 in cfg.paper_strategy_profiles
-    assert 13 not in cfg.live_strategy_profiles
+    assert 13 not in cfg.live_profiles
 
     profile = cfg.paper_strategy_profiles[13]
     assert profile.strategy_id == 13
-    assert profile.min_edge == 0.05
-    assert profile.edge_buffer == 0.007
-    assert profile.vol_lookback_seconds == 240
-    assert profile.vol_min_bps == 9.0
-    assert profile.vol_max_bps == 42.0
-    assert profile.probability_shrink == 0.30
-    assert profile.min_probability == 0.60
+    assert profile.strategy13_min_edge == 0.05
+    assert profile.strategy13_edge_buffer == 0.007
+    assert profile.strategy13_vol_lookback_seconds == 240
+    assert profile.strategy13_vol_min_bps == 9.0
+    assert profile.strategy13_vol_max_bps == 42.0
+    assert profile.strategy13_probability_shrink == 0.30
+    assert profile.strategy13_min_probability == 0.60
     assert profile.max_entry_price == 0.53
-    assert profile.confirm_micro is False
-    assert profile.micro_disagree_penalty == 0.015
-    assert profile.confirm_before_entry_seconds == 3
+    assert profile.strategy13_confirm_micro is False
+    assert profile.strategy13_micro_disagree_penalty == 0.015
+    assert profile.strategy13_confirm_before_entry_seconds == 3
+
+
+def test_build_config_keeps_strategy13_live_opt_in_only_when_primary_strategy():
+    cfg = build_config_from_env_values(
+        {
+            "STRATEGY_ID": "13",
+            "PAPER_STRATEGY_IDS": "13",
+        }
+    )
+
+    assert cfg.strategy_id == 13
+    assert cfg.paper_strategy_ids == [13]
+    assert cfg.live_strategy_ids == []
+    assert 13 in cfg.paper_strategy_profiles
+    assert 13 not in cfg.live_profiles
+
+
+def test_build_config_allows_explicit_strategy13_live_opt_in():
+    cfg = build_config_from_env_values(
+        {
+            "STRATEGY_ID": "7",
+            "PAPER_STRATEGY_IDS": "7",
+            "LIVE_STRATEGY_IDS": "13",
+            "STRATEGY_13_MIN_EDGE": "0.052",
+        }
+    )
+
+    assert cfg.live_strategy_ids == [13]
+    assert 13 in cfg.live_profiles
+    assert cfg.live_profiles[13].strategy13_min_edge == 0.052
 
 
 def test_build_config_accepts_strategy13_short_profile_keys():
@@ -415,16 +445,16 @@ def test_build_config_accepts_strategy13_short_profile_keys():
 
     assert cfg.strategy_id == 13
     profile = cfg.paper_strategy_profiles[13]
-    assert profile.min_edge == 0.04
-    assert profile.edge_buffer == 0.006
-    assert profile.vol_lookback_seconds == 180
-    assert profile.vol_min_bps == 7.0
-    assert profile.vol_max_bps == 35.0
-    assert profile.probability_shrink == 0.40
-    assert profile.min_probability == 0.62
-    assert profile.confirm_micro is True
-    assert profile.micro_disagree_penalty == 0.025
-    assert profile.confirm_before_entry_seconds == 4
+    assert profile.strategy13_min_edge == 0.04
+    assert profile.strategy13_edge_buffer == 0.006
+    assert profile.strategy13_vol_lookback_seconds == 180
+    assert profile.strategy13_vol_min_bps == 7.0
+    assert profile.strategy13_vol_max_bps == 35.0
+    assert profile.strategy13_probability_shrink == 0.40
+    assert profile.strategy13_min_probability == 0.62
+    assert profile.strategy13_confirm_micro is True
+    assert profile.strategy13_micro_disagree_penalty == 0.025
+    assert profile.strategy13_confirm_before_entry_seconds == 4
 
 
 def test_build_config_accepts_strategy10_and_reads_edge_values():

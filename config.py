@@ -861,46 +861,6 @@ class LiveStrategyProfile:
     strategy13_micro_disagree_penalty: float
     strategy13_confirm_before_entry_seconds: int
 
-    @property
-    def min_edge(self) -> float:
-        return self.strategy13_min_edge
-
-    @property
-    def edge_buffer(self) -> float:
-        return self.strategy13_edge_buffer
-
-    @property
-    def vol_lookback_seconds(self) -> int:
-        return self.strategy13_vol_lookback_seconds
-
-    @property
-    def vol_min_bps(self) -> float:
-        return self.strategy13_vol_min_bps
-
-    @property
-    def vol_max_bps(self) -> float:
-        return self.strategy13_vol_max_bps
-
-    @property
-    def probability_shrink(self) -> float:
-        return self.strategy13_probability_shrink
-
-    @property
-    def min_probability(self) -> float:
-        return self.strategy13_min_probability
-
-    @property
-    def confirm_micro(self) -> bool:
-        return self.strategy13_confirm_micro
-
-    @property
-    def micro_disagree_penalty(self) -> float:
-        return self.strategy13_micro_disagree_penalty
-
-    @property
-    def confirm_before_entry_seconds(self) -> int:
-        return self.strategy13_confirm_before_entry_seconds
-
 
 def _base_live_profile_for_strategy(cfg: AppConfig, strategy_id: int) -> LiveStrategyProfile:
     return LiveStrategyProfile(
@@ -1336,6 +1296,14 @@ def _paper_strategy_profile_for_strategy(cfg: AppConfig, strategy_id: int) -> Li
     return _profile_for_strategy(cfg, strategy_id)
 
 
+def _default_live_strategy_ids(raw_live_strategy_ids: str | None, fallback_strategy_id: int) -> list[int]:
+    if raw_live_strategy_ids is not None and not raw_live_strategy_ids.strip():
+        return []
+    if raw_live_strategy_ids is None and fallback_strategy_id == 13:
+        return []
+    return _parse_strategy_id_list(raw_live_strategy_ids, fallback=fallback_strategy_id)
+
+
 @dataclass(slots=True)
 class AppConfig:
     gamma_api_base: str = "https://gamma-api.polymarket.com"
@@ -1497,9 +1465,9 @@ class AppConfig:
             self.paper_strategy_ids = list(legacy_strategy_ids)
         raw_live_strategy_ids = os.getenv(LIVE_STRATEGY_IDS)
         if raw_live_strategy_ids is None and legacy_strategy_ids:
-            self.live_strategy_ids = list(legacy_strategy_ids)
+            self.live_strategy_ids = [strategy_id for strategy_id in legacy_strategy_ids if strategy_id != 13]
         elif not self.live_strategy_ids:
-            self.live_strategy_ids = _parse_strategy_id_list(raw_live_strategy_ids, fallback=self.strategy_id)
+            self.live_strategy_ids = _default_live_strategy_ids(raw_live_strategy_ids, self.strategy_id)
         live_claims_strategy_ids = bool(raw_live_strategy_ids and raw_live_strategy_ids.strip()) or self.trade_mode in {"live", "both"}
         if live_claims_strategy_ids:
             self.paper_strategy_ids = _exclude_strategy_ids(self.paper_strategy_ids, self.live_strategy_ids)
@@ -1606,10 +1574,6 @@ class AppConfig:
     @property
     def market_definition(self) -> MarketTimeframeDefinition:
         return MARKET_TIMEFRAME_DEFINITIONS[self.market_timeframe]
-
-    @property
-    def live_strategy_profiles(self) -> dict[int, LiveStrategyProfile]:
-        return self.live_profiles
 
     @property
     def series_id(self) -> int:
