@@ -7482,6 +7482,98 @@ def test_run_paper_trading_processes_all_selected_strategies(tmp_path, monkeypat
     assert state.paper_strategies[6].strategy6_last_ofi_score == pytest.approx(signal.ofi_score)
 
 
+def test_run_paper_trading_strategy13_pending_trade_can_queue(tmp_path, monkeypatch):
+    now = datetime(2026, 4, 30, 1, 0, 4, tzinfo=timezone.utc)
+    window = MarketWindow(
+        event_id="e1",
+        market_id="m1",
+        slug="btc-updown-5m-strategy13",
+        title="BTC",
+        start_time=datetime(2026, 4, 30, 1, 0, 0, tzinfo=timezone.utc),
+        end_time=datetime(2026, 4, 30, 1, 5, 0, tzinfo=timezone.utc),
+        price_to_beat=100000.0,
+        up_token_id="up-token",
+        down_token_id="down-token",
+    )
+    cfg = AppConfig(
+        strategy_id=13,
+        paper_strategy_ids=[13],
+        live_strategy_ids=[],
+        trade_mode="paper",
+        logs_dir=tmp_path / "logs",
+        history_dir=tmp_path / "data",
+        max_entry_price=0.54,
+        open_delay_seconds=5,
+        entry_grace_seconds=300,
+        poll_interval_seconds=1,
+        strategy13_min_edge=0.02,
+        strategy13_edge_buffer=0.0,
+        strategy13_vol_min_bps=8.0,
+        strategy13_vol_max_bps=12.0,
+        strategy13_probability_shrink=0.25,
+        strategy13_min_probability=0.58,
+        strategy13_confirm_micro=False,
+        strategy13_confirm_before_entry_seconds=0,
+        binance_signal_stale_seconds=10.0,
+    )
+    quote = MarketQuote(
+        slug=window.slug,
+        up_price=0.52,
+        up_best_ask=0.52,
+        down_price=0.48,
+        down_best_ask=0.48,
+        binance_mid_price=100140.0,
+        binance_signal_at=now,
+        accepting_orders=True,
+        fetched_at=now,
+    )
+
+    class FixedDateTime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return now if tz is None else now.astimezone(tz)
+
+    class Strategy13PaperClient:
+        def find_current_and_next_rounds(self, *, now):
+            return window, None
+
+        def get_market_by_slug(self, slug):
+            assert slug == window.slug
+            return {
+                "slug": slug,
+                "clobTokenIds": '["up-token", "down-token"]',
+                "outcomes": '["Up", "Down"]',
+                "acceptingOrders": True,
+            }
+
+        def quote_from_market(self, market):
+            return quote
+
+    state_path = tmp_path / "paper_state.json"
+    log_path = tmp_path / "paper_trades.csv"
+    monkeypatch.setattr(trader, "datetime", FixedDateTime)
+    monkeypatch.setattr("trader._sleep_until_round_end", lambda *_args, **_kwargs: False)
+
+    result = trader.run_paper_trading(
+        cfg,
+        client=Strategy13PaperClient(),
+        state_path=state_path,
+        log_path=log_path,
+    )
+
+    state = load_session_state(
+        state_path,
+        effective_paper_strategy_ids=[13],
+    )
+    pending = state.paper_strategies[13].pending_paper_trades
+    assert result["status"] == "stopped"
+    assert len(pending) == 1
+    assert pending[0].strategy == 13
+    assert pending[0].side == "UP"
+    assert pending[0].signal_probability is not None
+    assert pending[0].signal_edge is not None
+
+
 def test_market_order_min_stake_uses_configured_minimum_only_for_market_buys():
     assert trader._market_min_order_size({"orderMinSize": "5"}) == pytest.approx(5.0)
     assert trader._market_min_order_size({"minimum_order_size": 7}) == pytest.approx(7.0)
