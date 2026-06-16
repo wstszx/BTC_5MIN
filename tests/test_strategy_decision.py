@@ -1856,6 +1856,272 @@ def test_strategy12_probability_skip_keeps_strategy12_reason_and_diagnostics():
     assert decision.signal_edge is not None
 
 
+def test_strategy13_buys_underpriced_probability_edge_with_micro_confirmation():
+    now = datetime(2026, 4, 30, 1, 2, 0, tzinfo=timezone.utc)
+    window = MarketWindow(
+        event_id="e1",
+        market_id="m1",
+        slug="s1",
+        title="BTC",
+        start_time=datetime(2026, 4, 30, 1, 0, 0, tzinfo=timezone.utc),
+        end_time=datetime(2026, 4, 30, 1, 5, 0, tzinfo=timezone.utc),
+        price_to_beat=100000.0,
+    )
+    cfg = AppConfig(
+        strategy_id=13,
+        max_entry_price=0.54,
+        strategy13_min_edge=0.02,
+        strategy13_edge_buffer=0.0,
+        strategy13_vol_min_bps=8.0,
+        strategy13_vol_max_bps=12.0,
+        strategy13_probability_shrink=0.25,
+        strategy13_min_probability=0.58,
+        strategy13_confirm_micro=True,
+        strategy13_micro_disagree_penalty=0.02,
+        strategy13_confirm_before_entry_seconds=0,
+        strategy7_ofi_threshold=0.50,
+        strategy7_momentum_threshold=0.005,
+        strategy7_min_signal_gap=0.0,
+        strategy7_max_momentum_delta=0.12,
+        binance_signal_stale_seconds=10.0,
+    )
+    state = SessionState()
+    quote = MarketQuote(
+        slug="s1",
+        up_price=0.52,
+        up_best_ask=0.52,
+        down_price=0.48,
+        down_best_ask=0.48,
+        strategy6_ofi_score=0.72,
+        strategy6_signal_at=now,
+        binance_mid_price=100140.0,
+        binance_signal_at=now,
+    )
+
+    decision = resolve_side_from_strategy(
+        cfg=cfg,
+        state=state,
+        slug="s1",
+        quote=quote,
+        window=window,
+        entry_time=now,
+        now=now,
+    )
+
+    assert state.strategy11_round_start_btc_price == pytest.approx(100000.0)
+    assert decision.side == "UP"
+    assert decision.reason is None
+    assert decision.candidate_side == "UP"
+    assert decision.candidate_price == pytest.approx(0.52)
+    assert decision.signal_open_up_price == pytest.approx(100000.0)
+    assert decision.signal_current_up_price == pytest.approx(100140.0)
+    assert decision.signal_probability is not None
+    assert decision.signal_probability >= cfg.strategy13_min_probability
+    assert decision.signal_edge is not None
+    assert decision.signal_edge >= cfg.strategy13_min_edge
+    assert decision.signal_threshold == pytest.approx(cfg.strategy13_min_edge)
+    assert decision.ofi_score == pytest.approx(0.72)
+
+
+def test_strategy13_skips_when_edge_is_too_low():
+    now = datetime(2026, 4, 30, 1, 2, 0, tzinfo=timezone.utc)
+    window = MarketWindow(
+        event_id="e1",
+        market_id="m1",
+        slug="s1",
+        title="BTC",
+        start_time=datetime(2026, 4, 30, 1, 0, 0, tzinfo=timezone.utc),
+        end_time=datetime(2026, 4, 30, 1, 5, 0, tzinfo=timezone.utc),
+        price_to_beat=100000.0,
+    )
+    cfg = AppConfig(
+        strategy_id=13,
+        max_entry_price=0.56,
+        strategy13_min_edge=0.08,
+        strategy13_edge_buffer=0.0,
+        strategy13_vol_min_bps=30.0,
+        strategy13_vol_max_bps=30.0,
+        strategy13_probability_shrink=0.25,
+        strategy13_min_probability=0.58,
+        strategy13_confirm_micro=False,
+        strategy13_confirm_before_entry_seconds=0,
+        binance_signal_stale_seconds=10.0,
+    )
+    state = SessionState(signal_round_slug="s1", strategy11_round_start_btc_price=100000.0)
+    quote = MarketQuote(
+        slug="s1",
+        up_price=0.54,
+        up_best_ask=0.54,
+        down_price=0.46,
+        down_best_ask=0.46,
+        binance_mid_price=100080.0,
+        binance_signal_at=now,
+    )
+
+    decision = resolve_side_from_strategy(
+        cfg=cfg,
+        state=state,
+        slug="s1",
+        quote=quote,
+        window=window,
+        entry_time=now,
+        now=now,
+    )
+
+    assert decision.side is None
+    assert decision.reason == "strategy13_edge_too_low"
+    assert decision.candidate_side is not None
+    assert decision.signal_probability is not None
+    assert decision.signal_edge is not None
+    assert decision.signal_threshold == pytest.approx(0.08)
+
+
+def test_strategy13_skips_when_microstructure_conflicts():
+    now = datetime(2026, 4, 30, 1, 2, 0, tzinfo=timezone.utc)
+    window = MarketWindow(
+        event_id="e1",
+        market_id="m1",
+        slug="s1",
+        title="BTC",
+        start_time=datetime(2026, 4, 30, 1, 0, 0, tzinfo=timezone.utc),
+        end_time=datetime(2026, 4, 30, 1, 5, 0, tzinfo=timezone.utc),
+        price_to_beat=100000.0,
+    )
+    cfg = AppConfig(
+        strategy_id=13,
+        max_entry_price=0.54,
+        strategy13_min_edge=0.02,
+        strategy13_edge_buffer=0.0,
+        strategy13_vol_min_bps=8.0,
+        strategy13_vol_max_bps=12.0,
+        strategy13_probability_shrink=0.25,
+        strategy13_min_probability=0.58,
+        strategy13_confirm_micro=True,
+        strategy13_micro_disagree_penalty=0.02,
+        strategy13_confirm_before_entry_seconds=0,
+        strategy7_ofi_threshold=0.50,
+        strategy7_momentum_threshold=0.005,
+        strategy7_min_signal_gap=0.0,
+        binance_signal_stale_seconds=10.0,
+    )
+    state = SessionState(signal_round_slug="s1", signal_round_open_up_price=0.50)
+    quote = MarketQuote(
+        slug="s1",
+        up_price=0.52,
+        up_best_ask=0.52,
+        down_price=0.48,
+        down_best_ask=0.48,
+        strategy6_ofi_score=-0.72,
+        strategy6_signal_at=now,
+        binance_mid_price=100140.0,
+        binance_signal_at=now,
+    )
+
+    decision = resolve_side_from_strategy(
+        cfg=cfg,
+        state=state,
+        slug="s1",
+        quote=quote,
+        window=window,
+        entry_time=now,
+        now=now,
+    )
+
+    assert decision.side is None
+    assert decision.reason == "strategy13_micro_conflict"
+    assert decision.candidate_side == "UP"
+    assert decision.signal_probability is not None
+    assert decision.signal_edge is not None
+    assert decision.ofi_score == pytest.approx(-0.72)
+
+
+def test_strategy13_skips_when_btc_price_is_stale():
+    now = datetime(2026, 4, 30, 1, 2, 0, tzinfo=timezone.utc)
+    window = MarketWindow(
+        event_id="e1",
+        market_id="m1",
+        slug="s1",
+        title="BTC",
+        start_time=datetime(2026, 4, 30, 1, 0, 0, tzinfo=timezone.utc),
+        end_time=datetime(2026, 4, 30, 1, 5, 0, tzinfo=timezone.utc),
+        price_to_beat=100000.0,
+    )
+    cfg = AppConfig(strategy_id=13, binance_signal_stale_seconds=1.0)
+    state = SessionState()
+    quote = MarketQuote(
+        slug="s1",
+        up_best_ask=0.52,
+        down_best_ask=0.48,
+        binance_mid_price=100140.0,
+        binance_signal_at=now - timedelta(seconds=5),
+    )
+
+    decision = resolve_side_from_strategy(
+        cfg=cfg,
+        state=state,
+        slug="s1",
+        quote=quote,
+        window=window,
+        entry_time=now,
+        now=now,
+    )
+
+    assert decision.side is None
+    assert decision.reason == "strategy13_btc_price_stale"
+    assert decision.signal_threshold == pytest.approx(1.0)
+
+
+def test_strategy13_skips_when_confirmation_is_too_late():
+    now = datetime(2026, 4, 30, 1, 4, 59, tzinfo=timezone.utc)
+    window = MarketWindow(
+        event_id="e1",
+        market_id="m1",
+        slug="s1",
+        title="BTC",
+        start_time=datetime(2026, 4, 30, 1, 0, 0, tzinfo=timezone.utc),
+        end_time=datetime(2026, 4, 30, 1, 5, 0, tzinfo=timezone.utc),
+        price_to_beat=100000.0,
+    )
+    cfg = AppConfig(
+        strategy_id=13,
+        max_entry_price=0.54,
+        strategy13_min_edge=0.02,
+        strategy13_edge_buffer=0.0,
+        strategy13_vol_min_bps=8.0,
+        strategy13_vol_max_bps=12.0,
+        strategy13_probability_shrink=0.25,
+        strategy13_min_probability=0.58,
+        strategy13_confirm_micro=False,
+        strategy13_confirm_before_entry_seconds=2,
+        binance_signal_stale_seconds=10.0,
+    )
+    state = SessionState()
+    quote = MarketQuote(
+        slug="s1",
+        up_price=0.52,
+        up_best_ask=0.52,
+        down_price=0.48,
+        down_best_ask=0.48,
+        binance_mid_price=100140.0,
+        binance_signal_at=now,
+    )
+
+    decision = resolve_side_from_strategy(
+        cfg=cfg,
+        state=state,
+        slug="s1",
+        quote=quote,
+        window=window,
+        entry_time=window.end_time,
+        now=now,
+    )
+
+    assert decision.side is None
+    assert decision.reason == "strategy13_entry_too_late"
+    assert decision.candidate_side == "UP"
+    assert decision.signal_probability is not None
+
+
 def test_strategy11_edge_uses_fee_adjusted_effective_price():
     now = datetime(2026, 4, 30, 1, 2, 0, tzinfo=timezone.utc)
     window = MarketWindow(
