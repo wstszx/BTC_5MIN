@@ -1317,16 +1317,6 @@ def evaluate_strategy13_probability_edge(
     best_probability = _strategy13_best_probability(edge)
     min_probability = max(0.5, min(0.99, float(getattr(cfg, "strategy13_min_probability", 0.58))))
     min_edge = max(0.0, float(getattr(cfg, "strategy13_min_edge", 0.0)))
-    if edge.best_edge is None or edge.best_edge < min_edge:
-        return _strategy13_decision_from_edge(
-            cfg=cfg,
-            state=state,
-            quote=quote,
-            now=now,
-            window=window,
-            edge=edge,
-            reason="strategy13_edge_too_low",
-        )
     if edge.best_side is None or best_probability is None or best_probability < min_probability:
         return _strategy13_decision_from_edge(
             cfg=cfg,
@@ -1336,6 +1326,16 @@ def evaluate_strategy13_probability_edge(
             window=window,
             edge=edge,
             reason="strategy13_probability_too_low",
+        )
+    if edge.best_edge is None or edge.best_edge < min_edge:
+        return _strategy13_decision_from_edge(
+            cfg=cfg,
+            state=state,
+            quote=quote,
+            now=now,
+            window=window,
+            edge=edge,
+            reason="strategy13_edge_too_low",
         )
 
     ofi_score = resolve_strategy6_ofi_score(quote)

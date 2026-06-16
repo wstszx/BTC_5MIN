@@ -1942,7 +1942,7 @@ def test_strategy13_skips_when_edge_is_too_low():
         strategy13_vol_min_bps=30.0,
         strategy13_vol_max_bps=30.0,
         strategy13_probability_shrink=0.25,
-        strategy13_min_probability=0.58,
+        strategy13_min_probability=0.50,
         strategy13_confirm_micro=False,
         strategy13_confirm_before_entry_seconds=0,
         binance_signal_stale_seconds=10.0,
@@ -1974,6 +1974,60 @@ def test_strategy13_skips_when_edge_is_too_low():
     assert decision.signal_probability is not None
     assert decision.signal_edge is not None
     assert decision.signal_threshold == pytest.approx(0.08)
+
+
+def test_strategy13_probability_skip_precedes_edge_skip_when_both_are_low():
+    now = datetime(2026, 4, 30, 1, 2, 0, tzinfo=timezone.utc)
+    window = MarketWindow(
+        event_id="e1",
+        market_id="m1",
+        slug="s1",
+        title="BTC",
+        start_time=datetime(2026, 4, 30, 1, 0, 0, tzinfo=timezone.utc),
+        end_time=datetime(2026, 4, 30, 1, 5, 0, tzinfo=timezone.utc),
+        price_to_beat=100000.0,
+    )
+    cfg = AppConfig(
+        strategy_id=13,
+        max_entry_price=0.56,
+        strategy13_min_edge=0.08,
+        strategy13_edge_buffer=0.0,
+        strategy13_vol_min_bps=30.0,
+        strategy13_vol_max_bps=30.0,
+        strategy13_probability_shrink=0.25,
+        strategy13_min_probability=0.90,
+        strategy13_confirm_micro=False,
+        strategy13_confirm_before_entry_seconds=0,
+        binance_signal_stale_seconds=10.0,
+    )
+    state = SessionState(signal_round_slug="s1", strategy11_round_start_btc_price=100000.0)
+    quote = MarketQuote(
+        slug="s1",
+        up_price=0.54,
+        up_best_ask=0.54,
+        down_price=0.46,
+        down_best_ask=0.46,
+        binance_mid_price=100080.0,
+        binance_signal_at=now,
+    )
+
+    decision = resolve_side_from_strategy(
+        cfg=cfg,
+        state=state,
+        slug="s1",
+        quote=quote,
+        window=window,
+        entry_time=now,
+        now=now,
+    )
+
+    assert decision.side is None
+    assert decision.reason == "strategy13_probability_too_low"
+    assert decision.candidate_side is not None
+    assert decision.signal_probability is not None
+    assert decision.signal_probability < cfg.strategy13_min_probability
+    assert decision.signal_edge is not None
+    assert decision.signal_edge < cfg.strategy13_min_edge
 
 
 def test_strategy13_skips_when_microstructure_conflicts():
