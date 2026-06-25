@@ -3294,6 +3294,82 @@ def test_place_live_order_strategy7_revalidates_low_order_book_price_before_skip
     assert rows[-1]["live_order_book_price"] == "0.51"
 
 
+def test_place_live_order_strategy11_revalidates_low_order_book_price_before_submitting(tmp_path, monkeypatch):
+    class _RefreshingStrategy11MarketClient(_LiveMarketClient):
+        def __init__(self):
+            self.quote_calls = 0
+
+        def quote_from_market(self, _market):
+            self.quote_calls += 1
+            return MarketQuote(
+                slug="btc-updown-5m-test",
+                up_price=0.51,
+                down_price=0.49,
+                up_best_ask=0.51,
+                down_best_bid=0.49,
+                binance_mid_price=100_020.0,
+                binance_signal_at=datetime.now(timezone.utc),
+                fetched_at=datetime.now(timezone.utc),
+            )
+
+    class _RecoveringBookClobClient(_StubClobClient):
+        def get_order_book(self, token_id):
+            token_id = getattr(token_id, "token_id", token_id)
+            self.order_book_calls.append(token_id)
+            if len(self.order_book_calls) <= 2:
+                if token_id == "up-token":
+                    return {"asks": [{"price": "0.43", "size": "10.0"}]}
+                if token_id == "down-token":
+                    return {"bids": [{"price": "0.57", "size": "10.0"}]}
+            if token_id == "up-token":
+                return {"asks": [{"price": "0.51", "size": "10.0"}]}
+            if token_id == "down-token":
+                return {"bids": [{"price": "0.49", "size": "10.0"}]}
+            return None
+
+    decisions: list[SideDecision] = [
+        SideDecision(side="UP", signal_probability=0.57, signal_edge=0.06, signal_delta=20.0),
+        SideDecision(side="UP", signal_probability=0.58, signal_edge=0.07, signal_delta=20.0),
+    ]
+
+    def fake_side(**_kwargs):
+        return decisions.pop(0)
+
+    monkeypatch.setattr("trader._resolve_side_from_strategy", fake_side)
+    cfg = AppConfig(
+        live_trading_enabled=True,
+        strategy_id=11,
+        live_order_type="FAK",
+        min_entry_price=0.48,
+        max_entry_price=0.54,
+        live_max_price_improvement=0.05,
+        strategy11_confirm_before_entry_seconds=0,
+        signal_lock_before_entry_seconds=0,
+    )
+    market_client = _RefreshingStrategy11MarketClient()
+    stub_clob = _RecoveringBookClobClient()
+
+    result = place_live_order(
+        cfg=cfg,
+        market_client=market_client,
+        clob_client=stub_clob,
+        state_path=tmp_path / "state.json",
+        log_path=tmp_path / "live.csv",
+    )
+
+    rows = list(csv.DictReader((tmp_path / "live.csv").open(newline="", encoding="utf-8")))
+
+    assert result["status"] == "submitted"
+    assert result["order_id"] == "oid-123"
+    assert market_client.quote_calls == 2
+    assert len(stub_clob.created_orders) == 1
+    assert rows[-1]["strategy"] == "11"
+    assert rows[-1]["side"] == "UP"
+    assert rows[-1]["skip_reason"] == ""
+    assert rows[-1]["price"] == "0.51"
+    assert rows[-1]["live_order_book_price"] == "0.51"
+
+
 def test_place_live_order_skips_fak_when_quote_improvement_exceeds_decision_floor_without_rest_precheck(
     tmp_path,
     monkeypatch,

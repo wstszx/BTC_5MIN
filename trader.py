@@ -769,6 +769,7 @@ def _execute_live_order_with_fak_retry(
     retry_delay = max(0.0, float(getattr(cfg, "live_fak_no_match_retry_delay_seconds", 0.0) or 0.0))
     attempt = 0
     low_entry_revalidated = False
+    low_entry_revalidation_strategy_ids = {7, 11}
     while True:
         quote_skip_reason = (
             _live_quote_execution_skip_reason(
@@ -802,7 +803,7 @@ def _execute_live_order_with_fak_retry(
             )
         )
         if (
-            strategy_id == 7
+            strategy_id in low_entry_revalidation_strategy_ids
             and not low_entry_revalidated
             and execution.skip_reason == "live_order_book_price_below_min_entry"
         ):
@@ -830,7 +831,7 @@ def _execute_live_order_with_fak_retry(
                 execution = OrderExecutionResult(
                     status="skipped",
                     remaining_budget=remaining_live_budget,
-                    skip_reason=refreshed_decision.reason or "strategy7_revalidation_signal_changed",
+                    skip_reason=refreshed_decision.reason or f"strategy{strategy_id}_revalidation_signal_changed",
                     balance_error=balance_error,
                 )
                 return execution, current_plan, refreshed_decision, current_side, current_price, current_quote
