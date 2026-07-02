@@ -1,5 +1,5 @@
 @echo off
-title BTC_5MIN Trading Bot & Dashboard
+title BTC_5MIN Trading Bot ^& Dashboard
 echo ==================================================
 echo [BTC_5MIN] Starting Trading Bot and Dashboard...
 echo ==================================================
