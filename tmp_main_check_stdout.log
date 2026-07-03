@@ -1,9 +1,0 @@
-Runtime started: paper trading + dashboard
-Trade mode: live
-Dashboard URL: http://127.0.0.1:8787/
-[2026-05-01 05:15:21 UTC] paper-trade started | strategies=1,2,3,4,5,6,7,8 entry_timing=OPEN poll=5s dry_run_once=False
-[2026-05-01 05:15:23 UTC] round=btc-updown-5m-1777612200 pending resolution
-[2026-05-01 05:15:23 UTC] round=btc-updown-5m-1777612200 pending resolution
-[2026-05-01 05:15:24 UTC] round=btc-updown-5m-1777612200 pending resolution
-[2026-05-01 05:15:24 UTC] round=btc-updown-5m-1777611600 settled result=UP trade_pnl=2.0000 total_cash_pnl=2.0000 consecutive_losses=0
-[2026-05-01 05:15:24 UTC] round=btc-updown-5m-1777611600 settled result=UP trade_pnl=0.8182 total_cash_pnl=2.3823 consecutive_losses=0

@@ -30,16 +30,18 @@ logs/live_runtime_check_*.out
 logs/live_runtime_check_*.err
 !logs/.gitkeep
 .env.dashboard
-tmp_main_stdout.log
-tmp_main_stderr.log
+tmp_*
 _served_dashboard.js
 _served_index.html
 _tmp_dashboard_check.js
 docs/superpowers/plans/2026-04-15-live-redeem-relayer-migration.md
 
+*.bak_clean
 codex.patch
 tmp_apply.patch
 .playwright-cli/
 output/playwright/
 output/*.log
 .superpowers/
+test-results/
+logs/analysis/
