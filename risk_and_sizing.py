@@ -40,6 +40,9 @@ def build_trade_plan(
     min_stake: float | None = None,
     base_order_cost: float = 1.0,
     order_cost_multiplier: float = 1.0,
+    martingale_enabled: bool = False,
+    martingale_multiplier: float = 2.0,
+    martingale_max_stake: float | None = None,
 ) -> TradePlan:
     if side not in {"UP", "DOWN"}:
         raise ValueError(f"Unsupported side: {side}")
@@ -104,10 +107,28 @@ def build_trade_plan(
     tracks_recovery_loss = False
 
     effective_multiplier = max(0.0, float(order_cost_multiplier))
+
+    # Martingale: scale stake by multiplier^consecutive_losses after each loss
+    if martingale_enabled and state.consecutive_losses > 0:
+        martingale_mul = martingale_multiplier ** state.consecutive_losses
+        effective_multiplier *= martingale_mul
+
     if effective_multiplier != 1.0:
         order_cost *= effective_multiplier
         order_size *= effective_multiplier
         expected_profit *= effective_multiplier
+
+    # Martingale max stake cap: if computed stake exceeds the martingale ceiling,
+    # skip the trade (don't reset consecutive_losses so the streak continues).
+    if martingale_enabled and martingale_max_stake is not None and order_cost > martingale_max_stake:
+        return TradePlan(
+            False,
+            side=side,
+            price=price,
+            max_entry_price=effective_max_entry_price,
+            order_cost_multiplier=effective_multiplier,
+            skip_reason="martingale_stake_above_max",
+        )
 
     if min_stake is not None and order_cost < min_stake:
         return TradePlan(

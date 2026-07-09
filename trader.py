@@ -727,6 +727,9 @@ def _build_live_trade_plan_for_decision(
         max_consecutive_losses=cfg.max_consecutive_losses,
         base_order_cost=cfg.base_order_cost,
         order_cost_multiplier=_order_cost_multiplier_for_decision(cfg, side_decision, price),
+        martingale_enabled=cfg.martingale_enabled,
+        martingale_multiplier=cfg.martingale_multiplier,
+        martingale_max_stake=cfg.martingale_max_stake,
     )
 
 
@@ -3009,6 +3012,9 @@ def run_paper_trading(
                         max_consecutive_losses=strategy_cfg.max_consecutive_losses,
                         base_order_cost=strategy_cfg.base_order_cost,
                         order_cost_multiplier=_order_cost_multiplier_for_decision(strategy_cfg, side_decision, price),
+                        martingale_enabled=strategy_cfg.martingale_enabled,
+                        martingale_multiplier=strategy_cfg.martingale_multiplier,
+                        martingale_max_stake=strategy_cfg.martingale_max_stake,
                     )
                     if dry_run_once:
                         projected_streak = (
@@ -3268,6 +3274,9 @@ def run_paper_trading(
                         max_consecutive_losses=strategy_cfg.max_consecutive_losses,
                         base_order_cost=strategy_cfg.base_order_cost,
                         order_cost_multiplier=_order_cost_multiplier_for_decision(strategy_cfg, side_decision, price),
+                        martingale_enabled=strategy_cfg.martingale_enabled,
+                        martingale_multiplier=strategy_cfg.martingale_multiplier,
+                        martingale_max_stake=strategy_cfg.martingale_max_stake,
                     )
                     if not plan.should_trade:
                         next_state = _session_state_to_paper_strategy_state(strategy_session)

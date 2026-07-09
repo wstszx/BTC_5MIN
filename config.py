@@ -1333,6 +1333,9 @@ class AppConfig:
     signal_lock_before_entry_seconds: int = 20
     max_stake_skip_alert_threshold: int = 5
     min_price_threshold: float | None = None
+    martingale_enabled: bool = field(default_factory=lambda: _env_bool("MARTINGALE_ENABLED", False))
+    martingale_multiplier: float = field(default_factory=lambda: _env_float("MARTINGALE_MULTIPLIER", 2.0))
+    martingale_max_stake: float = field(default_factory=lambda: _env_float("MARTINGALE_MAX_STAKE", 32.0))
     min_entry_price: float | None = None
     live_max_price_improvement: float = field(default_factory=lambda: _env_float("LIVE_MAX_PRICE_IMPROVEMENT", 0.05))
     ofi_threshold: float = 0.65
