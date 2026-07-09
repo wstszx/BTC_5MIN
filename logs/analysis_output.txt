@@ -1,0 +1,179 @@
+=== Live result values distribution ===
+  "UP": 68
+  "DOWN": 65
+  "PROVISIONAL_LOSS": 1
+
+=== Live side+result combos (recent Jul 1-4) ===
+  side="SKIP" result="": 1504
+  side="UP" result="": 26
+  side="DOWN" result="": 3
+  side="DOWN" result="UP": 2
+  side="DOWN" result="DOWN": 1
+  side="UP" result="DOWN": 1
+  side="UP" result="UP": 1
+
+=== Actual Live trades (result=UP/DOWN + non-zero PnL): 133 ===
+Wins: 69, Losses: 64, Win Rate: 51.9%
+Total PnL: 5.05
+Avg Win: 2.46
+Avg Loss: -2.57
+
+--- By Strategy ---
+  S7: 74 trades, W:41 L:33, WR=55.4%, PnL=12.59
+    Last 5:
+      2026-07-01 side=DOWN result=DOWN pnl=+3.42
+      2026-07-01 side=UP result=DOWN pnl=-4.13
+      2026-07-03 side=DOWN result=UP pnl=-4.14
+      2026-07-03 side=UP result=UP pnl=+3.71
+      2026-07-03 side=DOWN result=UP pnl=-4.13
+  S10: 49 trades, W:23 L:26, WR=46.9%, PnL=-7.95
+    Last 5:
+      2026-05-27 side=UP result=UP pnl=+1.85
+      2026-05-27 side=DOWN result=UP pnl=-2.07
+      2026-06-09 side=UP result=UP pnl=+1.71
+      2026-06-10 side=UP result=DOWN pnl=-2.10
+      2026-06-10 side=UP result=DOWN pnl=-2.07
+  S11: 10 trades, W:5 L:5, WR=50.0%, PnL=0.41
+    Last 5:
+      2026-06-25 side=UP result=UP pnl=+5.68
+      2026-06-25 side=DOWN result=UP pnl=-5.17
+      2026-06-25 side=DOWN result=UP pnl=-5.19
+      2026-06-25 side=DOWN result=DOWN pnl=+4.27
+      2026-06-25 side=DOWN result=DOWN pnl=+4.63
+
+=== Recent Live trades (Jul 1-4) ===
+Trades: 5
+  2026-07-01T10:00:04.457849+00:00 S7 side=DOWN result=DOWN pnl=+3.42
+  2026-07-01T11:30:22.256166+00:00 S7 side=UP result=DOWN pnl=-4.13
+  2026-07-03T05:50:05.387259+00:00 S7 side=DOWN result=UP pnl=-4.14
+  2026-07-03T14:45:05.212761+00:00 S7 side=UP result=UP pnl=+3.71
+  2026-07-03T18:10:03.456187+00:00 S7 side=DOWN result=UP pnl=-4.13
+
+
+=== PAPER TRADES ANALYSIS ===
+
+Paper result values distribution:
+  "UP": 1073
+  "DOWN": 1069
+
+Actual Paper trades (result=UP/DOWN + non-zero PnL): 2142
+Wins: 1137, Losses: 1005, WR: 53.1%
+Total PnL: 135.39
+
+--- Paper By Strategy ---
+  S1: 214 trades, W:114 L:100, WR=53.3%, PnL=8.17
+  S2: 224 trades, W:113 L:111, WR=50.4%, PnL=-3.66
+  S3: 216 trades, W:110 L:106, WR=50.9%, PnL=-1.94
+  S4: 217 trades, W:105 L:112, WR=48.4%, PnL=-12.31
+  S5: 190 trades, W:91 L:99, WR=47.9%, PnL=-4.47
+  S6: 328 trades, W:182 L:146, WR=55.5%, PnL=26.12
+  S7: 67 trades, W:41 L:26, WR=61.2%, PnL=33.14
+  S9: 60 trades, W:30 L:30, WR=50.0%, PnL=-2.48
+  S10: 604 trades, W:334 L:270, WR=55.3%, PnL=78.39
+  S11: 19 trades, W:16 L:3, WR=84.2%, PnL=15.67
+  S12: 3 trades, W:1 L:2, WR=33.3%, PnL=-1.25
+
+=== Recent Paper trades (Jul 1-4) ===
+Total recent paper trades: 931
+  S1: 170 trades, W:94 L:76, WR=55.3%, PnL=13.61
+  S2: 185 trades, W:91 L:94, WR=49.2%, PnL=-7.38
+  S3: 171 trades, W:94 L:77, WR=55.0%, PnL=12.33
+  S4: 167 trades, W:78 L:89, WR=46.7%, PnL=-14.32
+  S5: 81 trades, W:43 L:38, WR=53.1%, PnL=4.27
+  S6: 77 trades, W:45 L:32, WR=58.4%, PnL=10.88
+  S10: 80 trades, W:42 L:38, WR=52.5%, PnL=2.77
+
+--- Recent Paper Last 5 trades per strategy ---
+  S1 (170 recent trades):
+    2026-07-03 side=UP result=UP pnl=+0.96
+    2026-07-03 side=UP result=UP pnl=+0.96
+    2026-07-03 side=UP result=DOWN pnl=-1.00
+    2026-07-03 side=DOWN result=UP pnl=-1.00
+    2026-07-04 side=UP result=DOWN pnl=-1.00
+  S2 (185 recent trades):
+    2026-07-03 side=DOWN result=UP pnl=-1.00
+    2026-07-03 side=UP result=DOWN pnl=-1.00
+    2026-07-03 side=UP result=UP pnl=+0.96
+    2026-07-03 side=UP result=UP pnl=+0.96
+    2026-07-04 side=UP result=UP pnl=+0.96
+  S3 (171 recent trades):
+    2026-07-03 side=UP result=UP pnl=+0.96
+    2026-07-03 side=UP result=DOWN pnl=-1.00
+    2026-07-03 side=DOWN result=UP pnl=-1.00
+    2026-07-03 side=UP result=DOWN pnl=-1.00
+    2026-07-03 side=UP result=UP pnl=+0.96
+  S4 (167 recent trades):
+    2026-07-03 side=UP result=UP pnl=+0.96
+    2026-07-03 side=DOWN result=DOWN pnl=+0.92
+    2026-07-03 side=UP result=DOWN pnl=-1.00
+    2026-07-03 side=UP result=UP pnl=+0.96
+    2026-07-03 side=UP result=UP pnl=+0.96
+  S5 (81 recent trades):
+    2026-07-03 side=UP result=UP pnl=+1.20
+    2026-07-03 side=DOWN result=DOWN pnl=+1.11
+    2026-07-03 side=UP result=UP pnl=+1.15
+    2026-07-03 side=UP result=UP pnl=+1.15
+    2026-07-04 side=UP result=UP pnl=+1.15
+  S6 (77 recent trades):
+    2026-07-03 side=UP result=UP pnl=+0.96
+    2026-07-03 side=UP result=DOWN pnl=-1.00
+    2026-07-03 side=UP result=UP pnl=+0.96
+    2026-07-04 side=UP result=UP pnl=+0.96
+    2026-07-04 side=UP result=UP pnl=+0.96
+  S10 (80 recent trades):
+    2026-07-03 side=UP result=UP pnl=+1.92
+    2026-07-03 side=DOWN result=DOWN pnl=+1.85
+    2026-07-03 side=UP result=DOWN pnl=-2.00
+    2026-07-03 side=DOWN result=DOWN pnl=+1.64
+    2026-07-03 side=UP result=UP pnl=+1.92
+
+
+=== COMPARISON: Live vs Paper (full history) ===
+Live strategies with trades: ['7', '10', '11']
+Paper strategies with trades: ['1', '2', '3', '4', '5', '6', '7', '9', '10', '11', '12']
+
+  Strategy 7:
+    Live:  74 trades, W:41 L:33, WR=55.4%, PnL=12.59
+    Paper: 67 trades, W:41 L:26, WR=61.2%, PnL=33.14
+    Recent Live:  5 trades, W:2 L:3, PnL=-5.28
+    Recent Paper: 0 trades, W:0 L:0, PnL=0.00
+
+  Strategy 10:
+    Live:  49 trades, W:23 L:26, WR=46.9%, PnL=-7.95
+    Paper: 604 trades, W:334 L:270, WR=55.3%, PnL=78.39
+    Recent Live:  0 trades, W:0 L:0, PnL=0.00
+    Recent Paper: 80 trades, W:42 L:38, PnL=2.77
+
+  Strategy 11:
+    Live:  10 trades, W:5 L:5, WR=50.0%, PnL=0.41
+    Paper: 19 trades, W:16 L:3, WR=84.2%, PnL=15.67
+
+
+=== RECENT SKIP COMPARISON (Jul 1-4) ===
+
+Strategy 7 - Live vs Paper Skip Reasons:
+  Skip Reason                                       Live    Paper
+  --------------------------------------------- -------- --------
+  entry_window_missed                                  6        6
+  live_fak_not_matched                                 3        3
+  live_order_book_price_below_min_entry                2        2
+  observed_waiting_for_entry                           1        0
+  strategy7_confidence_too_low                        70       70
+  strategy7_entry_too_late                            23       23
+  strategy7_momentum_too_hot                          18       18
+  strategy7_momentum_too_weak                         86       86
+  strategy7_ofi_stale                                  8        8
+  strategy7_ofi_too_weak                             335      336
+  strategy7_price_too_high                            40       40
+  strategy7_price_too_low                             16       16
+  strategy7_signal_conflict                          155      155
+  ws_stale                                             1        1
+
+Strategy 11 - Live vs Paper Skip Reasons:
+  Skip Reason                                       Live    Paper
+  --------------------------------------------- -------- --------
+  observed_waiting_for_entry                           1        0
+  strategy11_btc_price_stale                           8        8
+  strategy11_edge_too_low                             82       82
+  strategy11_entry_too_late                           50       50
+  strategy11_probability_too_low                     628      629

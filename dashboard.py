@@ -17,6 +17,8 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
+import requests
+
 from atomic_io import atomic_path_guard, atomic_write_text
 from clob_adapter import (
     create_live_clob_client as _create_live_clob_client,
@@ -881,6 +883,59 @@ def _health_check_payload(
     if value is not None:
         payload["value"] = value
     return payload
+
+
+_GEOBLOCK_URL = "https://polymarket.com/api/geoblock"
+
+
+def check_geoblock_status() -> dict[str, Any]:
+    """Proactively check if the current network is geo-restricted by Polymarket.
+
+    Makes a GET request to https://polymarket.com/api/geoblock and interprets
+    the response. A 403 status or body containing "restricted" means the current
+    IP/region is blocked from trading.
+
+    Returns:
+        dict with keys:
+            ok (bool): True if network appears unrestricted
+            restricted (bool): True if explicitly blocked
+            status_code (int): HTTP status code from the endpoint
+            detail (str): Human-readable explanation in Chinese
+    """
+    try:
+        resp = requests.get(_GEOBLOCK_URL, timeout=10)
+        body = resp.text.lower() if resp.text else ""
+        status = resp.status_code
+
+        if status == 403 or "restricted" in body:
+            return {
+                "ok": False,
+                "restricted": True,
+                "status_code": status,
+                "detail": "当前网络所在地区被 Polymarket 限制交易，请更换网络环境。",
+            }
+
+        if 200 <= status < 300:
+            return {
+                "ok": True,
+                "restricted": False,
+                "status_code": status,
+                "detail": "当前网络环境正常，未被限制。",
+            }
+
+        return {
+            "ok": False,
+            "restricted": False,
+            "status_code": status,
+            "detail": f"无法确认网络状态，HTTP {status}。",
+        }
+    except requests.RequestException as exc:
+        return {
+            "ok": False,
+            "restricted": False,
+            "status_code": 0,
+            "detail": f"网络检查请求失败：{exc}",
+        }
 
 
 def _terminal_outcome_price(value: float | None, target: float) -> bool:
@@ -3160,6 +3215,26 @@ class DashboardState:
             )
         )
 
+        geoblock_status = check_geoblock_status()
+        # Only mark as "not ok" when explicitly restricted (403 + restricted body).
+        # Network/unreachable errors are still "ok" with a warning detail.
+        geoblock_ok = not geoblock_status.get("restricted", False)
+        checks.append(
+            _health_check_payload(
+                "geoblock",
+                "地区限制",
+                ok=geoblock_ok,
+                detail=geoblock_status["detail"],
+                value={
+                    "restricted": geoblock_status["restricted"],
+                    "status_code": geoblock_status["status_code"],
+                },
+            )
+        )
+        constraints["geoblock_restricted"] = geoblock_status["restricted"]
+        constraints["geoblock_detail"] = geoblock_status["detail"]
+        constraints["geoblock_status_code"] = geoblock_status["status_code"]
+
         ok = all(item["ok"] for item in checks)
         return {
             "ok": ok,
@@ -3728,6 +3803,9 @@ class _DashboardRequestHandler(BaseHTTPRequestHandler):
             if parsed.path == "/api/live/health":
                 self._send_json(self.dashboard_state.get_live_health_payload())
                 return
+            if parsed.path == "/api/live/geoblock":
+                self._send_json(check_geoblock_status())
+                return
             if parsed.path == "/api/paper/recent":
                 query = parse_qs(parsed.query)
                 limit = int((query.get("limit") or ["20"])[0])
@@ -3972,6 +4050,10 @@ def _dashboard_html() -> str:
         <div id=\"wsHealth\" class=\"chip\">待刷新</div>
         <span id=\"topConnectionDetail\" class=\"top-connection-detail\">--</span>
       </div>
+      <div id=\"topGeoblockStatus\" class=\"top-connection-status\" title=\"Polymarket 网络地区限制状态\">
+        <span class=\"top-connection-label\">网络</span>
+        <div id=\"geoblockHealth\" class=\"chip\">待检查</div>
+      </div>
       <div id=\"clockLocal\" class=\"clock\">本地时间 --</div>
       <button id=\"btnHelp\" class=\"btn btn-ghost\" type=\"button\">帮助</button>
       <button id=\"btnRefreshNow\" class=\"btn btn-ghost\" type=\"button\">立即刷新</button>
@@ -4178,6 +4260,7 @@ def _dashboard_html() -> str:
               <div class="kv"><div class="k">最小报价单位</div><div id="liveHealthTickSize" class="v">--</div></div>
               <div class="kv"><div class="k">手续费</div><div id="liveHealthFees" class="v">--</div></div>
               <div class="kv"><div class="k">策略组合</div><div id="liveHealthStrategies" class="v">--</div></div>
+              <div class="kv"><div class="k">地区限制</div><div id="liveHealthGeoblock" class="v">--</div></div>
             </div>
             <div id="liveHealthList" class="runtime-list"></div>
           </div>
@@ -5681,6 +5764,7 @@ const POLL_MS = {
   summary: 20000,
   recent: 12000,
   clock: 1000,
+  geoblock: 60000,
 };
 
 const TIMEFRAME_META = {
@@ -7938,6 +8022,15 @@ function renderLiveHealth(payload) {
   const paperStrategies = Array.isArray(constraints.paper_strategy_ids) ? constraints.paper_strategy_ids.join(',') : '--';
   const liveStrategies = Array.isArray(constraints.live_strategy_ids) ? constraints.live_strategy_ids.join(',') : '--';
   setText('liveHealthStrategies', '纸面 ' + paperStrategies + ' / 实盘 ' + liveStrategies);
+  const geoblockRestricted = constraints.geoblock_restricted;
+  const geoblockDetail = constraints.geoblock_detail || '--';
+  if (geoblockRestricted === true) {
+    setText('liveHealthGeoblock', '受限 - ' + geoblockDetail);
+  } else if (geoblockRestricted === false) {
+    setText('liveHealthGeoblock', '正常');
+  } else {
+    setText('liveHealthGeoblock', '--');
+  }
   const checks = Array.isArray(payload.checks) ? payload.checks : [];
   setHtml('liveHealthList', checks.map((item) => {
     const tone = item.ok ? 'ok' : 'err';
@@ -7958,6 +8051,24 @@ async function refreshLiveHealth() {
   } catch (err) {
     setChip('liveHealthStatus', '检查失败', 'err');
     setHtml('liveHealthList', '<div class="runtime-item"><span class="rk">错误</span><span class="rv">' + esc(err && err.message ? err.message : '检查失败') + '</span></div>');
+    console.error(err);
+  }
+}
+
+async function refreshGeoblock() {
+  try {
+    const data = await apiGet('/api/live/geoblock');
+    if (data.restricted === true) {
+      setChip('geoblockHealth', '受限', 'err');
+    } else if (data.ok === true) {
+      setChip('geoblockHealth', '正常', 'ok');
+    } else if (data.status_code === 0) {
+      setChip('geoblockHealth', '检查失败', 'warn');
+    } else {
+      setChip('geoblockHealth', '未知', 'warn');
+    }
+  } catch (err) {
+    setChip('geoblockHealth', '检查失败', 'err');
     console.error(err);
   }
 }
@@ -8876,6 +8987,7 @@ async function refreshAll() {
   await refreshConfig();
   await refreshMarket();
   await Promise.allSettled([refreshSummary(), refreshRecent(), refreshLiveHealth()]);
+  refreshGeoblock();
 }
 
 function tickClock() {
@@ -8936,6 +9048,7 @@ function startPolling() {
   setInterval(refreshSummary, POLL_MS.summary);
   setInterval(refreshRecent, POLL_MS.recent);
   setInterval(tickClock, POLL_MS.clock);
+  setInterval(refreshGeoblock, POLL_MS.geoblock);
 }
 
 async function bootstrap() {
