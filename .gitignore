@@ -45,3 +45,6 @@ output/*.log
 .superpowers/
 test-results/
 logs/analysis/
+
+# 部署配置（含 Clash 订阅链接等敏感信息）
+deploy/clash-config.yaml

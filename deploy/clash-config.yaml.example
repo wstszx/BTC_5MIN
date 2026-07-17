@@ -1,0 +1,28 @@
+# Clash.Meta 配置
+# 复制为 clash-config.yaml 后修改
+
+port: 7890
+socks-port: 7891
+allow-lan: false
+mode: rule
+log-level: info
+
+# 订阅链接（填入你的 V2Ray/Clash 订阅地址）
+proxy-providers:
+  MyProvider:
+    type: http
+    url: "<你的订阅链接>"
+    interval: 86400
+    health-check:
+      enable: true
+      url: https://www.gstatic.com/generate_204
+      interval: 300
+
+proxy-groups:
+  - name: Proxy
+    type: select
+    use:
+      - MyProvider
+
+rules:
+  - MATCH,Proxy

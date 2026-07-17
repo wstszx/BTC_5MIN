@@ -1,0 +1,13 @@
+[Unit]
+Description=Clash.Meta Proxy
+After=network.target
+
+[Service]
+Type=simple
+User=btcbot
+ExecStart=/usr/local/bin/clash-meta -f /opt/btc-5min/deploy/clash-config.yaml
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
