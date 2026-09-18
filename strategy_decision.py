@@ -92,6 +92,22 @@ class Strategy13ProbabilityEdge:
     best_edge: float | None
 
 
+@dataclass(slots=True)
+class Strategy14FairValue:
+    open_up_price: float
+    current_up_price: float
+    ofi_score: float
+    fair_up_probability: float
+    fair_down_probability: float
+    move: float
+    overshoot: float
+    fade_side: str | None
+    fade_price: float | None
+    fade_effective_price: float | None
+    fade_fair_probability: float | None
+    fade_edge: float | None
+
+
 def resolve_quote_price(side: str, quote: MarketQuote) -> float | None:
     if side == "UP":
         return quote.up_best_ask if quote.up_best_ask is not None else quote.up_price
@@ -601,7 +617,7 @@ def apply_strategy6_signal_to_quote(
     now: datetime | None = None,
     diagnostic_log: Callable[[str], None] | None = None,
 ) -> None:
-    if cfg.strategy_id not in {6, 7, 8, 9, 10, 11, 12, 13} or binance_signal_service is None:
+    if cfg.strategy_id not in {6, 7, 8, 9, 10, 11, 12, 13, 14} or binance_signal_service is None:
         return
     now = now or datetime.now(timezone.utc)
     quote_binance_signal_at = getattr(quote, "binance_signal_at", None)
@@ -1482,6 +1498,223 @@ def evaluate_strategy13_probability_edge(
     )
 
 
+def _strategy14_finite_price(value: object) -> float | None:
+    if value is None:
+        return None
+    try:
+        price = float(value)
+    except (TypeError, ValueError):
+        return None
+    if 0 < price < 1 and isfinite(price):
+        return price
+    return None
+
+
+def _strategy14_finite_float(value: object, default: float) -> float:
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError):
+        return default
+    return numeric if isfinite(numeric) else default
+
+
+def estimate_strategy14_fair_value(
+    *,
+    cfg: AppConfig,
+    quote: MarketQuote,
+    open_up_price: float,
+    current_up_price: float,
+    ofi_score: float,
+) -> Strategy14FairValue:
+    """Open-anchored fair value for the overreaction-fade strategy.
+
+    The fair UP probability is anchored at the round-open UP price and only
+    adjusted by the Binance order-flow imbalance (OFI). When OFI supports the
+    current move, the fair value moves with it and the overshoot shrinks, so
+    confirmed trends produce no trade; an unsupported move keeps the fair
+    value near the open anchor and creates an overshoot to fade.
+    """
+    ofi_weight = _strategy14_finite_float(getattr(cfg, "strategy14_ofi_weight", 0.08), 0.08)
+    bounded_ofi = max(-1.0, min(1.0, ofi_score))
+    fair_up = _clamp_probability(open_up_price + ofi_weight * bounded_ofi, low=0.05, high=0.95)
+    fair_down = 1.0 - fair_up
+    move = current_up_price - open_up_price
+    overshoot = current_up_price - fair_up
+    min_price_gap = max(0.0, _strategy14_finite_float(getattr(cfg, "strategy14_min_price_gap", 0.05), 0.05))
+    edge_buffer = max(0.0, _strategy14_finite_float(getattr(cfg, "strategy14_edge_buffer", 0.005), 0.005))
+
+    fade_side: str | None = None
+    fade_price: float | None = None
+    fade_effective_price: float | None = None
+    fade_fair_probability: float | None = None
+    fade_edge: float | None = None
+    if overshoot >= min_price_gap:
+        # UP price ran above its OFI-adjusted fair value: fade by buying DOWN.
+        fade_side = "DOWN"
+        fade_fair_probability = fair_down
+    elif -overshoot >= min_price_gap:
+        # UP price ran below its OFI-adjusted fair value: fade by buying UP.
+        fade_side = "UP"
+        fade_fair_probability = fair_up
+    if fade_side is not None:
+        fade_price = resolve_quote_price(fade_side, quote)
+        if is_valid_signal_price(fade_price):
+            fade_effective_price = effective_price_after_fee(fade_price)
+            fade_edge = (
+                fade_fair_probability - fade_effective_price - edge_buffer
+                if fade_fair_probability is not None and fade_effective_price is not None
+                else None
+            )
+
+    return Strategy14FairValue(
+        open_up_price=open_up_price,
+        current_up_price=current_up_price,
+        ofi_score=ofi_score,
+        fair_up_probability=fair_up,
+        fair_down_probability=fair_down,
+        move=move,
+        overshoot=overshoot,
+        fade_side=fade_side,
+        fade_price=fade_price,
+        fade_effective_price=fade_effective_price,
+        fade_fair_probability=fade_fair_probability,
+        fade_edge=fade_edge,
+    )
+
+
+def evaluate_strategy14_fade(
+    *,
+    cfg: AppConfig,
+    quote: MarketQuote,
+    now: datetime,
+    window: MarketWindow | None,
+    signal_open_up_price: float | None,
+    signal_current_up_price: float | None,
+) -> SideDecision:
+    ofi_score = resolve_strategy6_ofi_score(quote)
+    if ofi_score is None:
+        return SideDecision(
+            side=None,
+            reason="strategy14_ofi_unavailable",
+            signal_open_up_price=signal_open_up_price,
+            signal_current_up_price=signal_current_up_price,
+        )
+    if is_strategy6_signal_stale(quote=quote, now=now, stale_seconds=cfg.binance_signal_stale_seconds):
+        return SideDecision(
+            side=None,
+            reason="strategy14_ofi_stale",
+            signal_open_up_price=signal_open_up_price,
+            signal_current_up_price=signal_current_up_price,
+            signal_threshold=cfg.binance_signal_stale_seconds,
+            signal_delta=ofi_score,
+            ofi_score=ofi_score,
+        )
+    open_price = _strategy14_finite_price(signal_open_up_price)
+    current_price = _strategy14_finite_price(signal_current_up_price)
+    if open_price is None or current_price is None:
+        return SideDecision(
+            side=None,
+            reason="strategy14_anchor_unavailable",
+            signal_open_up_price=signal_open_up_price,
+            signal_current_up_price=signal_current_up_price,
+            ofi_score=ofi_score,
+        )
+
+    extreme_price = _strategy14_finite_float(getattr(cfg, "strategy14_extreme_move_price", 0.85), 0.85)
+    extreme_price = min(0.99, max(0.5, extreme_price))
+    if current_price >= extreme_price or current_price <= 1.0 - extreme_price:
+        return SideDecision(
+            side=None,
+            reason="strategy14_move_too_extreme",
+            signal_open_up_price=signal_open_up_price,
+            signal_current_up_price=signal_current_up_price,
+            signal_threshold=extreme_price,
+            signal_delta=current_price - open_price,
+            ofi_score=ofi_score,
+        )
+
+    fair_value = estimate_strategy14_fair_value(
+        cfg=cfg,
+        quote=quote,
+        open_up_price=open_price,
+        current_up_price=current_price,
+        ofi_score=ofi_score,
+    )
+    if fair_value.fade_side is None:
+        return SideDecision(
+            side=None,
+            reason="strategy14_move_too_small",
+            signal_open_up_price=signal_open_up_price,
+            signal_current_up_price=signal_current_up_price,
+            signal_threshold=fair_value.overshoot,
+            signal_delta=fair_value.move,
+            signal_probability=fair_value.fair_up_probability,
+            ofi_score=ofi_score,
+        )
+    if fair_value.fade_edge is None:
+        return SideDecision(
+            side=None,
+            reason="strategy14_quote_unavailable",
+            candidate_side=fair_value.fade_side,
+            candidate_price=fair_value.fade_price,
+            signal_open_up_price=signal_open_up_price,
+            signal_current_up_price=signal_current_up_price,
+            signal_threshold=fair_value.overshoot,
+            signal_delta=fair_value.move,
+            signal_probability=fair_value.fade_fair_probability,
+            signal_edge=fair_value.fade_edge,
+            ofi_score=ofi_score,
+        )
+
+    min_edge = max(0.0, _strategy14_finite_float(getattr(cfg, "strategy14_min_edge", 0.03), 0.03))
+    if fair_value.fade_edge < min_edge:
+        return SideDecision(
+            side=None,
+            reason="strategy14_edge_too_low",
+            candidate_side=fair_value.fade_side,
+            candidate_price=fair_value.fade_price,
+            signal_open_up_price=signal_open_up_price,
+            signal_current_up_price=signal_current_up_price,
+            signal_threshold=min_edge,
+            signal_delta=fair_value.move,
+            signal_probability=fair_value.fade_fair_probability,
+            signal_edge=fair_value.fade_edge,
+            ofi_score=ofi_score,
+        )
+
+    min_remaining = max(0, int(_strategy14_finite_float(getattr(cfg, "strategy14_min_remaining_seconds", 60), 60)))
+    if window is not None and min_remaining > 0:
+        remaining_seconds = (window.end_time - now).total_seconds()
+        if remaining_seconds < min_remaining:
+            return SideDecision(
+                side=None,
+                reason="strategy14_entry_too_late",
+                candidate_side=fair_value.fade_side,
+                candidate_price=fair_value.fade_price,
+                signal_open_up_price=signal_open_up_price,
+                signal_current_up_price=signal_current_up_price,
+                signal_threshold=min_remaining,
+                signal_delta=fair_value.move,
+                signal_probability=fair_value.fade_fair_probability,
+                signal_edge=fair_value.fade_edge,
+                ofi_score=ofi_score,
+            )
+
+    return SideDecision(
+        side=fair_value.fade_side,
+        candidate_side=fair_value.fade_side,
+        candidate_price=fair_value.fade_price,
+        signal_open_up_price=signal_open_up_price,
+        signal_current_up_price=signal_current_up_price,
+        signal_threshold=min_edge,
+        signal_delta=fair_value.move,
+        signal_probability=fair_value.fade_fair_probability,
+        signal_edge=fair_value.fade_edge,
+        max_entry_price=_strategy14_finite_float(getattr(cfg, "strategy14_max_entry_price", None), None),
+        ofi_score=ofi_score,
+    )
+
+
 def resolve_side_from_strategy(
     *,
     cfg: AppConfig,
@@ -1508,7 +1741,7 @@ def resolve_side_from_strategy(
             return SideDecision(side="DOWN", signal_threshold=cfg.ofi_threshold, signal_delta=ofi_score)
         return SideDecision(side=None, reason="ofi_too_weak", signal_threshold=cfg.ofi_threshold, signal_delta=ofi_score)
 
-    if cfg.strategy_id not in {5, 7, 8, 9, 10, 11, 12, 13}:
+    if cfg.strategy_id not in {5, 7, 8, 9, 10, 11, 12, 13, 14}:
         return SideDecision(side=fallback_side_resolver(cfg.strategy_id, state.round_index))
 
     fallback_strategy = cfg.signal_fallback_strategy_id
@@ -1615,6 +1848,41 @@ def resolve_side_from_strategy(
                 price=candidate_price,
                 min_entry_price=getattr(cfg, "min_entry_price", None),
                 max_entry_price=getattr(cfg, "max_entry_price", None),
+            )
+            if price_skip_reason is not None:
+                edge_decision.side = None
+                edge_decision.reason = price_skip_reason
+                edge_decision.candidate_side = state.signal_round_locked_side
+                edge_decision.candidate_price = candidate_price
+                return edge_decision
+            edge_decision.side = state.signal_round_locked_side
+            edge_decision.candidate_side = state.signal_round_locked_side
+            edge_decision.candidate_price = candidate_price
+            return edge_decision
+        if cfg.strategy_id == 14:
+            now = now or datetime.now(timezone.utc)
+            edge_decision = evaluate_strategy14_fade(
+                cfg=cfg,
+                quote=quote,
+                now=now,
+                window=window,
+                signal_open_up_price=state.signal_round_open_up_price,
+                signal_current_up_price=signal_current_up_price,
+            )
+            state.strategy6_last_ofi_score = edge_decision.ofi_score
+            edge_decision.signal_locked = True
+            if edge_decision.side is None:
+                return edge_decision
+            if edge_decision.side != state.signal_round_locked_side:
+                edge_decision.side = None
+                edge_decision.reason = "strategy14_signal_conflict"
+                return edge_decision
+            candidate_price = resolve_quote_price(state.signal_round_locked_side, quote)
+            price_skip_reason = entry_price_skip_reason(
+                strategy_prefix="strategy14",
+                price=candidate_price,
+                min_entry_price=getattr(cfg, "strategy14_min_entry_price", None),
+                max_entry_price=getattr(cfg, "strategy14_max_entry_price", None),
             )
             if price_skip_reason is not None:
                 edge_decision.side = None
@@ -2114,6 +2382,55 @@ def resolve_side_from_strategy(
             price=candidate_price,
             min_entry_price=getattr(cfg, "min_entry_price", None),
             max_entry_price=getattr(cfg, "max_entry_price", None),
+        )
+        if price_skip_reason is not None:
+            edge_decision.side = None
+            edge_decision.reason = price_skip_reason
+            edge_decision.candidate_side = edge_decision.candidate_side or edge_decision.side
+            edge_decision.candidate_price = candidate_price
+            return edge_decision
+
+        if entry_time is not None:
+            lock_at = entry_time - timedelta(seconds=max(0, cfg.signal_lock_before_entry_seconds))
+            if now >= lock_at:
+                state.signal_round_locked_side = edge_decision.side
+        edge_decision.signal_locked = state.signal_round_locked_side in {"UP", "DOWN"}
+        edge_decision.candidate_side = edge_decision.side
+        edge_decision.candidate_price = candidate_price
+        return edge_decision
+
+    if cfg.strategy_id == 14:
+        edge_decision = evaluate_strategy14_fade(
+            cfg=cfg,
+            quote=quote,
+            now=now,
+            window=window,
+            signal_open_up_price=signal_open_up_price,
+            signal_current_up_price=signal_current_up_price,
+        )
+        state.strategy6_last_ofi_score = edge_decision.ofi_score
+        if edge_decision.side is None:
+            return edge_decision
+
+        effective_confirm_before_entry_seconds = max(
+            0,
+            int(getattr(cfg, "strategy14_confirm_before_entry_seconds", 0)),
+        )
+        if (
+            entry_time is not None
+            and effective_confirm_before_entry_seconds > 0
+            and (entry_time - now).total_seconds() < effective_confirm_before_entry_seconds
+        ):
+            edge_decision.side = None
+            edge_decision.reason = "strategy14_entry_too_late"
+            return edge_decision
+
+        candidate_price = resolve_quote_price(edge_decision.side, quote)
+        price_skip_reason = entry_price_skip_reason(
+            strategy_prefix="strategy14",
+            price=candidate_price,
+            min_entry_price=getattr(cfg, "strategy14_min_entry_price", None),
+            max_entry_price=getattr(cfg, "strategy14_max_entry_price", None),
         )
         if price_skip_reason is not None:
             edge_decision.side = None

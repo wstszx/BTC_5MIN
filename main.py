@@ -294,6 +294,23 @@ def _paper_strategy_profile_from_cfg(cfg: AppConfig, strategy_id: int) -> LiveSt
             'strategy13_confirm_before_entry_seconds',
             cfg.strategy13_confirm_before_entry_seconds,
         ),
+        strategy14_min_price_gap=getattr(existing, 'strategy14_min_price_gap', cfg.strategy14_min_price_gap),
+        strategy14_ofi_weight=getattr(existing, 'strategy14_ofi_weight', cfg.strategy14_ofi_weight),
+        strategy14_min_edge=getattr(existing, 'strategy14_min_edge', cfg.strategy14_min_edge),
+        strategy14_edge_buffer=getattr(existing, 'strategy14_edge_buffer', cfg.strategy14_edge_buffer),
+        strategy14_min_entry_price=getattr(existing, 'strategy14_min_entry_price', cfg.strategy14_min_entry_price),
+        strategy14_max_entry_price=getattr(existing, 'strategy14_max_entry_price', cfg.strategy14_max_entry_price),
+        strategy14_extreme_move_price=getattr(existing, 'strategy14_extreme_move_price', cfg.strategy14_extreme_move_price),
+        strategy14_min_remaining_seconds=getattr(
+            existing,
+            'strategy14_min_remaining_seconds',
+            cfg.strategy14_min_remaining_seconds,
+        ),
+        strategy14_confirm_before_entry_seconds=getattr(
+            existing,
+            'strategy14_confirm_before_entry_seconds',
+            cfg.strategy14_confirm_before_entry_seconds,
+        ),
     )
 
 
@@ -376,6 +393,15 @@ def _paper_cfg_for_timeframe(cfg: AppConfig, timeframe: str) -> AppConfig:
         strategy13_confirm_micro=profile.strategy13_confirm_micro,
         strategy13_micro_disagree_penalty=profile.strategy13_micro_disagree_penalty,
         strategy13_confirm_before_entry_seconds=profile.strategy13_confirm_before_entry_seconds,
+        strategy14_min_price_gap=profile.strategy14_min_price_gap,
+        strategy14_ofi_weight=profile.strategy14_ofi_weight,
+        strategy14_min_edge=profile.strategy14_min_edge,
+        strategy14_edge_buffer=profile.strategy14_edge_buffer,
+        strategy14_min_entry_price=profile.strategy14_min_entry_price,
+        strategy14_max_entry_price=profile.strategy14_max_entry_price,
+        strategy14_extreme_move_price=profile.strategy14_extreme_move_price,
+        strategy14_min_remaining_seconds=profile.strategy14_min_remaining_seconds,
+        strategy14_confirm_before_entry_seconds=profile.strategy14_confirm_before_entry_seconds,
     )
     timeframe_cfg.paper_strategy_profiles = strategy_profiles
     timeframe_cfg.paper_strategy_profiles = {
