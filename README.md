@@ -63,6 +63,8 @@ Strategy 8 is available as a state-switching strategy. It uses the same OFI and 
 
 Strategy 11 is available for both paper and live strategy lists. It anchors each round to the Binance BTC mid price, estimates the probability of finishing above or below that anchor from current distance, remaining time, and `STRATEGY_11_VOLATILITY_BPS_PER_SQRT_MINUTE`, then only buys when probability minus market ask and buffer clears `STRATEGY_11_MIN_EDGE`.
 
+Strategy 14 is an overreaction-fade strategy (the contrarian complement to the momentum-chasing strategies 7/10). It anchors the round at the opening UP price, adjusts that anchor by the Binance order-flow imbalance (`STRATEGY_14_OFI_WEIGHT` × OFI), and treats a move larger than `STRATEGY_14_MIN_PRICE_GAP` away from that OFI-adjusted fair line as an overreaction: it then buys the opposite, cheaper side when that side's ask is inside `STRATEGY_14_MIN_ENTRY_PRICE`…`STRATEGY_14_MAX_ENTRY_PRICE` and the fair-minus-ask edge clears `STRATEGY_14_MIN_EDGE` plus `STRATEGY_14_EDGE_BUFFER`. Because OFI moves the fair line with the market, confirmed trends produce no overshoot and no trade; `STRATEGY_14_EXTREME_MOVE_PRICE` and `STRATEGY_14_MIN_REMAINING_SECONDS` keep it out of one-sided markets and near-the-close fades. It is not added to any default strategy list — enable it by adding `14` to `PAPER_STRATEGY_IDS` first.
+
 Legacy paper timeframe/profile keys are still parsed for compatibility, but they are no longer the primary dashboard editing path. Use `MARKET_TIMEFRAME` for the active 5m/15m market and the strategy panel for mode-specific strategy changes.
 
 ## 3. Run the supported runtime

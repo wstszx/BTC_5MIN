@@ -33,7 +33,7 @@ def test_collect_config_warnings_reports_invalid_scalar_values():
         {
             "STRATEGY_7_MAX_STAKE": "abc",
             "WS_ENABLED": "maybe",
-            "STRATEGY_ID": "14",
+            "STRATEGY_ID": "15",
             "MARKET_TIMEFRAME": "7m",
             "TARGET_PROFIT": "1.2",
         }
@@ -41,7 +41,7 @@ def test_collect_config_warnings_reports_invalid_scalar_values():
 
     assert warnings["STRATEGY_7_MAX_STAKE"] == "Invalid value for STRATEGY_7_MAX_STAKE: expected number, got 'abc'"
     assert warnings["WS_ENABLED"] == "Invalid value for WS_ENABLED: expected true/false, got 'maybe'"
-    assert warnings["STRATEGY_ID"] == "Invalid value for STRATEGY_ID: expected strategy id 1-13, got '14'"
+    assert warnings["STRATEGY_ID"] == "Invalid value for STRATEGY_ID: expected strategy id 1-14, got '15'"
     assert warnings["MARKET_TIMEFRAME"] == "Invalid value for MARKET_TIMEFRAME: expected one of 5m, 15m, got '7m'"
     assert "TARGET_PROFIT" not in warnings
 

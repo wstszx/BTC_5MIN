@@ -17,7 +17,7 @@ _ENV_FILE_ENCODINGS: tuple[str, ...] = ("utf-8", "utf-8-sig", "gbk")
 _BOOL_TRUE_VALUES = {"1", "true", "yes", "on"}
 _BOOL_FALSE_VALUES = {"0", "false", "no", "off"}
 _STRATEGY_ID_MIN = 1
-_STRATEGY_ID_MAX = 13
+_STRATEGY_ID_MAX = 14
 
 _STRATEGY7_SHORT_PROFILE_KEYS: dict[str, str] = {
     "OFI_THRESHOLD": "STRATEGY7_OFI_THRESHOLD",
@@ -103,6 +103,17 @@ _STRATEGY13_SHORT_PROFILE_KEYS: dict[str, str] = {
     "MICRO_DISAGREE_PENALTY": "STRATEGY13_MICRO_DISAGREE_PENALTY",
     "CONFIRM_BEFORE_ENTRY_SECONDS": "STRATEGY13_CONFIRM_BEFORE_ENTRY_SECONDS",
 }
+_STRATEGY14_SHORT_PROFILE_KEYS: dict[str, str] = {
+    "MIN_PRICE_GAP": "STRATEGY14_MIN_PRICE_GAP",
+    "OFI_WEIGHT": "STRATEGY14_OFI_WEIGHT",
+    "MIN_EDGE": "STRATEGY14_MIN_EDGE",
+    "EDGE_BUFFER": "STRATEGY14_EDGE_BUFFER",
+    "MIN_ENTRY_PRICE": "STRATEGY14_MIN_ENTRY_PRICE",
+    "MAX_ENTRY_PRICE": "STRATEGY14_MAX_ENTRY_PRICE",
+    "EXTREME_MOVE_PRICE": "STRATEGY14_EXTREME_MOVE_PRICE",
+    "MIN_REMAINING_SECONDS": "STRATEGY14_MIN_REMAINING_SECONDS",
+    "CONFIRM_BEFORE_ENTRY_SECONDS": "STRATEGY14_CONFIRM_BEFORE_ENTRY_SECONDS",
+}
 _STRATEGY_SHORT_PROFILE_KEYS: dict[int, dict[str, str]] = {
     7: _STRATEGY7_SHORT_PROFILE_KEYS,
     8: _STRATEGY7_SHORT_PROFILE_KEYS,
@@ -111,6 +122,7 @@ _STRATEGY_SHORT_PROFILE_KEYS: dict[int, dict[str, str]] = {
     11: _STRATEGY11_SHORT_PROFILE_KEYS,
     12: _STRATEGY12_SHORT_PROFILE_KEYS,
     13: _STRATEGY13_SHORT_PROFILE_KEYS,
+    14: _STRATEGY14_SHORT_PROFILE_KEYS,
 }
 
 
@@ -150,6 +162,8 @@ _INT_CONFIG_KEYS: frozenset[str] = frozenset(
         "STRATEGY11_CONFIRM_BEFORE_ENTRY_SECONDS",
         "STRATEGY13_VOL_LOOKBACK_SECONDS",
         "STRATEGY13_CONFIRM_BEFORE_ENTRY_SECONDS",
+        "STRATEGY14_MIN_REMAINING_SECONDS",
+        "STRATEGY14_CONFIRM_BEFORE_ENTRY_SECONDS",
         "WS_QUOTE_STALE_SECONDS",
         "WS_CONNECT_TIMEOUT_SECONDS",
         "WS_LOG_EVERY_UPDATES",
@@ -225,6 +239,13 @@ _FLOAT_CONFIG_KEYS: frozenset[str] = frozenset(
         "STRATEGY13_PROBABILITY_SHRINK",
         "STRATEGY13_MIN_PROBABILITY",
         "STRATEGY13_MICRO_DISAGREE_PENALTY",
+        "STRATEGY14_MIN_PRICE_GAP",
+        "STRATEGY14_OFI_WEIGHT",
+        "STRATEGY14_MIN_EDGE",
+        "STRATEGY14_EDGE_BUFFER",
+        "STRATEGY14_MIN_ENTRY_PRICE",
+        "STRATEGY14_MAX_ENTRY_PRICE",
+        "STRATEGY14_EXTREME_MOVE_PRICE",
         "BINANCE_SIGNAL_STALE_SECONDS",
         "NEAR_ENTRY_POLL_WINDOW_SECONDS",
         "POLL_INTERVAL_SECONDS",
@@ -335,6 +356,15 @@ _GLOBAL_STRATEGY_CONFIG_KEYS: frozenset[str] = frozenset(
         "STRATEGY13_CONFIRM_MICRO",
         "STRATEGY13_MICRO_DISAGREE_PENALTY",
         "STRATEGY13_CONFIRM_BEFORE_ENTRY_SECONDS",
+        "STRATEGY14_MIN_PRICE_GAP",
+        "STRATEGY14_OFI_WEIGHT",
+        "STRATEGY14_MIN_EDGE",
+        "STRATEGY14_EDGE_BUFFER",
+        "STRATEGY14_MIN_ENTRY_PRICE",
+        "STRATEGY14_MAX_ENTRY_PRICE",
+        "STRATEGY14_EXTREME_MOVE_PRICE",
+        "STRATEGY14_MIN_REMAINING_SECONDS",
+        "STRATEGY14_CONFIRM_BEFORE_ENTRY_SECONDS",
     }
 )
 
@@ -774,6 +804,15 @@ class PaperTimeframeProfile:
     strategy13_confirm_micro: bool
     strategy13_micro_disagree_penalty: float
     strategy13_confirm_before_entry_seconds: int
+    strategy14_min_price_gap: float
+    strategy14_ofi_weight: float
+    strategy14_min_edge: float
+    strategy14_edge_buffer: float
+    strategy14_min_entry_price: float
+    strategy14_max_entry_price: float
+    strategy14_extreme_move_price: float
+    strategy14_min_remaining_seconds: int
+    strategy14_confirm_before_entry_seconds: int
     min_entry_price: float | None
     max_entry_price: float
     strategy7_max_entry_price: float
@@ -860,6 +899,15 @@ class LiveStrategyProfile:
     strategy13_confirm_micro: bool
     strategy13_micro_disagree_penalty: float
     strategy13_confirm_before_entry_seconds: int
+    strategy14_min_price_gap: float
+    strategy14_ofi_weight: float
+    strategy14_min_edge: float
+    strategy14_edge_buffer: float
+    strategy14_min_entry_price: float
+    strategy14_max_entry_price: float
+    strategy14_extreme_move_price: float
+    strategy14_min_remaining_seconds: int
+    strategy14_confirm_before_entry_seconds: int
 
 
 def _base_live_profile_for_strategy(cfg: AppConfig, strategy_id: int) -> LiveStrategyProfile:
@@ -943,6 +991,15 @@ def _base_live_profile_for_strategy(cfg: AppConfig, strategy_id: int) -> LiveStr
         strategy13_confirm_micro=cfg.strategy13_confirm_micro,
         strategy13_micro_disagree_penalty=cfg.strategy13_micro_disagree_penalty,
         strategy13_confirm_before_entry_seconds=cfg.strategy13_confirm_before_entry_seconds,
+        strategy14_min_price_gap=cfg.strategy14_min_price_gap,
+        strategy14_ofi_weight=cfg.strategy14_ofi_weight,
+        strategy14_min_edge=cfg.strategy14_min_edge,
+        strategy14_edge_buffer=cfg.strategy14_edge_buffer,
+        strategy14_min_entry_price=cfg.strategy14_min_entry_price,
+        strategy14_max_entry_price=cfg.strategy14_max_entry_price,
+        strategy14_extreme_move_price=cfg.strategy14_extreme_move_price,
+        strategy14_min_remaining_seconds=cfg.strategy14_min_remaining_seconds,
+        strategy14_confirm_before_entry_seconds=cfg.strategy14_confirm_before_entry_seconds,
     )
 
 
@@ -957,7 +1014,7 @@ def _cap_profile_safety_limits(cfg: AppConfig, profile: LiveStrategyProfile) -> 
 def _profile_for_strategy(cfg: AppConfig, strategy_id: int) -> LiveStrategyProfile:
     strategy7_max_entry_fallback = (
         _strategy_env_float(strategy_id, "STRATEGY7_MAX_ENTRY_PRICE", cfg.max_entry_price)
-        if strategy_id in {7, 8, 9, 10, 11, 12, 13}
+        if strategy_id in {7, 8, 9, 10, 11, 12, 13, 14}
         else cfg.max_entry_price
     )
 
@@ -1285,6 +1342,51 @@ def _profile_for_strategy(cfg: AppConfig, strategy_id: int) -> LiveStrategyProfi
                 "STRATEGY13_CONFIRM_BEFORE_ENTRY_SECONDS",
                 cfg.strategy13_confirm_before_entry_seconds,
             ),
+            strategy14_min_price_gap=_strategy_env_float(
+                strategy_id,
+                "STRATEGY14_MIN_PRICE_GAP",
+                cfg.strategy14_min_price_gap,
+            ),
+            strategy14_ofi_weight=_strategy_env_float(
+                strategy_id,
+                "STRATEGY14_OFI_WEIGHT",
+                cfg.strategy14_ofi_weight,
+            ),
+            strategy14_min_edge=_strategy_env_float(
+                strategy_id,
+                "STRATEGY14_MIN_EDGE",
+                cfg.strategy14_min_edge,
+            ),
+            strategy14_edge_buffer=_strategy_env_float(
+                strategy_id,
+                "STRATEGY14_EDGE_BUFFER",
+                cfg.strategy14_edge_buffer,
+            ),
+            strategy14_min_entry_price=_strategy_env_float(
+                strategy_id,
+                "STRATEGY14_MIN_ENTRY_PRICE",
+                cfg.strategy14_min_entry_price,
+            ),
+            strategy14_max_entry_price=_strategy_env_float(
+                strategy_id,
+                "STRATEGY14_MAX_ENTRY_PRICE",
+                cfg.strategy14_max_entry_price,
+            ),
+            strategy14_extreme_move_price=_strategy_env_float(
+                strategy_id,
+                "STRATEGY14_EXTREME_MOVE_PRICE",
+                cfg.strategy14_extreme_move_price,
+            ),
+            strategy14_min_remaining_seconds=_strategy_env_int(
+                strategy_id,
+                "STRATEGY14_MIN_REMAINING_SECONDS",
+                cfg.strategy14_min_remaining_seconds,
+            ),
+            strategy14_confirm_before_entry_seconds=_strategy_env_int(
+                strategy_id,
+                "STRATEGY14_CONFIRM_BEFORE_ENTRY_SECONDS",
+                cfg.strategy14_confirm_before_entry_seconds,
+            ),
         )
 
 
@@ -1396,6 +1498,15 @@ class AppConfig:
     strategy13_confirm_micro: bool = field(default_factory=lambda: _env_bool("STRATEGY13_CONFIRM_MICRO", True))
     strategy13_micro_disagree_penalty: float = field(default_factory=lambda: _env_float("STRATEGY13_MICRO_DISAGREE_PENALTY", 0.02))
     strategy13_confirm_before_entry_seconds: int = field(default_factory=lambda: _env_int("STRATEGY13_CONFIRM_BEFORE_ENTRY_SECONDS", 2))
+    strategy14_min_price_gap: float = field(default_factory=lambda: _env_float("STRATEGY14_MIN_PRICE_GAP", 0.05))
+    strategy14_ofi_weight: float = field(default_factory=lambda: _env_float("STRATEGY14_OFI_WEIGHT", 0.08))
+    strategy14_min_edge: float = field(default_factory=lambda: _env_float("STRATEGY14_MIN_EDGE", 0.03))
+    strategy14_edge_buffer: float = field(default_factory=lambda: _env_float("STRATEGY14_EDGE_BUFFER", 0.005))
+    strategy14_min_entry_price: float = field(default_factory=lambda: _env_float("STRATEGY14_MIN_ENTRY_PRICE", 0.30))
+    strategy14_max_entry_price: float = field(default_factory=lambda: _env_float("STRATEGY14_MAX_ENTRY_PRICE", 0.52))
+    strategy14_extreme_move_price: float = field(default_factory=lambda: _env_float("STRATEGY14_EXTREME_MOVE_PRICE", 0.85))
+    strategy14_min_remaining_seconds: int = field(default_factory=lambda: _env_int("STRATEGY14_MIN_REMAINING_SECONDS", 60))
+    strategy14_confirm_before_entry_seconds: int = field(default_factory=lambda: _env_int("STRATEGY14_CONFIRM_BEFORE_ENTRY_SECONDS", 0))
     binance_ws_url: str = field(default_factory=lambda: os.getenv('BINANCE_WS_URL') or 'wss://stream.binance.com:9443/ws')
     binance_depth_stream: str = field(default_factory=lambda: os.getenv('BINANCE_DEPTH_STREAM') or 'btcusdt@depth5')
     binance_signal_stale_seconds: float = 2.0
@@ -1465,7 +1576,9 @@ class AppConfig:
             self.paper_strategy_ids = list(legacy_strategy_ids)
         raw_live_strategy_ids = os.getenv(LIVE_STRATEGY_IDS)
         if raw_live_strategy_ids is None and legacy_strategy_ids:
-            self.live_strategy_ids = [strategy_id for strategy_id in legacy_strategy_ids if strategy_id != 13]
+            self.live_strategy_ids = [
+                strategy_id for strategy_id in legacy_strategy_ids if strategy_id not in {13, 14}
+            ]
         elif not self.live_strategy_ids:
             self.live_strategy_ids = _default_live_strategy_ids(raw_live_strategy_ids, self.strategy_id)
         live_claims_strategy_ids = bool(raw_live_strategy_ids and raw_live_strategy_ids.strip()) or self.trade_mode in {"live", "both"}
@@ -1550,6 +1663,15 @@ class AppConfig:
                 strategy13_confirm_micro=self.strategy13_confirm_micro,
                 strategy13_micro_disagree_penalty=self.strategy13_micro_disagree_penalty,
                 strategy13_confirm_before_entry_seconds=self.strategy13_confirm_before_entry_seconds,
+                strategy14_min_price_gap=self.strategy14_min_price_gap,
+                strategy14_ofi_weight=self.strategy14_ofi_weight,
+                strategy14_min_edge=self.strategy14_min_edge,
+                strategy14_edge_buffer=self.strategy14_edge_buffer,
+                strategy14_min_entry_price=self.strategy14_min_entry_price,
+                strategy14_max_entry_price=self.strategy14_max_entry_price,
+                strategy14_extreme_move_price=self.strategy14_extreme_move_price,
+                strategy14_min_remaining_seconds=self.strategy14_min_remaining_seconds,
+                strategy14_confirm_before_entry_seconds=self.strategy14_confirm_before_entry_seconds,
                 min_entry_price=self.min_entry_price,
                 max_entry_price=self.max_entry_price,
                 strategy7_max_entry_price=self.strategy7_max_entry_price,

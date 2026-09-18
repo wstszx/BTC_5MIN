@@ -103,8 +103,8 @@ def _write_env_file(path: Path, values: dict[str, str]) -> None:
     atomic_write_text(path, text, encoding="utf-8")
 
 
-SUPPORTED_STRATEGY_ID_TEXTS: set[str] = {str(strategy_id) for strategy_id in range(1, 14)}
-SUPPORTED_STRATEGY_SELECT_OPTIONS: list[str] = [str(strategy_id) for strategy_id in range(1, 14)]
+SUPPORTED_STRATEGY_ID_TEXTS: set[str] = {str(strategy_id) for strategy_id in range(1, 15)}
+SUPPORTED_STRATEGY_SELECT_OPTIONS: list[str] = [str(strategy_id) for strategy_id in range(1, 15)]
 
 
 def _normalize_strategy_id_list_for_key(value: str, key: str, attr_name: str) -> str:
@@ -114,10 +114,10 @@ def _normalize_strategy_id_list_for_key(value: str, key: str, attr_name: str) ->
     if raw and len(normalized_ids) == 1 and normalized_ids[0] == cfg.strategy_id:
         has_valid = any(item in SUPPORTED_STRATEGY_ID_TEXTS for item in raw)
         if not has_valid:
-            raise ValueError(f"Invalid value for {key}: expected comma-separated strategy ids 1-13, got {value!r}")
+            raise ValueError(f"Invalid value for {key}: expected comma-separated strategy ids 1-14, got {value!r}")
     normalized = [str(item) for item in normalized_ids]
     if not normalized:
-        raise ValueError(f"Invalid value for {key}: expected comma-separated strategy ids 1-13, got {value!r}")
+        raise ValueError(f"Invalid value for {key}: expected comma-separated strategy ids 1-14, got {value!r}")
     return ",".join(normalized)
 
 
@@ -430,6 +430,15 @@ STRATEGY_PROFILE_EDITABLE_FIELDS: tuple[str, ...] = (
     "STRATEGY11_MIN_PROBABILITY",
     "STRATEGY11_MAX_PROBABILITY",
     "STRATEGY11_CONFIRM_BEFORE_ENTRY_SECONDS",
+    "STRATEGY14_MIN_PRICE_GAP",
+    "STRATEGY14_OFI_WEIGHT",
+    "STRATEGY14_MIN_EDGE",
+    "STRATEGY14_EDGE_BUFFER",
+    "STRATEGY14_MIN_ENTRY_PRICE",
+    "STRATEGY14_MAX_ENTRY_PRICE",
+    "STRATEGY14_EXTREME_MOVE_PRICE",
+    "STRATEGY14_MIN_REMAINING_SECONDS",
+    "STRATEGY14_CONFIRM_BEFORE_ENTRY_SECONDS",
 )
 
 STRATEGY_PROFILE_COMMON_FIELDS: tuple[str, ...] = (
@@ -474,7 +483,7 @@ def _shared_strategy_profile_key(strategy_id: int | str, base_key: str) -> str:
 
 
 def _split_strategy_profile_key(key: str) -> tuple[str, str, str] | None:
-    match = re.match(r"^(?:(PAPER|LIVE)_)?STRATEGY_(13|12|11|10|[1-9])_(.+)$", str(key or ""))
+    match = re.match(r"^(?:(PAPER|LIVE)_)?STRATEGY_(14|13|12|11|10|[1-9])_(.+)$", str(key or ""))
     if not match:
         return None
     mode = (match.group(1) or "shared").lower()
@@ -607,6 +616,20 @@ def _strategy_profile_field_names(strategy_id: int | str) -> list[str]:
                 "STRATEGY11_MIN_PROBABILITY",
                 "STRATEGY11_MAX_PROBABILITY",
                 "STRATEGY11_CONFIRM_BEFORE_ENTRY_SECONDS",
+            ]
+        )
+    if strategy_text == "14":
+        fields.extend(
+            [
+                "STRATEGY14_MIN_PRICE_GAP",
+                "STRATEGY14_OFI_WEIGHT",
+                "STRATEGY14_MIN_EDGE",
+                "STRATEGY14_EDGE_BUFFER",
+                "STRATEGY14_MIN_ENTRY_PRICE",
+                "STRATEGY14_MAX_ENTRY_PRICE",
+                "STRATEGY14_EXTREME_MOVE_PRICE",
+                "STRATEGY14_MIN_REMAINING_SECONDS",
+                "STRATEGY14_CONFIRM_BEFORE_ENTRY_SECONDS",
             ]
         )
     return fields
@@ -1756,6 +1779,12 @@ def _strategy_catalog() -> dict[str, dict[str, Any]]:
             "preview": ["BTC EDGE", "OFI", "MOMENTUM", "SKIP"],
             "detail": "它比策略11更保守：概率优势不足会跳过，概率方向和微观结构方向冲突也会跳过。",
         },
+        "14": {
+            "label": "超调回归",
+            "summary": "本轮 UP 价格相对开盘明显超调、且币安盘口失衡不支持该方向时，买入被压便宜的另一边。",
+            "preview": ["OPEN ANCHOR", "OFI", "OVERSHOOT", "FADE"],
+            "detail": "与策略7/10的追动量相反：价格冲过开盘锚+盘口修正后的公平线且 OFI 不确认时，判定为超调并反向入场；价格极端单边时不追。只在买入价位于入场区间且剩余时间足够时入场。",
+        },
     }
 
 
@@ -1915,6 +1944,15 @@ class DashboardState:
         "STRATEGY11_MIN_PROBABILITY": "策略11 最低方向概率",
         "STRATEGY11_MAX_PROBABILITY": "策略11 概率上限",
         "STRATEGY11_CONFIRM_BEFORE_ENTRY_SECONDS": "策略11 最晚确认秒数",
+        "STRATEGY14_MIN_PRICE_GAP": "策略14 最小超调幅度",
+        "STRATEGY14_OFI_WEIGHT": "策略14 盘口修正权重",
+        "STRATEGY14_MIN_EDGE": "策略14 最小期望优势",
+        "STRATEGY14_EDGE_BUFFER": "策略14 成本缓冲",
+        "STRATEGY14_MIN_ENTRY_PRICE": "策略14 买入价下限",
+        "STRATEGY14_MAX_ENTRY_PRICE": "策略14 买入价上限",
+        "STRATEGY14_EXTREME_MOVE_PRICE": "策略14 单边极端价",
+        "STRATEGY14_MIN_REMAINING_SECONDS": "策略14 最少剩余秒数",
+        "STRATEGY14_CONFIRM_BEFORE_ENTRY_SECONDS": "策略14 最晚确认秒数",
         "SIGNAL_MOMENTUM_THRESHOLD": "动量阈值",
         "SIGNAL_WEAK_SIGNAL_MODE": "弱信号处理",
         "SIGNAL_FALLBACK_STRATEGY_ID": "弱信号回退基础策略",
@@ -1963,7 +2001,7 @@ class DashboardState:
                 "true/false": "true/false",
                 "integer": "整数",
                 "number": "数字",
-                "comma-separated strategy ids 1-13": "1-13 的策略编号列表",
+                "comma-separated strategy ids 1-14": "1-14 的策略编号列表",
                 "comma-separated 5m/15m": "5m/15m 频次列表",
             }.get(expected, expected.replace("one of", "可选值"))
             return f"{label}的值无效（{key_text}）：需要 {expected_label}，当前为 {raw_value}。"
@@ -2072,6 +2110,15 @@ class DashboardState:
         "STRATEGY11_MIN_PROBABILITY": "strategy11_min_probability",
         "STRATEGY11_MAX_PROBABILITY": "strategy11_max_probability",
         "STRATEGY11_CONFIRM_BEFORE_ENTRY_SECONDS": "strategy11_confirm_before_entry_seconds",
+        "STRATEGY14_MIN_PRICE_GAP": "strategy14_min_price_gap",
+        "STRATEGY14_OFI_WEIGHT": "strategy14_ofi_weight",
+        "STRATEGY14_MIN_EDGE": "strategy14_min_edge",
+        "STRATEGY14_EDGE_BUFFER": "strategy14_edge_buffer",
+        "STRATEGY14_MIN_ENTRY_PRICE": "strategy14_min_entry_price",
+        "STRATEGY14_MAX_ENTRY_PRICE": "strategy14_max_entry_price",
+        "STRATEGY14_EXTREME_MOVE_PRICE": "strategy14_extreme_move_price",
+        "STRATEGY14_MIN_REMAINING_SECONDS": "strategy14_min_remaining_seconds",
+        "STRATEGY14_CONFIRM_BEFORE_ENTRY_SECONDS": "strategy14_confirm_before_entry_seconds",
         "SIGNAL_MOMENTUM_THRESHOLD": "signal_momentum_threshold",
         "SIGNAL_WEAK_SIGNAL_MODE": "signal_weak_signal_mode",
         "SIGNAL_FALLBACK_STRATEGY_ID": "signal_fallback_strategy_id",
@@ -2105,6 +2152,8 @@ class DashboardState:
         "STRATEGY9_STABILITY_SAMPLE_COUNT",
         "STRATEGY9_STABILITY_REQUIRED_COUNT",
         "STRATEGY11_CONFIRM_BEFORE_ENTRY_SECONDS",
+        "STRATEGY14_MIN_REMAINING_SECONDS",
+        "STRATEGY14_CONFIRM_BEFORE_ENTRY_SECONDS",
         "WS_QUOTE_STALE_SECONDS",
         "WS_CONNECT_TIMEOUT_SECONDS",
     )
@@ -2161,6 +2210,13 @@ class DashboardState:
         "STRATEGY11_VOLATILITY_BPS_PER_SQRT_MINUTE",
         "STRATEGY11_MIN_PROBABILITY",
         "STRATEGY11_MAX_PROBABILITY",
+        "STRATEGY14_MIN_PRICE_GAP",
+        "STRATEGY14_OFI_WEIGHT",
+        "STRATEGY14_MIN_EDGE",
+        "STRATEGY14_EDGE_BUFFER",
+        "STRATEGY14_MIN_ENTRY_PRICE",
+        "STRATEGY14_MAX_ENTRY_PRICE",
+        "STRATEGY14_EXTREME_MOVE_PRICE",
         "SIGNAL_MOMENTUM_THRESHOLD",
         "SIGNAL_DYNAMIC_THRESHOLD_K",
         "WS_TRADE_GUARD_STALE_SECONDS",
@@ -2251,9 +2307,18 @@ class DashboardState:
         "STRATEGY11_MIN_PROBABILITY": "strategy_11_only",
         "STRATEGY11_MAX_PROBABILITY": "strategy_11_only",
         "STRATEGY11_CONFIRM_BEFORE_ENTRY_SECONDS": "strategy_11_only",
+        "STRATEGY14_MIN_PRICE_GAP": "strategy_14_only",
+        "STRATEGY14_OFI_WEIGHT": "strategy_14_only",
+        "STRATEGY14_MIN_EDGE": "strategy_14_only",
+        "STRATEGY14_EDGE_BUFFER": "strategy_14_only",
+        "STRATEGY14_MIN_ENTRY_PRICE": "strategy_14_only",
+        "STRATEGY14_MAX_ENTRY_PRICE": "strategy_14_only",
+        "STRATEGY14_EXTREME_MOVE_PRICE": "strategy_14_only",
+        "STRATEGY14_MIN_REMAINING_SECONDS": "strategy_14_only",
+        "STRATEGY14_CONFIRM_BEFORE_ENTRY_SECONDS": "strategy_14_only",
     }
     FIELD_HELP: dict[str, str] = {
-        "STRATEGY_ID": "策略 1-4 是固定节奏策略，策略 5 是动量策略，策略 6 是 Binance OFI，策略 7/8/9 是组合信号策略，策略 10 是估值优势策略，策略 11 是 BTC 概率定价策略。",
+        "STRATEGY_ID": "策略 1-4 是固定节奏策略，策略 5 是动量策略，策略 6 是 Binance OFI，策略 7/8/9 是组合信号策略，策略 10 是估值优势策略，策略 11 是 BTC 概率定价策略，策略 12 是 BTC 概率+盘口确认，策略 13 是 BTC 概率收缩+盘口确认，策略 14 是超调回归策略。",
         "STRATEGY_IDS": "统一策略组合。设置后纸面和实盘都使用同一组策略和同一套参数，切换模式只改变执行环境。",
         "LIVE_STRATEGY_IDS": "实盘运行时可轮询的策略列表，按输入顺序去重，例如 2,6。未填写时会回退到 STRATEGY_ID。",
         "PAPER_STRATEGY_IDS": "纸面测试可同时运行多个策略，按输入顺序去重，例如 1,2,6。",
@@ -2272,6 +2337,15 @@ class DashboardState:
         "STRATEGY11_MIN_PROBABILITY": "策略11 只有方向概率达到该下限时才考虑入场。",
         "STRATEGY11_MAX_PROBABILITY": "策略11 对估算概率做截断，避免短时价格跳动把概率推到极端。",
         "STRATEGY11_CONFIRM_BEFORE_ENTRY_SECONDS": "策略11 需要在计划入场前至少提前这么多秒完成概率确认。",
+        "STRATEGY14_MIN_PRICE_GAP": "策略14 当前 UP 价格偏离“开盘锚+盘口修正”公平线至少这么多才判定为超调，低于该值跳过。",
+        "STRATEGY14_OFI_WEIGHT": "策略14 公平概率对币安盘口失衡 OFI 的修正幅度：盘口越支持当前方向，公平线越跟随价格，超调越难触发。",
+        "STRATEGY14_MIN_EDGE": "策略14 买入边公平概率减去含费买入价和缓冲后的最小优势，低于该值跳过。",
+        "STRATEGY14_EDGE_BUFFER": "策略14 从期望优势中扣除的成本/滑点缓冲。",
+        "STRATEGY14_MIN_ENTRY_PRICE": "策略14 被买入一边的 ask 价下限，低于该值说明超调太晚、趋势已单边化，跳过。",
+        "STRATEGY14_MAX_ENTRY_PRICE": "策略14 被买入一边的 ask 价上限，高于该值说明另一边仍被市场认可，跳过。",
+        "STRATEGY14_EXTREME_MOVE_PRICE": "策略14 当前 UP 价格达到该值或低于 1-该值时视为极端单边行情，停止反向入场。",
+        "STRATEGY14_MIN_REMAINING_SECONDS": "策略14 距本轮结束至少还剩多少秒才允许入场，保证回归有足够时间展开。",
+        "STRATEGY14_CONFIRM_BEFORE_ENTRY_SECONDS": "策略14 需要在计划入场前至少提前这么多秒完成信号确认，0 表示不启用该限制。",
         "ENABLE_LIVE_TRADING": "运行模式选择实盘或纸面+实盘时会自动开启；关闭后只能安全运行纸面测试。",
         "MARKET_TIMEFRAME": "选择当前要玩的 Polymarket BTC 预测频次，仅支持 5 分钟和 15 分钟。",
         "OPEN_DELAY_SECONDS": "OPEN 模式下，从每轮开始后延迟多少秒再尝试入场。",
@@ -2498,7 +2572,7 @@ class DashboardState:
             strategy_ids = []
             strategy_ids.extend(getattr(cfg, "paper_strategy_ids", []) or [])
             strategy_ids.extend(getattr(cfg, "live_strategy_ids", []) or [])
-        ofi_strategy_ids = {6, 7, 8, 9, 10, 11, 12}
+        ofi_strategy_ids = {6, 7, 8, 9, 10, 11, 12, 13, 14}
         if cfg.strategy_id not in ofi_strategy_ids and not any(strategy_id in ofi_strategy_ids for strategy_id in strategy_ids):
             return None
         service = BinanceDepth5SignalService(ws_url=cfg.binance_ws_url, stream=cfg.binance_depth_stream)
@@ -6246,6 +6320,15 @@ const CONFIG_KEY_NAMES = {
   STRATEGY11_MIN_PROBABILITY: '策略11 最低方向概率',
   STRATEGY11_MAX_PROBABILITY: '策略11 概率上限',
   STRATEGY11_CONFIRM_BEFORE_ENTRY_SECONDS: '策略11 最晚确认秒数',
+  STRATEGY14_MIN_PRICE_GAP: '策略14 最小超调幅度',
+  STRATEGY14_OFI_WEIGHT: '策略14 盘口修正权重',
+  STRATEGY14_MIN_EDGE: '策略14 最小期望优势',
+  STRATEGY14_EDGE_BUFFER: '策略14 成本缓冲',
+  STRATEGY14_MIN_ENTRY_PRICE: '策略14 买入价下限',
+  STRATEGY14_MAX_ENTRY_PRICE: '策略14 买入价上限',
+  STRATEGY14_EXTREME_MOVE_PRICE: '策略14 单边极端价',
+  STRATEGY14_MIN_REMAINING_SECONDS: '策略14 最少剩余秒数',
+  STRATEGY14_CONFIRM_BEFORE_ENTRY_SECONDS: '策略14 最晚确认秒数',
   SIGNAL_MOMENTUM_THRESHOLD: '动量阈值',
   SIGNAL_WEAK_SIGNAL_MODE: '弱信号处理',
   SIGNAL_FALLBACK_STRATEGY_ID: '弱信号回退基础策略',
